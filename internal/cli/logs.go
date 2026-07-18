@@ -138,6 +138,10 @@ func followFile(ctx context.Context, path string, offset int64, w io.Writer) err
 // readGrowth reads and prints any bytes appended to the file at path since
 // offset, returning the new offset. If the file is now smaller than
 // offset (rotated/truncated), it reads from the start instead.
+//
+// NOTE: Rotation to exactly the same file size within one poll interval is not
+// detected. Detection would require inode comparison; this implementation uses
+// only size heuristics.
 func readGrowth(path string, offset int64, w io.Writer) (int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
