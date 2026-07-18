@@ -140,7 +140,11 @@ func TestTick_ExitedWorker_QueuesSummaryWithExitedLine(t *testing.T) {
 	cfg := testConfig()
 
 	seedOrchAndTask(t, st, "orch1", "in_progress")
-	addWorker(t, st, "worker1", "orch1", "exited", "", 0)
+	// "exited" is a store.Session.Activity value (see internal/activity), set
+	// by the poller when a worker's tmux pane dies; store.Session.State stays
+	// "running" until the reconciler later promotes it to "errored". Seed the
+	// same shape production data has: State "running", Activity "exited".
+	addWorker(t, st, "worker1", "orch1", "running", "exited", 0)
 
 	hb := New(st, b, cfg, unknownActivity, func(string) {})
 

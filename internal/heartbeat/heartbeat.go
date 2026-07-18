@@ -188,11 +188,13 @@ func (h *Heartbeat) rootTask(orchID string) (store.Task, bool, error) {
 }
 
 // stalledWorkerLine reports whether w counts as stalled and, if so, its
-// summary line. A worker is stalled if its state is "exited", or if its
-// activity is idle/blocked/waiting_input and it has been that way longer
-// than threshold.
+// summary line. A worker is stalled if its activity is "exited" (its tmux
+// pane died; store.Session.State stays "running" until the reconciler
+// later promotes it to "errored", so State is not the field to check
+// here), or if its activity is idle/blocked/waiting_input and it has been
+// that way longer than threshold.
 func stalledWorkerLine(w store.Session, now time.Time, threshold time.Duration) (string, bool) {
-	if w.State == "exited" {
+	if activity.State(w.Activity) == activity.Exited {
 		return fmt.Sprintf("- %s: exited", w.ID), true
 	}
 
