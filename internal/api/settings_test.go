@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/IvanRoslov/rocket/internal/store"
 )
@@ -232,5 +233,53 @@ func TestPutSettingsEmptyTokenDeletes(t *testing.T) {
 
 	if _, err := st.GetSetting("github_token"); err != store.ErrNotFound {
 		t.Errorf("GetSetting after delete-via-PUT: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestPutSettingsGithubTimeoutReturns502(t *testing.T) {
+	// Stub that sleeps longer than the timeout
+	ghStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(1 * time.Second)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ghStub.Close()
+
+	// Save original timeout and client, override temporarily
+	origTimeout := settingsValidateTimeout
+	origClient := settingsHTTPClient
+	defer func() {
+		settingsValidateTimeout = origTimeout
+		settingsHTTPClient = origClient
+	}()
+
+	settingsValidateTimeout = 100 * time.Millisecond
+	settingsHTTPClient = &http.Client{Timeout: 100 * time.Millisecond}
+
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "rocket.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	d := testDeps(t, nil)
+	d.Store = st
+	d.Cfg.GithubAPIBase = ghStub.URL
+
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	resp := putJSON(t, srv.URL+"/v1/settings", map[string]string{"github_token": "ghp_timeout_test"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", resp.StatusCode)
+	}
+	eb := decodeErr(t, resp)
+	if eb.Error.Code != "github_unreachable" {
+		t.Errorf("code = %q, want github_unreachable", eb.Error.Code)
+	}
+
+	if _, err := st.GetSetting("github_token"); err != store.ErrNotFound {
+		t.Errorf("GetSetting after timeout PUT: err = %v, want ErrNotFound", err)
 	}
 }

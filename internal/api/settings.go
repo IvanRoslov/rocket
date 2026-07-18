@@ -1,13 +1,23 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/IvanRoslov/rocket/internal/store"
 )
+
+// settingsValidateTimeout is the timeout for validating GitHub tokens.
+// It can be overridden in tests.
+var settingsValidateTimeout = 10 * time.Second
+
+// settingsHTTPClient is the HTTP client used for validating GitHub tokens,
+// configured with a timeout.
+var settingsHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 // registerSettingsRoutes wires the /v1/settings routes onto mux.
 func registerSettingsRoutes(mux *http.ServeMux, d Deps) {
@@ -54,23 +64,28 @@ type githubUserResponse struct {
 }
 
 // validateGithubToken checks token against GitHub's /user endpoint using
-// apiBase, returning the authenticated login on success.
+// apiBase, returning the authenticated login on success. The request is bounded
+// by settingsValidateTimeout to prevent hanging on unresponsive GitHub endpoints.
 //
 // Returns a *store's ErrNotFound-free* error classification via the two
 // bool results: invalid indicates the token was rejected by GitHub (401/403,
 // caller should respond 400 invalid_token); unreachable indicates a
-// network/transport error or a 5xx from GitHub (caller should respond 502
-// github_unreachable). Any other non-2xx status is also treated as
-// unreachable, since it's not something the caller's local retry logic
-// should treat as a bad token.
+// network/transport error, context timeout, or any non-2xx status from GitHub
+// (caller should respond 502 github_unreachable). Any non-200/401/403 status
+// is treated as unreachable, since it's not something the caller's local
+// retry logic should treat as a bad token.
 func validateGithubToken(apiBase, token string) (login string, invalid bool, unreachable bool, err error) {
-	req, buildErr := http.NewRequest(http.MethodGet, apiBase+"/user", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), settingsValidateTimeout)
+	defer cancel()
+
+	req, buildErr := http.NewRequestWithContext(ctx, http.MethodGet, apiBase+"/user", nil)
 	if buildErr != nil {
 		return "", false, true, buildErr
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
 
-	resp, doErr := http.DefaultClient.Do(req)
+	resp, doErr := settingsHTTPClient.Do(req)
 	if doErr != nil {
 		return "", false, true, doErr
 	}
