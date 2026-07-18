@@ -66,6 +66,7 @@ func NewHandler(d Deps) http.Handler {
 	registerSSERoutes(mux, d)
 	registerInternalActivityRoutes(mux, d)
 	registerMessageRoutes(mux, d)
+	registerQuestionRoutes(mux, d)
 
 	// Catch-all: anything not matched by a more specific pattern above is a
 	// 404, rendered in the standard error JSON shape.

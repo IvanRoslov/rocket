@@ -100,13 +100,9 @@ type taskDetailResponse struct {
 	OpenQuestions int                  `json:"open_questions"`
 }
 
-// countOpenQuestions returns the number of open questions for a task. Task
-// Q&A lands in Phase 3 Task 7; until then this always returns 0.
-//
-// TODO(phase3/task7): wire this up to the real open-questions count once
-// task Q&A storage exists.
+// countOpenQuestions returns the number of open questions for a task.
 func countOpenQuestions(d Deps, taskID int64) (int, error) {
-	return 0, nil
+	return d.Store.CountOpenQuestions(taskID)
 }
 
 // taskBoard is the JSON shape of the "board" grouping returned by GET
@@ -176,6 +172,12 @@ func registerTaskRoutes(mux *http.ServeMux, d Deps) {
 	})
 	mux.HandleFunc("POST /v1/tasks/{id}/log", func(w http.ResponseWriter, r *http.Request) {
 		handlePostTaskLog(w, r, d)
+	})
+	mux.HandleFunc("POST /v1/tasks/{id}/questions", func(w http.ResponseWriter, r *http.Request) {
+		handlePostTaskQuestions(w, r, d)
+	})
+	mux.HandleFunc("GET /v1/tasks/{id}/questions", func(w http.ResponseWriter, r *http.Request) {
+		handleGetTaskQuestions(w, r, d)
 	})
 }
 
