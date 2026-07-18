@@ -133,7 +133,7 @@ func newAttachCmd() *cobra.Command {
 			var resp struct {
 				Command []string `json:"command"`
 			}
-			if err := c.Get("/v1/sessions/"+args[0]+"/attach", nil, &resp); err != nil {
+			if err := c.Get(apiPath("v1", "sessions", args[0], "attach"), nil, &resp); err != nil {
 				return err
 			}
 			if len(resp.Command) == 0 {
@@ -177,7 +177,7 @@ func newKillCmd() *cobra.Command {
 				return err
 			}
 
-			path := "/v1/sessions/" + args[0] + "/kill"
+			path := apiPath("v1", "sessions", args[0], "kill")
 			if cleanup {
 				path += "?cleanup=true"
 			}
@@ -214,7 +214,7 @@ func newRestoreCmd() *cobra.Command {
 			}
 
 			var resp map[string]any
-			if err := c.Post("/v1/sessions/"+args[0]+"/restore", nil, &resp); err != nil {
+			if err := c.Post(apiPath("v1", "sessions", args[0], "restore"), nil, &resp); err != nil {
 				return err
 			}
 

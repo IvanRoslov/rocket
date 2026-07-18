@@ -1,9 +1,26 @@
 package cli
 
 import (
+	"net/url"
+	"strings"
+
 	"github.com/IvanRoslov/rocket/internal/client"
 	"github.com/IvanRoslov/rocket/internal/config"
 )
+
+// apiPath joins parts into a "/"-separated request path, url.PathEscape-ing
+// each part first. Every place a user-supplied id (session id, repo id,
+// project id, ...) is embedded in a request path MUST go through this
+// helper: an unescaped id like "../shutdown?" would otherwise let a crafted
+// id rewrite the request to a different endpoint (e.g. turning
+// POST /v1/sessions/<id>/restore into POST /v1/shutdown).
+func apiPath(parts ...string) string {
+	escaped := make([]string, len(parts))
+	for i, p := range parts {
+		escaped[i] = url.PathEscape(p)
+	}
+	return "/" + strings.Join(escaped, "/")
+}
 
 // loadConfig loads the rocket config from $ROCKET_HOME (or ~/.rocket),
 // applying the global --socket override (if given) to cfg.SocketOverride

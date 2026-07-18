@@ -122,7 +122,7 @@ func newProjectShowCmd() *cobra.Command {
 			}
 
 			var resp map[string]any
-			if err := c.Get("/v1/projects/"+args[0], nil, &resp); err != nil {
+			if err := c.Get(apiPath("v1", "projects", args[0]), nil, &resp); err != nil {
 				return err
 			}
 
@@ -190,7 +190,7 @@ func updateLinked(cmd *cobra.Command, project, repo string, add bool) error {
 	}
 
 	var detail map[string]any
-	if err := c.Get("/v1/projects/"+project, nil, &detail); err != nil {
+	if err := c.Get(apiPath("v1", "projects", project), nil, &detail); err != nil {
 		return err
 	}
 
@@ -230,7 +230,7 @@ func updateLinked(cmd *cobra.Command, project, repo string, add bool) error {
 	}
 
 	var resp map[string]any
-	if err := c.Patch("/v1/projects/"+project, map[string]any{"linked": updated}, &resp); err != nil {
+	if err := c.Patch(apiPath("v1", "projects", project), map[string]any{"linked": updated}, &resp); err != nil {
 		return err
 	}
 
@@ -260,7 +260,7 @@ func newProjectRmCmd() *cobra.Command {
 			}
 
 			var resp map[string]any
-			if err := c.Delete("/v1/projects/"+args[0], nil, &resp); err != nil {
+			if err := c.Delete(apiPath("v1", "projects", args[0]), nil, &resp); err != nil {
 				return err
 			}
 

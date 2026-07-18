@@ -104,7 +104,7 @@ func newRepoRmCmd() *cobra.Command {
 			}
 
 			var resp map[string]any
-			if err := c.Delete("/v1/repos/"+args[0], nil, &resp); err != nil {
+			if err := c.Delete(apiPath("v1", "repos", args[0]), nil, &resp); err != nil {
 				return err
 			}
 

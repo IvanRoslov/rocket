@@ -2,6 +2,7 @@ package cli
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -50,5 +51,30 @@ func TestLoadConfigNoOverrideWhenSocketFlagEmpty(t *testing.T) {
 	want := filepath.Join(home, "rocket.sock")
 	if cfg.SocketPath() != want {
 		t.Errorf("cfg.SocketPath() = %q, want %q", cfg.SocketPath(), want)
+	}
+}
+
+// TestApiPathEscapesTraversal proves apiPath escapes a crafted id like
+// "../shutdown?" so it cannot be used to rewrite the request to a different
+// endpoint (e.g. turning POST /v1/sessions/<id>/restore into
+// POST /v1/shutdown).
+func TestApiPathEscapesTraversal(t *testing.T) {
+	got := apiPath("v1", "sessions", "../shutdown?", "restore")
+	want := "/v1/sessions/..%2Fshutdown%3F/restore"
+	if got != want {
+		t.Errorf("apiPath = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "../") {
+		t.Fatalf("apiPath result still contains a raw path traversal segment: %q", got)
+	}
+}
+
+// TestApiPathPlainIDsUnchanged proves apiPath leaves ordinary ids untouched
+// so normal usage still produces the expected request path.
+func TestApiPathPlainIDsUnchanged(t *testing.T) {
+	got := apiPath("v1", "sessions", "myfeat-mytask", "kill")
+	want := "/v1/sessions/myfeat-mytask/kill"
+	if got != want {
+		t.Errorf("apiPath = %q, want %q", got, want)
 	}
 }
