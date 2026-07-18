@@ -2,6 +2,7 @@ package api
 
 import (
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -40,7 +41,10 @@ type queueInfo struct {
 type tmuxResponse struct {
 	Name      string `json:"name"`
 	SessionID string `json:"session_id,omitempty"`
-	Orphan    bool   `json:"orphan"`
+	// State is the owning session's state (e.g. "running", "killed",
+	// "errored"), omitted when Orphan is true.
+	State  string `json:"state,omitempty"`
+	Orphan bool   `json:"orphan"`
 }
 
 // worktreeResponse is one entry of the "worktrees" section of GET
@@ -49,7 +53,10 @@ type worktreeResponse struct {
 	Path      string `json:"path"`
 	SessionID string `json:"session_id,omitempty"`
 	SizeBytes int64  `json:"size_bytes"`
-	Orphan    bool   `json:"orphan"`
+	// State is the owning session's state (e.g. "running", "killed",
+	// "errored"), omitted when Orphan is true.
+	State  string `json:"state,omitempty"`
+	Orphan bool   `json:"orphan"`
 }
 
 // systemResponse is the JSON shape of GET /v1/system.
@@ -78,32 +85,41 @@ func handleGetSystem(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
+	// Each of these collectors inspects live system state (tmux, the
+	// filesystem, the log file) that can fail independently of the
+	// others and independently of the store query above. A single bad
+	// collector shouldn't 500 the whole overview: log it and degrade to
+	// an empty slice for that section so the rest of the response still
+	// renders.
 	tmux, err := d.Manager.ListTmux(r.Context())
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
+		slog.Warn("api: GET /v1/system: list tmux failed, degrading to empty", "error", err)
+		tmux = nil
 	}
 
 	worktrees, err := d.Manager.ListWorktrees()
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
+		slog.Warn("api: GET /v1/system: list worktrees failed, degrading to empty", "error", err)
+		worktrees = nil
 	}
 
 	logTail, err := readLogTail(d.Cfg.LogPath(), maxLogTailLines, maxLogTailBytes)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
+		slog.Warn("api: GET /v1/system: read log tail failed, degrading to empty", "error", err)
+		logTail = nil
+	}
+	if logTail == nil {
+		logTail = []string{}
 	}
 
 	tmuxOut := make([]tmuxResponse, len(tmux))
 	for i, t := range tmux {
-		tmuxOut[i] = tmuxResponse{Name: t.Name, SessionID: t.SessionID, Orphan: t.Orphan}
+		tmuxOut[i] = tmuxResponse{Name: t.Name, SessionID: t.SessionID, State: t.State, Orphan: t.Orphan}
 	}
 
 	wtOut := make([]worktreeResponse, len(worktrees))
 	for i, e := range worktrees {
-		wtOut[i] = worktreeResponse{Path: e.Path, SessionID: e.SessionID, SizeBytes: e.SizeBytes, Orphan: e.Orphan}
+		wtOut[i] = worktreeResponse{Path: e.Path, SessionID: e.SessionID, SizeBytes: e.SizeBytes, State: e.State, Orphan: e.Orphan}
 	}
 
 	writeJSON(w, http.StatusOK, systemResponse{

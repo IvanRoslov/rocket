@@ -334,18 +334,27 @@ func (w *gitWorkspace) List() ([]Entry, error) {
 }
 
 // dirSize returns the sum of the sizes of all regular files under path.
+// A per-entry error (permission denied, a broken symlink, a directory that
+// vanishes mid-walk, ...) is skipped rather than aborting the whole walk,
+// so one bad entry doesn't stop us from reporting the size of everything
+// else that's readable.
 func dirSize(path string) (int64, error) {
 	var size int64
 	err := filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			if d != nil && d.IsDir() {
+				// Can't descend into this directory (e.g. permission
+				// denied): skip it and keep walking the rest of the tree.
+				return fs.SkipDir
+			}
+			return nil
 		}
 		if d.IsDir() {
 			return nil
 		}
 		info, err := d.Info()
 		if err != nil {
-			return err
+			return nil
 		}
 		size += info.Size()
 		return nil

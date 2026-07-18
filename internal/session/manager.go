@@ -375,8 +375,11 @@ type TmuxInfo struct {
 	// SessionID is the store session that owns this tmux name, or "" if
 	// Orphan is true.
 	SessionID string
-	// Orphan is true when the tmux session is live but no live (spawning/
-	// running) session in the store references it.
+	// State is the owning session's state (e.g. "running", "killed",
+	// "errored"), or "" if Orphan is true.
+	State string
+	// Orphan is true when no store record at all (in any state)
+	// references this tmux name.
 	Orphan bool
 }
 
@@ -390,8 +393,11 @@ type WorktreeInfo struct {
 	SessionID string
 	// SizeBytes is the worktree's on-disk size.
 	SizeBytes int64
-	// Orphan is true when no live (spawning/running) session in the
-	// store references this worktree path.
+	// State is the owning session's state (e.g. "running", "killed",
+	// "errored"), or "" if Orphan is true.
+	State string
+	// Orphan is true when no store record at all (in any state)
+	// references this worktree path.
 	Orphan bool
 }
 
@@ -408,19 +414,25 @@ func (m *Manager) ListWorktrees() ([]WorktreeInfo, error) {
 }
 
 // tmuxInfos is the unlocked implementation shared by ListTmux and Cleanup.
+//
+// A tmux name is an orphan only if no store record at all (in any state:
+// spawning/running/killed/errored/done) references it. A resource left
+// behind by a killed or errored session still has a store record, so it is
+// reported (with its owning session's id and state) but never touched by
+// Cleanup — only kill --cleanup or restore should remove it.
 func (m *Manager) tmuxInfos(ctx context.Context) ([]TmuxInfo, error) {
 	names, err := m.rt.List(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	live, err := m.st.ListSessions(store.SessionFilter{})
+	all, err := m.st.ListSessions(store.SessionFilter{All: true})
 	if err != nil {
 		return nil, err
 	}
-	liveByTmux := make(map[string]string, len(live))
-	for _, s := range live {
-		liveByTmux[s.TmuxName] = s.ID
+	byTmux := make(map[string]store.Session, len(all))
+	for _, s := range all {
+		byTmux[s.TmuxName] = s
 	}
 
 	out := make([]TmuxInfo, 0, len(names))
@@ -430,48 +442,57 @@ func (m *Manager) tmuxInfos(ctx context.Context) ([]TmuxInfo, error) {
 			// touch.
 			continue
 		}
-		id, ok := liveByTmux[name]
-		out = append(out, TmuxInfo{Name: name, SessionID: id, Orphan: !ok})
+		s, ok := byTmux[name]
+		if !ok {
+			out = append(out, TmuxInfo{Name: name, Orphan: true})
+			continue
+		}
+		out = append(out, TmuxInfo{Name: name, SessionID: s.ID, State: s.State, Orphan: false})
 	}
 	return out, nil
 }
 
 // worktreeInfos is the unlocked implementation shared by ListWorktrees and
 // Cleanup.
+//
+// A worktree path is an orphan only if no store record at all (in any
+// state) references it; see tmuxInfos for the rationale.
 func (m *Manager) worktreeInfos() ([]WorktreeInfo, error) {
 	entries, err := m.ws.List()
 	if err != nil {
 		return nil, err
 	}
 
-	live, err := m.st.ListSessions(store.SessionFilter{})
+	all, err := m.st.ListSessions(store.SessionFilter{All: true})
 	if err != nil {
 		return nil, err
 	}
-	liveByPath := make(map[string]bool, len(live))
-	for _, s := range live {
+	byPath := make(map[string]store.Session, len(all))
+	for _, s := range all {
 		if s.WorktreePath != "" {
-			liveByPath[s.WorktreePath] = true
+			byPath[s.WorktreePath] = s
 		}
 	}
 
 	out := make([]WorktreeInfo, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, WorktreeInfo{
-			Path:      e.Path,
-			SessionID: e.SessionID,
-			SizeBytes: e.SizeBytes,
-			Orphan:    !liveByPath[e.Path],
-		})
+		s, ok := byPath[e.Path]
+		if !ok {
+			out = append(out, WorktreeInfo{Path: e.Path, SessionID: e.SessionID, SizeBytes: e.SizeBytes, Orphan: true})
+			continue
+		}
+		out = append(out, WorktreeInfo{Path: e.Path, SessionID: e.SessionID, SizeBytes: e.SizeBytes, State: s.State, Orphan: false})
 	}
 	return out, nil
 }
 
 // Cleanup destroys every orphaned tmux session and removes every orphaned
 // worktree directory (see TmuxInfo.Orphan / WorktreeInfo.Orphan), never
-// touching a resource referenced by a live session. It returns the names/
-// paths actually cleaned up; errors from individual operations are
-// collected and joined, but cleanup continues for the rest.
+// touching a resource that any store record references — including
+// resources left behind by killed or errored sessions, which are removed
+// via kill --cleanup or restore instead. It returns the names/paths
+// actually cleaned up; errors from individual operations are collected and
+// joined, but cleanup continues for the rest.
 func (m *Manager) Cleanup(ctx context.Context) (killedTmux, removedWorktrees []string, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -254,6 +254,231 @@ func TestPostSystemCleanupOnlyTouchesOrphans(t *testing.T) {
 	}
 }
 
+// TestGetSystemKilledSessionResourcesNotOrphan verifies that a killed
+// session's leftover tmux name and worktree directory are reported with
+// orphan:false and state:"killed" (not treated as orphans just because
+// ListSessions' default filter excludes terminal states), and that cleanup
+// leaves them untouched.
+func TestGetSystemKilledSessionResourcesNotOrphan(t *testing.T) {
+	rt := &systemFakeRuntime{names: []string{"killed-sess"}}
+	d, dir := systemTestDeps(t, rt)
+	srv := newTestServer(t, d)
+
+	seedSystemSessionState(t, d.Store, dir, "killed-sess", "killed")
+
+	killedWtPath := filepath.Join(dir, "worktrees", "repo1", "killed-sess")
+	if err := os.MkdirAll(killedWtPath, 0755); err != nil {
+		t.Fatalf("mkdir killed worktree: %v", err)
+	}
+
+	resp, err := http.Get(srv.URL + "/v1/system")
+	if err != nil {
+		t.Fatalf("GET /v1/system: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var body systemResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+
+	tmByName := map[string]tmuxResponse{}
+	for _, tm := range body.Tmux {
+		tmByName[tm.Name] = tm
+	}
+	killedTm, ok := tmByName["killed-sess"]
+	if !ok {
+		t.Fatalf("killed-sess missing from tmux list")
+	}
+	if killedTm.Orphan {
+		t.Errorf("killed-sess tmux should not be orphan (has a store record)")
+	}
+	if killedTm.SessionID != "killed-sess" {
+		t.Errorf("killed-sess tmux session_id = %q, want killed-sess", killedTm.SessionID)
+	}
+	if killedTm.State != "killed" {
+		t.Errorf("killed-sess tmux state = %q, want killed", killedTm.State)
+	}
+
+	wtByPath := map[string]worktreeResponse{}
+	for _, wt := range body.Worktrees {
+		wtByPath[wt.Path] = wt
+	}
+	killedWt, ok := wtByPath[killedWtPath]
+	if !ok {
+		t.Fatalf("killed worktree missing from worktrees list")
+	}
+	if killedWt.Orphan {
+		t.Errorf("killed worktree should not be orphan (has a store record)")
+	}
+	if killedWt.State != "killed" {
+		t.Errorf("killed worktree state = %q, want killed", killedWt.State)
+	}
+
+	// Cleanup must not touch either resource: they belong to a killed
+	// session, not a true orphan.
+	cResp := postJSON(t, srv.URL+"/v1/system/cleanup", map[string]any{})
+	defer cResp.Body.Close()
+	if cResp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", cResp.StatusCode)
+	}
+	var cBody struct {
+		KilledTmux       []string `json:"killed_tmux"`
+		RemovedWorktrees []string `json:"removed_worktrees"`
+	}
+	if err := json.NewDecoder(cResp.Body).Decode(&cBody); err != nil {
+		t.Fatalf("decode cleanup body: %v", err)
+	}
+	if len(cBody.KilledTmux) != 0 {
+		t.Errorf("killed_tmux = %v, want empty (killed session's tmux is not an orphan)", cBody.KilledTmux)
+	}
+	if len(cBody.RemovedWorktrees) != 0 {
+		t.Errorf("removed_worktrees = %v, want empty (killed session's worktree is not an orphan)", cBody.RemovedWorktrees)
+	}
+	if len(rt.destroyed) != 0 {
+		t.Errorf("runtime destroyed = %v, want empty", rt.destroyed)
+	}
+	if _, err := os.Stat(killedWtPath); err != nil {
+		t.Errorf("killed worktree dir was removed: %v", err)
+	}
+}
+
+// TestGetSystemTrueOrphanHasNoState verifies that a resource with no store
+// record at all (a true orphan) is reported with orphan:true and an empty
+// state, and IS removed by cleanup.
+func TestGetSystemTrueOrphanHasNoState(t *testing.T) {
+	rt := &systemFakeRuntime{names: []string{"orphan-sess"}}
+	d, dir := systemTestDeps(t, rt)
+	srv := newTestServer(t, d)
+
+	orphanWtPath := filepath.Join(dir, "worktrees", "repo1", "orphan-wt")
+	if err := os.MkdirAll(orphanWtPath, 0755); err != nil {
+		t.Fatalf("mkdir orphan worktree: %v", err)
+	}
+
+	resp, err := http.Get(srv.URL + "/v1/system")
+	if err != nil {
+		t.Fatalf("GET /v1/system: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var body systemResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+
+	tmByName := map[string]tmuxResponse{}
+	for _, tm := range body.Tmux {
+		tmByName[tm.Name] = tm
+	}
+	orphanTm, ok := tmByName["orphan-sess"]
+	if !ok {
+		t.Fatalf("orphan-sess missing from tmux list")
+	}
+	if !orphanTm.Orphan {
+		t.Errorf("orphan-sess tmux should be orphan (no store record)")
+	}
+	if orphanTm.State != "" {
+		t.Errorf("orphan-sess tmux state = %q, want empty", orphanTm.State)
+	}
+
+	wtByPath := map[string]worktreeResponse{}
+	for _, wt := range body.Worktrees {
+		wtByPath[wt.Path] = wt
+	}
+	orphanWt, ok := wtByPath[orphanWtPath]
+	if !ok {
+		t.Fatalf("orphan worktree missing from worktrees list")
+	}
+	if !orphanWt.Orphan {
+		t.Errorf("orphan worktree should be orphan (no store record)")
+	}
+	if orphanWt.State != "" {
+		t.Errorf("orphan worktree state = %q, want empty", orphanWt.State)
+	}
+
+	cResp := postJSON(t, srv.URL+"/v1/system/cleanup", map[string]any{})
+	defer cResp.Body.Close()
+	var cBody struct {
+		KilledTmux       []string `json:"killed_tmux"`
+		RemovedWorktrees []string `json:"removed_worktrees"`
+	}
+	if err := json.NewDecoder(cResp.Body).Decode(&cBody); err != nil {
+		t.Fatalf("decode cleanup body: %v", err)
+	}
+	if len(cBody.KilledTmux) != 1 || cBody.KilledTmux[0] != "orphan-sess" {
+		t.Errorf("killed_tmux = %v, want [orphan-sess]", cBody.KilledTmux)
+	}
+	if len(cBody.RemovedWorktrees) != 1 || cBody.RemovedWorktrees[0] != orphanWtPath {
+		t.Errorf("removed_worktrees = %v, want [%s]", cBody.RemovedWorktrees, orphanWtPath)
+	}
+	if _, err := os.Stat(orphanWtPath); !os.IsNotExist(err) {
+		t.Errorf("orphan worktree dir still present, err = %v", err)
+	}
+}
+
+// TestGetSystemSurvivesUnreadableWorktreeEntry verifies that an unreadable
+// file inside a worktree directory (e.g. permission denied) doesn't fail
+// GET /v1/system; dirSize should skip the unreadable entry and keep
+// walking, and handleGetSystem should still return 200 with the rest of the
+// worktree data intact.
+func TestGetSystemSurvivesUnreadableWorktreeEntry(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root: permission bits don't block access")
+	}
+
+	d, dir := systemTestDeps(t, &systemFakeRuntime{})
+	srv := newTestServer(t, d)
+
+	wtPath := filepath.Join(dir, "worktrees", "repo1", "sess-with-bad-file")
+	if err := os.MkdirAll(wtPath, 0755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	readableFile := filepath.Join(wtPath, "readable.txt")
+	if err := os.WriteFile(readableFile, []byte("hello"), 0644); err != nil {
+		t.Fatalf("write readable file: %v", err)
+	}
+	unreadableDir := filepath.Join(wtPath, "noperm")
+	if err := os.MkdirAll(unreadableDir, 0755); err != nil {
+		t.Fatalf("mkdir noperm dir: %v", err)
+	}
+	unreadableFile := filepath.Join(unreadableDir, "secret.txt")
+	if err := os.WriteFile(unreadableFile, []byte("secret"), 0644); err != nil {
+		t.Fatalf("write unreadable file: %v", err)
+	}
+	if err := os.Chmod(unreadableDir, 0000); err != nil {
+		t.Fatalf("chmod noperm dir: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(unreadableDir, 0755) })
+
+	resp, err := http.Get(srv.URL + "/v1/system")
+	if err != nil {
+		t.Fatalf("GET /v1/system: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (a single unreadable entry must not fail the whole request)", resp.StatusCode)
+	}
+
+	var body systemResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+
+	found := false
+	for _, wt := range body.Worktrees {
+		if wt.Path == wtPath {
+			found = true
+			if wt.SizeBytes < int64(len("hello")) {
+				t.Errorf("size_bytes = %d, want at least %d (readable.txt counted)", wt.SizeBytes, len("hello"))
+			}
+		}
+	}
+	if !found {
+		t.Errorf("worktree %s missing from response despite unreadable entry inside it", wtPath)
+	}
+}
+
 // seedSystemSession inserts a project/repo/session triple whose session id,
 // TmuxName and worktree path are all sessID, so that the tmux name sessID
 // is considered "live" (referenced by a running session). worktreesRootDir
@@ -261,6 +486,13 @@ func TestPostSystemCleanupOnlyTouchesOrphans(t *testing.T) {
 // real on-disk layout under <home>/worktrees/repo1/<sessID>, so it lines up
 // with what workspace.List() reports for a directory created at that path.
 func seedSystemSession(t *testing.T, st *store.Store, worktreesRootDir, sessID string) {
+	t.Helper()
+	seedSystemSessionState(t, st, worktreesRootDir, sessID, "running")
+}
+
+// seedSystemSessionState is seedSystemSession with an explicit session
+// state, for exercising resources owned by killed/errored/done sessions.
+func seedSystemSessionState(t *testing.T, st *store.Store, worktreesRootDir, sessID, state string) {
 	t.Helper()
 	if err := st.AddRepo(store.Repo{ID: "repo1", Path: "/tmp/repo1", DefaultBranch: "main"}); err != nil {
 		t.Fatalf("AddRepo: %v", err)
@@ -278,7 +510,7 @@ func seedSystemSession(t *testing.T, st *store.Store, worktreesRootDir, sessID s
 		Branch:       "feature/" + sessID,
 		WorktreePath: filepath.Join(worktreesRootDir, "worktrees", "repo1", sessID),
 		TmuxName:     sessID,
-		State:        "running",
+		State:        state,
 	}); err != nil {
 		t.Fatalf("AddSession: %v", err)
 	}
