@@ -587,7 +587,7 @@ func TestRenderTaskCardBasic(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, w, now)
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, w, now)
 
 	output := w.String()
 	if !strings.Contains(output, "#1 My Task (in_progress)") {
@@ -610,7 +610,7 @@ func TestRenderTaskCardWithDescription(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, w, now)
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, w, now)
 
 	output := w.String()
 	if !strings.Contains(output, "Description") {
@@ -636,7 +636,7 @@ func TestRenderTaskCardWithSubtasks(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, w, now)
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, w, now)
 
 	output := w.String()
 	if !strings.Contains(output, "Subtasks") {
@@ -665,7 +665,7 @@ func TestRenderTaskCardWithDocs(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, docs, []taskLogRow{}, w, now)
+	renderTaskCard(task, docs, []taskLogRow{}, nil, w, now)
 
 	output := w.String()
 	if !strings.Contains(output, "Docs") {
@@ -693,7 +693,7 @@ func TestRenderTaskCardWithLog(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, logs, w, now)
+	renderTaskCard(task, []taskDocRow{}, logs, nil, w, now)
 
 	output := w.String()
 	if !strings.Contains(output, "Log") {
@@ -715,7 +715,7 @@ func TestRenderTaskCardEmptyDocsAndLogs(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, w, now)
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, w, now)
 
 	output := w.String()
 	if strings.Contains(output, "Docs") {
@@ -742,7 +742,7 @@ func TestRenderTaskCardWithSession(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, w, now)
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, w, now)
 
 	output := w.String()
 	if !strings.Contains(output, "sess-123") {
@@ -768,7 +768,7 @@ func TestRenderTaskCardWithOpenQuestions(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, w, now)
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, w, now)
 
 	output := w.String()
 	if !strings.Contains(output, "Open Questions") {
@@ -776,6 +776,51 @@ func TestRenderTaskCardWithOpenQuestions(t *testing.T) {
 	}
 	if !strings.Contains(output, "3") {
 		t.Errorf("expected open questions count in output")
+	}
+}
+
+// TestRenderTaskCardWithQuestionsThread tests that task show inlines the
+// Q&A thread (via renderQuestions) under a "## Questions" section, on top
+// of the existing open-questions count line.
+func TestRenderTaskCardWithQuestionsThread(t *testing.T) {
+	now := time.Now()
+	task := taskDetailRow{
+		ID:            1,
+		Title:         "My Task",
+		Status:        "in_progress",
+		ProjectID:     "proj-1",
+		OpenQuestions: 1,
+	}
+	questions := []questionRow{
+		{
+			ID:        42,
+			TaskID:    1,
+			Ordinal:   1,
+			AskedBy:   "orch-1",
+			Body:      "Which approach should I take?",
+			Status:    "open",
+			WhoseTurn: "user",
+			Messages: []questionMessageRow{
+				{ID: 1, Author: "orch-1", Kind: "question", Body: "Which approach should I take?"},
+			},
+		},
+	}
+
+	w := &bytes.Buffer{}
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, questions, w, now)
+
+	output := w.String()
+	if !strings.Contains(output, "## Questions") {
+		t.Errorf("expected ## Questions section in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Q1 (#42) [open]") {
+		t.Errorf("expected inlined question header in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Which approach should I take?") {
+		t.Errorf("expected question body in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Open Questions") || !strings.Contains(output, "1") {
+		t.Errorf("expected open questions count line preserved, got:\n%s", output)
 	}
 }
 
@@ -800,7 +845,7 @@ func TestRenderTaskCardLogTail(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, logs, w, now)
+	renderTaskCard(task, []taskDocRow{}, logs, nil, w, now)
 
 	output := w.String()
 	// Should show entry 5-14 (last 10), not entry 0-4 (first 5)
@@ -957,7 +1002,7 @@ func TestRenderTaskCardSubtaskRepoID(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, w, now)
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, w, now)
 
 	output := w.String()
 	// Should show repo-123 for first subtask

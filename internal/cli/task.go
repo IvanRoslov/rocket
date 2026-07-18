@@ -354,7 +354,12 @@ func newTaskShowCmd() *cobra.Command {
 				return err
 			}
 
-			renderTaskCard(task, docsResp.Docs, logResp.Log, cmd.OutOrStdout(), time.Now())
+			questions, err := fetchQuestions(c, args[0], false)
+			if err != nil {
+				return err
+			}
+
+			renderTaskCard(task, docsResp.Docs, logResp.Log, questions, cmd.OutOrStdout(), time.Now())
 			return nil
 		},
 	}
@@ -867,7 +872,7 @@ func renderTaskBoard(board map[string][]taskRow, w io.Writer, statusFiltered boo
 }
 
 // renderTaskCard writes a detailed card view for a task to w.
-func renderTaskCard(task taskDetailRow, docs []taskDocRow, logs []taskLogRow, w io.Writer, now time.Time) {
+func renderTaskCard(task taskDetailRow, docs []taskDocRow, logs []taskLogRow, questions []questionRow, w io.Writer, now time.Time) {
 	// Header: #id title (status)
 	fmt.Fprintf(w, "# #%d %s (%s)\n\n", task.ID, task.Title, task.Status)
 
@@ -941,9 +946,13 @@ func renderTaskCard(task taskDetailRow, docs []taskDocRow, logs []taskLogRow, w 
 		fmt.Fprintf(w, "\n")
 	}
 
-	// Open questions
+	// Questions: count line, followed by the inlined thread rendering.
 	if task.OpenQuestions > 0 {
-		fmt.Fprintf(w, "## Open Questions\n%d\n", task.OpenQuestions)
+		fmt.Fprintf(w, "## Open Questions\n%d\n\n", task.OpenQuestions)
+	}
+	if len(questions) > 0 {
+		fmt.Fprintf(w, "## Questions\n")
+		fmt.Fprint(w, renderQuestions(task.ID, questions))
 	}
 }
 
