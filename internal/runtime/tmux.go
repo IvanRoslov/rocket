@@ -1,0 +1,278 @@
+package runtime
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+)
+
+// nameRE is the set of characters permitted in a session name. It is
+// deliberately restrictive: session names are interpolated into tmux
+// targets as "=name", and tmux target syntax treats many characters
+// (":", ".", "%", etc.) specially.
+var nameRE = regexp.MustCompile(`^[a-z0-9-]+$`)
+
+// tmuxRuntime is the tmux-backed implementation of Runtime.
+type tmuxRuntime struct{}
+
+// NewTmux returns a Runtime that manages sessions via the tmux binary.
+func NewTmux() Runtime {
+	return &tmuxRuntime{}
+}
+
+func validateName(name string) error {
+	if !nameRE.MatchString(name) {
+		return fmt.Errorf("invalid session name %q: must match %s", name, nameRE.String())
+	}
+	return nil
+}
+
+// sessionTarget returns the exact-match target for session-level tmux
+// operations (new-session, has-session, kill-session, send-keys,
+// paste-buffer).
+func sessionTarget(name string) string {
+	return "=" + name
+}
+
+// paneTarget returns the exact-match target for pane-level tmux
+// operations (capture-pane).
+func paneTarget(name string) string {
+	return "=" + name + ":"
+}
+
+// runTmux runs `tmux <args...>` and returns stdout, stderr and any error
+// from starting/waiting on the process. A non-zero exit status is
+// reported via the returned error (as *exec.ExitError, wrapped).
+func runTmux(ctx context.Context, args ...string) (stdout, stderr string, err error) {
+	cmd := exec.CommandContext(ctx, "tmux", args...)
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	err = cmd.Run()
+	stdout = outBuf.String()
+	stderr = errBuf.String()
+	if err != nil {
+		err = fmt.Errorf("tmux %s: %w (stderr: %s)", strings.Join(args, " "), err, strings.TrimSpace(stderr))
+	}
+	return stdout, stderr, err
+}
+
+func (t *tmuxRuntime) Create(ctx context.Context, spec CreateSpec) (Handle, error) {
+	if err := validateName(spec.Name); err != nil {
+		return Handle{}, err
+	}
+
+	launchPath := filepath.Join(spec.Dir, ".rocket-launch.sh")
+	script := "#!/bin/sh\n" + spec.Command + "\nexec $SHELL -i\n"
+	if err := os.WriteFile(launchPath, []byte(script), 0o700); err != nil {
+		return Handle{}, fmt.Errorf("write launch script: %w", err)
+	}
+
+	args := []string{"new-session", "-d", "-s", spec.Name, "-c", spec.Dir}
+
+	keys := make([]string, 0, len(spec.Env))
+	for k := range spec.Env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		args = append(args, "-e", k+"="+spec.Env[k])
+	}
+
+	args = append(args, "sh .rocket-launch.sh")
+
+	if _, _, err := runTmux(ctx, args...); err != nil {
+		return Handle{}, fmt.Errorf("create session %q: %w", spec.Name, err)
+	}
+
+	return Handle{Name: spec.Name}, nil
+}
+
+func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
+	if err := validateName(h.Name); err != nil {
+		return err
+	}
+
+	// 1. Clear any existing draft on the input line. send-keys and
+	// paste-buffer address a pane, not a session, so they need the
+	// colon-suffixed pane target even though has-session/kill-session
+	// accept the bare session target.
+	if _, _, err := runTmux(ctx, "send-keys", "-t", paneTarget(h.Name), "C-u"); err != nil {
+		return fmt.Errorf("clear draft: %w", err)
+	}
+
+	// 2. Load the text into a tmux buffer via a temp file, then paste it.
+	tmpFile, err := os.CreateTemp(os.TempDir(), "rocket-inject-")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	if err := tmpFile.Chmod(0o600); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+	if _, err := tmpFile.WriteString(text); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("close temp file: %w", err)
+	}
+
+	bufName := "rocket-" + h.Name
+	if _, _, err := runTmux(ctx, "load-buffer", "-b", bufName, tmpPath); err != nil {
+		return fmt.Errorf("load buffer: %w", err)
+	}
+	if _, _, err := runTmux(ctx, "paste-buffer", "-d", "-b", bufName, "-t", paneTarget(h.Name)); err != nil {
+		return fmt.Errorf("paste buffer: %w", err)
+	}
+
+	// 3. Adaptive submit: press Enter, then poll until the draft is gone
+	// from the visible tail (i.e. it was actually submitted). Some
+	// programs / TUIs occasionally swallow the first Enter, so retry.
+	if strings.TrimRight(text, "\n") == "" {
+		// Nothing meaningful to verify; a single Enter is sufficient.
+		_, _, err := runTmux(ctx, "send-keys", "-t", paneTarget(h.Name), "Enter")
+		return err
+	}
+
+	const maxAttempts = 5
+	const pollInterval = 300 * time.Millisecond
+	const pollTimeout = 1500 * time.Millisecond
+
+	baseline, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name), "-S", "-5")
+	if err != nil {
+		return fmt.Errorf("capture baseline: %w", err)
+	}
+	baseCount := nonBlankLineCount(baseline)
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if _, _, err := runTmux(ctx, "send-keys", "-t", paneTarget(h.Name), "Enter"); err != nil {
+			return fmt.Errorf("send Enter: %w", err)
+		}
+
+		deadline := time.Now().Add(pollTimeout)
+		for {
+			out, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name), "-S", "-5")
+			if err != nil {
+				return fmt.Errorf("poll capture-pane: %w", err)
+			}
+			// The draft occupies the (single) input line while pending.
+			// Once tmux/the target program processes Enter, either the
+			// draft's content moves off the input line and is replaced
+			// (e.g. by an echoed copy plus a fresh, distinct prompt
+			// line) or the line the cursor sits on no longer matches
+			// the draft. We detect this generically: the pane grew a
+			// new non-blank line, which happens once Enter is actually
+			// processed (a new prompt, an echoed line, or program
+			// output appears) as opposed to being swallowed.
+			if nonBlankLineCount(out) > baseCount || lastLine(out) != lastLine(baseline) {
+				return nil
+			}
+			if time.Now().After(deadline) {
+				break
+			}
+			time.Sleep(pollInterval)
+		}
+	}
+
+	return fmt.Errorf("inject: draft not submitted after %d attempts", maxAttempts)
+}
+
+// lastLine returns the final non-blank line of s, or "" if s has no
+// non-blank content.
+func lastLine(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			return lines[i]
+		}
+	}
+	return ""
+}
+
+// nonBlankLineCount counts the non-blank lines in s.
+func nonBlankLineCount(s string) int {
+	n := 0
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) != "" {
+			n++
+		}
+	}
+	return n
+}
+
+func (t *tmuxRuntime) Capture(ctx context.Context, h Handle, lines int) (string, error) {
+	if err := validateName(h.Name); err != nil {
+		return "", err
+	}
+	out, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name), "-S", fmt.Sprintf("-%d", lines))
+	if err != nil {
+		return "", fmt.Errorf("capture pane %q: %w", h.Name, err)
+	}
+	return out, nil
+}
+
+func (t *tmuxRuntime) Alive(ctx context.Context, h Handle) bool {
+	if err := validateName(h.Name); err != nil {
+		return false
+	}
+	_, _, err := runTmux(ctx, "has-session", "-t", sessionTarget(h.Name))
+	return err == nil
+}
+
+func (t *tmuxRuntime) Destroy(ctx context.Context, h Handle) error {
+	if err := validateName(h.Name); err != nil {
+		return err
+	}
+	_, stderr, err := runTmux(ctx, "kill-session", "-t", sessionTarget(h.Name))
+	if err != nil {
+		if isNoSessionError(stderr) {
+			return nil
+		}
+		return fmt.Errorf("destroy session %q: %w", h.Name, err)
+	}
+	return nil
+}
+
+func isNoSessionError(stderr string) bool {
+	s := strings.ToLower(stderr)
+	return strings.Contains(s, "can't find session") ||
+		strings.Contains(s, "no such session") ||
+		strings.Contains(s, "session not found")
+}
+
+func (t *tmuxRuntime) AttachCommand(h Handle) []string {
+	return []string{"tmux", "attach", "-t", sessionTarget(h.Name)}
+}
+
+func (t *tmuxRuntime) List(ctx context.Context) ([]string, error) {
+	out, stderr, err := runTmux(ctx, "list-sessions", "-F", "#{session_name}")
+	if err != nil {
+		if isNoServerError(stderr) || (strings.TrimSpace(out) == "" && strings.TrimSpace(stderr) == "") {
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+
+	trimmed := strings.TrimRight(out, "\n")
+	if trimmed == "" {
+		return []string{}, nil
+	}
+	names := strings.Split(trimmed, "\n")
+	return names, nil
+}
+
+func isNoServerError(stderr string) bool {
+	s := strings.ToLower(stderr)
+	return strings.Contains(s, "no server running") || strings.Contains(s, "error connecting")
+}
