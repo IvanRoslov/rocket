@@ -18,6 +18,7 @@ import (
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/monitor"
+	"github.com/IvanRoslov/rocket/internal/queue"
 	"github.com/IvanRoslov/rocket/internal/runtime"
 	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -53,6 +54,7 @@ func Run(cfg *config.Config) error {
 	ws := workspace.New(cfg.WorktreesDir)
 	mgr := session.NewManager(st, b, rt, ws, cfg)
 	mon := monitor.New(st, b, rt, cfg, agent.Get)
+	q := queue.New(st, b, rt, cfg, mon.Activity)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -63,6 +65,7 @@ func Run(cfg *config.Config) error {
 	}
 
 	go mon.Run(ctx)
+	go q.Run(ctx)
 
 	shutdownCalled := make(chan struct{})
 	var shutdownOnce func()
@@ -82,6 +85,7 @@ func Run(cfg *config.Config) error {
 		Cfg:       cfg,
 		Manager:   mgr,
 		Monitor:   mon,
+		Queue:     q,
 		Shutdown:  shutdownOnce,
 		StartedAt: time.Now(),
 	}

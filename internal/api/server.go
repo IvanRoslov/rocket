@@ -14,6 +14,7 @@ import (
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/monitor"
+	"github.com/IvanRoslov/rocket/internal/queue"
 	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 	"github.com/IvanRoslov/rocket/internal/version"
@@ -31,6 +32,7 @@ type Deps struct {
 	Cfg       *config.Config
 	Manager   *session.Manager
 	Monitor   *monitor.Monitor
+	Queue     *queue.Queue
 	Shutdown  func()
 	StartedAt time.Time
 }
