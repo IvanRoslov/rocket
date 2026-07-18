@@ -589,6 +589,71 @@ func TestQueue_SpawningRecipientWaitsThenDelivers(t *testing.T) {
 	}
 }
 
+// TestQueue_ClaimMessageRaceSkipsExpiredMessage simulates a timeout-expiry
+// race against a live worker: a queued message is marked "failed" directly
+// (as expireTimedOut would do), then Wake is called. The worker must lose
+// the CAS in ClaimMessage and never call Inject, leaving the message failed
+// instead of overwriting it back to delivered.
+func TestQueue_ClaimMessageRaceSkipsExpiredMessage(t *testing.T) {
+	h := newTestQueue(t)
+	h.addRunningSession(t, "recv", activity.Ready)
+
+	id, err := h.st.AddMessage(store.Message{ToSession: "recv", Body: "hello"})
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+
+	// Simulate expiry racing the worker: mark the message failed directly,
+	// bypassing the normal delivery path (as expireTimedOut's UPDATE would).
+	if err := h.st.UpdateMessageStatus(id, "failed", 0, 0); err != nil {
+		t.Fatalf("UpdateMessageStatus: %v", err)
+	}
+
+	h.q.Wake("recv")
+
+	// Give the worker a chance to run (it should find no queued message via
+	// NextQueuedMessage and exit immediately without ever calling Inject).
+	time.Sleep(200 * time.Millisecond)
+
+	if got := messageStatus(t, h.st, id); got != "failed" {
+		t.Fatalf("status = %q, want failed (must not be revived to delivered)", got)
+	}
+	if n := h.rt.callCount(); n != 0 {
+		t.Fatalf("Inject called %d times, want 0", n)
+	}
+}
+
+// TestClaimMessageCAS exercises store.ClaimMessage directly: it succeeds
+// exactly once for a queued message and fails once the status is no longer
+// "queued".
+func TestClaimMessageCAS(t *testing.T) {
+	h := newTestQueue(t)
+
+	id, err := h.st.AddMessage(store.Message{ToSession: "recv", Body: "hello"})
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+
+	ok, err := h.st.ClaimMessage(id)
+	if err != nil {
+		t.Fatalf("ClaimMessage: %v", err)
+	}
+	if !ok {
+		t.Fatal("first ClaimMessage should succeed")
+	}
+	if got := messageStatus(t, h.st, id); got != "delivering" {
+		t.Fatalf("status after claim = %q, want delivering", got)
+	}
+
+	ok, err = h.st.ClaimMessage(id)
+	if err != nil {
+		t.Fatalf("ClaimMessage (second): %v", err)
+	}
+	if ok {
+		t.Fatal("second ClaimMessage should fail (no longer queued)")
+	}
+}
+
 func TestFormatBody(t *testing.T) {
 	got := formatBody(store.Message{FromSession: "orch", Body: "hi"})
 	want := "[from orch] hi"

@@ -357,8 +357,29 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 	handle := runtime.Handle{Name: sess.TmuxName}
 	text := formatBody(msg)
 
+	claimed := false
 	for {
 		msg.Attempts++
+
+		if !claimed {
+			// Atomically claim the queued->delivering transition. If this
+			// loses the CAS, the message is no longer "queued" — e.g.
+			// expireTimedOut already marked it "failed" for timing out
+			// concurrently with this worker deciding to deliver it. Without
+			// this check the worker would blindly inject and then overwrite
+			// "failed" back to "delivered", reviving a message it shouldn't.
+			ok, err := q.st.ClaimMessage(msg.ID)
+			if err != nil {
+				slog.Error("queue: claim message", "id", msg.ID, "error", err)
+				return
+			}
+			if !ok {
+				slog.Warn("queue: message no longer queued at claim time, skipping delivery", "id", msg.ID)
+				return
+			}
+			claimed = true
+		}
+
 		if err := q.st.UpdateMessageStatus(msg.ID, "delivering", msg.Attempts, 0); err != nil {
 			slog.Error("queue: update message delivering", "id", msg.ID, "error", err)
 		}

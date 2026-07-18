@@ -104,6 +104,31 @@ func (s *Store) NextQueuedMessage(to string) (Message, bool, error) {
 	return m, true, nil
 }
 
+// ClaimMessage atomically transitions message id from status "queued" to
+// "delivering" via a compare-and-swap UPDATE. It returns true if this call
+// won the claim (RowsAffected == 1); false means the message was no longer
+// "queued" (e.g. it was already claimed, or expired/failed concurrently by
+// housekeeping) and the caller must not proceed with delivery.
+//
+// This exists to close a race between a live delivery worker and
+// expireTimedOut: without a CAS, a worker that read a message as "queued"
+// could still inject and mark it "delivered" after housekeeping had already
+// marked the same message "failed" for timing out, silently reviving a
+// message that should have stayed failed.
+func (s *Store) ClaimMessage(id int64) (bool, error) {
+	res, err := s.db.Exec(
+		`UPDATE messages SET status = 'delivering' WHERE id = ? AND status = 'queued'`, id,
+	)
+	if err != nil {
+		return false, fmt.Errorf("claim message: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("claim message rows affected: %w", err)
+	}
+	return n == 1, nil
+}
+
 // UpdateMessageStatus updates a message's status, attempts, and delivered_at
 // (0 stored as NULL). Returns ErrNotFound if the message doesn't exist.
 func (s *Store) UpdateMessageStatus(id int64, status string, attempts int, deliveredAt int64) error {
