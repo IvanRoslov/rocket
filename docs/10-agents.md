@@ -28,6 +28,7 @@ type LaunchSpec struct {
 - **Launch:** `claude --dangerously-skip-permissions --append-system-prompt "$(cat <prompt-file>)" [-–model X] -- "<first message>"` — позиционный аргумент авто-сабмитит первый ход, оставляя интерактивный режим.
 - **Env:** `CLAUDECODE=""` (анти-nesting) + стандартные ROCKET_*.
 - **SetupWorkspace:** идемпотентный upsert `.claude/settings.json` в worktree — hook-скрипт активности (`SessionStart/Stop/PreToolUse/PostToolUse/Notification/...` → `POST /v1/internal/activity` через `curl --unix-socket`).
+- **Superpowers:** промпты rocket ([prompts/](../docs/prompts/)) требуют от агентов навыков плагина Superpowers (brainstorming, writing-plans, TDD, systematic-debugging, verification-before-completion). Для claude-code это предусловие: `rocket doctor` проверяет, что плагин установлен, и предупреждает, если нет. Для агентов без поддержки skills секции про Superpowers из промптов вырезаются адаптером (шаблоны помечают их условным блоком `{{#if skills}}`).
 - **Activity:** нативный JSONL-транскрипт `~/.claude/projects/<путь-как-slug>/*.jsonl`: тип последней записи + mtime → active/ready/idle/blocked; push-hooks дают waiting_input.
 
 ## Адаптер codex

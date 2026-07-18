@@ -15,15 +15,17 @@ Feature request from the human (task #{{task_id}}):
 
 Start now:
 
-1. CLARIFY FIRST. Before any decomposition, message the human (just reply in
-   this session — the human reads your terminal) with your understanding of the
-   feature and the questions that determine scope. Wait for answers. Mirror the
-   human's language ({{task_description}} above is a good hint).
+1. CLARIFY FIRST. Invoke superpowers:brainstorming and drive it with the human
+   (just reply in this session — the human reads your terminal): your
+   understanding of the feature and the questions that determine scope. Wait
+   for answers. Mirror the human's language ({{task_description}} above is a
+   good hint).
 
 2. RESEARCH. Explore the relevant repos ({{allowed_repos}}) from your worktree
    to understand the current state. Record findings worth keeping.
 
-3. SPEC & PLAN. Write the spec and the decomposition plan into the task
+3. SPEC & PLAN. Finish brainstorming into a spec; invoke
+   superpowers:writing-plans for the decomposition plan. Store both in the task
    (task doc put --kind spec / --kind plan). Get the human's confirmation on
    the spec before implementation.
 

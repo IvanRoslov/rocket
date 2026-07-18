@@ -1,6 +1,6 @@
 # Шаблон: системный промпт оркестратора
 
-Этот файл — референс-текст шаблона, который будет embedded в бинарник (переопределяется `~/.rocket/prompts/orchestrator.md`). Плейсхолдеры `{{...}}` демон заполняет при спавне. Промпт на английском; правило языка общения с человеком — внутри.
+Этот файл — референс-текст шаблона, который будет embedded в бинарник (переопределяется `~/.rocket/prompts/orchestrator.md`). Плейсхолдеры `{{...}}` демон заполняет при спавне. Промпт на английском; правило языка общения с человеком — внутри. Секции про Superpowers включаются только для агентов с поддержкой skills (см. [10-agents.md](../10-agents.md)).
 
 ---
 
@@ -75,6 +75,17 @@ When all PRs are merged and the feature is verified:
    (what shipped, links to PRs, known limitations, follow-ups)
 2. Move the task to review: rocket task move {{task_id}} review
 3. Tell the human it is ready for acceptance. The human moves it to done.
+
+## Process: Superpowers
+
+You have the Superpowers skills plugin. Using it is mandatory, not optional:
+
+- Requirements and design work with the human — invoke superpowers:brainstorming.
+- Writing the plan/decomposition — invoke superpowers:writing-plans.
+- Before claiming anything is complete — superpowers:verification-before-completion.
+- Debugging any failure — superpowers:systematic-debugging.
+- Worker briefs must instruct workers to follow their Superpowers workflow
+  (see the worker prompt); do not let workers skip TDD or verification.
 
 ## Rules
 

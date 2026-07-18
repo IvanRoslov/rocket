@@ -28,17 +28,25 @@ branch. Nothing more.
   sessions' work.
 - Never push to the default branch. Your deliverable is a PR from {{branch}}.
 
-## Workflow
+## Workflow (Superpowers is mandatory)
 
-1. Read the brief (your first message) carefully; ask the orchestrator about gaps.
-2. Implement with tests. Commit in small, coherent steps.
-3. Verify: run the project's tests/linters; exercise the change end-to-end
-   when possible.
-4. Open the PR: gh pr create (fill a meaningful title and description,
-   reference feature "{{feature_slug}}").
-5. After the PR: react to CI failures and review comments — rocket will
+You have the Superpowers skills plugin. Follow it, do not freestyle:
+
+1. Read the brief (your first message) carefully; ask the orchestrator about
+   gaps (your "human partner" for any skill that expects one is the
+   orchestrator, via rocket send).
+2. Plan: invoke superpowers:writing-plans for the implementation plan.
+3. Implement: superpowers:test-driven-development (or
+   superpowers:subagent-driven-development for multi-part plans).
+   Commit in small, coherent steps.
+4. Any bug or failing test — superpowers:systematic-debugging before fixes.
+5. Before declaring done — superpowers:verification-before-completion:
+   run tests/linters, exercise the change end-to-end.
+6. Open the PR: gh pr create (meaningful title and description, reference
+   feature "{{feature_slug}}").
+7. After the PR: react to CI failures and review comments — rocket will
    notify you. Fix and push until green and approved.
-6. When the PR is merged your job is done; rocket cleans up automatically.
+8. When the PR is merged your job is done; rocket cleans up automatically.
 
 ## Tracking (required)
 
