@@ -114,6 +114,7 @@ type fakeAgent struct {
 	setupErr     error
 	setupCalls   []agent.LaunchSpec
 	launchCalls  []agent.LaunchSpec
+	envOverrides map[string]string // optional env overrides to merge with defaults
 }
 
 func (a *fakeAgent) Name() string { return "fake" }
@@ -131,7 +132,13 @@ func (a *fakeAgent) LaunchCommand(spec agent.LaunchSpec) []string {
 }
 
 func (a *fakeAgent) Env(spec agent.LaunchSpec) map[string]string {
-	return map[string]string{"FAKE_ENV": "1", "ROCKET_SESSION_ID": spec.SessionID}
+	env := map[string]string{"FAKE_ENV": "1", "ROCKET_SESSION_ID": spec.SessionID}
+	if a.envOverrides != nil {
+		for k, v := range a.envOverrides {
+			env[k] = v
+		}
+	}
+	return env
 }
 
 // testFakeAgent is the instance returned by the "fake" agent builder
@@ -304,6 +311,32 @@ func TestSpawnNameCollisionInTmuxGetsSuffix(t *testing.T) {
 	}
 }
 
+func TestSpawnConcurrentRaceRetriesOnErrExists(t *testing.T) {
+	m, st, _, _, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+
+	// Pre-seed the store with "feat-task" to simulate a concurrent spawn
+	// winning the race between reserveName check and AddSession.
+	if err := st.AddSession(store.Session{
+		ID: "feat-task", Kind: "worker", ProjectID: "proj1", RepoID: "repo1",
+		FeatureSlug: "feat", Agent: "fake", Branch: "feature/feat/task",
+		WorktreePath: "/tmp/wt", TmuxName: "feat-task", State: "running",
+	}); err != nil {
+		t.Fatalf("pre-seed AddSession: %v", err)
+	}
+
+	// Spawn should retry and pick "feat-task-2" instead.
+	sess, err := m.Spawn(context.Background(), SpawnReq{
+		Project: "proj1", Repo: "repo1", Task: "task", Feature: "feat", AgentName: "fake",
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if sess.ID != "feat-task-2" {
+		t.Errorf("ID = %q, want feat-task-2 (retried after collision)", sess.ID)
+	}
+}
+
 func TestSpawnWorkspaceErrorMarksErrored(t *testing.T) {
 	m, st, b, _, ws := testManager(t)
 	seedProjectRepo(t, st, "proj1", "repo1")
@@ -379,6 +412,49 @@ func TestSpawnAgentUnavailable(t *testing.T) {
 	testFakeAgent.availableErr = errors.New("not installed")
 	_, err := m.Spawn(context.Background(), SpawnReq{Project: "proj1", Repo: "repo1", Task: "mytask", AgentName: "fake"})
 	assertValidationCode(t, err, "agent_unavailable")
+}
+
+func TestSpawnEnvMergeAgentOverridesRepo(t *testing.T) {
+	m, st, _, rt, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+
+	// Set repo env with K=repo and R=repo.
+	repo, err := st.GetRepo("repo1")
+	if err != nil {
+		t.Fatalf("GetRepo: %v", err)
+	}
+	repo.Env = map[string]string{"K": "repo", "R": "repo"}
+	if err := st.UpdateRepo(repo); err != nil {
+		t.Fatalf("UpdateRepo: %v", err)
+	}
+
+	// Create agent that overrides K with "agent" value to test merge.
+	testFakeAgent = &fakeAgent{
+		envOverrides: map[string]string{"K": "agent"},
+	}
+
+	_, err = m.Spawn(context.Background(), SpawnReq{
+		Project: "proj1", Repo: "repo1", Task: "mytask", Feature: "myfeat",
+		AgentName: "fake",
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	if len(rt.created) != 1 {
+		t.Fatalf("runtime.Create calls = %d, want 1", len(rt.created))
+	}
+
+	env := rt.created[0].Env
+	if env["K"] != "agent" {
+		t.Errorf("env[K] = %q, want agent (agent should override repo)", env["K"])
+	}
+	if env["R"] != "repo" {
+		t.Errorf("env[R] = %q, want repo (repo-only key should be present)", env["R"])
+	}
+	if env["FAKE_ENV"] != "1" {
+		t.Errorf("env[FAKE_ENV] = %q, want 1 (agent env should be present)", env["FAKE_ENV"])
+	}
 }
 
 func assertValidationCode(t *testing.T, err error, code string) {

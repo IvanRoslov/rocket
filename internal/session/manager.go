@@ -121,32 +121,50 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 		return store.Session{}, validationErr("agent_unavailable", "agent unavailable: "+err.Error())
 	}
 
-	id, err := m.reserveName(ctx, feature, req.Task)
-	if err != nil {
-		return store.Session{}, err
-	}
-
 	branch := "feature/" + feature + "/" + req.Task
 
-	sess := store.Session{
-		ID:          id,
-		Kind:        kind,
-		ProjectID:   req.Project,
-		RepoID:      req.Repo,
-		FeatureSlug: feature,
-		Agent:       agentName,
-		Branch:      branch,
-		TmuxName:    id,
-		State:       "spawning",
-		Prompt:      req.Prompt,
-	}
+	// Retry name reservation up to 3 times in case of concurrent spawn race.
+	// The race: reserveName picks a name, but between that check and AddSession,
+	// another spawn wins the race and inserts the same name. On ErrExists,
+	// recompute the name (suffix search sees the winner) and retry.
+	var id string
+	var sess store.Session
+	const maxRetries = 3
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		var err error
+		id, err = m.reserveName(ctx, feature, req.Task)
+		if err != nil {
+			return store.Session{}, err
+		}
 
-	if err := m.st.AddSession(sess); err != nil {
-		return store.Session{}, err
+		sess = store.Session{
+			ID:          id,
+			Kind:        kind,
+			ProjectID:   req.Project,
+			RepoID:      req.Repo,
+			FeatureSlug: feature,
+			Agent:       agentName,
+			Branch:      branch,
+			TmuxName:    id,
+			State:       "spawning",
+			Prompt:      req.Prompt,
+		}
+
+		if err := m.st.AddSession(sess); err != nil {
+			if errors.Is(err, store.ErrExists) && attempt < maxRetries {
+				continue // retry
+			}
+			if errors.Is(err, store.ErrExists) {
+				return store.Session{}, fmt.Errorf("session name reservation raced 3 times for %q", feature+"-"+req.Task)
+			}
+			return store.Session{}, err
+		}
+
+		m.bus.Publish("session.spawned", id, map[string]any{
+			"project": req.Project, "repo": req.Repo, "feature": feature, "task": req.Task,
+		})
+		break // success
 	}
-	m.bus.Publish("session.spawned", id, map[string]any{
-		"project": req.Project, "repo": req.Repo, "feature": feature, "task": req.Task,
-	})
 
 	wtRes, err := m.ws.Create(ctx, repo, id, branch)
 	if err != nil {

@@ -153,7 +153,12 @@ func handleGetSession(w http.ResponseWriter, r *http.Request, d Deps) {
 
 func handleKillSession(w http.ResponseWriter, r *http.Request, d Deps) {
 	id := r.PathValue("id")
-	cleanup := r.URL.Query().Get("cleanup") == "true"
+	cleanup := false
+	if v := r.URL.Query().Get("cleanup"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cleanup = b
+		}
+	}
 
 	if err := d.Manager.Kill(r.Context(), id, cleanup); err != nil {
 		writeManagerErr(w, err)
