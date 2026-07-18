@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"sort"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -22,6 +23,18 @@ var (
 	ErrRepoInUse = errors.New("repo is in use by a project")
 )
 
+// escapeDSNPath percent-encodes special characters in a file path for use in a
+// SQLite URI. modernc.org/sqlite splits the DSN at the FIRST '?' to separate
+// the path from query parameters, and SQLite URI filenames percent-decode %XX
+// sequences — so an unescaped path containing '?', '#', or '%' would corrupt
+// the pragma query string. We encode % first, then ? and #, to avoid double-encoding.
+func escapeDSNPath(path string) string {
+	path = strings.ReplaceAll(path, "%", "%25")
+	path = strings.ReplaceAll(path, "?", "%3F")
+	path = strings.ReplaceAll(path, "#", "%23")
+	return path
+}
+
 // Store wraps a SQLite database handle with rocket's DAOs.
 type Store struct {
 	db *sql.DB
@@ -32,7 +45,7 @@ type Store struct {
 // migrations. Open is idempotent: calling it repeatedly against the same
 // path is safe and re-applies no migration twice.
 func Open(path string) (*Store, error) {
-	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+	dsn := "file:" + escapeDSNPath(path) + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)

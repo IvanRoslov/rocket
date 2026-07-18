@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -436,5 +437,31 @@ func TestAppendListEvents(t *testing.T) {
 	}
 	if len(bySession) != 1 || bySession[0].SessionID != "s2" {
 		t.Fatalf("ListEvents by session = %+v", bySession)
+	}
+}
+
+func TestOpen_EscapedDSNPath(t *testing.T) {
+	// Test that paths containing special characters like '?', '#', and '%'
+	// are properly escaped so pragmas are preserved in the DSN.
+	oddDir := filepath.Join(t.TempDir(), "we?ird#50%")
+	if err := os.Mkdir(oddDir, 0755); err != nil {
+		t.Fatalf("mkdir oddDir: %v", err)
+	}
+
+	path := filepath.Join(oddDir, "rocket.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open with escaped path: %v", err)
+	}
+	defer s.Close()
+
+	// Verify that pragmas were successfully applied by checking foreign_keys
+	ctx := context.Background()
+	var fkEnabled int
+	if err := s.db.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&fkEnabled); err != nil {
+		t.Fatalf("Query PRAGMA foreign_keys: %v", err)
+	}
+	if fkEnabled != 1 {
+		t.Fatalf("foreign_keys = %d, want 1 (pragma was not applied)", fkEnabled)
 	}
 }
