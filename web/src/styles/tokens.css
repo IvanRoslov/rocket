@@ -84,4 +84,16 @@
   --radius-badge-sm: 5px;
   --radius-badge-lg: 7px;
   --radius-pill: 20px;
+
+  /* Buttons */
+  --btn-primary-bg: #1a1a1c;
+  --btn-primary-bg-hover: #000;
+  --btn-primary-fg: #fff;
+
+  /* Overlay (modal) */
+  --overlay-bg: rgba(15, 15, 17, 0.55);
+  --overlay-blur: 2px;
+
+  /* Segmented control */
+  --segmented-bg: #f4f4f2;
 }
