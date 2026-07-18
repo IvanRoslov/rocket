@@ -359,7 +359,12 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 			q.deliverSuccess(msg)
 			return
 		case errors.Is(err, runtime.ErrSubmitUnconfirmed):
-			out, capErr := q.rt.Capture(ctx, handle, 5)
+			// Capture generously (not just a handful of lines): the marker
+			// may sit well above the pane's very bottom rows by the time we
+			// get here, and a too-narrow capture would spuriously look
+			// "marker gone" or fail to see growth. See tmux.Inject's
+			// tailLines doc for why a small fixed tail is unreliable here.
+			out, capErr := q.rt.Capture(ctx, handle, 200)
 			if capErr == nil && markerPresent(out, text) {
 				retryEligible = true
 			} else {

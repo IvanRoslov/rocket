@@ -111,20 +111,25 @@ func (t *tmuxRuntime) Create(ctx context.Context, spec CreateSpec) (Handle, erro
 // Inject clears any draft on the target pane's input line, pastes text,
 // and presses Enter, retrying Enter up to maxAttempts times while polling
 // for confirmation that the submit was processed. Submission is confirmed
-// against the bottom 5-line tail of the pane (captured via `capture-pane
-// -S -5`) as soon as EITHER of two independent signals fires:
+// against the pane's full currently-visible content (a bare `capture-pane
+// -p`, i.e. exactly pane-height rows — see tailLines's doc for why a small
+// fixed-size tail is unreliable) as soon as EITHER of two independent
+// signals fires:
 //
 //   - marker-absent: the last non-empty line of the injected text is no
-//     longer present anywhere in the captured tail, AND the marker was
+//     longer present anywhere in the captured pane, AND the marker was
 //     observed in the baseline (i.e. was actually rendered before Enter).
 //     This covers full-screen / alt-screen TUIs that redraw on submit and
 //     clear the input box, even when the redraw leaves the surrounding line
 //     count and footer unchanged. If the marker never renders (e.g. input
-//     consumed instantly without echo), count-growth is used instead.
-//   - count-growth: the number of non-blank lines in the tail grew versus
+//     consumed instantly without echo), count-growth is used instead. Note
+//     this signal never fires for chat-style TUIs that keep the submitted
+//     text permanently visible as part of the conversation history (e.g.
+//     Claude Code) — count-growth is the operative signal there.
+//   - count-growth: the number of non-blank lines in the pane grew versus
 //     the pre-Enter baseline. This covers simple echo-style consumers
-//     (e.g. `cat`) where the submitted text lingers in the tail as an
-//     echoed line, and also handles cases where the marker never renders.
+//     (e.g. `cat`) where the submitted text lingers as an echoed line, and
+//     also covers chat-style TUIs where the reply adds new visible lines.
 //
 // If attempts are exhausted without either signal firing, Inject returns
 // ErrSubmitUnconfirmed (wrapped with context) rather than a generic
@@ -196,7 +201,7 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 	if marker != "" {
 		deadline := time.Now().Add(pollTimeout)
 		for {
-			out, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name), "-S", "-5")
+			out, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name))
 			if err == nil && strings.Contains(out, marker) {
 				markerSeen = true
 				break
@@ -208,7 +213,7 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 		}
 	}
 
-	baseline, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name), "-S", "-5")
+	baseline, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name))
 	if err != nil {
 		return fmt.Errorf("capture baseline: %w", err)
 	}
@@ -221,7 +226,7 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 
 		deadline := time.Now().Add(pollTimeout)
 		for {
-			out, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name), "-S", "-5")
+			out, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name))
 			if err != nil {
 				return fmt.Errorf("poll capture-pane: %w", err)
 			}
@@ -261,6 +266,39 @@ func lastLine(s string) string {
 	return ""
 }
 
+// tailLines returns the last n lines of s. It exists because
+// `tmux capture-pane -S -N` (without a matching -E) is NOT a "last N lines"
+// tail: -S is an absolute offset from the top of the currently visible
+// pane, and without -E the capture runs through to the bottom of the
+// visible screen regardless of N — for a pane taller than N this yields
+// (pane height + N) lines, not N. Pairing it with "-E -1" to bound the end
+// was tried and found unreliable for alternate-screen TUIs (e.g. Claude
+// Code), which sometimes report an empty capture for that range. Capturing
+// generously via -S -N (or with no -S at all) and then trimming to exactly
+// the last n lines here, in Go, sidesteps both problems.
+func tailLines(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
+}
+
+// trimTrailingBlank drops trailing blank lines from s. A captured pane
+// often has unwritten rows below the actual content (padding out to the
+// full terminal height), and those don't count as "the tail" of anything —
+// without trimming them first, tailLines on a lightly-used pane would
+// return mostly (or entirely) blank output instead of the real content
+// sitting above the padding.
+func trimTrailingBlank(s string) string {
+	lines := strings.Split(s, "\n")
+	end := len(lines)
+	for end > 0 && strings.TrimSpace(lines[end-1]) == "" {
+		end--
+	}
+	return strings.Join(lines[:end], "\n")
+}
+
 // nonBlankLineCount counts the non-blank lines in s.
 func nonBlankLineCount(s string) int {
 	n := 0
@@ -272,6 +310,13 @@ func nonBlankLineCount(s string) int {
 	return n
 }
 
+// Capture returns (up to) the last `lines` lines of the pane's actual
+// content. It captures generously via `-S -N` (best-effort extra
+// scrollback — harmless no-op for alternate-screen TUIs that have none),
+// then trims unwritten trailing-blank padding and bounds the result to
+// exactly `lines` in Go; see tailLines and trimTrailingBlank for why doing
+// this client-side is necessary rather than trusting tmux's own -S/-E
+// bounds.
 func (t *tmuxRuntime) Capture(ctx context.Context, h Handle, lines int) (string, error) {
 	if err := validateName(h.Name); err != nil {
 		return "", err
@@ -280,7 +325,7 @@ func (t *tmuxRuntime) Capture(ctx context.Context, h Handle, lines int) (string,
 	if err != nil {
 		return "", fmt.Errorf("capture pane %q: %w", h.Name, err)
 	}
-	return out, nil
+	return tailLines(trimTrailingBlank(out), lines), nil
 }
 
 func (t *tmuxRuntime) Alive(ctx context.Context, h Handle) bool {
