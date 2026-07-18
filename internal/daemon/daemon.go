@@ -12,10 +12,14 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/IvanRoslov/rocket/internal/agent/claudecode" // register the claude-code agent
 	"github.com/IvanRoslov/rocket/internal/api"
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
+	"github.com/IvanRoslov/rocket/internal/runtime"
+	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
+	"github.com/IvanRoslov/rocket/internal/workspace"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -43,6 +47,9 @@ func Run(cfg *config.Config) error {
 	defer st.Close()
 
 	b := bus.New(st)
+	rt := runtime.NewTmux()
+	ws := workspace.New(cfg.WorktreesDir)
+	mgr := session.NewManager(st, b, rt, ws, cfg)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -63,6 +70,7 @@ func Run(cfg *config.Config) error {
 		Store:     st,
 		Bus:       b,
 		Cfg:       cfg,
+		Manager:   mgr,
 		Shutdown:  shutdownOnce,
 		StartedAt: time.Now(),
 	}

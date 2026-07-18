@@ -13,6 +13,7 @@ import (
 
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
+	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 	"github.com/IvanRoslov/rocket/internal/version"
 )
@@ -21,16 +22,15 @@ import (
 // finish during graceful shutdown.
 const shutdownTimeout = 5 * time.Second
 
-// Deps holds the dependencies the API handler needs. Later tasks add more
-// fields (e.g. Manager *session.Manager); this struct's shape is
-// load-bearing for those tasks and must not be reshuffled lightly.
+// Deps holds the dependencies the API handler needs. This struct's shape is
+// load-bearing for callers and must not be reshuffled lightly.
 type Deps struct {
 	Store     *store.Store
 	Bus       *bus.Bus
 	Cfg       *config.Config
+	Manager   *session.Manager
 	Shutdown  func()
 	StartedAt time.Time
-	// further fields added by later tasks: Manager *session.Manager
 }
 
 // NewHandler builds the routed http.Handler for rocket's API.
@@ -56,6 +56,7 @@ func NewHandler(d Deps) http.Handler {
 
 	registerRepoRoutes(mux, d)
 	registerProjectRoutes(mux, d)
+	registerSessionRoutes(mux, d)
 
 	// Catch-all: anything not matched by a more specific pattern above is a
 	// 404, rendered in the standard error JSON shape.

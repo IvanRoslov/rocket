@@ -38,6 +38,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newDaemonCmd())
 	root.AddCommand(newRepoCmd())
 	root.AddCommand(newProjectCmd())
+	root.AddCommand(newSpawnCmd())
 	return root
 }
 
