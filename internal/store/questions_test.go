@@ -125,8 +125,8 @@ func TestResolveQuestion_AlreadyResolvedErrors(t *testing.T) {
 
 	if err := s.ResolveQuestion(id, "answered"); err == nil {
 		t.Fatal("second ResolveQuestion: want error, got nil")
-	} else if errors.Is(err, ErrNotFound) {
-		t.Fatalf("expected an 'already resolved' error, not ErrNotFound: %v", err)
+	} else if !errors.Is(err, ErrQuestionResolved) {
+		t.Fatalf("expected ErrQuestionResolved, got: %v", err)
 	}
 }
 

@@ -96,8 +96,8 @@ func (s *Store) ListQuestions(taskID int64, openOnly bool) ([]Question, error) {
 
 // ResolveQuestion transitions question id from status "open" to "resolved"
 // with the given resolution ("answered" or "dismissed"), setting resolved_at
-// to now. Returns ErrNotFound if the question doesn't exist, and an error if
-// it is already resolved.
+// to now. Returns ErrNotFound if the question doesn't exist, and
+// ErrQuestionResolved if it is already resolved.
 func (s *Store) ResolveQuestion(id int64, resolution string) error {
 	res, err := s.db.Exec(
 		`UPDATE task_questions SET status = 'resolved', resolution = ?, resolved_at = ?
@@ -120,7 +120,7 @@ func (s *Store) ResolveQuestion(id int64, resolution string) error {
 	if _, err := s.GetQuestion(id); err != nil {
 		return err
 	}
-	return fmt.Errorf("question %d is already resolved", id)
+	return ErrQuestionResolved
 }
 
 // AddQuestionMessage inserts a new message into a question's thread.

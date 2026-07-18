@@ -296,10 +296,6 @@ func handlePostQuestionReply(w http.ResponseWriter, r *http.Request, d Deps) {
 	if !ok {
 		return
 	}
-	if q.Status != "open" {
-		writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
-		return
-	}
 
 	task, ok := getTaskOr404(w, d, q.TaskID)
 	if !ok {
@@ -312,6 +308,11 @@ func handlePostQuestionReply(w http.ResponseWriter, r *http.Request, d Deps) {
 	}
 	if caller != nil && (caller.Kind != "orchestrator" || task.SessionID != caller.ID) {
 		writeErr(w, http.StatusForbidden, "forbidden", "only the human user or the task's own orchestrator may reply")
+		return
+	}
+
+	if q.Status != "open" {
+		writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
 		return
 	}
 
@@ -413,6 +414,10 @@ func handlePostQuestionAnswer(w http.ResponseWriter, r *http.Request, d Deps) {
 	if req.Dismiss {
 		resolution = "dismissed"
 		if err := d.Store.ResolveQuestion(id, resolution); err != nil {
+			if errors.Is(err, store.ErrQuestionResolved) {
+				writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
+				return
+			}
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
@@ -423,15 +428,22 @@ func handlePostQuestionAnswer(w http.ResponseWriter, r *http.Request, d Deps) {
 		}
 		resolution = "answered"
 
+		// Resolve first — if it fails with already-resolved, return 409 immediately.
+		// Only after successful resolve do we add the message, deliver, and publish event.
+		if err := d.Store.ResolveQuestion(id, resolution); err != nil {
+			if errors.Is(err, store.ErrQuestionResolved) {
+				writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
+				return
+			}
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+
 		if _, err := d.Store.AddQuestionMessage(store.QuestionMessage{
 			QuestionID: id,
 			Kind:       "answer",
 			Body:       req.Body,
 		}); err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
-		}
-		if err := d.Store.ResolveQuestion(id, resolution); err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}

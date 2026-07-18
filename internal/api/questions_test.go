@@ -465,3 +465,81 @@ func TestQuestionAnswer_TerminalOrchestrator_SkipsDeliveryButStillResolves(t *te
 		t.Errorf("delivered messages = %+v, want none (session terminal)", msgs)
 	}
 }
+
+func TestQuestionAnswer_ConcurrentDoubleAnswer(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	askResp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1", map[string]any{"body": "Q"})
+	q := decodeQuestion(t, askResp)
+	askResp.Body.Close()
+
+	// Two goroutines race to answer the same question.
+	ch := make(chan int, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			resp := postJSON(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/answer", map[string]any{"body": "answer"})
+			ch <- resp.StatusCode
+			resp.Body.Close()
+		}()
+	}
+
+	// Exactly one should succeed (200), the other should get 409.
+	codes := []int{<-ch, <-ch}
+	successes := 0
+	conflicts := 0
+	for _, code := range codes {
+		if code == http.StatusOK {
+			successes++
+		} else if code == http.StatusConflict {
+			conflicts++
+		} else {
+			t.Errorf("unexpected status code: %d", code)
+		}
+	}
+	if successes != 1 {
+		t.Errorf("successes = %d, want 1", successes)
+	}
+	if conflicts != 1 {
+		t.Errorf("conflicts = %d, want 1", conflicts)
+	}
+
+	// Verify exactly ONE answer message row exists.
+	msgs, err := d.Store.ListQuestionMessages(q.ID)
+	if err != nil {
+		t.Fatalf("ListQuestionMessages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("msgs len = %d, want 1 (exactly one answer from winner)", len(msgs))
+	}
+	if msgs[0].Kind != "answer" {
+		t.Errorf("msgs[0].Kind = %q, want answer", msgs[0].Kind)
+	}
+}
+
+func TestQuestionReply_WorkerReplyToResolvedGets403NotConflict(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+	addTestSession(t, d, "worker-1", "worker", "proj1")
+
+	askResp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1", map[string]any{"body": "Q"})
+	q := decodeQuestion(t, askResp)
+	askResp.Body.Close()
+
+	// Resolve the question.
+	dismissResp := postJSON(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/answer", map[string]any{"dismiss": true})
+	dismissResp.Body.Close()
+
+	// Worker tries to reply to resolved question.
+	// Should get 403 (unauthorized) NOT 409 (conflict/resolved) to avoid information disclosure.
+	resp := postJSONWithHeader(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/reply", "worker-1", map[string]any{"body": "nope"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	if eb := decodeErr(t, resp); eb.Error.Code != "forbidden" {
+		t.Errorf("code = %q, want forbidden", eb.Error.Code)
+	}
+}
