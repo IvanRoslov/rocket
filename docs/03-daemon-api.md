@@ -9,14 +9,34 @@ HTTP+JSON, префикс `/v1`. Листенеры: Unix-сокет `~/.rocket/
 | GET | `/v1/health` | `{status, version, uptime}` |
 | POST | `/v1/shutdown` | Штатная остановка демона (сессии не трогает) |
 
+## Настройки и GitHub
+
+| Метод | Путь | Описание |
+|---|---|---|
+| GET | `/v1/settings` | Настройки (секреты замаскированы) |
+| PUT | `/v1/settings` | `{github_token?: "..."}` — валидирует токен запросом к GitHub |
+| GET | `/v1/github/repos?q=` | Репозитории, доступные токену (для UI выбора), с кэшем |
+
+## Репозитории
+
+| Метод | Путь | Описание |
+|---|---|---|
+| GET | `/v1/repos` | Список зарегистрированных репозиториев |
+| POST | `/v1/repos` | Регистрация: `{id?, path}` — локальный чекаут, либо `{github: "owner/name"}` — демон клонирует в `~/.rocket/repos/` и регистрирует |
+| PATCH | `/v1/repos/{id}` | Изменение полей (env, symlinks, post_create, …) |
+| DELETE | `/v1/repos/{id}` | Удаление из реестра (не должен входить в проекты) |
+
 ## Проекты
 
 | Метод | Путь | Описание |
 |---|---|---|
-| GET | `/v1/projects` | Список проектов реестра |
-| POST | `/v1/projects` | Регистрация: `{id?, path}` — валидирует git-репо, пишет в config.yaml |
-| PATCH | `/v1/projects/{id}` | Изменение полей (в т.ч. `links`) |
-| DELETE | `/v1/projects/{id}` | Удаление из реестра (сессии должны быть закрыты) |
+| GET | `/v1/projects` | Список проектов (+ агрегаты: задачи по статусам, живые сессии) |
+| POST | `/v1/projects` | `{id?, name, main, linked?}` — main/linked это id репозиториев |
+| GET | `/v1/projects/{id}` | Карточка проекта: репозитории, счётчики |
+| PATCH | `/v1/projects/{id}` | Изменение `name`, `main`, `linked` |
+| DELETE | `/v1/projects/{id}` | Удаление (задачи должны быть закрыты/отменены) |
+
+Для UI создания проекта: POST `/v1/repos` принимает и путь, введённый вручную — так дашборд регистрирует репо и сразу добавляет его в проект.
 
 ## Сессии
 
@@ -25,7 +45,7 @@ HTTP+JSON, префикс `/v1`. Листенеры: Unix-сокет `~/.rocket/
 | GET | `/v1/sessions` | Список; фильтры `?kind=&project=&feature=&state=` |
 | GET | `/v1/sessions/{id}` | Полная карточка сессии |
 | POST | `/v1/orchestrators` | `{description, project, agent?}` → спавн оркестратора; ответ `{id, feature_slug}` |
-| POST | `/v1/workers` | `{caller, task, project, prompt, agent?}` → спавн воркера; caller обязан быть живым оркестратором, project ∈ {хаб caller, links хаба} |
+| POST | `/v1/workers` | `{caller, task, repo, prompt, agent?}` → спавн воркера; caller обязан быть живым оркестратором, repo ∈ репозитории проекта caller (main + linked) |
 | POST | `/v1/sessions/{id}/kill` | Убить сессию: tmux destroy + `state=killed`; `?cleanup=true` — ещё и worktree |
 | POST | `/v1/sessions/{id}/restore` | Восстановить упавшую сессию (worktree restore + перезапуск агента) |
 | GET | `/v1/sessions/{id}/output?lines=N` | capture-pane |

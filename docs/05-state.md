@@ -4,53 +4,75 @@
 
 ```
 ~/.rocket/
-├── config.yaml        # реестр проектов и настройки (редактируется руками и CLI)
+├── config.yaml        # опциональные настройки демона (только настройки!)
 ├── rocket.sock        # Unix-сокет API (создаёт демон, mode 0600)
 ├── rocketd.pid
-├── rocket.db          # SQLite: sessions, messages, events
+├── rocket.db          # SQLite: всё состояние, включая реестр репо и проектов
 ├── logs/rocketd.log   # ротация по размеру
+├── repos/             # чекауты, склонированные самим rocket'ом
+│   └── <owner>__<name>/
 └── worktrees/
-    └── <project>/<session>/
+    └── <repo-id>/<session-id>/
 ```
 
-Принцип: **config.yaml — декларативный ввод человека; rocket.db — рабочее состояние демона.** CLI никогда не пишет в rocket.db напрямую.
+Принцип: **вся модель данных — в rocket.db, единственный писатель — демон.** Репозитории и проекты тоже живут в базе и управляются через CLI/API/дашборд, а не редактированием файлов. config.yaml — только настройки демона, опционален (без него — дефолты).
 
-## config.yaml
+## Куда rocket клонирует репо и кладёт worktree
+
+Два источника репозиториев — две судьбы `path`:
+
+- **Локальный чекаут** (`rocket repo add <path>` / `POST {path}`): rocket ничего не копирует, `repos.path` указывает на существующую рабочую копию пользователя. rocket в ней ничего не меняет — она нужна только как источник для `git worktree add` и symlinks.
+- **Клон из GitHub** (UI / `POST {github: "owner/name"}`): демон делает `git clone` в `~/.rocket/repos/<owner>__<name>/` (двойное подчёркивание исключает коллизии одинаковых имён у разных owner'ов) и записывает этот путь в `repos.path`. Такой чекаут — служебный: пользователь в нём не работает, демон обновляет его `git fetch` перед созданием worktree.
+
+**Worktree** всегда создаются демоном в `~/.rocket/worktrees/<repo-id>/<session-id>/` — плоско, предсказуемо, вне пользовательских директорий; cleanup сессии удаляет ровно свою папку. Путь виден в карточке сессии (API/`task show`/дашборд).
+
+Обе базовые директории переопределяются в config.yaml (`repos_dir`, `worktrees_dir`) — например, чтобы вынести worktree на быстрый диск.
+
+## config.yaml (опционально)
 
 ```yaml
-daemon:
-  port: 4477              # localhost-порт для дашборда
-  heartbeat_interval: 5m
-  github_poll_interval: 2m
-
-defaults:
-  agent: claude-code      # агент по умолчанию
-
-projects:
-  api:
-    path: ~/projects/api
-    default_branch: main
-    links: [web, infra]   # где оркестраторы api могут спавнить воркеров
-    auto_cleanup: true    # авто-зачистка воркеров после merge PR (по умолчанию true)
-    env:
-      FOO: bar
-    symlinks: [node_modules, .env]
-    post_create:
-      - pnpm install
-  web:
-    path: ~/projects/web
-    default_branch: main
+port: 4477                # localhost-порт для дашборда
+heartbeat_interval: 5m
+github_poll_interval: 2m
+default_agent: claude-code
+repos_dir: ~/.rocket/repos          # куда клонировать репо из GitHub
+worktrees_dir: ~/.rocket/worktrees  # где создавать worktree сессий
 ```
-
-Демон перечитывает конфиг по SIGHUP и при изменении через API (`project add` и т.п. пишут файл через демон, с сохранением комментариев не заморачиваемся — v1 перезаписывает).
 
 ## Схема SQLite
 
 ```sql
-CREATE TABLE sessions (
+CREATE TABLE settings (
+  key   TEXT PRIMARY KEY,   -- напр. 'github_token'
+  value TEXT NOT NULL
+);
+
+CREATE TABLE repos (
+  id             TEXT PRIMARY KEY,          -- "api", "web"
+  path           TEXT NOT NULL,             -- абсолютный путь к основному чекауту
+  default_branch TEXT NOT NULL DEFAULT 'main',
+  auto_cleanup   INTEGER NOT NULL DEFAULT 1,
+  env            TEXT NOT NULL DEFAULT '{}', -- JSON {K:V}
+  symlinks       TEXT NOT NULL DEFAULT '[]', -- JSON [paths]
+  post_create    TEXT NOT NULL DEFAULT '[]', -- JSON [commands]
+  created_at     INTEGER NOT NULL
+);
+
+CREATE TABLE projects (
+  id           TEXT PRIMARY KEY,            -- "billing"
+  name         TEXT NOT NULL,               -- "Биллинг"
+  main_repo    TEXT NOT NULL REFERENCES repos(id),
+  linked_repos TEXT NOT NULL DEFAULT '[]',  -- JSON [repo ids]
+  created_at   INTEGER NOT NULL
+);
+```
+
+```sql
+CREATE TABLE sessions (  -- продолжение схемы
   id            TEXT PRIMARY KEY,
   kind          TEXT NOT NULL CHECK (kind IN ('orchestrator','worker')),
-  project_id    TEXT NOT NULL,
+  project_id    TEXT NOT NULL,             -- проект (верхняя сущность)
+  repo_id       TEXT NOT NULL,             -- репозиторий, где worktree
   feature_slug  TEXT NOT NULL,
   parent_id     TEXT REFERENCES sessions(id),
   agent         TEXT NOT NULL,
@@ -84,7 +106,8 @@ CREATE TABLE tasks (
   parent_id    INTEGER REFERENCES tasks(id),   -- NULL = задача, иначе подзадача
   title        TEXT NOT NULL,
   description  TEXT NOT NULL DEFAULT '',
-  project_id   TEXT NOT NULL,
+  project_id   TEXT NOT NULL,                  -- проект; у подзадачи дополнительно
+  repo_id      TEXT,                            -- репо воркера (только подзадачи)
   status       TEXT NOT NULL DEFAULT 'backlog', -- backlog|in_progress|review|done|cancelled
   feature_slug TEXT,
   session_id   TEXT REFERENCES sessions(id),   -- задача → оркестратор, подзадача → воркер
@@ -139,5 +162,6 @@ CREATE INDEX idx_events_session ON events(session_id, id);
 
 ```
 ROCKET_SESSION_ID, ROCKET_KIND, ROCKET_PARENT_ID, ROCKET_PROJECT_ID,
-ROCKET_FEATURE, ROCKET_SOCKET (путь к сокету), + env проекта из конфига
+ROCKET_REPO_ID, ROCKET_FEATURE, ROCKET_SOCKET (путь к сокету),
++ env репозитория из конфига
 ```

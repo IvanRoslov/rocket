@@ -15,7 +15,7 @@ type Agent interface {
 }
 
 type LaunchSpec struct {
-    SessionID, Kind, ParentID, ProjectID, Feature string
+    SessionID, Kind, ParentID, ProjectID, RepoID, Feature string
     WorktreePath, SystemPrompt, FirstMessage      string
     Model, PermissionMode                          string
 }

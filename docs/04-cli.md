@@ -2,7 +2,7 @@
 
 Один бинарник `rocket`. Все команды — клиенты API демона; при недоступном сокете демон автозапускается (кроме `daemon *`). Глобальные флаги: `--json` (машинный вывод), `--socket <path>`.
 
-Внутри rocket-сессий выставлены env: `ROCKET_SESSION_ID`, `ROCKET_KIND`, `ROCKET_PARENT_ID`, `ROCKET_PROJECT_ID`, `ROCKET_FEATURE`. CLI использует их для автоопределения вызывающего.
+Внутри rocket-сессий выставлены env: `ROCKET_SESSION_ID`, `ROCKET_KIND`, `ROCKET_PARENT_ID`, `ROCKET_PROJECT_ID`, `ROCKET_REPO_ID`, `ROCKET_FEATURE`. CLI использует их для автоопределения вызывающего.
 
 ## Для пользователя
 
@@ -41,10 +41,17 @@ rocket kill <session> [--cleanup]
 rocket restore <session>
     Восстановить упавшую сессию (после ребута и т.п.).
 
-rocket project add <path> [--id <id>]
-rocket project ls
-rocket project link <hub> <target>      # добавить target в links хаба
-rocket project unlink <hub> <target>
+rocket repo add <path> [--id <id>]      # зарегистрировать локальный чекаут
+rocket repo add --github <owner/name>   # склонировать в ~/.rocket/repos и зарегистрировать
+rocket repo ls / rocket repo rm <id>
+
+rocket github auth <token>              # сохранить GitHub-токен (то же, что Settings в UI)
+
+rocket project create <id> --main <repo> [--link <repo>]... [--name "..."]
+rocket project ls                       # проекты с агрегатами (задачи, сессии)
+rocket project show <id>
+rocket project link <project> <repo>    # добавить linked-репо
+rocket project unlink <project> <repo>
 rocket project rm <id>
 
 rocket events [--follow] [--session <id>]
@@ -56,10 +63,11 @@ rocket doctor                           # проверка окружения: t
 ## Для агентов (вызываются оркестратором/воркером из своей сессии)
 
 ```
-rocket spawn --task <name> --project <id> --prompt "<бриф>" [--agent <name>]
+rocket spawn --task <name> --repo <id> --prompt "<бриф>" [--agent <name>]
              [--subtask <id>]
     Только для оркестраторов. Спавнит воркера <feature>-<name> на ветке
-    feature/<feature>/<name> в указанном проекте. Автоматически создаёт
+    feature/<feature>/<name> в указанном репозитории (main или linked
+    репо проекта оркестратора). Автоматически создаёт
     подзадачу (in_progress) и привязывает к воркеру; --subtask привязывает
     к заранее созданной подзадаче. Печатает session id и subtask id.
 

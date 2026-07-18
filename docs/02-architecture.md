@@ -24,7 +24,7 @@
 HTTP+JSON. Два листенера с одним роутером: Unix-сокет `~/.rocket/rocket.sock` (mode 0600) и `127.0.0.1:<port>` для дашборда. SSE-эндпоинт `/v1/events/stream`. Никакой аутентификации в v1 — доступ ограничен правами на сокет и localhost.
 
 ### store
-SQLite (`~/.rocket/rocket.db`, драйвер без cgo — `modernc.org/sqlite`). Единственный писатель — демон. Таблицы: `sessions`, `tasks`, `task_docs`, `task_log`, `messages`, `events`. Схема — [05-state.md](05-state.md). Миграции — embedded SQL, применяются при старте.
+SQLite (`~/.rocket/rocket.db`, драйвер без cgo — `modernc.org/sqlite`). Единственный писатель — демон. Таблицы: `repos`, `projects`, `sessions`, `tasks`, `task_docs`, `task_log`, `messages`, `events` — реестр репозиториев и проектов тоже в базе, config.yaml содержит только настройки демона. Схема — [05-state.md](05-state.md). Миграции — embedded SQL, применяются при старте.
 
 ### session manager
 Оркестрирует спавн/kill/restore: резервирует имя, создаёт worktree (workspace), собирает команду запуска (agents), создаёт tmux-сессию (runtime), пишет запись в store, публикует события. Все переходы состояний — только через него.
@@ -51,9 +51,9 @@ type Runtime interface {
 - всё через `exec.Command` без shell-интерполяции; валидация имён `^[a-z0-9-]+$`.
 
 ### workspace (git worktree)
-Интерфейс `Workspace`: `Create`, `Restore`, `Destroy`. Раскладка: `~/.rocket/worktrees/<project>/<session>/`.
+Интерфейс `Workspace`: `Create`, `Restore`, `Destroy`. Раскладка: `~/.rocket/worktrees/<repo>/<session>/`.
 
-- Create: `git fetch origin` → база `origin/<default_branch>` (фолбэк на локальную) → `git worktree add -b <branch> <path> <base>`; затем symlinks и `post_create` из конфига проекта.
+- Create: `git fetch origin` → база `origin/<default_branch>` (фолбэк на локальную) → `git worktree add -b <branch> <path> <base>`; затем symlinks и `post_create` из настроек репозитория.
 - Коллизия ветки: если ветка уже существует — переиспользовать (`worktree add` без `-b`), событие `workspace.branch_collision`.
 - Destroy: `git worktree remove --force`; **ветку не удаляем никогда**. Фолбэк — `rm -rf` + `git worktree prune`.
 - Restore (после ребута/рестарта демона): `worktree prune` → `fetch` → переприкрепить существующую ветку без потери коммитов.
@@ -74,16 +74,16 @@ type Runtime interface {
 Канбан-слой: CRUD задач, автосоздание подзадач при спавне воркеров, автопереходы статусов по PR-циклу, документы и журнал. См. [12-tasks.md](12-tasks.md).
 
 ### github
-Цикл (каждые ~2m) поллит `gh` по PR воркеров: `pr_state`, `ci_state`; реакции (сообщение воркеру о красном CI) и авто-cleanup после merge. См. [09-github.md](09-github.md).
+GitHub REST API с токеном пользователя (хранится в settings): каталог репозиториев для UI, клонирование выбранных, и цикл (каждые ~2m) поллинга PR воркеров: `pr_state`, `ci_state`; реакции (сообщение воркеру о красном CI) и авто-cleanup после merge. См. [09-github.md](09-github.md).
 
 ### events
 Внутренняя шина (Go-каналы) + append в таблицу `events` + fan-out в SSE-подписчиков.
 
 ## Потоки данных (примеры)
 
-**`rocket up "billing v2"`**: CLI → POST /v1/orchestrators → session manager: slug, worktree в хабе, launch-команда агента с kickoff, tmux create → запись в store → ответ CLI с `session_id`.
+**`rocket up "billing v2" --project billing`**: CLI → создание задачи + POST /v1/tasks/{id}/start → session manager: slug, worktree в main-репо проекта, launch-команда агента с kickoff, tmux create → запись в store → ответ CLI с `task_id`/`session_id`.
 
-**Оркестратор спавнит воркера**: агент выполняет `rocket spawn --task backend --project api --prompt "..."` в своём терминале → CLI (env `ROCKET_SESSION_ID` определяет вызывающего) → POST /v1/workers → проверка: вызывающий — оркестратор, целевой проект ∈ {хаб, links} → спавн с `parent_id`.
+**Оркестратор спавнит воркера**: агент выполняет `rocket spawn --task backend --repo api --prompt "..."` в своём терминале → CLI (env `ROCKET_SESSION_ID` определяет вызывающего) → POST /v1/workers → проверка: вызывающий — оркестратор, целевой репо ∈ репозитории его проекта (main + linked) → спавн с `parent_id` + автосоздание подзадачи.
 
 **Воркер спрашивает оркестратора**: `rocket send billing-v2-orch "вопрос"` → POST /v1/messages → очередь → монитор видит, что оркестратор idle → инжекция `[from billing-v2-backend] вопрос`.
 

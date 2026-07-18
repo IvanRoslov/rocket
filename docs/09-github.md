@@ -1,26 +1,33 @@
 # Интеграция с GitHub
 
-Вся работа с GitHub — через `gh` CLI (авторизация — забота пользователя, `rocket doctor` проверяет). Демон ничего не пишет в GitHub — только читает; PR открывают сами агенты через `gh pr create`.
+## Аутентификация
+
+Пользователь один раз вводит GitHub-токен (PAT, scopes `repo`) — в дашборде (Settings) или `rocket github auth <token>`. Токен хранится в таблице `settings` базы демона (файл 0600; этого уровня защиты достаточно для локального инструмента). Демон работает с GitHub REST API напрямую с этим токеном — `gh` CLI демону не нужен.
+
+Агенты в сессиях продолжают пользоваться `gh` (например `gh pr create`); демон прокидывает токен в env сессий (`GH_TOKEN`), так что отдельная авторизация агентам не требуется.
+
+## Каталог репозиториев
+
+Для UI добавления репо:
+
+- `GET /v1/github/repos?q=<поиск>` — демон отдаёт список доступных токену репозиториев (owner/name, private, default_branch), с кэшем на несколько минут.
+- `POST /v1/repos {github: "owner/name"}` — rocket сам клонирует репо в `~/.rocket/repos/<name>` и регистрирует его в реестре. Альтернатива — как раньше, `{path: ...}` для уже существующего локального чекаута.
+
+Демон ничего не пишет в GitHub — только читает; PR открывают сами агенты.
 
 ## Привязка PR к сессии
 
-Источник правды — ветка: для воркера `feature/<slug>/<task>` демон ищет PR по head-ветке:
-
-```
-gh pr list --repo <repo> --head feature/<slug>/<task> --json number,state,...
-```
-
-`repo` выводится из `git remote origin` проекта. Найденный PR пишется в `sessions.pr_number`. Отдельного hook-парсинга `gh pr create` (как metadata-updater в AO) не требуется — поллинг по ветке проще и не зависит от агента.
+Источник правды — ветка: для воркера `feature/<slug>/<task>` демон ищет PR по head-ветке через REST API (`GET /repos/{owner}/{repo}/pulls?head=...`). `owner/repo` выводится из `git remote origin` репозитория. Найденный PR пишется в `sessions.pr_number`. Отдельного hook-парсинга `gh pr create` (как metadata-updater в AO) не требуется — поллинг по ветке проще и не зависит от агента.
 
 ## Поллер
 
 Цикл каждые 2m (конфигурируемо) по всем живым воркерам:
 
 1. Нет `pr_number` → поиск PR по ветке; найден → событие `pr.opened`.
-2. Есть PR → `gh pr view <n> --json state,statusCheckRollup,reviewDecision`:
+2. Есть PR → REST API (pull + check-runs + reviews):
    - `ci_state`: rollup чеков → `pending|passing|failing`; смена → событие `pr.ci_changed`;
    - `pr_state`: `open|merged|closed`.
-3. Rate-limit дружелюбие: батчинг по репозиториям, backoff при ошибках `gh`.
+3. Rate-limit дружелюбие: батчинг по репозиториям, conditional requests (ETag), backoff при ошибках API.
 
 ## Реакции
 

@@ -8,14 +8,14 @@
 
 - Go-модуль, каркас CLI (cobra) и демона; автозапуск демона, PID/сокет, `daemon start|stop|status|run`.
 - SQLite-store + миграции; журнал событий (запись + `rocket events`).
-- Реестр проектов: `project add|ls|rm|link`, config.yaml.
+- Реестры в базе: `repo add|ls|rm` (локальные чекауты), `project create|ls|show|link|unlink|rm` (main + linked).
 - Runtime tmux: create/inject/capture/alive/destroy, exact-match, keep-alive shell, launch-скрипты.
 - Workspace worktree: create/restore/destroy, symlinks, post_create, коллизии веток.
 - Адаптер claude-code (launch + env; активность — в фазе 2).
 - Команды: `spawn` (пока без проверки «только оркестратор»), `ls`, `attach`, `kill`, `restore`, `doctor`, `logs`.
 - Реконсиляция при старте демона (store vs tmux/файлы).
 
-**Готово, когда:** `rocket project add … && rocket spawn … && rocket attach …` даёт живого Claude Code в worktree; `kill --cleanup` корректно всё сносит; демон переживает рестарт.
+**Готово, когда:** `rocket repo add … && rocket project create … && rocket spawn … && rocket attach …` даёт живого Claude Code в worktree; `kill --cleanup` корректно всё сносит; демон переживает рестарт.
 
 ## Фаза 2 — активность и сообщения
 
@@ -35,7 +35,7 @@
 
 - Слой задач: таблицы tasks/task_docs/task_log, API, `rocket task add|ls|show|start|move|doc|log|cancel`.
 - `rocket up` (task add + start): slug, worktree в хабе, системный промпт + kickoff (шаблоны, переопределение файлом).
-- `rocket spawn` — только для оркестраторов, проверка `links`, `parent_id`, наследование `feature_slug`, системный промпт воркера; автосоздание подзадачи, `--subtask`.
+- `rocket spawn` — только для оркестраторов, проверка «репо ∈ проект оркестратора», `parent_id`, наследование `feature_slug`, системный промпт воркера; автосоздание подзадачи, `--subtask`.
 - Автопереходы статусов подзадач (spawn → in_progress; PR-переходы — заглушки до фазы 4).
 - `rocket status <slug>`; `kill --cascade`; `attach <task-id>`.
 - Heartbeat: только задачи в `in_progress`, детект застрявших воркеров, сводки оркестратору, анти-спам.
@@ -46,6 +46,8 @@
 
 **Цель:** демон видит PR/CI и закрывает петлю доставки.
 
+- GitHub-токен (`rocket github auth`, settings в базе), REST-клиент, `GH_TOKEN` в env сессий.
+- Каталог репозиториев GitHub + клонирование: `repo add --github`, `GET /v1/github/repos`.
 - Поллер: поиск PR по ветке, `pr_state`/`ci_state`, события.
 - Реакции: CI failing → сообщение воркеру; changes requested → сообщение воркеру.
 - Авто-cleanup воркера после merge (grace, ветка остаётся, off-switch per-project).
@@ -68,6 +70,7 @@
 **Цель:** наблюдение и управление из браузера. Дизайн — [11-dashboard.md](11-dashboard.md).
 
 - `web/` (TS + React + Vite), статика раздаётся демоном; данные — REST + SSE.
+- Проекты: переключатель, визард создания (main/linked из GitHub-каталога или локального пути), Settings с GitHub-токеном.
 - Экран «Канбан»: колонки, живые карточки, drag-n-drop move, создание задач, Start.
 - Экран «Карточка задачи»: overview с декомпозицией, docs, journal, messages (чат с оркестратором), рейл сессий с attach/output/kill.
 - Экран «Система»: сессии/процессы/worktree/очередь, kill/cleanup.
