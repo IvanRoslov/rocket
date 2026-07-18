@@ -1,9 +1,6 @@
 import { createBrowserRouter } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
-
-function ProjectsPage() {
-  return <div>Projects</div>
-}
+import { ProjectsScreen } from './screens/projects/ProjectsScreen'
 
 function NewProjectPage() {
   return <div>New project</div>
@@ -29,7 +26,7 @@ export const router = createBrowserRouter([
   {
     element: <AppShell />,
     children: [
-      { path: '/', element: <ProjectsPage /> },
+      { path: '/', element: <ProjectsScreen /> },
       { path: '/projects/new', element: <NewProjectPage /> },
       { path: '/p/:projectId', element: <KanbanPage /> },
       { path: '/p/:projectId/tasks/:taskId', element: <TaskPage /> },

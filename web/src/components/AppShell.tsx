@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
 import { NavLink, Outlet, useParams, useLocation } from 'react-router-dom'
+import { ProjectSwitcher } from './ProjectSwitcher'
 
 const navLinkStyle = ({ isActive }: { isActive: boolean }): CSSProperties => ({
   padding: '7px 11px',
@@ -50,25 +51,7 @@ export function AppShell() {
           </span>
         </NavLink>
         <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
-        <button
-          type="button"
-          disabled
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            height: 32,
-            padding: '0 10px',
-            background: 'var(--surface)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-btn)',
-            font: '500 13px var(--font-ui)',
-            color: 'var(--text-4)',
-          }}
-        >
-          <span>Select project</span>
-          <span style={{ fontSize: 10 }}>▾</span>
-        </button>
+        <ProjectSwitcher currentProjectId={projectId} />
         <div style={{ flex: 1 }} />
         <nav style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <NavLink to="/" end style={navLinkStyle}>

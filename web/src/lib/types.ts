@@ -52,6 +52,8 @@ export interface Project {
   live_sessions: number
   tasks: TaskCounters
   created_at: number
+  /** Contract field (phase 3): open questions awaiting a user reply. Optional until phase 3 lands. */
+  awaiting_questions?: number
 }
 
 // ---------------------------------------------------------------------------
