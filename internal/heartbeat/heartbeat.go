@@ -249,8 +249,8 @@ func (h *Heartbeat) reminderLine(q store.Question, now time.Time) (string, bool,
 
 	mins := int(since.Minutes())
 	snippet := q.Body
-	if len(snippet) > 60 {
-		snippet = snippet[:60]
+	if runes := []rune(snippet); len(runes) > 60 {
+		snippet = string(runes[:60])
 	}
 	return fmt.Sprintf("- Q%d %q waiting for your reply %dm", ordinal, snippet, mins), true, nil
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/IvanRoslov/rocket/internal/activity"
 	"github.com/IvanRoslov/rocket/internal/bus"
@@ -277,6 +278,57 @@ func TestTick_OverdueQuestion_QueuesReminderLine(t *testing.T) {
 	}
 	if !strings.Contains(msgs[0].Body, "Q1") || !strings.Contains(msgs[0].Body, "waiting for your reply") {
 		t.Errorf("expected body to contain a reminder line, got %q", msgs[0].Body)
+	}
+}
+
+// TestTick_OverdueQuestion_RuneSafeSnippetTruncation verifies the reminder
+// snippet truncates on runes, not bytes: a Russian (multi-byte UTF-8)
+// question body over 60 runes must still produce valid UTF-8 output instead
+// of slicing mid-rune.
+func TestTick_OverdueQuestion_RuneSafeSnippetTruncation(t *testing.T) {
+	st := openTestStore(t)
+	b := bus.New(st)
+	cfg := testConfig()
+
+	taskID := seedOrchAndTask(t, st, "orch1", "in_progress")
+
+	body := "Какой подход лучше выбрать для реализации слоя кэширования в этом сервисе, учитывая нагрузку?"
+	if len([]rune(body)) <= 60 {
+		t.Fatalf("test body must be over 60 runes, got %d", len([]rune(body)))
+	}
+	qid, err := st.AddQuestion(store.Question{TaskID: taskID, AskedBy: "orch1", Body: body})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+	oldTS := time.Now().Add(-45 * time.Minute).Unix()
+	if _, err := st.AddQuestionMessage(store.QuestionMessage{
+		QuestionID: qid, Author: "", Kind: "reply", Body: "Используй вариант А.", CreatedAt: oldTS,
+	}); err != nil {
+		t.Fatalf("AddQuestionMessage: %v", err)
+	}
+
+	hb := New(st, b, cfg, unknownActivity, func(string) {})
+
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	msgs, err := st.ListMessages("orch1", 0)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if !utf8.ValidString(msgs[0].Body) {
+		t.Errorf("reminder body is not valid UTF-8: %q", msgs[0].Body)
+	}
+	if !strings.Contains(msgs[0].Body, "Q1") || !strings.Contains(msgs[0].Body, "waiting for your reply") {
+		t.Errorf("expected body to contain a reminder line, got %q", msgs[0].Body)
+	}
+	wantSnippet := string([]rune(body)[:60])
+	if !strings.Contains(msgs[0].Body, wantSnippet) {
+		t.Errorf("expected body to contain rune-truncated snippet %q, got %q", wantSnippet, msgs[0].Body)
 	}
 }
 
