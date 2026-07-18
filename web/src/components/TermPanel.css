@@ -16,9 +16,21 @@
   position: absolute;
   top: 12px;
   right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 4px 10px;
   border-radius: var(--radius-badge-lg);
   background: var(--warn-bg, #fef3c7);
   color: var(--warn-text-2, #92400e);
   font: 600 11.5px var(--font-mono, monospace);
+}
+.term-panel__retry {
+  border: none;
+  border-radius: var(--radius-badge, 4px);
+  padding: 2px 8px;
+  background: var(--warn-text-2, #92400e);
+  color: var(--warn-bg, #fef3c7);
+  font: 600 11.5px var(--font-mono, monospace);
+  cursor: pointer;
 }
