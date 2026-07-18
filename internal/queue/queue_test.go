@@ -428,10 +428,32 @@ func TestQueue_RunRecoversOrphanedDeliveringMessages(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	h.q.Recover(ctx)
 	go h.q.Run(ctx)
 
 	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" },
 		"orphaned delivering message recovered and delivered")
+}
+
+func TestQueue_RecoverAloneResetsDeliveringWithoutRun(t *testing.T) {
+	h := newTestQueue(t)
+	h.addRunningSession(t, "recv", activity.Ready)
+
+	id, err := h.st.AddMessage(store.Message{ToSession: "recv", Body: "orphaned"})
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+	if err := h.st.UpdateMessageStatus(id, "delivering", 1, 0); err != nil {
+		t.Fatalf("UpdateMessageStatus: %v", err)
+	}
+
+	// Calling Recover synchronously, without ever starting Run, must still
+	// reset and redeliver the orphaned message. This is the behavior the
+	// daemon relies on to complete recovery before serving the API.
+	h.q.Recover(context.Background())
+
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" },
+		"orphaned delivering message recovered by Recover alone")
 }
 
 func TestQueue_CtxCancelStopsWaitingWorker(t *testing.T) {
@@ -445,9 +467,10 @@ func TestQueue_CtxCancelStopsWaitingWorker(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	h.q.Recover(ctx)
 	go h.q.Run(ctx)
 
-	// Let Run's startup Wake spin the worker up into its wait loop.
+	// Let Recover's startup Wake spin the worker up into its wait loop.
 	waitUntil(t, func() bool {
 		h.q.mu.Lock()
 		defer h.q.mu.Unlock()

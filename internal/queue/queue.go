@@ -89,22 +89,24 @@ func (q *Queue) runCtx() context.Context {
 	return context.Background()
 }
 
-// Run recovers messages orphaned in status "delivering" by a previous
-// crash, starts a delivery worker for every recipient with a queued
-// message, then runs housekeeping (timeout expiry every minute, retention
-// purge once a day) until ctx is cancelled.
-func (q *Queue) Run(ctx context.Context) {
+// Recover performs the queue's startup recovery pass: it resets messages
+// orphaned in status "delivering" by a previous crash back to "queued" (see
+// store.ResetDelivering for why this is necessary — no query anywhere reads
+// "delivering" back into the live queue, so without this they would be
+// silently lost, breaking FIFO for anything queued behind them), then wakes
+// a delivery worker for every recipient with a queued message.
+//
+// Callers MUST call Recover synchronously (not in a goroutine) and have it
+// complete BEFORE the API starts serving requests. Otherwise an early
+// POST /v1/messages could call Wake for a recipient whose delivery worker
+// then races the recovery pass, breaking FIFO ordering for that recipient.
+func (q *Queue) Recover(ctx context.Context) {
 	q.ctxMu.Lock()
-	q.runCtxVal = ctx
+	if q.runCtxVal == nil {
+		q.runCtxVal = ctx
+	}
 	q.ctxMu.Unlock()
 
-	// Recover messages orphaned in "delivering" by a prior crash: no query
-	// anywhere reads that status back into the live queue, so without this
-	// they would be silently lost, breaking FIFO for anything queued behind
-	// them. This must run BEFORE any workers are spawned below, so that
-	// recovered messages are picked up by ListQueuedRecipients/Wake like any
-	// other queued message. See store.ResetDelivering for the accepted
-	// duplicate-delivery tradeoff.
 	if n, err := q.st.ResetDelivering(); err != nil {
 		slog.Error("queue: reset delivering messages", "error", err)
 	} else if n > 0 {
@@ -119,6 +121,15 @@ func (q *Queue) Run(ctx context.Context) {
 			q.Wake(to)
 		}
 	}
+}
+
+// Run runs housekeeping (timeout expiry every minute, retention purge once a
+// day) until ctx is cancelled. Callers must call Recover(ctx) synchronously
+// before Run (and before serving the API) — see Recover's doc comment.
+func (q *Queue) Run(ctx context.Context) {
+	q.ctxMu.Lock()
+	q.runCtxVal = ctx
+	q.ctxMu.Unlock()
 
 	housekeeping := time.NewTicker(time.Minute)
 	defer housekeeping.Stop()

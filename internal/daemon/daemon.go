@@ -65,6 +65,11 @@ func Run(cfg *config.Config) error {
 	}
 
 	go mon.Run(ctx)
+
+	// Recover synchronously (ResetDelivering + initial Wakes) BEFORE serving
+	// the API: otherwise an early POST /v1/messages could Wake a recipient
+	// whose delivery worker races the recovery pass. See Queue.Recover.
+	q.Recover(ctx)
 	go q.Run(ctx)
 
 	shutdownCalled := make(chan struct{})
