@@ -115,14 +115,16 @@ func (t *tmuxRuntime) Create(ctx context.Context, spec CreateSpec) (Handle, erro
 // -S -5`) as soon as EITHER of two independent signals fires:
 //
 //   - marker-absent: the last non-empty line of the injected text is no
-//     longer present anywhere in the captured tail. This covers
-//     full-screen / alt-screen TUIs that redraw on submit and clear the
-//     input box, even when the redraw leaves the surrounding line count
-//     and footer unchanged.
+//     longer present anywhere in the captured tail, AND the marker was
+//     observed in the baseline (i.e. was actually rendered before Enter).
+//     This covers full-screen / alt-screen TUIs that redraw on submit and
+//     clear the input box, even when the redraw leaves the surrounding line
+//     count and footer unchanged. If the marker never renders (e.g. input
+//     consumed instantly without echo), count-growth is used instead.
 //   - count-growth: the number of non-blank lines in the tail grew versus
 //     the pre-Enter baseline. This covers simple echo-style consumers
 //     (e.g. `cat`) where the submitted text lingers in the tail as an
-//     echoed line, so marker-absent alone would never fire.
+//     echoed line, and also handles cases where the marker never renders.
 //
 // If attempts are exhausted without either signal firing, Inject returns
 // ErrSubmitUnconfirmed (wrapped with context) rather than a generic
@@ -183,12 +185,34 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 	const pollInterval = 300 * time.Millisecond
 	const pollTimeout = 1500 * time.Millisecond
 
+	marker := lastLine(text)
+
+	// 3a. Pre-check: poll until the marker appears in the pane, up to
+	// pollTimeout. This ensures the marker was actually rendered before we
+	// proceed with Enter attempts. If the marker never appears (e.g. the
+	// input was consumed instantly without echo), we'll proceed with Enter
+	// and rely solely on count-growth for submission confirmation.
+	markerSeen := false
+	if marker != "" {
+		deadline := time.Now().Add(pollTimeout)
+		for {
+			out, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name), "-S", "-5")
+			if err == nil && strings.Contains(out, marker) {
+				markerSeen = true
+				break
+			}
+			if time.Now().After(deadline) {
+				break
+			}
+			time.Sleep(pollInterval)
+		}
+	}
+
 	baseline, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name), "-S", "-5")
 	if err != nil {
 		return fmt.Errorf("capture baseline: %w", err)
 	}
 	baseCount := nonBlankLineCount(baseline)
-	marker := lastLine(text)
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if _, _, err := runTmux(ctx, "send-keys", "-t", paneTarget(h.Name), "Enter"); err != nil {
@@ -204,11 +228,13 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 			// marker-absent: the injected text's last line no longer
 			// appears anywhere in the tail — the input box was cleared.
 			// Handles full-screen/alt-screen TUIs that redraw with a
-			// static line count and footer on submit.
-			markerAbsent := marker != "" && !strings.Contains(out, marker)
+			// static line count and footer on submit. Only valid if
+			// markerSeen is true (marker was rendered in the baseline).
+			markerAbsent := markerSeen && marker != "" && !strings.Contains(out, marker)
 			// count-growth: the tail gained non-blank lines vs baseline
 			// — handles echo-style consumers (e.g. cat) where the
-			// marker lingers in the tail.
+			// marker lingers in the tail, and also handles cases where
+			// the marker never rendered.
 			countGrowth := nonBlankLineCount(out) > baseCount
 			if markerAbsent || countGrowth {
 				return nil
