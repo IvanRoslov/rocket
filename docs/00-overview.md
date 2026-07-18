@@ -61,4 +61,5 @@ rocket — идейный наследник [agent-orchestrator](https://github
 | [10-agents.md](10-agents.md) | Интерфейс Agent и адаптеры |
 | [11-dashboard.md](11-dashboard.md) | Дашборд: канбан, карточка задачи, системный экран |
 | [12-tasks.md](12-tasks.md) | Задачи: канбан-модель, подзадачи, документы, журнал |
+| [prompts/](prompts/) | Референс-тексты промптов: оркестратор, воркер, kickoff |
 | [ROADMAP.md](ROADMAP.md) | Фазы разработки |
