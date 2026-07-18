@@ -27,21 +27,28 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 		liveSet[name] = true
 	}
 
-	// List sessions from store that are not in terminal state
-	sessions, err := m.st.ListSessions(store.SessionFilter{All: false})
+	// List all sessions from store (including terminal states) to build
+	// the complete set of known tmux names for orphan detection
+	sessions, err := m.st.ListSessions(store.SessionFilter{All: true})
 	if err != nil {
 		return err
 	}
 
-	// Track which live names correspond to stored sessions
+	// Track which session names exist in store (any state)
 	storedSet := make(map[string]bool, len(sessions))
+	for _, sess := range sessions {
+		storedSet[sess.TmuxName] = true
+	}
 
 	// Collect errors but continue processing
 	var errs []error
 
-	// Check each non-terminal session
+	// Check each non-terminal session (spawning, running only)
 	for _, sess := range sessions {
-		storedSet[sess.TmuxName] = true
+		// Skip terminal sessions (killed, done, errored)
+		if sess.State != "spawning" && sess.State != "running" {
+			continue
+		}
 
 		// Check if tmux session exists
 		if !liveSet[sess.TmuxName] {

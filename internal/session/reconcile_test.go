@@ -472,3 +472,47 @@ func TestReconcileNoOrphanEventWhenNoneExist(t *testing.T) {
 		}
 	}
 }
+
+// TestReconcileKilledSessionTmuxNameNotOrphan tests that a tmux session
+// whose name belongs to a killed store session is NOT reported as an orphan.
+func TestReconcileKilledSessionTmuxNameNotOrphan(t *testing.T) {
+	m, st, b, rt, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+
+	// Create a killed session
+	sess := store.Session{
+		ID:           "killed-sess",
+		Kind:         "worker",
+		ProjectID:    "proj1",
+		RepoID:       "repo1",
+		FeatureSlug:  "feat1",
+		Agent:        "fake",
+		Branch:       "feature/feat1/task1",
+		WorktreePath: "/nonexistent",
+		TmuxName:     "killed-sess",
+		State:        "killed",
+	}
+	if err := st.AddSession(sess); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+
+	// The tmux session exists in the runtime (this shouldn't normally happen,
+	// but if it does, it should not be reported as an orphan)
+	rt.listNames = []string{"killed-sess"}
+
+	ch, cancel := b.Subscribe()
+	defer cancel()
+
+	if err := m.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	// No reconcile.orphan_tmux event should be published
+	// (killed-sess is in storedSet even though killed session is not checked)
+	events := drainEvents(ch)
+	for _, e := range events {
+		if e.Type == "reconcile.orphan_tmux" {
+			t.Errorf("unexpected reconcile.orphan_tmux event for killed session's tmux: %+v", e)
+		}
+	}
+}
