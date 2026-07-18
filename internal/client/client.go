@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 
@@ -45,6 +46,14 @@ type Client struct {
 }
 
 // New builds a Client that dials the unix socket at socketPath.
+//
+// The underlying http.Client deliberately has no global Timeout: requests
+// instead get a per-request deadline via context (see requestTimeout),
+// because Manager.Spawn/Restore run `git fetch` + `worktree add`
+// synchronously and can legitimately take much longer than a typical
+// request's 10s budget — a global Timeout would make the CLI report
+// failure (context deadline exceeded) even though the daemon's spawn
+// eventually succeeds.
 func New(socketPath string) *Client {
 	return &Client{
 		baseURL: "http://rocket",
@@ -55,7 +64,6 @@ func New(socketPath string) *Client {
 					return d.DialContext(ctx, "unix", socketPath)
 				},
 			},
-			Timeout: 10 * time.Second,
 		},
 	}
 }
@@ -80,6 +88,36 @@ func (c *Client) Delete(path string, in, out any) error {
 	return c.do(http.MethodDelete, path, in, out)
 }
 
+// defaultRequestTimeout bounds most requests: they're quick reads/writes
+// against the daemon's in-memory state and local store.
+const defaultRequestTimeout = 10 * time.Second
+
+// spawnRequestTimeout bounds requests whose handler synchronously runs
+// `git fetch` + `worktree add` (session spawn and restore), which can
+// legitimately exceed defaultRequestTimeout on a slow network or a large
+// repo.
+//
+// TODO(phase2): replace this path-based heuristic with per-call timeout
+// options on Client once callers need finer control than "default" vs
+// "spawn-like".
+const spawnRequestTimeout = 5 * time.Minute
+
+// requestTimeout returns the timeout to apply to a request, based on its
+// method and path. See defaultRequestTimeout and spawnRequestTimeout.
+func requestTimeout(method, path string) time.Duration {
+	if method != http.MethodPost {
+		return defaultRequestTimeout
+	}
+	p := path
+	if i := strings.IndexAny(p, "?"); i >= 0 {
+		p = p[:i]
+	}
+	if p == "/v1/sessions" || strings.HasSuffix(p, "/restore") {
+		return spawnRequestTimeout
+	}
+	return defaultRequestTimeout
+}
+
 func (c *Client) do(method, path string, in, out any) error {
 	var body io.Reader
 	if in != nil {
@@ -90,7 +128,10 @@ func (c *Client) do(method, path string, in, out any) error {
 		body = bytes.NewReader(b)
 	}
 
-	req, err := http.NewRequest(method, c.baseURL+path, body)
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout(method, path))
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
