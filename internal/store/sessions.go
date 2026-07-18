@@ -168,6 +168,19 @@ func (s *Store) UpdateSession(sess Session) error {
 	return checkRowsAffected(res)
 }
 
+// UpdateSessionActivity updates a session's activity, activity_ts, and refreshes updated_at.
+// Returns ErrNotFound if the session doesn't exist.
+func (s *Store) UpdateSessionActivity(id, state string, ts int64) error {
+	res, err := s.db.Exec(
+		`UPDATE sessions SET activity = ?, activity_ts = ?, updated_at = ? WHERE id = ?`,
+		nullIfEmpty(state), nullIfZero(ts), time.Now().Unix(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("update session activity: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
 func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 	var sess Session
 	var parentID, activity, prompt sql.NullString

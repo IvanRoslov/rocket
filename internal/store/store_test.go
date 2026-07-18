@@ -496,3 +496,65 @@ func TestOpen_EscapedDSNPath(t *testing.T) {
 		t.Fatalf("foreign_keys = %d, want 1 (pragma was not applied)", fkEnabled)
 	}
 }
+
+func TestUpdateSessionActivity(t *testing.T) {
+	s := openTestStore(t)
+	mustSetup(t, s)
+
+	// Add a session
+	sess := Session{
+		ID: "s1", Kind: "orchestrator", ProjectID: "billing", RepoID: "api",
+		FeatureSlug: "f1", Agent: "claude-code", Branch: "b1",
+		WorktreePath: "/wt/s1", TmuxName: "t1", State: "running",
+	}
+	if err := s.AddSession(sess); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+
+	// Verify initial activity state (empty)
+	got, err := s.GetSession("s1")
+	if err != nil {
+		t.Fatalf("GetSession initial: %v", err)
+	}
+	if got.Activity != "" || got.ActivityTS != 0 {
+		t.Fatalf("initial activity/ts should be empty: %+v", got)
+	}
+
+	// Update activity
+	ts := int64(1234567890)
+	if err := s.UpdateSessionActivity("s1", "active", ts); err != nil {
+		t.Fatalf("UpdateSessionActivity: %v", err)
+	}
+
+	// Verify activity was updated
+	got, err = s.GetSession("s1")
+	if err != nil {
+		t.Fatalf("GetSession after update: %v", err)
+	}
+	if got.Activity != "active" {
+		t.Fatalf("Activity = %q, want 'active'", got.Activity)
+	}
+	if got.ActivityTS != ts {
+		t.Fatalf("ActivityTS = %d, want %d", got.ActivityTS, ts)
+	}
+
+	// Update with empty state (should set to nil in DB)
+	if err := s.UpdateSessionActivity("s1", "", 0); err != nil {
+		t.Fatalf("UpdateSessionActivity empty: %v", err)
+	}
+	got, err = s.GetSession("s1")
+	if err != nil {
+		t.Fatalf("GetSession after empty update: %v", err)
+	}
+	if got.Activity != "" {
+		t.Fatalf("Activity should be empty after update: %q", got.Activity)
+	}
+	if got.ActivityTS != 0 {
+		t.Fatalf("ActivityTS should be 0 after update: %d", got.ActivityTS)
+	}
+
+	// UpdateSessionActivity on missing id should return ErrNotFound
+	if err := s.UpdateSessionActivity("missing", "idle", ts); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateSessionActivity missing id: got %v, want ErrNotFound", err)
+	}
+}
