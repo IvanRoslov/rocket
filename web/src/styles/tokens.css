@@ -1,0 +1,87 @@
+/*
+ * Design tokens for the rocket dashboard.
+ * Values are taken verbatim from docs/design/SUMMARY.md.
+ */
+:root {
+  /* Surfaces */
+  --bg: #f6f6f4;
+  --surface: #fff;
+  --surface-2: #f0f0ee;
+  --surface-3: #f4f4f2;
+  --surface-4: #fafafa;
+  --rail: #fbfbfa;
+  --border: #e7e7e4;
+  --border-hover: #d4d4d1;
+  --divider: #f0f0ee;
+  --divider-2: #f7f7f5;
+
+  /* Text */
+  --text: #1a1a1c;
+  --text-2: #52525b;
+  --text-2-alt: #3f3f46;
+  --text-3: #71717a;
+  --text-4: #a1a1aa;
+
+  /* Accent (indigo) */
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-selected-bg: #eef2ff;
+  --accent-selected-border: #c7d2fe;
+  --accent-text: #3730a3;
+
+  /* Success */
+  --ok: #16a34a;
+  --ok-text: #166534;
+  --ok-bg: #dcfce7;
+  --ok-bg-2: #f0fdf4;
+  --ok-border: #bbf7d0;
+
+  /* Warning / awaiting */
+  --warn: #d97706;
+  --warn-text: #b45309;
+  --warn-text-2: #92400e;
+  --warn-bg: #fef3c7;
+  --warn-bg-2: #fffbeb;
+  --warn-border: #fcd34d;
+  --warn-border-2: #fde68a;
+
+  /* Error */
+  --err: #dc2626;
+  --err-text: #b91c1c;
+  --err-text-2: #991b1b;
+  --err-bg: #fee2e2;
+  --err-bg-2: #fef2f2;
+  --err-border: #fecaca;
+
+  /* Review (purple) */
+  --review: #7c3aed;
+  --review-text: #6b21a8;
+  --review-bg: #f3e8ff;
+
+  /* Neutral badge */
+  --neutral-text: #52525b;
+  --neutral-bg: #f1f5f9;
+
+  /* Dark surfaces (terminal / log only) */
+  --dark-surface: #161618;
+  --dark-header: #1f1f22;
+  --dark-text: #d4d4d8;
+  --dark-text-2: #e4e4e7;
+  --dark-log: #a7d3a7;
+
+  /* Fonts */
+  --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, monospace;
+
+  /* Radii */
+  --radius-panel: 12px;
+  --radius-panel-sm: 10px;
+  --radius-panel-lg: 14px;
+  --radius-btn: 8px;
+  --radius-btn-sm: 7px;
+  --radius-btn-lg: 10px;
+  --radius-badge: 6px;
+  --radius-badge-sm: 5px;
+  --radius-badge-lg: 7px;
+  --radius-pill: 20px;
+}
