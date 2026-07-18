@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/IvanRoslov/rocket/internal/activity"
 	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
@@ -156,6 +157,10 @@ func (a *fakeAgent) Env(spec agent.LaunchSpec) map[string]string {
 		}
 	}
 	return env
+}
+
+func (a *fakeAgent) Activity(ctx context.Context, ref agent.ActivityRef) (activity.State, time.Time, error) {
+	return "", time.Time{}, agent.ErrNoSignal
 }
 
 // testFakeAgent is the instance returned by the "fake" agent builder
