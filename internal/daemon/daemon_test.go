@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -89,6 +90,52 @@ func TestRunServesHealthAndShutsDownCleanly(t *testing.T) {
 
 	if _, err := os.Stat(cfg.PidPath()); !os.IsNotExist(err) {
 		t.Errorf("pid file still exists after shutdown: err=%v", err)
+	}
+}
+
+// TestRunHonorsSocketOverride proves that cfg.SocketOverride (as set by the
+// CLI's --socket flag via loadConfig) actually changes where the daemon
+// binds, not just what SocketPath() reports.
+func TestRunHonorsSocketOverride(t *testing.T) {
+	home := shortHomeDir(t)
+	t.Setenv("ROCKET_HOME", home)
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+
+	overrideDir, err := os.MkdirTemp("", "rktsock")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(overrideDir) })
+	cfg.SocketOverride = filepath.Join(overrideDir, "override.sock")
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Run(cfg)
+	}()
+
+	waitForHealth(t, cfg, 3*time.Second)
+
+	if _, err := os.Stat(cfg.SocketOverride); err != nil {
+		t.Errorf("override socket file not created: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "rocket.sock")); !os.IsNotExist(err) {
+		t.Errorf("default socket path should not exist when override is set, err=%v", err)
+	}
+
+	c := client.New(cfg.SocketPath())
+	if err := c.Post("/v1/shutdown", nil, nil); err != nil {
+		t.Fatalf("POST /v1/shutdown: %v", err)
+	}
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not exit after shutdown")
 	}
 }
 

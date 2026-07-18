@@ -101,6 +101,16 @@ func claimPidFile(path string) error {
 		return fmt.Errorf("remove stale pid file: %w", err)
 	}
 	if err := writePidFileExclusive(path, pid); err != nil {
+		if os.IsExist(err) {
+			// Lost the race: another process claimed the pid file between
+			// our removal and retry. Re-read it and report a genuine
+			// conflict if a live pid is now present.
+			if raced, readErr := os.ReadFile(path); readErr == nil {
+				if racedPid, parseErr := strconv.Atoi(string(raced)); parseErr == nil && processAlive(racedPid) {
+					return fmt.Errorf("already running (pid %d)", racedPid)
+				}
+			}
+		}
 		return fmt.Errorf("write pid file after removing stale one: %w", err)
 	}
 	return nil

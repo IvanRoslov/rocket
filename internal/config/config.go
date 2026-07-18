@@ -18,6 +18,11 @@ type Config struct {
 	ReposDir           string        `yaml:"repos_dir"`
 	WorktreesDir       string        `yaml:"worktrees_dir"`
 	Home               string        `yaml:"-"`
+
+	// SocketOverride, when non-empty, takes precedence over the default
+	// <home>/rocket.sock path returned by SocketPath. It is populated from
+	// the CLI's global --socket flag and is never persisted to config.yaml.
+	SocketOverride string `yaml:"-"`
 }
 
 // Load loads the configuration from <home>/config.yaml.
@@ -94,8 +99,13 @@ func Load(home string) (*Config, error) {
 	return cfg, nil
 }
 
-// SocketPath returns the path to the socket file.
+// SocketPath returns the path to the socket file. If SocketOverride is set
+// (typically from the CLI's global --socket flag), it takes precedence over
+// the default <home>/rocket.sock path.
 func (c *Config) SocketPath() string {
+	if c.SocketOverride != "" {
+		return c.SocketOverride
+	}
 	return filepath.Join(c.Home, "rocket.sock")
 }
 

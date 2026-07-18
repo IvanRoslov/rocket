@@ -5,9 +5,19 @@ import (
 	"github.com/IvanRoslov/rocket/internal/config"
 )
 
-// loadConfig loads the rocket config from $ROCKET_HOME (or ~/.rocket).
+// loadConfig loads the rocket config from $ROCKET_HOME (or ~/.rocket),
+// applying the global --socket override (if given) to cfg.SocketOverride
+// so every consumer of cfg — the HTTP client, daemon autostart, and
+// `daemon run` itself — agrees on the socket path.
 func loadConfig() (*config.Config, error) {
-	return config.Load("")
+	cfg, err := config.Load("")
+	if err != nil {
+		return nil, err
+	}
+	if flags.Socket != "" {
+		cfg.SocketOverride = flags.Socket
+	}
+	return cfg, nil
 }
 
 // connect loads config and connects a client to the daemon, honoring the
@@ -19,17 +29,6 @@ func connect(autostart bool) (*client.Client, *config.Config, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if flags.Socket == "" {
-		c, err := client.Connect(cfg, autostart)
-		return c, cfg, err
-	}
-
-	// A custom socket was given: connect directly, skipping autostart (we
-	// don't know how to launch a daemon bound to an arbitrary socket path).
-	c := client.New(flags.Socket)
-	var out struct{}
-	if err := c.Get("/v1/health", nil, &out); err != nil {
-		return nil, cfg, client.ErrDaemonUnavailable
-	}
-	return c, cfg, nil
+	c, err := client.Connect(cfg, autostart)
+	return c, cfg, err
 }

@@ -163,7 +163,7 @@ func Connect(cfg *config.Config, autostart bool) (*Client, error) {
 		return nil, ErrDaemonUnavailable
 	}
 
-	if err := spawnDaemon(); err != nil {
+	if err := spawnDaemon(cfg.SocketOverride); err != nil {
 		return nil, fmt.Errorf("%w: spawn daemon: %v", ErrDaemonUnavailable, err)
 	}
 
@@ -192,7 +192,12 @@ func healthy(c *Client) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-func spawnDaemon() error {
+// spawnDaemon launches `rocket daemon run` as a detached background
+// process. If socketOverride is non-empty, it is passed through as
+// --socket so the spawned daemon binds to the same socket path the parent
+// process resolved (the child does not otherwise see the parent's --socket
+// flag).
+func spawnDaemon(socketOverride string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -203,7 +208,11 @@ func spawnDaemon() error {
 	}
 	defer devNull.Close()
 
-	cmd := exec.Command(exe, "daemon", "run")
+	args := []string{"daemon", "run"}
+	if socketOverride != "" {
+		args = append(args, "--socket", socketOverride)
+	}
+	cmd := exec.Command(exe, args...)
 	cmd.Stdout = devNull
 	cmd.Stderr = devNull
 	cmd.Stdin = devNull

@@ -25,14 +25,6 @@ func (e *usageError) Error() string {
 	return e.message
 }
 
-type daemonUnavailableError struct {
-	message string
-}
-
-func (e *daemonUnavailableError) Error() string {
-	return e.message
-}
-
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "rocket",
@@ -63,13 +55,9 @@ func Execute() int {
 // 3: usage error
 func exitCode(err error) int {
 	var usageErr *usageError
-	var daemonErr *daemonUnavailableError
 
 	if errors.As(err, &usageErr) {
 		return 3
-	}
-	if errors.As(err, &daemonErr) {
-		return 2
 	}
 	if errors.Is(err, client.ErrDaemonUnavailable) {
 		return 2

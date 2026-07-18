@@ -196,6 +196,25 @@ func TestPaths(t *testing.T) {
 	}
 }
 
+func TestSocketOverride(t *testing.T) {
+	tempDir := t.TempDir()
+	cfg, err := Load(tempDir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	// Default: SocketPath is under Home.
+	if got, want := cfg.SocketPath(), filepath.Join(tempDir, "rocket.sock"); got != want {
+		t.Errorf("SocketPath() = %s, want %s", got, want)
+	}
+
+	// With SocketOverride set, it takes precedence.
+	cfg.SocketOverride = "/tmp/custom.sock"
+	if got, want := cfg.SocketPath(), "/tmp/custom.sock"; got != want {
+		t.Errorf("SocketPath() with override = %s, want %s", got, want)
+	}
+}
+
 func TestMalformedYAML(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("ROCKET_HOME", "")
