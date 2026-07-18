@@ -18,6 +18,7 @@ type taskRow struct {
 	Title       string `json:"title"`
 	Status      string `json:"status"`
 	ProjectID   string `json:"project_id"`
+	RepoID      string `json:"repo_id,omitempty"`
 	FeatureSlug string `json:"feature_slug,omitempty"`
 	SessionID   string `json:"session_id,omitempty"`
 }
@@ -201,7 +202,8 @@ func newTaskLsCmd() *cobra.Command {
 				return printJSON(cmd, resp)
 			}
 
-			renderTaskBoard(resp.Board, cmd.OutOrStdout(), time.Now())
+			statusFiltered := status != ""
+			renderTaskBoard(resp.Board, cmd.OutOrStdout(), statusFiltered)
 			return nil
 		},
 	}
@@ -451,7 +453,8 @@ func newTaskLogCmd() *cobra.Command {
 // renderTaskBoard writes a kanban board view to w, grouping tasks by status.
 // Renders statuses in order: backlog, in_progress, review, done, cancelled.
 // Skips empty groups; shows done/cancelled only if they have tasks.
-func renderTaskBoard(board map[string][]taskRow, w io.Writer, now time.Time) {
+// When statusFiltered is false, trims done/cancelled to last 5 tasks (highest ids).
+func renderTaskBoard(board map[string][]taskRow, w io.Writer, statusFiltered bool) {
 	// Define status order and labels
 	statuses := []struct {
 		key   string
@@ -470,10 +473,18 @@ func renderTaskBoard(board map[string][]taskRow, w io.Writer, now time.Time) {
 			continue
 		}
 
+		// Trim done/cancelled to last 5 if not status-filtered
+		displayTasks := tasks
+		trimmedCount := 0
+		if !statusFiltered && (s.key == "done" || s.key == "cancelled") && len(tasks) > 5 {
+			trimmedCount = len(tasks) - 5
+			displayTasks = tasks[trimmedCount:]
+		}
+
 		fmt.Fprintf(w, "\n%s\n", s.label)
 		fmt.Fprintf(w, "%s\n", "---")
 
-		for _, t := range tasks {
+		for _, t := range displayTasks {
 			line := fmt.Sprintf("#%d %s", t.ID, t.Title)
 			if t.FeatureSlug != "" {
 				line += fmt.Sprintf(" [%s]", t.FeatureSlug)
@@ -482,6 +493,11 @@ func renderTaskBoard(board map[string][]taskRow, w io.Writer, now time.Time) {
 				line += fmt.Sprintf(" [%s]", t.SessionID)
 			}
 			fmt.Fprintf(w, "%s\n", line)
+		}
+
+		// Show trimmed message if tasks were cut
+		if trimmedCount > 0 {
+			fmt.Fprintf(w, "  … and %d more (use --status %s)\n", trimmedCount, s.key)
 		}
 	}
 }
@@ -519,8 +535,8 @@ func renderTaskCard(task taskDetailRow, docs []taskDocRow, logs []taskLogRow, w 
 		tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 		fmt.Fprintf(tw, "ID\tTITLE\tSTATUS\tREPO\tSESSION\n")
 		for _, st := range task.Subtasks {
-			repo := st.ProjectID
-			if st.ProjectID == "" {
+			repo := st.RepoID
+			if st.RepoID == "" {
 				repo = "-"
 			}
 			session := st.SessionID

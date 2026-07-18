@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -207,11 +208,10 @@ func TestTaskLogUsage(t *testing.T) {
 
 // TestRenderTaskBoardEmpty tests rendering an empty board.
 func TestRenderTaskBoardEmpty(t *testing.T) {
-	now := time.Now()
 	board := map[string][]taskRow{}
 
 	w := &bytes.Buffer{}
-	renderTaskBoard(board, w, now)
+	renderTaskBoard(board, w, false)
 
 	output := w.String()
 	if len(strings.TrimSpace(output)) > 0 {
@@ -221,7 +221,6 @@ func TestRenderTaskBoardEmpty(t *testing.T) {
 
 // TestRenderTaskBoardSingleStatus tests rendering a board with one status.
 func TestRenderTaskBoardSingleStatus(t *testing.T) {
-	now := time.Now()
 	board := map[string][]taskRow{
 		"backlog": []taskRow{
 			{ID: 1, Title: "Task 1", Status: "backlog"},
@@ -230,7 +229,7 @@ func TestRenderTaskBoardSingleStatus(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskBoard(board, w, now)
+	renderTaskBoard(board, w, false)
 
 	output := w.String()
 	if !strings.Contains(output, "BACKLOG") {
@@ -246,7 +245,6 @@ func TestRenderTaskBoardSingleStatus(t *testing.T) {
 
 // TestRenderTaskBoardMultipleStatuses tests rendering a board with multiple statuses.
 func TestRenderTaskBoardMultipleStatuses(t *testing.T) {
-	now := time.Now()
 	board := map[string][]taskRow{
 		"backlog": []taskRow{
 			{ID: 1, Title: "Task 1", Status: "backlog"},
@@ -266,7 +264,7 @@ func TestRenderTaskBoardMultipleStatuses(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskBoard(board, w, now)
+	renderTaskBoard(board, w, false)
 
 	output := w.String()
 	headers := []string{"BACKLOG", "IN PROGRESS", "REVIEW", "DONE", "CANCELLED"}
@@ -279,7 +277,6 @@ func TestRenderTaskBoardMultipleStatuses(t *testing.T) {
 
 // TestRenderTaskBoardSkipsEmpty tests that empty statuses are skipped.
 func TestRenderTaskBoardSkipsEmpty(t *testing.T) {
-	now := time.Now()
 	board := map[string][]taskRow{
 		"backlog": []taskRow{
 			{ID: 1, Title: "Task 1", Status: "backlog"},
@@ -289,7 +286,7 @@ func TestRenderTaskBoardSkipsEmpty(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskBoard(board, w, now)
+	renderTaskBoard(board, w, false)
 
 	output := w.String()
 	if !strings.Contains(output, "BACKLOG") {
@@ -305,7 +302,6 @@ func TestRenderTaskBoardSkipsEmpty(t *testing.T) {
 
 // TestRenderTaskBoardWithFeatureAndSession tests rendering tasks with feature slug and session.
 func TestRenderTaskBoardWithFeatureAndSession(t *testing.T) {
-	now := time.Now()
 	board := map[string][]taskRow{
 		"backlog": []taskRow{
 			{ID: 1, Title: "Task 1", Status: "backlog", FeatureSlug: "my-feature", SessionID: "sess-123"},
@@ -313,7 +309,7 @@ func TestRenderTaskBoardWithFeatureAndSession(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskBoard(board, w, now)
+	renderTaskBoard(board, w, false)
 
 	output := w.String()
 	if !strings.Contains(output, "[my-feature]") {
@@ -578,5 +574,162 @@ func TestFormatAttach(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestRenderTaskBoardTrimsDonesUnfiltered tests that done tasks are trimmed to last 5 when not status-filtered.
+func TestRenderTaskBoardTrimsDonesUnfiltered(t *testing.T) {
+	// Create 7 done tasks (ids 1-7)
+	doneTasks := make([]taskRow, 7)
+	for i := 0; i < 7; i++ {
+		doneTasks[i] = taskRow{
+			ID:     int64(i + 1),
+			Title:  fmt.Sprintf("Done Task %d", i+1),
+			Status: "done",
+		}
+	}
+	board := map[string][]taskRow{
+		"done": doneTasks,
+	}
+
+	w := &bytes.Buffer{}
+	renderTaskBoard(board, w, false) // statusFiltered=false
+
+	output := w.String()
+	// Should show last 5 (tasks 3-7)
+	if !strings.Contains(output, "#3 Done Task 3") {
+		t.Errorf("expected task 3 in output")
+	}
+	if !strings.Contains(output, "#7 Done Task 7") {
+		t.Errorf("expected task 7 in output")
+	}
+	// Should NOT show first 2 (tasks 1-2)
+	if strings.Contains(output, "#1 Done Task 1") {
+		t.Errorf("should not show task 1 when trimmed")
+	}
+	if strings.Contains(output, "#2 Done Task 2") {
+		t.Errorf("should not show task 2 when trimmed")
+	}
+	// Should show trimmed message
+	if !strings.Contains(output, "… and 2 more") {
+		t.Errorf("expected '… and 2 more' message in output")
+	}
+	if !strings.Contains(output, "use --status done") {
+		t.Errorf("expected 'use --status done' in message")
+	}
+}
+
+// TestRenderTaskBoardShowsAllWhenFiltered tests that all done tasks are shown when status-filtered.
+func TestRenderTaskBoardShowsAllWhenFiltered(t *testing.T) {
+	// Create 7 done tasks (ids 1-7)
+	doneTasks := make([]taskRow, 7)
+	for i := 0; i < 7; i++ {
+		doneTasks[i] = taskRow{
+			ID:     int64(i + 1),
+			Title:  fmt.Sprintf("Done Task %d", i+1),
+			Status: "done",
+		}
+	}
+	board := map[string][]taskRow{
+		"done": doneTasks,
+	}
+
+	w := &bytes.Buffer{}
+	renderTaskBoard(board, w, true) // statusFiltered=true
+
+	output := w.String()
+	// Should show all 7 tasks
+	for i := 1; i <= 7; i++ {
+		if !strings.Contains(output, fmt.Sprintf("#%d Done Task %d", i, i)) {
+			t.Errorf("expected task %d in output when filtered", i)
+		}
+	}
+	// Should NOT show trimmed message
+	if strings.Contains(output, "… and") {
+		t.Errorf("should not show trimmed message when status-filtered")
+	}
+}
+
+// TestRenderTaskBoardTrimmsCancelledUnfiltered tests that cancelled tasks are trimmed like done tasks.
+func TestRenderTaskBoardTrimmsCancelledUnfiltered(t *testing.T) {
+	// Create 7 cancelled tasks
+	cancelledTasks := make([]taskRow, 7)
+	for i := 0; i < 7; i++ {
+		cancelledTasks[i] = taskRow{
+			ID:     int64(i + 1),
+			Title:  fmt.Sprintf("Cancelled Task %d", i+1),
+			Status: "cancelled",
+		}
+	}
+	board := map[string][]taskRow{
+		"cancelled": cancelledTasks,
+	}
+
+	w := &bytes.Buffer{}
+	renderTaskBoard(board, w, false) // statusFiltered=false
+
+	output := w.String()
+	// Should show last 5 (tasks 3-7)
+	if !strings.Contains(output, "#3 Cancelled Task 3") {
+		t.Errorf("expected task 3 in output")
+	}
+	// Should NOT show first 2
+	if strings.Contains(output, "#1 Cancelled Task 1") {
+		t.Errorf("should not show task 1 when trimmed")
+	}
+	// Should show trimmed message for cancelled
+	if !strings.Contains(output, "… and 2 more") {
+		t.Errorf("expected trimmed message")
+	}
+	if !strings.Contains(output, "use --status cancelled") {
+		t.Errorf("expected 'use --status cancelled' in message")
+	}
+}
+
+// TestRenderTaskCardSubtaskRepoID tests that subtask table uses RepoID column.
+func TestRenderTaskCardSubtaskRepoID(t *testing.T) {
+	now := time.Now()
+	task := taskDetailRow{
+		ID:        1,
+		Title:     "My Task",
+		Status:    "in_progress",
+		ProjectID: "proj-1",
+		Subtasks: []taskRow{
+			{ID: 10, Title: "Subtask with repo", Status: "backlog", RepoID: "repo-123"},
+			{ID: 11, Title: "Subtask without repo", Status: "in_progress", RepoID: ""},
+		},
+	}
+
+	w := &bytes.Buffer{}
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, w, now)
+
+	output := w.String()
+	// Should show repo-123 for first subtask
+	if !strings.Contains(output, "repo-123") {
+		t.Errorf("expected repo-123 in output for subtask with RepoID")
+	}
+	// Should show subtask 11 with repo-id (with "-" for empty repo)
+	if !strings.Contains(output, "#11") || !strings.Contains(output, "Subtask without repo") {
+		t.Errorf("expected subtask 11 in output")
+	}
+	// Verify the REPO column contains "-" for empty repo by checking the table structure
+	lines := strings.Split(output, "\n")
+	subtaskSection := false
+	found := false
+	for _, line := range lines {
+		if strings.Contains(line, "Subtasks") {
+			subtaskSection = true
+			continue
+		}
+		if subtaskSection && strings.Contains(line, "#11") && strings.Contains(line, "Subtask without repo") {
+			// Just check that the line contains "-" somewhere after the status column
+			if strings.Contains(line, "-") {
+				found = true
+			}
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected '-' for empty RepoID in subtask table")
 	}
 }
