@@ -66,11 +66,17 @@ func NewHandler(d Deps) http.Handler {
 	registerInternalActivityRoutes(mux, d)
 	registerMessageRoutes(mux, d)
 
-	// Catch-all: anything not matched by a more specific pattern above is a
-	// 404, rendered in the standard error JSON shape.
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	// Any /v1 path not matched by a more specific route above is a 404,
+	// rendered in the standard error JSON shape. This is a prefix pattern,
+	// so it's less specific than the exact "GET /v1/health" etc. routes
+	// registered above and only catches the leftovers.
+	mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not_found", "resource not found")
 	})
+
+	// Everything else falls to the embedded dashboard static build, with a
+	// SPA fallback to index.html for client-side routes.
+	registerStaticRoutes(mux)
 
 	return mux
 }

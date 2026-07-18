@@ -8,7 +8,11 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
+# dist is committed once, as a placeholder index.html so `go build` works
+# without an npm build (see web/embed.go). Ignore everything else built
+# there.
+dist/*
+!dist/index.html
 dist-ssr
 *.local
 
