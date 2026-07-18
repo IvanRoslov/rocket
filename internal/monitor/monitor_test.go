@@ -238,6 +238,48 @@ func TestSweepOnceUpdatesStoreActivity(t *testing.T) {
 	}
 }
 
+// TestSweepFreshRunningSessionNoSignalStaysReady verifies that a
+// freshly-running session with no stored ActivityTS (0, i.e. never reported
+// any signal yet) that gets agent.ErrNoSignal from the agent stays Ready
+// instead of being immediately demoted to Idle. Before the fix, ts was
+// computed as time.Unix(0, 0) (the epoch), which is always far in the past,
+// so applyMerge's Ready->Idle threshold fired instantly.
+func TestSweepFreshRunningSessionNoSignalStaysReady(t *testing.T) {
+	rt := &fakeRuntime{names: []string{"sess1"}}
+	prober := &fakeProber{onlyShell: map[string]bool{}}
+	agents := map[string]*fakeAgent{"fake": {err: agent.ErrNoSignal}}
+	m, st, b := testMonitor(t, rt, prober, agents)
+
+	seedSession(t, st, store.Session{
+		ID:       "sess1",
+		Agent:    "fake",
+		TmuxName: "sess1",
+		State:    "running",
+		Activity: "", // nothing reported yet
+		// ActivityTS left at zero.
+	})
+
+	ch, cancel := b.Subscribe()
+	defer cancel()
+
+	m.sweep(context.Background())
+
+	sess, err := st.GetSession("sess1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.Activity != string(activity.Ready) {
+		t.Errorf("Activity = %q, want ready (must not be instantly demoted to idle)", sess.Activity)
+	}
+
+	events := drainEvents(ch)
+	for _, e := range events {
+		if e.Type == "session.activity_changed" && e.SessionID == "sess1" && e.Data["to"] == "idle" {
+			t.Errorf("unexpected instant idle transition for fresh session: %+v", e)
+		}
+	}
+}
+
 // TestSweepReadyOldPastThresholdBecomesIdle verifies the Ready->Idle
 // threshold based on ReadyToIdle.
 func TestSweepReadyOldPastThresholdBecomesIdle(t *testing.T) {

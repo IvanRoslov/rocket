@@ -271,7 +271,17 @@ func (m *Monitor) pollSession(ctx context.Context, sess store.Session, liveSet m
 			if state == "" {
 				state = activity.Ready
 			}
-			ts = time.Unix(sess.ActivityTS, 0)
+			if sess.ActivityTS == 0 {
+				// No stored timestamp yet (fresh running/spawning session
+				// that hasn't reported any signal): use now as a fresh
+				// grace period rather than the epoch, which would make the
+				// Ready->Idle threshold in applyMerge fire instantly and
+				// mark a brand-new session idle before it has had any
+				// chance to become active.
+				ts = time.Now()
+			} else {
+				ts = time.Unix(sess.ActivityTS, 0)
+			}
 			// For spawning sessions with no signal and empty activity, don't write anything.
 			if sess.State == "spawning" && sess.Activity == "" {
 				return
