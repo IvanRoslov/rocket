@@ -22,6 +22,9 @@ type Config struct {
 	QueueTimeout              time.Duration `yaml:"queue_timeout"`
 	WorkerStallThreshold      time.Duration `yaml:"worker_stall_threshold"`
 	QuestionReminderThreshold time.Duration `yaml:"question_reminder_threshold"`
+	GithubAPIBase             string        `yaml:"github_api_base"`
+	GithubCloneBase           string        `yaml:"github_clone_base"`
+	MergeGrace                time.Duration `yaml:"merge_grace"`
 	Home                      string        `yaml:"-"`
 
 	// SocketOverride, when non-empty, takes precedence over the default
@@ -70,6 +73,9 @@ func Load(home string) (*Config, error) {
 		QueueTimeout:              30 * time.Minute,
 		WorkerStallThreshold:      15 * time.Minute,
 		QuestionReminderThreshold: 30 * time.Minute,
+		GithubAPIBase:             "https://api.github.com",
+		GithubCloneBase:           "",
+		MergeGrace:                5 * time.Minute,
 		Home:                      home,
 	}
 

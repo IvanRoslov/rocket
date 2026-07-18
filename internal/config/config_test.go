@@ -43,6 +43,15 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.QueueTimeout != 30*time.Minute {
 		t.Errorf("expected QueueTimeout 30m, got %v", cfg.QueueTimeout)
 	}
+	if cfg.GithubAPIBase != "https://api.github.com" {
+		t.Errorf("expected GithubAPIBase https://api.github.com, got %q", cfg.GithubAPIBase)
+	}
+	if cfg.GithubCloneBase != "" {
+		t.Errorf("expected GithubCloneBase empty, got %q", cfg.GithubCloneBase)
+	}
+	if cfg.MergeGrace != 5*time.Minute {
+		t.Errorf("expected MergeGrace 5m, got %v", cfg.MergeGrace)
+	}
 	if cfg.Home != tempDir {
 		t.Errorf("expected Home %s, got %s", tempDir, cfg.Home)
 	}
@@ -62,6 +71,8 @@ worktrees_dir: /tmp/worktrees
 activity_poll_interval: 10s
 ready_to_idle: 10m
 queue_timeout: 1h
+github_api_base: https://ghe.example.com/api/v3
+merge_grace: 10m
 `
 	configPath := filepath.Join(tempDir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
@@ -99,6 +110,12 @@ queue_timeout: 1h
 	}
 	if cfg.QueueTimeout != 1*time.Hour {
 		t.Errorf("expected QueueTimeout 1h, got %v", cfg.QueueTimeout)
+	}
+	if cfg.GithubAPIBase != "https://ghe.example.com/api/v3" {
+		t.Errorf("expected GithubAPIBase https://ghe.example.com/api/v3, got %q", cfg.GithubAPIBase)
+	}
+	if cfg.MergeGrace != 10*time.Minute {
+		t.Errorf("expected MergeGrace 10m, got %v", cfg.MergeGrace)
 	}
 }
 
