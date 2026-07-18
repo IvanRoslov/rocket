@@ -442,3 +442,95 @@ func TestPushUpdateInvalidStateIgnored(t *testing.T) {
 		t.Errorf("invalid pushed state should not be recorded in push map")
 	}
 }
+
+// TestSweepSpawningSessionNotExited verifies that a session in "spawning"
+// state is not marked Exited by tmux checks, even if tmux List is empty (the
+// session may not exist yet). With no agent signal and empty stored activity,
+// activity remains untouched and no event is published.
+func TestSweepSpawningSessionNotExited(t *testing.T) {
+	rt := &fakeRuntime{names: []string{}} // sess1 not present in tmux
+	prober := &fakeProber{onlyShell: map[string]bool{}}
+	agents := map[string]*fakeAgent{"fake": {err: agent.ErrNoSignal}}
+	m, st, b := testMonitor(t, rt, prober, agents)
+
+	seedSession(t, st, store.Session{
+		ID:       "sess1",
+		Agent:    "fake",
+		TmuxName: "sess1",
+		State:    "spawning",
+		Activity: "", // Empty activity at seed time
+	})
+
+	ch, cancel := b.Subscribe()
+	defer cancel()
+
+	m.sweep(context.Background())
+
+	sess, err := st.GetSession("sess1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	// Activity should remain empty; not forced to Ready or Exited.
+	if sess.Activity != "" {
+		t.Errorf("Activity = %q, want empty (spawning session should not be modified when agent gives ErrNoSignal)", sess.Activity)
+	}
+
+	events := drainEvents(ch)
+	for _, e := range events {
+		if e.Type == "session.activity_changed" {
+			t.Errorf("unexpected activity_changed event for spawning session with no signal: %+v", e)
+		}
+	}
+}
+
+// TestSweepPrunesStaleCacheEntries verifies that after sweep, cache and push
+// map entries are pruned if their session no longer exists in the live list.
+func TestSweepPrunesStaleCacheEntries(t *testing.T) {
+	rt := &fakeRuntime{names: []string{"sess1"}} // Only sess1 is live
+	prober := &fakeProber{onlyShell: map[string]bool{}}
+	now := time.Now()
+	agents := map[string]*fakeAgent{"fake": {state: activity.Active, ts: now}}
+	m, st, b := testMonitor(t, rt, prober, agents)
+
+	// Seed two sessions.
+	seedSession(t, st, store.Session{ID: "sess1", Agent: "fake", TmuxName: "sess1"})
+	seedSession(t, st, store.Session{ID: "sess2", Agent: "fake", TmuxName: "sess2"})
+
+	// Populate cache and push for both.
+	m.PushUpdate("sess1", activity.Active, now)
+	m.PushUpdate("sess2", activity.Active, now)
+
+	ch, cancel := b.Subscribe()
+	defer cancel()
+
+	// Mark sess2 as exited/killed so it won't be in live list after sweep.
+	if err := st.UpdateSessionState("sess2", "exited"); err != nil {
+		t.Fatalf("UpdateSessionState: %v", err)
+	}
+
+	m.sweep(context.Background())
+
+	// Drain any events (we're not testing them here).
+	_ = drainEvents(ch)
+
+	// Verify sess1 is still in cache and push.
+	m.mu.Lock()
+	_, inCache1 := m.cache["sess1"]
+	_, inPush1 := m.push["sess1"]
+	_, inCache2 := m.cache["sess2"]
+	_, inPush2 := m.push["sess2"]
+	m.mu.Unlock()
+
+	if !inCache1 {
+		t.Errorf("sess1 should still be in cache")
+	}
+	if !inPush1 {
+		t.Errorf("sess1 should still be in push map")
+	}
+	if inCache2 {
+		t.Errorf("sess2 should be pruned from cache")
+	}
+	if inPush2 {
+		t.Errorf("sess2 should be pruned from push map")
+	}
+}

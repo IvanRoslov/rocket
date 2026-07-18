@@ -198,14 +198,31 @@ func (m *Monitor) sweep(ctx context.Context) {
 		}
 	}
 
+	sessionIDs := make(map[string]bool)
 	for _, sess := range sessions {
+		sessionIDs[sess.ID] = true
 		m.pollSession(ctx, sess, liveSet, err == nil)
 	}
+
+	// Prune stale entries from cache and push maps whose sessions no longer exist.
+	m.mu.Lock()
+	for id := range m.cache {
+		if !sessionIDs[id] {
+			delete(m.cache, id)
+		}
+	}
+	for id := range m.push {
+		if !sessionIDs[id] {
+			delete(m.push, id)
+		}
+	}
+	m.mu.Unlock()
 }
 
 // pollSession runs the cascade for a single session: tmux-dead check,
 // pane-only-shell check, then the agent's own signal, and applies the
-// result.
+// result. For spawning sessions, tmux checks are skipped since the session
+// may not exist yet; only the agent Activity signal applies.
 func (m *Monitor) pollSession(ctx context.Context, sess store.Session, liveSet map[string]bool, haveLiveSet bool) {
 	var (
 		state  activity.State
@@ -213,12 +230,16 @@ func (m *Monitor) pollSession(ctx context.Context, sess store.Session, liveSet m
 		exited bool
 	)
 
-	switch {
-	case haveLiveSet && !liveSet[sess.TmuxName]:
-		state, ts, exited = activity.Exited, time.Now(), true
-	default:
-		if only, err := m.prober.onlyShellRunning(ctx, sess.TmuxName); err == nil && only {
+	// For spawning sessions, skip tmux-dead and pane-prober checks; only agent
+	// Activity applies since the tmux session may not exist yet.
+	if sess.State != "spawning" {
+		switch {
+		case haveLiveSet && !liveSet[sess.TmuxName]:
 			state, ts, exited = activity.Exited, time.Now(), true
+		default:
+			if only, err := m.prober.onlyShellRunning(ctx, sess.TmuxName); err == nil && only {
+				state, ts, exited = activity.Exited, time.Now(), true
+			}
 		}
 	}
 
@@ -237,6 +258,10 @@ func (m *Monitor) pollSession(ctx context.Context, sess store.Session, liveSet m
 				state = activity.Ready
 			}
 			ts = time.Unix(sess.ActivityTS, 0)
+			// For spawning sessions with no signal and empty activity, don't write anything.
+			if sess.State == "spawning" && sess.Activity == "" {
+				return
+			}
 		case err != nil:
 			slog.Error("monitor: agent activity", "session", sess.ID, "error", err)
 			return
