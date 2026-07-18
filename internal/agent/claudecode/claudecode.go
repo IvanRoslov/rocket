@@ -37,6 +37,9 @@ func (c *ClaudeCode) SetupWorkspace(spec agent.LaunchSpec) error {
 	if err := upsertClaudeSettings(spec.WorktreePath); err != nil {
 		return fmt.Errorf("upsert claude settings: %w", err)
 	}
+	if err := trustWorktree(spec.WorktreePath); err != nil {
+		return fmt.Errorf("trust worktree: %w", err)
+	}
 
 	if spec.SystemPrompt == "" {
 		return nil
@@ -223,6 +226,102 @@ func upsertClaudeSettings(worktreePath string) error {
 	if err := os.Chmod(tempPath, 0o644); err != nil {
 		os.Remove(tempPath)
 		return fmt.Errorf("chmod temp settings file: %w", err)
+	}
+	return os.Rename(tempPath, path)
+}
+
+// trustWorktree marks worktreePath as trusted in the user's global
+// ~/.claude.json so Claude Code's one-time "trust this folder" workspace
+// dialog does not block a headless launch. That dialog runs even with
+// --dangerously-skip-permissions (which only bypasses per-tool permission
+// checks, not the initial folder-trust prompt), and it is not auto-skipped
+// when rocket launches claude inside a real tmux TTY (only -p/non-TTY
+// invocations skip it). Since every spawned worktree is a brand-new path
+// Claude Code has never seen, without this the agent hangs forever on the
+// dialog and never starts.
+//
+// It preserves the rest of ~/.claude.json untouched, including any existing
+// entry for other projects or other fields already set for this path.
+func trustWorktree(worktreePath string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolve home dir: %w", err)
+	}
+
+	// Claude Code keys ~/.claude.json's projects map by the fully resolved
+	// path (e.g. on macOS /tmp is a symlink to /private/tmp), so resolve
+	// symlinks before using the path as a key. Fall back to the given path
+	// if it can't be resolved (e.g. it doesn't exist yet in some edge case)
+	// rather than failing the whole setup over this best-effort step.
+	resolved := worktreePath
+	if r, err := filepath.EvalSymlinks(worktreePath); err == nil {
+		resolved = r
+	}
+
+	path := filepath.Join(home, ".claude.json")
+
+	doc := map[string]json.RawMessage{}
+	if data, err := os.ReadFile(path); err == nil {
+		if len(data) > 0 {
+			if err := json.Unmarshal(data, &doc); err != nil {
+				return fmt.Errorf("parse existing %s: %w", path, err)
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	projects := map[string]json.RawMessage{}
+	if raw, ok := doc["projects"]; ok {
+		if err := json.Unmarshal(raw, &projects); err != nil {
+			return fmt.Errorf("parse existing projects in %s: %w", path, err)
+		}
+	}
+
+	entry := map[string]json.RawMessage{}
+	if raw, ok := projects[resolved]; ok {
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			return fmt.Errorf("parse existing project entry for %s in %s: %w", resolved, path, err)
+		}
+	}
+	entry["hasTrustDialogAccepted"] = json.RawMessage("true")
+
+	entryRaw, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	projects[resolved] = entryRaw
+
+	projectsRaw, err := json.Marshal(projects)
+	if err != nil {
+		return err
+	}
+	doc["projects"] = projectsRaw
+
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+	out = append(out, '\n')
+
+	// Write atomically: create temp file in same directory, then rename.
+	f, err := os.CreateTemp(home, ".claude-*.json")
+	if err != nil {
+		return fmt.Errorf("create temp claude.json file: %w", err)
+	}
+	tempPath := f.Name()
+	if _, err := f.Write(out); err != nil {
+		f.Close()
+		os.Remove(tempPath)
+		return fmt.Errorf("write temp claude.json file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tempPath)
+		return fmt.Errorf("close temp claude.json file: %w", err)
+	}
+	if err := os.Chmod(tempPath, 0o644); err != nil {
+		os.Remove(tempPath)
+		return fmt.Errorf("chmod temp claude.json file: %w", err)
 	}
 	return os.Rename(tempPath, path)
 }

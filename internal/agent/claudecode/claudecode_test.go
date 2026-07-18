@@ -468,6 +468,82 @@ func TestAvailable(t *testing.T) {
 	}
 }
 
+func TestSetupWorkspaceTrustsWorktreeInClaudeJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	cc := New()
+	spec := agent.LaunchSpec{WorktreePath: tmpDir}
+	if err := cc.SetupWorkspace(spec); err != nil {
+		t.Fatalf("SetupWorkspace failed: %v", err)
+	}
+
+	resolved, err := filepath.EvalSymlinks(tmpDir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(fakeHome, ".claude.json"))
+	if err != nil {
+		t.Fatalf("read ~/.claude.json: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("decode ~/.claude.json: %v", err)
+	}
+	projects, ok := doc["projects"].(map[string]any)
+	if !ok {
+		t.Fatalf("~/.claude.json missing projects object: %+v", doc)
+	}
+	entry, ok := projects[resolved].(map[string]any)
+	if !ok {
+		t.Fatalf("projects missing entry for %q: %+v", resolved, projects)
+	}
+	if trusted, _ := entry["hasTrustDialogAccepted"].(bool); !trusted {
+		t.Errorf("hasTrustDialogAccepted = %v, want true", entry["hasTrustDialogAccepted"])
+	}
+}
+
+func TestSetupWorkspaceTrustPreservesExistingClaudeJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	existing := `{
+  "numStartups": 42,
+  "projects": {
+    "/some/other/path": {"hasTrustDialogAccepted": true, "allowedTools": ["Bash"]}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(fakeHome, ".claude.json"), []byte(existing), 0o644); err != nil {
+		t.Fatalf("write existing ~/.claude.json: %v", err)
+	}
+
+	cc := New()
+	spec := agent.LaunchSpec{WorktreePath: tmpDir}
+	if err := cc.SetupWorkspace(spec); err != nil {
+		t.Fatalf("SetupWorkspace failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(fakeHome, ".claude.json"))
+	if err != nil {
+		t.Fatalf("read ~/.claude.json: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("decode ~/.claude.json: %v", err)
+	}
+	if doc["numStartups"] != float64(42) {
+		t.Errorf("numStartups = %v, want 42 (foreign key preserved)", doc["numStartups"])
+	}
+	projects := doc["projects"].(map[string]any)
+	other := projects["/some/other/path"].(map[string]any)
+	if tools, _ := other["allowedTools"].([]any); len(tools) != 1 || tools[0] != "Bash" {
+		t.Errorf("existing project entry was clobbered: %+v", other)
+	}
+}
+
 func TestSetupWorkspaceNoLeftoverTempFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 
