@@ -348,3 +348,115 @@ func TestValidation_EmptyInputsRejected(t *testing.T) {
 		t.Errorf("expected error for branch containing ..")
 	}
 }
+
+func TestValidation_RejectsTraversalIDs(t *testing.T) {
+	_, clonePath := setupOriginAndClone(t)
+	worktreesDir := t.TempDir()
+	ws := New(worktreesDir)
+	repo := testRepo(clonePath)
+	ctx := context.Background()
+
+	// Test repo.ID with ".."
+	badRepo := repo
+	badRepo.ID = ".."
+	if _, err := ws.Create(ctx, badRepo, "sess1", "branch"); err == nil {
+		t.Errorf("expected error for repo.ID with ..")
+	}
+	if err := ws.Destroy(ctx, badRepo, "sess1"); err == nil {
+		t.Errorf("expected error for Destroy with repo.ID ..")
+	}
+	if _, err := ws.Restore(ctx, badRepo, "sess1", "branch"); err == nil {
+		t.Errorf("expected error for Restore with repo.ID ..")
+	}
+
+	// Test sessionID with traversal
+	badSess := "../x"
+	if _, err := ws.Create(ctx, repo, badSess, "branch"); err == nil {
+		t.Errorf("expected error for sessionID ../x")
+	}
+	if err := ws.Destroy(ctx, repo, badSess); err == nil {
+		t.Errorf("expected error for Destroy with sessionID ../x")
+	}
+	if _, err := ws.Restore(ctx, repo, badSess, "branch"); err == nil {
+		t.Errorf("expected error for Restore with sessionID ../x")
+	}
+
+	// Test IDs with invalid characters
+	badRepo2 := repo
+	badRepo2.ID = "repo_underscore"
+	if _, err := ws.Create(ctx, badRepo2, "sess1", "branch"); err == nil {
+		t.Errorf("expected error for repo.ID with underscore")
+	}
+}
+
+func TestSymlinks_SkipsTraversalEntries(t *testing.T) {
+	_, clonePath := setupOriginAndClone(t)
+	worktreesDir := t.TempDir()
+	ws := New(worktreesDir)
+	repo := testRepo(clonePath)
+
+	// Add a real directory and an evil traversal entry
+	nm := filepath.Join(clonePath, "node_modules")
+	if err := os.MkdirAll(nm, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Include both valid and invalid symlink entries
+	repo.Symlinks = []string{
+		"node_modules",   // valid
+		"../evil",        // traversal
+		"/absolute/path", // absolute
+	}
+
+	res, err := ws.Create(context.Background(), repo, "sess1", "sym-test")
+	if err != nil {
+		t.Fatalf("Create should succeed despite invalid entries: %v", err)
+	}
+
+	// Verify valid symlink was created
+	link := filepath.Join(res.Path, "node_modules")
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Errorf("expected valid symlink at %s: %v", link, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected %s to be a symlink", link)
+	}
+
+	// Verify evil entries were not created
+	for _, evil := range []string{"../evil", "/absolute/path"} {
+		evilPath := filepath.Join(res.Path, evil)
+		if _, err := os.Lstat(evilPath); !os.IsNotExist(err) {
+			t.Errorf("evil entry %q should not exist (err=%v)", evil, err)
+		}
+	}
+}
+
+func TestDestroy_RepoPathGone(t *testing.T) {
+	origin, clonePath := setupOriginAndClone(t)
+	worktreesDir := t.TempDir()
+	ws := New(worktreesDir)
+	repo := testRepo(clonePath)
+	ctx := context.Background()
+
+	res, err := ws.Create(ctx, repo, "sess1", "feature-gone")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Simulate repo being deleted out-of-band (e.g., disk cleanup)
+	if err := os.RemoveAll(origin); err != nil {
+		t.Fatalf("failed to remove origin: %v", err)
+	}
+
+	// Destroy should succeed despite repo.Path being gone and prune failing
+	err = ws.Destroy(ctx, repo, "sess1")
+	if err != nil {
+		t.Errorf("Destroy should succeed when worktree dir is gone: %v", err)
+	}
+
+	// Verify worktree dir was actually removed
+	if _, statErr := os.Stat(res.Path); !os.IsNotExist(statErr) {
+		t.Errorf("worktree dir should be removed, got err=%v", statErr)
+	}
+}

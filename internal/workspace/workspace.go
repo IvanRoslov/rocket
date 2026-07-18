@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -63,12 +64,21 @@ func (w *gitWorkspace) worktreePath(repo store.Repo, sessionID string) string {
 	return filepath.Join(w.worktreesDir, repo.ID, sessionID)
 }
 
+// idPattern validates that an ID contains only lowercase letters, digits, and hyphens.
+var idPattern = regexp.MustCompile(`^[a-z0-9-]+$`)
+
 func validateInputs(repo store.Repo, sessionID, branch string) error {
 	if repo.ID == "" {
 		return errors.New("repo.ID must not be empty")
 	}
+	if !idPattern.MatchString(repo.ID) {
+		return fmt.Errorf("invalid repo.ID %q: must contain only lowercase letters, digits, and hyphens", repo.ID)
+	}
 	if sessionID == "" {
 		return errors.New("sessionID must not be empty")
+	}
+	if !idPattern.MatchString(sessionID) {
+		return fmt.Errorf("invalid sessionID %q: must contain only lowercase letters, digits, and hyphens", sessionID)
 	}
 	if branch == "" {
 		return errors.New("branch must not be empty")
@@ -140,6 +150,12 @@ func (w *gitWorkspace) Create(ctx context.Context, repo store.Repo, sessionID, b
 
 	// 4. Symlinks.
 	for _, rel := range repo.Symlinks {
+		// Reject traversal attempts and absolute paths.
+		if strings.Contains(rel, "..") || filepath.IsAbs(rel) {
+			slog.Warn("workspace: symlink entry rejected (traversal/absolute)", "repo", repo.ID, "path", rel)
+			continue
+		}
+
 		src := filepath.Join(repo.Path, rel)
 		dst := filepath.Join(path, rel)
 
@@ -179,8 +195,14 @@ func (w *gitWorkspace) Destroy(ctx context.Context, repo store.Repo, sessionID s
 	if repo.ID == "" {
 		return errors.New("repo.ID must not be empty")
 	}
+	if !idPattern.MatchString(repo.ID) {
+		return fmt.Errorf("invalid repo.ID %q: must contain only lowercase letters, digits, and hyphens", repo.ID)
+	}
 	if sessionID == "" {
 		return errors.New("sessionID must not be empty")
+	}
+	if !idPattern.MatchString(sessionID) {
+		return fmt.Errorf("invalid sessionID %q: must contain only lowercase letters, digits, and hyphens", sessionID)
 	}
 
 	path := w.worktreePath(repo, sessionID)
@@ -196,6 +218,11 @@ func (w *gitWorkspace) Destroy(ctx context.Context, repo store.Repo, sessionID s
 	// Always prune, so git's own bookkeeping is idempotent regardless of
 	// which path above was taken (this call never touches branches).
 	if _, err := runGit(ctx, repo.Path, "worktree", "prune"); err != nil {
+		// If the worktree dir is already gone, prune failure is non-fatal.
+		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+			slog.Warn("workspace: git worktree prune failed but worktree dir already removed", "repo", repo.ID, "session", sessionID, "error", err)
+			return nil
+		}
 		return fmt.Errorf("worktree prune: %w", err)
 	}
 
