@@ -544,6 +544,51 @@ func TestQueue_NotFoundGetSessionFailsMessageAsRecipientGone(t *testing.T) {
 	}
 }
 
+// TestQueue_SpawningRecipientWaitsThenDelivers verifies that a recipient in
+// state "spawning" is NOT failed as recipient_gone: the message must stay
+// queued while spawning, then deliver once the session transitions to
+// "running" with a ready activity signal.
+func TestQueue_SpawningRecipientWaitsThenDelivers(t *testing.T) {
+	h := newTestQueue(t)
+
+	if err := h.st.AddSession(store.Session{
+		ID: "recv", Kind: "worker", ProjectID: "p", RepoID: "r", Agent: "claude-code",
+		Branch: "main", WorktreePath: "/tmp/recv", TmuxName: "recv", State: "spawning",
+	}); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+
+	id, err := h.st.AddMessage(store.Message{ToSession: "recv", Body: "hello"})
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+
+	h.q.Wake("recv")
+
+	// While spawning, the message must stay queued (not failed).
+	time.Sleep(150 * time.Millisecond)
+	if got := messageStatus(t, h.st, id); got != "queued" {
+		t.Fatalf("status = %q while spawning, want queued", got)
+	}
+	if n := h.rt.callCount(); n != 0 {
+		t.Fatalf("Inject called %d times while spawning, want 0", n)
+	}
+
+	// Flip session to running + activity ready, and notify.
+	if err := h.st.UpdateSessionState("recv", "running"); err != nil {
+		t.Fatalf("UpdateSessionState: %v", err)
+	}
+	h.ac.set("recv", activity.Ready)
+	h.q.Wake("recv") // in case the worker had already exited its loop
+	h.b.Publish("session.activity_changed", "recv", map[string]any{"to": "ready"})
+
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" },
+		"message delivered after spawning session becomes running")
+	if n := h.rt.callCount(); n != 1 {
+		t.Fatalf("Inject called %d times, want 1", n)
+	}
+}
+
 func TestFormatBody(t *testing.T) {
 	got := formatBody(store.Message{FromSession: "orch", Body: "hi"})
 	want := "[from orch] hi"

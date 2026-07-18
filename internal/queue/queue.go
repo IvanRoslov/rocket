@@ -286,7 +286,19 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 			}
 			continue
 		}
-		if sess.State != "running" {
+		switch sess.State {
+		case "running":
+			// proceed to activity check below
+		case "spawning":
+			// Recipient session exists but hasn't finished starting yet:
+			// wait and re-check, same as an active/unknown activity state,
+			// rather than failing the message as recipient_gone.
+			if !q.waitForReady(ctx, msg.ToSession) {
+				return // ctx cancelled
+			}
+			continue
+		default:
+			// Terminal (done/killed/errored) or otherwise not deliverable.
 			q.fail(msg, "recipient_gone")
 			return
 		}
