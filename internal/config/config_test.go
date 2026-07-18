@@ -34,6 +34,15 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.WorktreesDir != filepath.Join(tempDir, "worktrees") {
 		t.Errorf("expected WorktreesDir %s, got %s", filepath.Join(tempDir, "worktrees"), cfg.WorktreesDir)
 	}
+	if cfg.ActivityPollInterval != 5*time.Second {
+		t.Errorf("expected ActivityPollInterval 5s, got %v", cfg.ActivityPollInterval)
+	}
+	if cfg.ReadyToIdle != 5*time.Minute {
+		t.Errorf("expected ReadyToIdle 5m, got %v", cfg.ReadyToIdle)
+	}
+	if cfg.QueueTimeout != 30*time.Minute {
+		t.Errorf("expected QueueTimeout 30m, got %v", cfg.QueueTimeout)
+	}
 	if cfg.Home != tempDir {
 		t.Errorf("expected Home %s, got %s", tempDir, cfg.Home)
 	}
@@ -50,6 +59,9 @@ github_poll_interval: 3m
 default_agent: custom-agent
 repos_dir: /tmp/repos
 worktrees_dir: /tmp/worktrees
+activity_poll_interval: 10s
+ready_to_idle: 10m
+queue_timeout: 1h
 `
 	configPath := filepath.Join(tempDir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
@@ -78,6 +90,15 @@ worktrees_dir: /tmp/worktrees
 	}
 	if cfg.WorktreesDir != "/tmp/worktrees" {
 		t.Errorf("expected WorktreesDir /tmp/worktrees, got %s", cfg.WorktreesDir)
+	}
+	if cfg.ActivityPollInterval != 10*time.Second {
+		t.Errorf("expected ActivityPollInterval 10s, got %v", cfg.ActivityPollInterval)
+	}
+	if cfg.ReadyToIdle != 10*time.Minute {
+		t.Errorf("expected ReadyToIdle 10m, got %v", cfg.ReadyToIdle)
+	}
+	if cfg.QueueTimeout != 1*time.Hour {
+		t.Errorf("expected QueueTimeout 1h, got %v", cfg.QueueTimeout)
 	}
 }
 

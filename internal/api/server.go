@@ -13,6 +13,8 @@ import (
 
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
+	"github.com/IvanRoslov/rocket/internal/monitor"
+	"github.com/IvanRoslov/rocket/internal/queue"
 	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 	"github.com/IvanRoslov/rocket/internal/version"
@@ -29,6 +31,8 @@ type Deps struct {
 	Bus       *bus.Bus
 	Cfg       *config.Config
 	Manager   *session.Manager
+	Monitor   *monitor.Monitor
+	Queue     *queue.Queue
 	Shutdown  func()
 	StartedAt time.Time
 }
@@ -58,6 +62,9 @@ func NewHandler(d Deps) http.Handler {
 	registerProjectRoutes(mux, d)
 	registerSessionRoutes(mux, d)
 	registerEventsRoutes(mux, d)
+	registerSSERoutes(mux, d)
+	registerInternalActivityRoutes(mux, d)
+	registerMessageRoutes(mux, d)
 
 	// Catch-all: anything not matched by a more specific pattern above is a
 	// 404, rendered in the standard error JSON shape.

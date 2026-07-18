@@ -12,10 +12,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/IvanRoslov/rocket/internal/agent"
 	_ "github.com/IvanRoslov/rocket/internal/agent/claudecode" // register the claude-code agent
 	"github.com/IvanRoslov/rocket/internal/api"
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
+	"github.com/IvanRoslov/rocket/internal/monitor"
+	"github.com/IvanRoslov/rocket/internal/queue"
 	"github.com/IvanRoslov/rocket/internal/runtime"
 	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -50,6 +53,8 @@ func Run(cfg *config.Config) error {
 	rt := runtime.NewTmux()
 	ws := workspace.New(cfg.WorktreesDir)
 	mgr := session.NewManager(st, b, rt, ws, cfg)
+	mon := monitor.New(st, b, rt, cfg, agent.Get)
+	q := queue.New(st, b, rt, cfg, mon.Activity)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -58,6 +63,21 @@ func Run(cfg *config.Config) error {
 	if err := mgr.Reconcile(ctx); err != nil {
 		slog.Error("reconcile failed (non-fatal)", "error", err)
 	}
+
+	// Sweep activity synchronously once, after reconcile and BEFORE
+	// q.Recover: without this, Recover's startup Wakes can race stale store
+	// activity left over from before a restart (e.g. a session still marked
+	// "active" from the moment of a crash), making delivery wait a full poll
+	// cycle before re-checking. Run below still does its own initial sweep;
+	// that duplicate is harmless.
+	mon.SweepOnce(ctx)
+	go mon.Run(ctx)
+
+	// Recover synchronously (ResetDelivering + initial Wakes) BEFORE serving
+	// the API: otherwise an early POST /v1/messages could Wake a recipient
+	// whose delivery worker races the recovery pass. See Queue.Recover.
+	q.Recover(ctx)
+	go q.Run(ctx)
 
 	shutdownCalled := make(chan struct{})
 	var shutdownOnce func()
@@ -76,6 +96,8 @@ func Run(cfg *config.Config) error {
 		Bus:       b,
 		Cfg:       cfg,
 		Manager:   mgr,
+		Monitor:   mon,
+		Queue:     q,
 		Shutdown:  shutdownOnce,
 		StartedAt: time.Now(),
 	}

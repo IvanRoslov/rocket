@@ -265,6 +265,91 @@ done`
 	}
 }
 
+// TestTmux_InjectChatHistoryTUI_MarkerPersistsButConfirms reproduces the
+// bug found running rocket's phase-2 E2E against real Claude Code
+// sessions: a chat-style TUI that permanently echoes every submitted
+// message into a scrolling history area above a static footer (so the
+// marker text is *never* absent from the pane as a whole — it stays
+// visible in history forever) and whose total on-screen non-blank line
+// count stays pinned once the history area is full (old lines are pushed
+// off-screen as new ones are appended, so a whole-pane line count doesn't
+// grow either). Confirmation must still succeed by noticing the marker
+// leave the narrow bottom-of-pane input/footer window, without needing
+// the marker to vanish from the pane, or the total count to grow.
+func TestTmux_InjectChatHistoryTUI_MarkerPersistsButConfirms(t *testing.T) {
+	requireTmux(t)
+	ctx := context.Background()
+	rt := NewTmux()
+
+	// A tiny alt-screen "chat TUI": maintains a fixed-size (3-line)
+	// scrolling history window of everything ever submitted, above a
+	// static separator/prompt footer. Submitted lines never disappear
+	// from the pane (they scroll within the fixed history window and the
+	// oldest one is dropped, keeping total on-screen line count pinned),
+	// mirroring Claude Code's behavior.
+	script := `printf '\033[?1049h'
+touch /tmp/hist.$$
+redraw() {
+  printf '\033[2J\033[H'
+  cat /tmp/hist.$$
+  printf -- '---static-footer---\n'
+  printf '> '
+}
+redraw
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> /tmp/hist.$$
+  tail -n 3 /tmp/hist.$$ > /tmp/hist.$$.tmp && mv /tmp/hist.$$.tmp /tmp/hist.$$
+  redraw
+done
+rm -f /tmp/hist.$$`
+
+	name := uniqueName(t, "")
+	h, err := rt.Create(ctx, CreateSpec{
+		Name:    name,
+		Dir:     t.TempDir(),
+		Command: script,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer rt.Destroy(ctx, h)
+
+	waitFor(t, func() bool {
+		out, err := rt.Capture(ctx, h, 20)
+		if err != nil {
+			return false
+		}
+		return strings.Contains(out, "---static-footer---")
+	}, "chat TUI to render its initial screen")
+
+	done := make(chan error, 1)
+	go func() {
+		done <- rt.Inject(ctx, h, "hello-marker")
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Inject: expected success, got: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("Inject did not return within timeout (likely burned all retries)")
+	}
+
+	// The marker legitimately remains visible in the pane (it's now part
+	// of "history"), but must no longer be on the active input line.
+	out, err := rt.Capture(ctx, h, 20)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	if !strings.Contains(out, "hello-marker") {
+		t.Fatalf("expected marker to remain visible in history, got: %q", out)
+	}
+	if strings.Contains(out, "> hello-marker") {
+		t.Fatalf("expected marker to have left the input line, got: %q", out)
+	}
+}
+
 func TestTmux_InvalidNameRejected(t *testing.T) {
 	requireTmux(t)
 	ctx := context.Background()

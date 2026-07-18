@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/IvanRoslov/rocket/internal/activity"
 	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
@@ -56,6 +58,9 @@ func (sessFakeAgent) Available() error                             { return nil 
 func (sessFakeAgent) SetupWorkspace(spec agent.LaunchSpec) error   { return nil }
 func (sessFakeAgent) LaunchCommand(spec agent.LaunchSpec) []string { return []string{"fake-agent"} }
 func (sessFakeAgent) Env(spec agent.LaunchSpec) map[string]string  { return nil }
+func (sessFakeAgent) Activity(ctx context.Context, ref agent.ActivityRef) (activity.State, time.Time, error) {
+	return "", time.Time{}, agent.ErrNoSignal
+}
 
 func init() {
 	agent.Register("fake", func() agent.Agent { return sessFakeAgent{} })

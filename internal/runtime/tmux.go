@@ -111,20 +111,27 @@ func (t *tmuxRuntime) Create(ctx context.Context, spec CreateSpec) (Handle, erro
 // Inject clears any draft on the target pane's input line, pastes text,
 // and presses Enter, retrying Enter up to maxAttempts times while polling
 // for confirmation that the submit was processed. Submission is confirmed
-// against the bottom 5-line tail of the pane (captured via `capture-pane
-// -S -5`) as soon as EITHER of two independent signals fires:
+// against confirmWindow — a true tail of the pane's bottom few rows, with
+// unwritten trailing-blank padding trimmed first (see tailLines and
+// trimTrailingBlank's docs for why this must be computed client-side) — as
+// soon as EITHER of two independent signals fires:
 //
 //   - marker-absent: the last non-empty line of the injected text is no
-//     longer present anywhere in the captured tail, AND the marker was
-//     observed in the baseline (i.e. was actually rendered before Enter).
-//     This covers full-screen / alt-screen TUIs that redraw on submit and
-//     clear the input box, even when the redraw leaves the surrounding line
-//     count and footer unchanged. If the marker never renders (e.g. input
-//     consumed instantly without echo), count-growth is used instead.
-//   - count-growth: the number of non-blank lines in the tail grew versus
-//     the pre-Enter baseline. This covers simple echo-style consumers
-//     (e.g. `cat`) where the submitted text lingers in the tail as an
-//     echoed line, and also handles cases where the marker never renders.
+//     longer present anywhere in confirmWindow, AND the marker was
+//     observed there in the baseline (i.e. was actually rendered before
+//     Enter). This is the primary signal for chat-style TUIs (e.g. Claude
+//     Code): the submitted message gets echoed permanently into a
+//     scrolling history area above the visible window, so it would never
+//     "disappear" if checked against the whole pane — but the narrow
+//     bottom-of-pane window (essentially just the input/prompt line) does
+//     reliably go from "showing the draft" to "empty again" once
+//     submitted. It also covers full-screen/alt-screen TUIs that redraw on
+//     submit with the same surrounding line count and footer.
+//   - count-growth: the number of non-blank lines in confirmWindow grew
+//     versus the pre-Enter baseline. This covers simple echo-style
+//     consumers (e.g. `cat`) where the submitted text lingers as an
+//     echoed line, and cases where the marker never rendered in the first
+//     place.
 //
 // If attempts are exhausted without either signal firing, Inject returns
 // ErrSubmitUnconfirmed (wrapped with context) rather than a generic
@@ -187,6 +194,19 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 
 	marker := lastLine(text)
 
+	// confirmWindow bounds every capture used for confirmation to a true
+	// tail of the pane's bottom few rows — the input/prompt line plus a
+	// little surrounding chrome. This is deliberately narrow: chat-style
+	// TUIs (e.g. Claude Code) echo a submitted message permanently into a
+	// scrolling history area, so checking the *whole* pane for the marker
+	// would see it forever and never confirm submission. But a properly
+	// bounded bottom-of-pane tail reliably distinguishes "marker is the
+	// active, not-yet-submitted draft on the input line" (baseline) from
+	// "marker has moved into history and the input line is empty/footer
+	// chrome again" (submitted) — see tailLines's doc for why this must be
+	// done client-side rather than via tmux's own -S/-E.
+	const confirmWindow = 5
+
 	// 3a. Pre-check: poll until the marker appears in the pane, up to
 	// pollTimeout. This ensures the marker was actually rendered before we
 	// proceed with Enter attempts. If the marker never appears (e.g. the
@@ -196,8 +216,8 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 	if marker != "" {
 		deadline := time.Now().Add(pollTimeout)
 		for {
-			out, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name), "-S", "-5")
-			if err == nil && strings.Contains(out, marker) {
+			out, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name))
+			if err == nil && strings.Contains(tailLines(trimTrailingBlank(out), confirmWindow), marker) {
 				markerSeen = true
 				break
 			}
@@ -208,11 +228,11 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 		}
 	}
 
-	baseline, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name), "-S", "-5")
+	baseline, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name))
 	if err != nil {
 		return fmt.Errorf("capture baseline: %w", err)
 	}
-	baseCount := nonBlankLineCount(baseline)
+	baseCount := nonBlankLineCount(tailLines(trimTrailingBlank(baseline), confirmWindow))
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if _, _, err := runTmux(ctx, "send-keys", "-t", paneTarget(h.Name), "Enter"); err != nil {
@@ -221,10 +241,11 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 
 		deadline := time.Now().Add(pollTimeout)
 		for {
-			out, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name), "-S", "-5")
+			full, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name))
 			if err != nil {
 				return fmt.Errorf("poll capture-pane: %w", err)
 			}
+			out := tailLines(trimTrailingBlank(full), confirmWindow)
 			// marker-absent: the injected text's last line no longer
 			// appears anywhere in the tail — the input box was cleared.
 			// Handles full-screen/alt-screen TUIs that redraw with a
@@ -261,6 +282,39 @@ func lastLine(s string) string {
 	return ""
 }
 
+// tailLines returns the last n lines of s. It exists because
+// `tmux capture-pane -S -N` (without a matching -E) is NOT a "last N lines"
+// tail: -S is an absolute offset from the top of the currently visible
+// pane, and without -E the capture runs through to the bottom of the
+// visible screen regardless of N — for a pane taller than N this yields
+// (pane height + N) lines, not N. Pairing it with "-E -1" to bound the end
+// was tried and found unreliable for alternate-screen TUIs (e.g. Claude
+// Code), which sometimes report an empty capture for that range. Capturing
+// generously via -S -N (or with no -S at all) and then trimming to exactly
+// the last n lines here, in Go, sidesteps both problems.
+func tailLines(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
+}
+
+// trimTrailingBlank drops trailing blank lines from s. A captured pane
+// often has unwritten rows below the actual content (padding out to the
+// full terminal height), and those don't count as "the tail" of anything —
+// without trimming them first, tailLines on a lightly-used pane would
+// return mostly (or entirely) blank output instead of the real content
+// sitting above the padding.
+func trimTrailingBlank(s string) string {
+	lines := strings.Split(s, "\n")
+	end := len(lines)
+	for end > 0 && strings.TrimSpace(lines[end-1]) == "" {
+		end--
+	}
+	return strings.Join(lines[:end], "\n")
+}
+
 // nonBlankLineCount counts the non-blank lines in s.
 func nonBlankLineCount(s string) int {
 	n := 0
@@ -272,6 +326,13 @@ func nonBlankLineCount(s string) int {
 	return n
 }
 
+// Capture returns (up to) the last `lines` lines of the pane's actual
+// content. It captures generously via `-S -N` (best-effort extra
+// scrollback — harmless no-op for alternate-screen TUIs that have none),
+// then trims unwritten trailing-blank padding and bounds the result to
+// exactly `lines` in Go; see tailLines and trimTrailingBlank for why doing
+// this client-side is necessary rather than trusting tmux's own -S/-E
+// bounds.
 func (t *tmuxRuntime) Capture(ctx context.Context, h Handle, lines int) (string, error) {
 	if err := validateName(h.Name); err != nil {
 		return "", err
@@ -280,7 +341,7 @@ func (t *tmuxRuntime) Capture(ctx context.Context, h Handle, lines int) (string,
 	if err != nil {
 		return "", fmt.Errorf("capture pane %q: %w", h.Name, err)
 	}
-	return out, nil
+	return tailLines(trimTrailingBlank(out), lines), nil
 }
 
 func (t *tmuxRuntime) Alive(ctx context.Context, h Handle) bool {

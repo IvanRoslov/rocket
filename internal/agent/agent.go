@@ -1,5 +1,24 @@
 package agent
 
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/IvanRoslov/rocket/internal/activity"
+)
+
+// ErrNoSignal indicates the agent adapter could not find any activity
+// signal (e.g. no transcript file) for the given reference.
+var ErrNoSignal = errors.New("no activity signal")
+
+// ActivityRef identifies the agent session/worktree to inspect for
+// activity state.
+type ActivityRef struct {
+	SessionID    string
+	WorktreePath string
+}
+
 // LaunchSpec contains all configuration needed to launch an agent.
 type LaunchSpec struct {
 	SessionID      string
@@ -33,6 +52,12 @@ type Agent interface {
 
 	// Env returns environment variables needed for the agent.
 	Env(spec LaunchSpec) map[string]string
+
+	// Activity returns the raw activity state and last-work timestamp for
+	// the given agent session, based on source signals (e.g. transcript
+	// files). Thresholds (e.g. downgrading Ready to Idle) are applied by
+	// the monitor, not here. Returns ErrNoSignal if no signal is found.
+	Activity(ctx context.Context, ref ActivityRef) (activity.State, time.Time, error)
 }
 
 // builders holds agent constructor functions, populated by agent implementations via Register.
