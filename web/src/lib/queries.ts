@@ -278,6 +278,66 @@ export function useUpdateSettings(): UseMutationResult<Settings, Error, { github
   })
 }
 
+/** `PATCH /v1/repos/{id}`: env/symlinks/post_create. Used by the repo Edit modal (Settings screen). */
+export function useUpdateRepo(): UseMutationResult<
+  Repo,
+  Error,
+  { id: string; env?: Record<string, string>; symlinks?: string[]; post_create?: string[] }
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...body }) => api.patch<Repo>(`/v1/repos/${id}`, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['repos'] })
+    },
+  })
+}
+
+/**
+ * `DELETE /v1/repos/{id}`. The daemon rejects this if the repo is still
+ * referenced by a project's `main`/`linked` — callers should also disable
+ * the Remove button client-side using the same check (Settings > Repositories).
+ */
+export function useDeleteRepo(): UseMutationResult<void, Error, string> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.del<void>(`/v1/repos/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['repos'] })
+    },
+  })
+}
+
+/** `PATCH /v1/projects/{id}`: name/main/linked. Used by the Settings > Project section. */
+export function useUpdateProject(): UseMutationResult<
+  Project,
+  Error,
+  { id: string; name?: string; main?: string; linked?: string[] }
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...body }) => api.patch<Project>(`/v1/projects/${id}`, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+}
+
+/**
+ * `DELETE /v1/projects/{id}`. The daemon rejects this unless every task is
+ * done/cancelled and no sessions are live — callers should also disable the
+ * Delete button client-side using `project.tasks`/`project.live_sessions`.
+ */
+export function useDeleteProject(): UseMutationResult<void, Error, string> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.del<void>(`/v1/projects/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Live invalidation
 // ---------------------------------------------------------------------------

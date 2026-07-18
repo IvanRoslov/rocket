@@ -4,7 +4,7 @@
 // `{error:{code,message}}` on failure.
 
 import { http, HttpResponse } from 'msw'
-import type { Settings } from '../lib/types'
+import type { Project, Repo, Settings } from '../lib/types'
 import {
   githubRepos,
   messages,
@@ -31,8 +31,23 @@ export function resetSettings(): void {
   settingsState = { ...settings }
 }
 
+// Mutable copies of the repos/projects fixtures, written by
+// `PATCH`/`DELETE /v1/repos/{id}` and `/v1/projects/{id}` (Settings screen).
+// Tests that mutate these should call `resetRepos()`/`resetProjects()` in
+// `afterEach` to avoid leaking state into later tests in the same file.
+let reposState: Repo[] = repos.map((r) => ({ ...r, env: { ...r.env }, symlinks: [...r.symlinks], post_create: [...r.post_create] }))
+let projectsState: Project[] = projects.map((p) => ({ ...p, linked: [...p.linked], tasks: { ...p.tasks } }))
+
+export function resetRepos(): void {
+  reposState = repos.map((r) => ({ ...r, env: { ...r.env }, symlinks: [...r.symlinks], post_create: [...r.post_create] }))
+}
+
+export function resetProjects(): void {
+  projectsState = projects.map((p) => ({ ...p, linked: [...p.linked], tasks: { ...p.tasks } }))
+}
+
 export const handlers = [
-  http.get('/v1/projects', () => HttpResponse.json(projects)),
+  http.get('/v1/projects', () => HttpResponse.json(projectsState)),
 
   http.get('/v1/sessions', ({ request }) => {
     const url = new URL(request.url)
@@ -41,7 +56,7 @@ export const handlers = [
     return HttpResponse.json(result)
   }),
 
-  http.get('/v1/repos', () => HttpResponse.json(repos)),
+  http.get('/v1/repos', () => HttpResponse.json(reposState)),
 
   http.get('/v1/system', () => HttpResponse.json(systemInfo)),
 
@@ -208,5 +223,75 @@ export const handlers = [
       tasks: { backlog: 0, in_progress: 0, review: 0, done: 0 },
       created_at: Math.floor(Date.now() / 1000),
     })
+  }),
+
+  // ------------------------------------------------------------------------
+  // Repo/project editing & deletion (Settings screen).
+  // ------------------------------------------------------------------------
+
+  http.patch('/v1/repos/:id', async ({ params, request }) => {
+    const id = params.id as string
+    const repo = reposState.find((r) => r.id === id)
+    if (!repo) {
+      return HttpResponse.json({ error: { code: 'not_found', message: `repo ${id} not found` } }, { status: 404 })
+    }
+    const body = (await request.json()) as Partial<Pick<Repo, 'env' | 'symlinks' | 'post_create'>>
+    Object.assign(repo, body)
+    return HttpResponse.json(repo)
+  }),
+
+  http.delete('/v1/repos/:id', ({ params }) => {
+    const id = params.id as string
+    const repo = reposState.find((r) => r.id === id)
+    if (!repo) {
+      return HttpResponse.json({ error: { code: 'not_found', message: `repo ${id} not found` } }, { status: 404 })
+    }
+    const usedBy = projectsState.filter((p) => p.main === id || p.linked.includes(id))
+    if (usedBy.length > 0) {
+      return HttpResponse.json(
+        {
+          error: {
+            code: 'repo_in_use',
+            message: `repo ${id} is used by project(s): ${usedBy.map((p) => p.id).join(', ')}`,
+          },
+        },
+        { status: 409 },
+      )
+    }
+    reposState = reposState.filter((r) => r.id !== id)
+    return new HttpResponse(null, { status: 204 })
+  }),
+
+  http.patch('/v1/projects/:id', async ({ params, request }) => {
+    const id = params.id as string
+    const project = projectsState.find((p) => p.id === id)
+    if (!project) {
+      return HttpResponse.json({ error: { code: 'not_found', message: `project ${id} not found` } }, { status: 404 })
+    }
+    const body = (await request.json()) as Partial<Pick<Project, 'name' | 'main' | 'linked'>>
+    Object.assign(project, body)
+    return HttpResponse.json(project)
+  }),
+
+  http.delete('/v1/projects/:id', ({ params }) => {
+    const id = params.id as string
+    const project = projectsState.find((p) => p.id === id)
+    if (!project) {
+      return HttpResponse.json({ error: { code: 'not_found', message: `project ${id} not found` } }, { status: 404 })
+    }
+    const openTasks = project.tasks.backlog + project.tasks.in_progress + project.tasks.review
+    if (openTasks > 0 || project.live_sessions > 0) {
+      return HttpResponse.json(
+        {
+          error: {
+            code: 'project_not_closed',
+            message: 'project has open tasks or live sessions',
+          },
+        },
+        { status: 409 },
+      )
+    }
+    projectsState = projectsState.filter((p) => p.id !== id)
+    return new HttpResponse(null, { status: 204 })
   }),
 ]

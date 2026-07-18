@@ -1,0 +1,305 @@
+/* ---------- SettingsScreen ---------- */
+.settings-screen {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 30px 24px 64px;
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 32px;
+  align-items: start;
+}
+.settings-nav {
+  position: sticky;
+  top: 76px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-nav__item {
+  text-align: left;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-btn);
+  cursor: pointer;
+  font: 600 13px var(--font-ui);
+  color: var(--text-3);
+}
+.settings-nav__item--active {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* ---------- Shared section chrome ---------- */
+.settings-section__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.settings-section__title {
+  margin: 0 0 4px;
+  font: 650 22px var(--font-ui);
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.settings-section__subtitle {
+  margin: 0 0 20px;
+  font: 14px var(--font-ui);
+  color: var(--text-3);
+}
+.settings-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.settings-mono {
+  font-family: var(--font-mono);
+}
+.settings-error {
+  margin: 9px 0 0;
+  font: 12.5px var(--font-ui);
+  color: var(--err-text);
+}
+.settings-note {
+  padding: 11px 13px;
+  border-radius: 9px;
+  font: 500 13px var(--font-ui);
+}
+.settings-note--warn {
+  background: var(--warn-bg-2);
+  border: 1px solid var(--warn-border);
+  color: var(--warn-text-2);
+}
+
+/* ---------- Field/form bits ---------- */
+.settings-field__label {
+  display: block;
+  font: 600 12.5px var(--font-ui);
+  margin-bottom: 6px;
+  color: var(--text);
+}
+.settings-field__label--spaced {
+  margin-top: 16px;
+}
+.settings-field__row {
+  display: flex;
+  gap: 9px;
+}
+.settings-field__input {
+  flex: 1;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  font: 14px var(--font-mono);
+  outline: none;
+  background: var(--surface);
+  color: var(--text);
+}
+.settings-field__input--full {
+  font-family: var(--font-ui);
+}
+.settings-field__hint {
+  margin: 9px 0 0;
+  font: 12px var(--font-ui);
+  color: var(--text-4);
+}
+.settings-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: 12.5px var(--font-mono);
+  outline: none;
+  margin-bottom: 14px;
+  resize: vertical;
+  background: var(--surface);
+  color: var(--text);
+}
+.settings-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* ---------- GitHub plate ---------- */
+.settings-github-plate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 13px;
+  background: var(--ok-bg-2);
+  border: 1px solid var(--ok-border);
+  border-radius: 9px;
+  margin-bottom: 18px;
+}
+.settings-github-plate__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex: none;
+}
+.settings-github-plate__label {
+  font: 500 13px var(--font-ui);
+  color: var(--ok-text);
+}
+.settings-github-plate__account {
+  font: 600 13px var(--font-mono);
+  color: var(--ok-text);
+}
+
+/* ---------- Repos table ---------- */
+.settings-repo-list {
+  padding: 0;
+  overflow: hidden;
+}
+.settings-repo-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--divider-2);
+}
+.settings-repo-row:last-child {
+  border-bottom: none;
+}
+.settings-repo-row__main {
+  min-width: 0;
+  flex: 1;
+}
+.settings-repo-row__id-line {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.settings-repo-row__id {
+  font: 600 14px var(--font-mono);
+}
+.settings-repo-row__path {
+  font: 11.5px var(--font-mono);
+  color: var(--text-4);
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-repo-row__used {
+  font: 12px var(--font-ui);
+  color: var(--text-3);
+  width: 180px;
+}
+
+/* ---------- Project chips ---------- */
+.settings-project-card {
+  margin-bottom: 16px;
+}
+.settings-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.settings-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 12.5px var(--font-mono);
+  background: var(--surface-3);
+  padding: 5px 10px;
+  border-radius: 7px;
+  border: none;
+}
+.settings-chip--main {
+  background: var(--accent-selected-bg);
+  color: var(--accent-text);
+}
+.settings-chip__tag {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--accent);
+}
+.settings-chip__remove {
+  cursor: pointer;
+  color: var(--text-4);
+  background: none;
+  border: none;
+  font: inherit;
+  padding: 0;
+}
+.settings-chip--add {
+  font-family: var(--font-ui);
+  background: var(--surface);
+  border: 1px dashed var(--border-hover);
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+/* ---------- Project select ---------- */
+.settings-project-select {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 18px;
+}
+.settings-project-select label {
+  font: 600 12.5px var(--font-ui);
+  color: var(--text-3);
+}
+.settings-project-select select {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: 13px var(--font-ui);
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* ---------- Danger zone ---------- */
+.settings-danger {
+  background: var(--err-bg-2);
+  border: 1px solid var(--err-border);
+  border-radius: var(--radius-panel);
+  padding: 16px 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.settings-danger__body {
+  flex: 1;
+}
+.settings-danger__title {
+  font: 600 13.5px var(--font-ui);
+  color: var(--err-text-2);
+}
+.settings-danger__hint {
+  font: 12.5px var(--font-ui);
+  color: var(--err-text);
+  margin-top: 2px;
+}
+
+/* ---------- Daemon key/value ---------- */
+.settings-kv {
+  padding: 0;
+}
+.settings-kv__row {
+  display: flex;
+  justify-content: space-between;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--divider-2);
+}
+.settings-kv__row:last-child {
+  border-bottom: none;
+}
+.settings-kv__key {
+  font: 500 13px var(--font-ui);
+  color: var(--text-3);
+}
+.settings-kv__val {
+  font: 600 13px var(--font-mono);
+  color: var(--text);
+}

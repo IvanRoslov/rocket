@@ -1,6 +1,7 @@
 import { createBrowserRouter } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
 import { ProjectsScreen } from './screens/projects/ProjectsScreen'
+import { SettingsScreen } from './screens/settings/SettingsScreen'
 import { SystemScreen } from './screens/system/SystemScreen'
 import { WizardScreen } from './screens/newproject/WizardScreen'
 
@@ -12,10 +13,6 @@ function TaskPage() {
   return <div>Task</div>
 }
 
-function SettingsPage() {
-  return <div>Settings</div>
-}
-
 export const router = createBrowserRouter([
   {
     element: <AppShell />,
@@ -25,7 +22,7 @@ export const router = createBrowserRouter([
       { path: '/p/:projectId', element: <KanbanPage /> },
       { path: '/p/:projectId/tasks/:taskId', element: <TaskPage /> },
       { path: '/system', element: <SystemScreen /> },
-      { path: '/settings', element: <SettingsPage /> },
+      { path: '/settings', element: <SettingsScreen /> },
     ],
   },
 ])
