@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -746,4 +747,186 @@ func TestRestoreUnknownSession(t *testing.T) {
 	m, _, _, _, _ := testManager(t)
 	err := m.Restore(context.Background(), "nope")
 	assertValidationCode(t, err, "session_not_found")
+}
+
+// --- slugFromTitle -------------------------------------------------------
+
+func TestSlugFromTitle(t *testing.T) {
+	cases := []struct {
+		name  string
+		title string
+		want  string
+	}{
+		{"simple", "Add login page", "add-login-page"},
+		{"punctuation", "Fix bug: NPE on save!!", "fix-bug-npe-on"},
+		{"unicode (non-ASCII letters stripped as non-alphanumeric)", "Реализовать OAuth-вход", "oauth"},
+		{"long title truncated to 4 words", "one two three four five six", "one-two-three-four"},
+		{"cap at 40 chars", "aaaaaaaaaa bbbbbbbbbb cccccccccc dddddddddd", "aaaaaaaaaa-bbbbbbbbbb-cccccccccc-ddddddd"},
+		{"leading/trailing punctuation", "  !!!Hello, World???  ", "hello-world"},
+		{"empty falls back to empty string", "", ""},
+		{"only punctuation falls back to empty string", "!!!???---", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := slugFromTitle(tc.title)
+			if got != tc.want {
+				t.Errorf("slugFromTitle(%q) = %q, want %q", tc.title, got, tc.want)
+			}
+			if len(got) > 40 {
+				t.Errorf("slugFromTitle(%q) = %q, longer than 40 chars", tc.title, got)
+			}
+		})
+	}
+}
+
+// --- SpawnOrchestrator ---------------------------------------------------
+
+func TestSpawnOrchestratorHappyPath(t *testing.T) {
+	m, st, b, rt, ws := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	proj, err := st.GetProject("proj1")
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+
+	ch, cancel := b.Subscribe()
+	defer cancel()
+
+	task := store.Task{ID: 42, Title: "Add login page", Description: "Users need to log in.", ProjectID: "proj1"}
+
+	sess, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake")
+	if err != nil {
+		t.Fatalf("SpawnOrchestrator: %v", err)
+	}
+
+	if sess.ID != "add-login-page-orch" {
+		t.Errorf("ID = %q, want add-login-page-orch", sess.ID)
+	}
+	if sess.Kind != "orchestrator" {
+		t.Errorf("Kind = %q, want orchestrator", sess.Kind)
+	}
+	if sess.Branch != "orch/add-login-page" {
+		t.Errorf("Branch = %q, want orch/add-login-page", sess.Branch)
+	}
+	if sess.FeatureSlug != "add-login-page" {
+		t.Errorf("FeatureSlug = %q, want add-login-page", sess.FeatureSlug)
+	}
+	if sess.ProjectID != "proj1" || sess.RepoID != "repo1" {
+		t.Errorf("ProjectID/RepoID = %q/%q, want proj1/repo1", sess.ProjectID, sess.RepoID)
+	}
+	if sess.ParentID != "" {
+		t.Errorf("ParentID = %q, want empty", sess.ParentID)
+	}
+	if sess.State != "running" {
+		t.Errorf("State = %q, want running", sess.State)
+	}
+	if sess.WorktreePath != "/fake/wt/add-login-page-orch" {
+		t.Errorf("WorktreePath = %q", sess.WorktreePath)
+	}
+
+	if len(ws.createCalls) != 1 {
+		t.Fatalf("workspace.Create calls = %d, want 1", len(ws.createCalls))
+	}
+	if ws.createCalls[0].branch != "orch/add-login-page" {
+		t.Errorf("workspace.Create branch = %q, want orch/add-login-page", ws.createCalls[0].branch)
+	}
+
+	if len(testFakeAgent.setupCalls) != 1 {
+		t.Fatalf("SetupWorkspace calls = %d, want 1", len(testFakeAgent.setupCalls))
+	}
+	spec := testFakeAgent.setupCalls[0]
+	if !strings.Contains(spec.SystemPrompt, "add-login-page") {
+		t.Errorf("SystemPrompt missing feature slug: %s", spec.SystemPrompt)
+	}
+	if !strings.Contains(spec.SystemPrompt, "42") {
+		t.Errorf("SystemPrompt missing task id: %s", spec.SystemPrompt)
+	}
+	if !strings.Contains(spec.FirstMessage, "Add login page") {
+		t.Errorf("FirstMessage missing task title: %s", spec.FirstMessage)
+	}
+	if !strings.Contains(spec.FirstMessage, "Users need to log in.") {
+		t.Errorf("FirstMessage missing task description: %s", spec.FirstMessage)
+	}
+
+	if len(rt.created) != 1 {
+		t.Fatalf("runtime.Create calls = %d, want 1", len(rt.created))
+	}
+
+	events := drainEvents(ch)
+	var types []string
+	for _, e := range events {
+		types = append(types, e.Type)
+	}
+	wantOrder := []string{"session.spawned", "session.state_changed"}
+	if len(types) != len(wantOrder) {
+		t.Fatalf("event types = %v, want %v", types, wantOrder)
+	}
+}
+
+func TestSpawnOrchestratorEmptyTitleFallsBackToTaskID(t *testing.T) {
+	m, st, _, _, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	proj, err := st.GetProject("proj1")
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+
+	task := store.Task{ID: 7, Title: "!!!", Description: "d", ProjectID: "proj1"}
+
+	sess, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake")
+	if err != nil {
+		t.Fatalf("SpawnOrchestrator: %v", err)
+	}
+	if sess.ID != "task-7-orch" {
+		t.Errorf("ID = %q, want task-7-orch", sess.ID)
+	}
+	if sess.FeatureSlug != "task-7" {
+		t.Errorf("FeatureSlug = %q, want task-7", sess.FeatureSlug)
+	}
+}
+
+func TestSpawnOrchestratorSlugCollisionGetsSuffix(t *testing.T) {
+	m, st, _, _, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	proj, err := st.GetProject("proj1")
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+
+	// Pre-seed a session already carrying feature_slug "add-login-page"
+	// (from an unrelated worker session, not necessarily an orchestrator).
+	if err := st.AddSession(store.Session{
+		ID: "add-login-page-mytask", Kind: "worker", ProjectID: "proj1", RepoID: "repo1",
+		FeatureSlug: "add-login-page", Agent: "fake", Branch: "feature/add-login-page/mytask",
+		WorktreePath: "/tmp/wt", TmuxName: "add-login-page-mytask", State: "running",
+	}); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+
+	task := store.Task{ID: 1, Title: "Add login page", Description: "d", ProjectID: "proj1"}
+
+	sess, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake")
+	if err != nil {
+		t.Fatalf("SpawnOrchestrator: %v", err)
+	}
+	if sess.ID != "add-login-page-2-orch" {
+		t.Errorf("ID = %q, want add-login-page-2-orch", sess.ID)
+	}
+	if sess.FeatureSlug != "add-login-page-2" {
+		t.Errorf("FeatureSlug = %q, want add-login-page-2", sess.FeatureSlug)
+	}
+}
+
+func TestSpawnOrchestratorAgentUnknown(t *testing.T) {
+	m, st, _, _, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	proj, err := st.GetProject("proj1")
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+
+	task := store.Task{ID: 1, Title: "Add login page", Description: "d", ProjectID: "proj1"}
+
+	_, err = m.SpawnOrchestrator(context.Background(), task, proj, "nope")
+	assertValidationCode(t, err, "agent_unknown")
 }

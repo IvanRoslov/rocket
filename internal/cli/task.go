@@ -81,8 +81,61 @@ func newTaskCmd() *cobra.Command {
 	cmd.AddCommand(newTaskShowCmd())
 	cmd.AddCommand(newTaskMoveCmd())
 	cmd.AddCommand(newTaskCancelCmd())
+	cmd.AddCommand(newTaskStartCmd())
 	cmd.AddCommand(newTaskDocCmd())
 	cmd.AddCommand(newTaskLogCmd())
+	return cmd
+}
+
+// taskStartResponse is the JSON shape of POST /v1/tasks/{id}/start.
+type taskStartResponse struct {
+	TaskID      int64  `json:"task_id"`
+	FeatureSlug string `json:"feature_slug"`
+	SessionID   string `json:"session_id"`
+}
+
+func newTaskStartCmd() *cobra.Command {
+	var agentName string
+
+	cmd := &cobra.Command{
+		Use:   "start <id>",
+		Short: "Запустить оркестратора для задачи",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return &usageError{message: "usage: rocket task start <id> [--agent <name>]"}
+			}
+
+			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
+				return &usageError{message: "invalid task id"}
+			}
+
+			c, _, err := connect(true)
+			if err != nil {
+				return err
+			}
+
+			var reqBody map[string]any
+			if agentName != "" {
+				reqBody = map[string]any{"agent": agentName}
+			}
+
+			path := apiPath("v1", "tasks", args[0], "start")
+			var resp taskStartResponse
+			if err := c.Post(path, reqBody, &resp); err != nil {
+				return err
+			}
+
+			if flags.JSON {
+				return printJSON(cmd, resp)
+			}
+			cmd.Printf("TASK=#%d\n", resp.TaskID)
+			cmd.Printf("SLUG=%s\n", resp.FeatureSlug)
+			cmd.Printf("SESSION=%s\n", resp.SessionID)
+			cmd.Printf("attach: rocket attach %s\n", resp.SessionID)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&agentName, "agent", "", "имя агента (по умолчанию — из конфига)")
 	return cmd
 }
 

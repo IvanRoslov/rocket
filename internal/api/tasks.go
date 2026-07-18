@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -151,6 +152,9 @@ func registerTaskRoutes(mux *http.ServeMux, d Deps) {
 	})
 	mux.HandleFunc("POST /v1/tasks/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
 		handlePostTaskCancel(w, r, d)
+	})
+	mux.HandleFunc("POST /v1/tasks/{id}/start", func(w http.ResponseWriter, r *http.Request) {
+		handlePostTaskStart(w, r, d)
 	})
 	mux.HandleFunc("GET /v1/tasks/{id}/docs", func(w http.ResponseWriter, r *http.Request) {
 		handleGetTaskDocs(w, r, d)
@@ -541,6 +545,118 @@ func killTaskSessions(ctx context.Context, d Deps, taskIDs []int64) error {
 		}
 	}
 	return nil
+}
+
+// isSessionTerminal reports whether state is one of the terminal session
+// states (killed/done/errored) — i.e. no live orchestrator is running for it.
+func isSessionTerminal(state string) bool {
+	return state == "killed" || state == "done" || state == "errored"
+}
+
+type postTaskStartRequest struct {
+	Agent string `json:"agent"`
+}
+
+// handlePostTaskStart spawns an orchestrator for a root, backlog task,
+// moving it to in_progress. Only the human user may start a task — agent
+// callers get 403. Root-ness, backlog status, and the absence of an
+// already-live orchestrator session on this task are all preconditions,
+// checked before spawning.
+func handlePostTaskStart(w http.ResponseWriter, r *http.Request, d Deps) {
+	id, ok := parseTaskID(w, r)
+	if !ok {
+		return
+	}
+	task, ok := getTaskOr404(w, d, id)
+	if !ok {
+		return
+	}
+
+	caller, err := callerSession(r, d.Store)
+	if writeCallerErr(w, err) {
+		return
+	}
+	if caller != nil {
+		writeErr(w, http.StatusForbidden, "forbidden", "only the human user may start a task")
+		return
+	}
+
+	if task.ParentID != 0 {
+		writeErr(w, http.StatusBadRequest, "not_root_task", "only root tasks can be started")
+		return
+	}
+	if task.Status != "backlog" {
+		writeErr(w, http.StatusConflict, "task_not_startable", "task must be in backlog to start")
+		return
+	}
+
+	if task.SessionID != "" {
+		sess, err := d.Store.GetSession(task.SessionID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		if err == nil && !isSessionTerminal(sess.State) {
+			writeErr(w, http.StatusConflict, "already_started", "task already has a live orchestrator session")
+			return
+		}
+	}
+
+	project, err := d.Store.GetProject(task.ProjectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, http.StatusBadRequest, "project_not_found", "project not found: "+task.ProjectID)
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	var req postTaskStartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		writeErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+	agentName := req.Agent
+	if agentName == "" {
+		agentName = d.Cfg.DefaultAgent
+	}
+
+	sess, err := d.Manager.SpawnOrchestrator(r.Context(), task, project, agentName)
+	if err != nil {
+		writeManagerErr(w, err)
+		return
+	}
+
+	task.FeatureSlug = sess.FeatureSlug
+	task.SessionID = sess.ID
+	if err := d.Store.UpdateTask(task); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	from := task.Status
+	if err := d.Store.UpdateTaskStatus(task.ID, "in_progress"); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	d.Bus.Publish("task.status_changed", sess.ID, map[string]any{
+		"task_id": task.ID, "from": from, "to": "in_progress", "by": "system",
+	})
+	if _, err := d.Store.AddTaskLog(store.TaskLogEntry{
+		TaskID: task.ID,
+		Kind:   "status",
+		Body:   fmt.Sprintf("status: %s → in_progress (by system)", from),
+	}); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"task_id":      task.ID,
+		"feature_slug": sess.FeatureSlug,
+		"session_id":   sess.ID,
+	})
 }
 
 // taskDocResponse is the JSON shape of a task doc as returned by the API.

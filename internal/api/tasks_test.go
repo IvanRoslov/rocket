@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -944,6 +945,184 @@ func TestPostTaskLogNotFound(t *testing.T) {
 	srv := newTestServer(t, d)
 
 	resp := postJSON(t, srv.URL+"/v1/tasks/999/log", map[string]any{"kind": "note", "body": "x"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+// --- POST /v1/tasks/{id}/start ------------------------------------------
+
+func TestPostTaskStartHappyPath(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+
+	id, err := d.Store.AddTask(store.Task{Title: "Add login page", Description: "desc", ProjectID: "proj1"})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	resp := postJSON(t, srv.URL+"/v1/tasks/"+itoa(id)+"/start", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+
+	var body struct {
+		TaskID      int64  `json:"task_id"`
+		FeatureSlug string `json:"feature_slug"`
+		SessionID   string `json:"session_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.TaskID != id {
+		t.Errorf("task_id = %d, want %d", body.TaskID, id)
+	}
+	if body.FeatureSlug != "add-login-page" {
+		t.Errorf("feature_slug = %q, want add-login-page", body.FeatureSlug)
+	}
+	if body.SessionID != "add-login-page-orch" {
+		t.Errorf("session_id = %q, want add-login-page-orch", body.SessionID)
+	}
+
+	task, err := d.Store.GetTask(id)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.Status != "in_progress" {
+		t.Errorf("task status = %q, want in_progress", task.Status)
+	}
+	if task.FeatureSlug != "add-login-page" {
+		t.Errorf("task feature_slug = %q, want add-login-page", task.FeatureSlug)
+	}
+	if task.SessionID != "add-login-page-orch" {
+		t.Errorf("task session_id = %q, want add-login-page-orch", task.SessionID)
+	}
+}
+
+func TestPostTaskStartAgentCallerForbidden(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+	addTestSession(t, d, "orch-1", "orchestrator", "proj1")
+
+	id, err := d.Store.AddTask(store.Task{Title: "T", ProjectID: "proj1"})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/tasks/"+itoa(id)+"/start", nil)
+	req.Header.Set(sessionHeader, "orch-1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	if eb := decodeErr(t, resp); eb.Error.Code != "forbidden" {
+		t.Errorf("code = %q, want forbidden", eb.Error.Code)
+	}
+}
+
+func TestPostTaskStartNonRootTaskRejected(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+
+	rootID, err := d.Store.AddTask(store.Task{Title: "Root", ProjectID: "proj1"})
+	if err != nil {
+		t.Fatalf("AddTask root: %v", err)
+	}
+	subID, err := d.Store.AddTask(store.Task{Title: "Sub", ProjectID: "proj1", ParentID: rootID})
+	if err != nil {
+		t.Fatalf("AddTask sub: %v", err)
+	}
+
+	resp := postJSON(t, srv.URL+"/v1/tasks/"+itoa(subID)+"/start", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if eb := decodeErr(t, resp); eb.Error.Code != "not_root_task" {
+		t.Errorf("code = %q, want not_root_task", eb.Error.Code)
+	}
+}
+
+func TestPostTaskStartNonBacklogRejected(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+
+	id, err := d.Store.AddTask(store.Task{Title: "T", ProjectID: "proj1"})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+	if err := d.Store.UpdateTaskStatus(id, "in_progress"); err != nil {
+		t.Fatalf("UpdateTaskStatus: %v", err)
+	}
+
+	resp := postJSON(t, srv.URL+"/v1/tasks/"+itoa(id)+"/start", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	if eb := decodeErr(t, resp); eb.Error.Code != "task_not_startable" {
+		t.Errorf("code = %q, want task_not_startable", eb.Error.Code)
+	}
+}
+
+func TestPostTaskStartAlreadyStartedRejected(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+	liveSess := addTestSession(t, d, "orch-live", "orchestrator", "proj1")
+
+	id, err := d.Store.AddTask(store.Task{Title: "T", ProjectID: "proj1", SessionID: liveSess.ID})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	resp := postJSON(t, srv.URL+"/v1/tasks/"+itoa(id)+"/start", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	if eb := decodeErr(t, resp); eb.Error.Code != "already_started" {
+		t.Errorf("code = %q, want already_started", eb.Error.Code)
+	}
+}
+
+func TestPostTaskStartAllowedAfterPriorOrchestratorKilled(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+	deadSess := addTestSession(t, d, "old-orch", "orchestrator", "proj1")
+	deadSess.State = "killed"
+	if err := d.Store.UpdateSession(deadSess); err != nil {
+		t.Fatalf("UpdateSession: %v", err)
+	}
+
+	id, err := d.Store.AddTask(store.Task{Title: "T", ProjectID: "proj1", SessionID: deadSess.ID})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	resp := postJSON(t, srv.URL+"/v1/tasks/"+itoa(id)+"/start", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+}
+
+func TestPostTaskStartNotFound(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+
+	resp := postJSON(t, srv.URL+"/v1/tasks/999/start", nil)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)

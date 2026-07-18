@@ -48,6 +48,32 @@ func TestTaskAddDescMutuallyExclusive(t *testing.T) {
 	}
 }
 
+// TestTaskStartUsage tests usage violations for task start.
+func TestTaskStartUsage(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"no args", []string{}},
+		{"too many args", []string{"1", "extra"}},
+		{"non-numeric id", []string{"abc"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newTaskStartCmd()
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Errorf("expected error for args %v", tt.args)
+			}
+			var usageErr *usageError
+			if !errors.As(err, &usageErr) {
+				t.Errorf("expected usageError, got %T: %v", err, err)
+			}
+		})
+	}
+}
+
 // TestTaskLsUsage tests usage violations for task ls.
 func TestTaskLsUsage(t *testing.T) {
 	tests := []struct {
