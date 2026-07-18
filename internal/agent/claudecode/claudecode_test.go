@@ -2,9 +2,11 @@ package claudecode
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/IvanRoslov/rocket/internal/agent"
@@ -541,6 +543,72 @@ func TestSetupWorkspaceTrustPreservesExistingClaudeJSON(t *testing.T) {
 	other := projects["/some/other/path"].(map[string]any)
 	if tools, _ := other["allowedTools"].([]any); len(tools) != 1 || tools[0] != "Bash" {
 		t.Errorf("existing project entry was clobbered: %+v", other)
+	}
+}
+
+// TestTrustWorktreeConcurrentCallsAllEntriesPresent races 10 concurrent
+// trustWorktree calls, each for a distinct worktree, against the same
+// ~/.claude.json. Without a lock serializing the read-modify-write, later
+// writers can clobber earlier ones' project entries entirely (last-writer-
+// wins on the whole file, not just the one project key). With the flock
+// guard, every entry must survive.
+func TestTrustWorktreeConcurrentCallsAllEntriesPresent(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	const n = 10
+	worktrees := make([]string, n)
+	for i := 0; i < n; i++ {
+		wt := filepath.Join(t.TempDir(), fmt.Sprintf("wt-%d", i))
+		if err := os.MkdirAll(wt, 0o755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		worktrees[i] = wt
+	}
+
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i, wt := range worktrees {
+		wg.Add(1)
+		go func(i int, wt string) {
+			defer wg.Done()
+			errs[i] = trustWorktree(wt)
+		}(i, wt)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("trustWorktree(%d) failed: %v", i, err)
+		}
+	}
+
+	data, err := os.ReadFile(filepath.Join(fakeHome, ".claude.json"))
+	if err != nil {
+		t.Fatalf("read ~/.claude.json: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("decode ~/.claude.json: %v", err)
+	}
+	projects, ok := doc["projects"].(map[string]any)
+	if !ok {
+		t.Fatalf("~/.claude.json missing projects object: %+v", doc)
+	}
+
+	for _, wt := range worktrees {
+		resolved, err := filepath.EvalSymlinks(wt)
+		if err != nil {
+			t.Fatalf("EvalSymlinks(%s): %v", wt, err)
+		}
+		entry, ok := projects[resolved].(map[string]any)
+		if !ok {
+			t.Errorf("projects missing entry for %q (lost to a concurrent write race)", resolved)
+			continue
+		}
+		if trusted, _ := entry["hasTrustDialogAccepted"].(bool); !trusted {
+			t.Errorf("entry for %q: hasTrustDialogAccepted = %v, want true", resolved, entry["hasTrustDialogAccepted"])
+		}
 	}
 }
 

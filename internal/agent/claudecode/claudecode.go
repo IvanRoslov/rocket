@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 
 	"github.com/IvanRoslov/rocket/internal/agent"
 )
@@ -260,6 +261,26 @@ func trustWorktree(worktreePath string) error {
 
 	path := filepath.Join(home, ".claude.json")
 
+	// Guard the read-modify-write against concurrent trustWorktree calls
+	// (e.g. multiple sessions spawning at once): without this, two
+	// goroutines can both read the file, each add their own project entry
+	// in memory, and the second writer's rename clobbers the first
+	// goroutine's entry entirely.
+	unlock, err := lockClaudeJSON(path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	// Preserve the existing file's permission bits; default to 0644 for a
+	// brand-new file.
+	perm := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		perm = info.Mode().Perm()
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
 	doc := map[string]json.RawMessage{}
 	if data, err := os.ReadFile(path); err == nil {
 		if len(data) > 0 {
@@ -319,11 +340,32 @@ func trustWorktree(worktreePath string) error {
 		os.Remove(tempPath)
 		return fmt.Errorf("close temp claude.json file: %w", err)
 	}
-	if err := os.Chmod(tempPath, 0o644); err != nil {
+	if err := os.Chmod(tempPath, perm); err != nil {
 		os.Remove(tempPath)
 		return fmt.Errorf("chmod temp claude.json file: %w", err)
 	}
 	return os.Rename(tempPath, path)
+}
+
+// lockClaudeJSON acquires an exclusive flock on a sidecar lock file next to
+// path (path + ".rocket-lock"), serializing concurrent read-modify-write
+// cycles against ~/.claude.json across goroutines/processes. The caller
+// must invoke the returned func (typically via defer) to release the lock
+// and close the file descriptor.
+func lockClaudeJSON(path string) (func(), error) {
+	lockPath := path + ".rocket-lock"
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open lock file %s: %w", lockPath, err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("flock %s: %w", lockPath, err)
+	}
+	return func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}, nil
 }
 
 // LaunchCommand builds the command to launch claude with the given spec.
