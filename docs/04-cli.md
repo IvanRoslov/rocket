@@ -14,6 +14,8 @@ rocket task start <id> [--agent <name>]          # назначить оркес
 rocket task move <id> <status>
 rocket task doc put <id> --kind spec|plan|report --title "..." --file <f.md>
 rocket task log <id> --kind decision|problem|note "<текст>"
+rocket task questions [<id>] [--open]            # вопросы, ждущие ответа
+rocket task answer <question-id> "<ответ>"       # ответ уходит оркестратору
 rocket task cancel <id>
     Подробности — 12-tasks.md.
 
@@ -73,6 +75,11 @@ rocket spawn --task <name> --repo <id> --prompt "<бриф>" [--agent <name>]
 
 rocket task ... (см. выше)
     Оркестратор ведёт доки/журнал своей задачи, воркер — своей подзадачи.
+
+rocket task ask <id> "<вопрос>" [--context <md>]
+    Только для оркестраторов: вопрос пользователю через задачу. Пользователь
+    увидит его в дашборде/CLI; ответ придёт входящим сообщением
+    "[task #N answer QM] ...".
 
 rocket send <session> "<текст>"
     То же, что у пользователя; from заполняется из ROCKET_SESSION_ID,

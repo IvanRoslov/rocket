@@ -78,6 +78,9 @@ HTTP+JSON, префикс `/v1`. Листенеры: Unix-сокет `~/.rocket/
 | PUT | `/v1/tasks/{id}/docs` | `{kind, title, body}` — создаёт новую версию |
 | GET | `/v1/tasks/{id}/log` | Журнал; `?kind=` |
 | POST | `/v1/tasks/{id}/log` | `{kind, body}` |
+| GET | `/v1/tasks/{id}/questions` | Вопросы задачи; `?status=open` |
+| POST | `/v1/tasks/{id}/questions` | `{body, context?}` — только оркестратор задачи; событие `task.question_asked` |
+| POST | `/v1/questions/{id}/answer` | `{body}` — сохраняет ответ и ставит его в очередь сообщений оркестратору (`[task #N answer QM] ...`); событие `task.question_answered` |
 
 Права: вызовы от агентов (определяются по `from`/env сессии) ограничены — оркестратор пишет только в свою задачу и её подзадачи, воркер — только в свою подзадачу. Автопереходы статусов (spawn → подзадача `in_progress`, PR open → `review`, merged → `done`) делает демон и записывает в `task_log` с `kind=status`.
 
@@ -96,7 +99,7 @@ HTTP+JSON, префикс `/v1`. Листенеры: Unix-сокет `~/.rocket/
 | GET | `/v1/events?since=<id>&limit=N&session=` | Журнал |
 | GET | `/v1/events/stream` | SSE; `?session=` — фильтр |
 
-Формат события: `{id, ts, type, session_id?, data{}}`. Типы: `session.spawned|state_changed|activity_changed|killed|restored`, `message.queued|delivered|failed`, `pr.opened|ci_changed|merged`, `orchestrator.heartbeat_sent`, `workspace.branch_collision|cleanup`, `repo.clone_started|clone_done|clone_failed` и т.д.
+Формат события: `{id, ts, type, session_id?, data{}}`. Типы: `session.spawned|state_changed|activity_changed|killed|restored`, `message.queued|delivered|failed`, `pr.opened|ci_changed|merged`, `orchestrator.heartbeat_sent`, `workspace.branch_collision|cleanup`, `repo.clone_started|clone_done|clone_failed`, `task.question_asked|question_answered` и т.д.
 
 ## Внутренние (для hook-скриптов агентов)
 

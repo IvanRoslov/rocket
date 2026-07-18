@@ -137,6 +137,18 @@ CREATE TABLE task_log (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE task_questions (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id     INTEGER NOT NULL REFERENCES tasks(id),
+  asked_by    TEXT NOT NULL,                 -- session id оркестратора
+  body        TEXT NOT NULL,
+  context     TEXT,                          -- опциональный markdown-контекст
+  status      TEXT NOT NULL DEFAULT 'open',  -- open|answered
+  answer      TEXT,
+  asked_at    INTEGER NOT NULL,
+  answered_at INTEGER
+);
+
 CREATE TABLE events (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   ts         INTEGER NOT NULL,
@@ -148,6 +160,7 @@ CREATE TABLE events (
 CREATE INDEX idx_tasks_status ON tasks(status, parent_id);
 CREATE INDEX idx_task_docs ON task_docs(task_id, kind);
 CREATE INDEX idx_task_log ON task_log(task_id, id);
+CREATE INDEX idx_task_questions ON task_questions(task_id, status);
 CREATE INDEX idx_sessions_state ON sessions(state);
 CREATE INDEX idx_sessions_feature ON sessions(feature_slug);
 CREATE INDEX idx_messages_to ON messages(to_session, status);

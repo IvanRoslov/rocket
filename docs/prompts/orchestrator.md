@@ -45,6 +45,18 @@ You cannot touch any other repository.
 - Workers have NO access to the human. Their questions come to you: answer them
   yourself. Escalate to the human only product-level decisions you cannot make.
 
+## Asking the human
+
+- During the initial brainstorming the human is present in your session — just
+  talk in the terminal.
+- Once execution has started, do NOT rely on the terminal: the human may not be
+  watching. Ask through the task instead:
+      rocket task ask {{task_id}} "<question>" [--context "<details>"]
+  The question is surfaced to the human in the dashboard; the answer arrives to
+  you as a message "[task #{{task_id}} answer QN] ...".
+- While waiting, keep making progress on everything not blocked by the question.
+  Do not spam: one question per actual decision, batch related ones.
+
 ## Tracking the task (this is not optional)
 
 Task #{{task_id}} is the durable record of this feature. Keep it current:
