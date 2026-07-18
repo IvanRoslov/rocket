@@ -359,12 +359,13 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 			q.deliverSuccess(msg)
 			return
 		case errors.Is(err, runtime.ErrSubmitUnconfirmed):
-			// Capture generously (not just a handful of lines): the marker
-			// may sit well above the pane's very bottom rows by the time we
-			// get here, and a too-narrow capture would spuriously look
-			// "marker gone" or fail to see growth. See tmux.Inject's
-			// tailLines doc for why a small fixed tail is unreliable here.
-			out, capErr := q.rt.Capture(ctx, handle, 200)
+			// Mirror Inject's own confirmWindow: a narrow tail of the
+			// pane's bottom rows (input line + footer chrome). Chat-style
+			// TUIs echo a submitted message permanently into a scrolling
+			// history area above this window, so a wide/whole-pane capture
+			// would see the marker forever and could never conclude
+			// "delivered" — see tmux.Inject's confirmWindow doc.
+			out, capErr := q.rt.Capture(ctx, handle, 5)
 			if capErr == nil && markerPresent(out, text) {
 				retryEligible = true
 			} else {
