@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -29,13 +30,24 @@ type Client struct {
 	token   string
 	http    *http.Client
 
+	// mu guards cache. cache is unbounded for the lifetime of the process:
+	// it is keyed by distinct request URLs (which include query strings,
+	// e.g. page number), so its size is bounded by the number of distinct
+	// URLs this client is asked to poll, not by request volume over time.
 	mu    sync.Mutex
 	cache map[string]cacheEntry
 }
 
+// cacheEntry holds everything needed to answer a subsequent request without
+// hitting the network: the ETag to send as If-None-Match, the cached body,
+// and the Link header from the original 200 response. The Link header is
+// cached because GitHub does not resend it on a 304 Not Modified response,
+// so without caching it, pagination would silently truncate to one page
+// whenever a request hit the ETag cache.
 type cacheEntry struct {
 	etag string
 	body []byte
+	link string
 }
 
 // New creates a Client for the given API base URL (trailing slash
@@ -70,9 +82,22 @@ type prAPI struct {
 	Number int    `json:"number"`
 	State  string `json:"state"`
 	Merged bool   `json:"merged"`
-	Head   struct {
+	// MergedAt is only used to derive Merged when the `merged` field itself
+	// is absent (see merged()); GitHub's list-PRs endpoint never populates
+	// `merged`, only the single-PR endpoint does.
+	MergedAt string `json:"merged_at"`
+	Head     struct {
 		SHA string `json:"sha"`
 	} `json:"head"`
+}
+
+// merged reports whether the PR is merged. The list-PRs endpoint (used by
+// FindPRByBranch) never populates the `merged` field, so it is derived from
+// merged_at being non-empty on a closed PR. The single-PR endpoint (used by
+// GetPR) does populate `merged` directly, but we still OR in the merged_at
+// derivation for consistency between the two code paths.
+func (p prAPI) merged() bool {
+	return p.Merged || (p.State == "closed" && p.MergedAt != "")
 }
 
 type reviewAPI struct {
@@ -83,25 +108,30 @@ type reviewAPI struct {
 	SubmittedAt string `json:"submitted_at"`
 }
 
+type checkRunAPI struct {
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+}
+
 type checkRunsResp struct {
-	TotalCount int `json:"total_count"`
-	CheckRuns  []struct {
-		Status     string `json:"status"`
-		Conclusion string `json:"conclusion"`
-	} `json:"check_runs"`
+	TotalCount int           `json:"total_count"`
+	CheckRuns  []checkRunAPI `json:"check_runs"`
 }
 
 // doGet performs an authenticated GET, transparently handling the ETag
 // cache (sending If-None-Match and reusing the cached body on 304) and
-// classifying rate-limit/server errors as ErrBackoff.
-func (c *Client) doGet(ctx context.Context, url string) (status int, body []byte, header http.Header, err error) {
+// classifying rate-limit/server errors as ErrBackoff. It returns the Link
+// response header (used for pagination) alongside the body: on a 304, the
+// Link cached from the original 200 response is returned, since GitHub does
+// not resend it on a 304.
+func (c *Client) doGet(ctx context.Context, url string) (status int, body []byte, link string, err error) {
 	if c.token == "" {
-		return 0, nil, nil, ErrNoToken
+		return 0, nil, "", ErrNoToken
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return 0, nil, nil, err
+		return 0, nil, "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/vnd.github+json")
@@ -115,35 +145,57 @@ func (c *Client) doGet(ctx context.Context, url string) (status int, body []byte
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return 0, nil, nil, err
+		return 0, nil, "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotModified {
-		return http.StatusOK, entry.body, resp.Header, nil
+		return http.StatusOK, entry.body, entry.link, nil
 	}
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, nil, nil, err
+		return 0, nil, "", err
 	}
 
 	if resp.StatusCode == http.StatusForbidden && resp.Header.Get("X-RateLimit-Remaining") == "0" {
-		return 0, nil, nil, fmt.Errorf("%w: rate limited", ErrBackoff)
+		return 0, nil, "", fmt.Errorf("%w: rate limited", ErrBackoff)
 	}
 	if resp.StatusCode >= 500 {
-		return 0, nil, nil, fmt.Errorf("%w: server error %d", ErrBackoff, resp.StatusCode)
+		return 0, nil, "", fmt.Errorf("%w: server error %d", ErrBackoff, resp.StatusCode)
 	}
 
+	respLink := resp.Header.Get("Link")
 	if resp.StatusCode == http.StatusOK {
 		if etag := resp.Header.Get("ETag"); etag != "" {
 			c.mu.Lock()
-			c.cache[url] = cacheEntry{etag: etag, body: respBody}
+			c.cache[url] = cacheEntry{etag: etag, body: respBody, link: respLink}
 			c.mu.Unlock()
 		}
 	}
 
-	return resp.StatusCode, respBody, resp.Header, nil
+	return resp.StatusCode, respBody, respLink, nil
+}
+
+// getPaginated performs a series of authenticated GETs starting at url,
+// invoking decodePage with the body of each page in turn and following the
+// Link rel="next" header until pagination is exhausted or an error occurs.
+func (c *Client) getPaginated(ctx context.Context, startURL string, decodePage func(body []byte) error) error {
+	pageURL := startURL
+	for pageURL != "" {
+		status, body, link, err := c.doGet(ctx, pageURL)
+		if err != nil {
+			return err
+		}
+		if status != http.StatusOK {
+			return fmt.Errorf("github: unexpected status %d for %s", status, pageURL)
+		}
+		if err := decodePage(body); err != nil {
+			return err
+		}
+		pageURL = nextLink(link)
+	}
+	return nil
 }
 
 // GetUser returns the authenticated user's login.
@@ -183,21 +235,16 @@ func nextLink(link string) string {
 // following pagination via the Link response header.
 func (c *Client) ListRepos(ctx context.Context) ([]Repo, error) {
 	var repos []Repo
-	url := c.baseURL + "/user/repos?per_page=100"
-	for url != "" {
-		status, body, header, err := c.doGet(ctx, url)
-		if err != nil {
-			return nil, err
-		}
-		if status != http.StatusOK {
-			return nil, fmt.Errorf("github: ListRepos: unexpected status %d", status)
-		}
+	err := c.getPaginated(ctx, c.baseURL+"/user/repos?per_page=100", func(body []byte) error {
 		var page []Repo
 		if err := json.Unmarshal(body, &page); err != nil {
-			return nil, err
+			return err
 		}
 		repos = append(repos, page...)
-		url = nextLink(header.Get("Link"))
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("github: ListRepos: %w", err)
 	}
 	return repos, nil
 }
@@ -205,8 +252,9 @@ func (c *Client) ListRepos(ctx context.Context) ([]Repo, error) {
 // FindPRByBranch finds the pull request whose head is owner:branch in
 // owner/repo. Returns (nil, nil) if none exists.
 func (c *Client) FindPRByBranch(ctx context.Context, owner, repo, branch string) (*PR, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/pulls?head=%s:%s&state=all&per_page=1", c.baseURL, owner, repo, owner, branch)
-	status, body, _, err := c.doGet(ctx, url)
+	reqURL := fmt.Sprintf("%s/repos/%s/%s/pulls?head=%s:%s&state=all&per_page=1",
+		c.baseURL, owner, repo, url.QueryEscape(owner), url.QueryEscape(branch))
+	status, body, _, err := c.doGet(ctx, reqURL)
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +272,7 @@ func (c *Client) FindPRByBranch(ctx context.Context, owner, repo, branch string)
 		return nil, nil
 	}
 	p := prs[0]
-	return &PR{Number: p.Number, State: p.State, Merged: p.Merged, HeadSHA: p.Head.SHA}, nil
+	return &PR{Number: p.Number, State: p.State, Merged: p.merged(), HeadSHA: p.Head.SHA}, nil
 }
 
 // GetPR fetches a pull request by number, along with its aggregated
@@ -243,23 +291,24 @@ func (c *Client) GetPR(ctx context.Context, owner, repo string, number int) (*PR
 		return nil, err
 	}
 
-	reviewsURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews", c.baseURL, owner, repo, number)
-	rstatus, rbody, _, err := c.doGet(ctx, reviewsURL)
-	if err != nil {
-		return nil, err
-	}
-	if rstatus != http.StatusOK {
-		return nil, fmt.Errorf("github: GetPR: unexpected status %d for PR #%d reviews", rstatus, number)
-	}
+	reviewsURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews?per_page=100", c.baseURL, owner, repo, number)
 	var reviews []reviewAPI
-	if err := json.Unmarshal(rbody, &reviews); err != nil {
-		return nil, err
+	err = c.getPaginated(ctx, reviewsURL, func(body []byte) error {
+		var page []reviewAPI
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		reviews = append(reviews, page...)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("github: GetPR: reviews for PR #%d: %w", number, err)
 	}
 
 	return &PR{
 		Number:         p.Number,
 		State:          p.State,
-		Merged:         p.Merged,
+		Merged:         p.merged(),
 		HeadSHA:        p.Head.SHA,
 		ReviewDecision: reviewDecision(reviews),
 	}, nil
@@ -271,6 +320,11 @@ func (c *Client) GetPR(ctx context.Context, owner, repo string, number int) (*PR
 // there is at least one reviewer and all latest reviews are APPROVED, the
 // decision is "approved". Otherwise "".
 func reviewDecision(reviews []reviewAPI) string {
+	// SubmittedAt is an ISO-8601 timestamp, so lexical string comparison
+	// sorts correctly. On a tie (identical SubmittedAt for the same
+	// reviewer, which GitHub does not produce in practice), ">=" picks the
+	// review encountered later in the slice, which matches the order the
+	// API returns reviews in (chronological, so effectively a no-op).
 	latest := make(map[string]reviewAPI)
 	for _, r := range reviews {
 		existing, ok := latest[r.User.Login]
@@ -316,28 +370,29 @@ var failingConclusions = map[string]bool{
 // CheckRollup summarizes the check-run status for a commit SHA as one of
 // "passing", "pending" or "failing".
 func (c *Client) CheckRollup(ctx context.Context, owner, repo, sha string) (string, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/commits/%s/check-runs", c.baseURL, owner, repo, sha)
-	status, body, _, err := c.doGet(ctx, url)
+	checkRunsURL := fmt.Sprintf("%s/repos/%s/%s/commits/%s/check-runs?per_page=100", c.baseURL, owner, repo, sha)
+	var runs []checkRunAPI
+	err := c.getPaginated(ctx, checkRunsURL, func(body []byte) error {
+		var resp checkRunsResp
+		if err := json.Unmarshal(body, &resp); err != nil {
+			return err
+		}
+		runs = append(runs, resp.CheckRuns...)
+		return nil
+	})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("github: CheckRollup: %w", err)
 	}
-	if status != http.StatusOK {
-		return "", fmt.Errorf("github: CheckRollup: unexpected status %d", status)
-	}
-	var resp checkRunsResp
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return "", err
-	}
-	if resp.TotalCount == 0 || len(resp.CheckRuns) == 0 {
+	if len(runs) == 0 {
 		return "passing", nil
 	}
 
-	for _, run := range resp.CheckRuns {
+	for _, run := range runs {
 		if failingConclusions[run.Conclusion] {
 			return "failing", nil
 		}
 	}
-	for _, run := range resp.CheckRuns {
+	for _, run := range runs {
 		if run.Status != "completed" {
 			return "pending", nil
 		}

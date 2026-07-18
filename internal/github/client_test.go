@@ -160,6 +160,183 @@ func TestFindPRByBranch_Found(t *testing.T) {
 	}
 }
 
+func TestFindPRByBranch_MergedFromMergedAt(t *testing.T) {
+	// The list-PRs endpoint (used by FindPRByBranch) never returns a
+	// `merged` field, but it does return `merged_at`. Merged must be
+	// derived from merged_at being set on a closed PR.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`[{"number":7,"state":"closed","merged_at":"2026-01-01T00:00:00Z","head":{"sha":"cafebabe"}}]`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "tok")
+	pr, err := c.FindPRByBranch(context.Background(), "o", "r", "branch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pr == nil || !pr.Merged {
+		t.Fatalf("expected merged PR, got %+v", pr)
+	}
+}
+
+func TestFindPRByBranch_EscapesOwnerAndBranch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("head"); got != "weird owner:feature/x y" {
+			t.Fatalf("unexpected head param %q", got)
+		}
+		w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "tok")
+	if _, err := c.FindPRByBranch(context.Background(), "weird owner", "r", "feature/x y"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetPR_ReviewsPagination_Page2FlipsDecision(t *testing.T) {
+	requests := 0
+	var baseURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/o/r/pulls/1":
+			w.Write([]byte(`{"number":1,"state":"open","merged":false,"head":{"sha":"sha1"}}`))
+		case r.URL.Path == "/repos/o/r/pulls/1/reviews":
+			requests++
+			if r.URL.Query().Get("page") == "2" {
+				w.Write([]byte(`[{"user":{"login":"bob"},"state":"CHANGES_REQUESTED","submitted_at":"2026-01-02T00:00:00Z"}]`))
+				return
+			}
+			w.Header().Set("Link", `<`+baseURL+`/repos/o/r/pulls/1/reviews?per_page=100&page=2>; rel="next"`)
+			w.Write([]byte(`[{"user":{"login":"alice"},"state":"APPROVED","submitted_at":"2026-01-01T00:00:00Z"}]`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	baseURL = srv.URL
+
+	c := New(srv.URL, "tok")
+	pr, err := c.GetPR(context.Background(), "o", "r", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pr.ReviewDecision != "changes_requested" {
+		t.Fatalf("expected changes_requested (from page 2), got %q", pr.ReviewDecision)
+	}
+	if requests != 2 {
+		t.Fatalf("expected 2 review page requests, got %d", requests)
+	}
+}
+
+func TestCheckRollup_Pagination_Page2ContainsFailure(t *testing.T) {
+	requests := 0
+	var baseURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/o/r/commits/sha1/check-runs" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		requests++
+		if r.URL.Query().Get("page") == "2" {
+			w.Write([]byte(`{"total_count":2,"check_runs":[{"status":"completed","conclusion":"failure"}]}`))
+			return
+		}
+		w.Header().Set("Link", `<`+baseURL+`/repos/o/r/commits/sha1/check-runs?per_page=100&page=2>; rel="next"`)
+		w.Write([]byte(`{"total_count":2,"check_runs":[{"status":"completed","conclusion":"success"}]}`))
+	}))
+	defer srv.Close()
+	baseURL = srv.URL
+
+	c := New(srv.URL, "tok")
+	rollup, err := c.CheckRollup(context.Background(), "o", "r", "sha1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rollup != "failing" {
+		t.Fatalf("expected failing (from page 2), got %q", rollup)
+	}
+	if requests != 2 {
+		t.Fatalf("expected 2 check-run page requests, got %d", requests)
+	}
+}
+
+func TestETagCache_PreservesLinkAcrossPagination(t *testing.T) {
+	// Regression test: on a 304, GitHub does not resend the Link header.
+	// The cache must remember the Link from the original 200 so that a
+	// second ListRepos call (hitting the ETag cache on every page) still
+	// follows pagination through to completion instead of truncating to
+	// page 1.
+	var baseURL string
+	page1Requests, page2Requests := 0, 0
+	var page1IfNoneMatch, page2IfNoneMatch string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/user/repos" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		page2 := r.URL.Query().Get("page") == "2"
+		if page2 {
+			page2Requests++
+		} else {
+			page1Requests++
+		}
+
+		inm := r.Header.Get("If-None-Match")
+		if page2 {
+			page2IfNoneMatch = inm
+		} else {
+			page1IfNoneMatch = inm
+		}
+
+		if inm != "" {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+
+		if page2 {
+			w.Header().Set("ETag", `"page2etag"`)
+			w.Write([]byte(`[{"full_name":"o/repo2","private":false,"default_branch":"main"}]`))
+			return
+		}
+		w.Header().Set("ETag", `"page1etag"`)
+		w.Header().Set("Link", `<`+baseURL+`/user/repos?per_page=100&page=2>; rel="next"`)
+		w.Write([]byte(`[{"full_name":"o/repo1","private":true,"default_branch":"main"}]`))
+	}))
+	defer srv.Close()
+	baseURL = srv.URL
+
+	c := New(srv.URL, "tok")
+
+	first, err := c.ListRepos(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error on first ListRepos: %v", err)
+	}
+	if len(first) != 2 {
+		t.Fatalf("expected 2 repos on first call, got %d: %+v", len(first), first)
+	}
+
+	second, err := c.ListRepos(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error on second ListRepos: %v", err)
+	}
+	if len(second) != 2 {
+		t.Fatalf("expected 2 repos on second (cached) call, got %d: %+v", len(second), second)
+	}
+	if second[0].FullName != "o/repo1" || second[1].FullName != "o/repo2" {
+		t.Fatalf("unexpected repos on second call: %+v", second)
+	}
+
+	if page1Requests != 2 || page2Requests != 2 {
+		t.Fatalf("expected 2 requests to each page, got page1=%d page2=%d", page1Requests, page2Requests)
+	}
+	if page1IfNoneMatch != `"page1etag"` {
+		t.Fatalf("expected If-None-Match on second page1 request, got %q", page1IfNoneMatch)
+	}
+	if page2IfNoneMatch != `"page2etag"` {
+		t.Fatalf("expected If-None-Match on second page2 request, got %q", page2IfNoneMatch)
+	}
+}
+
 func Test403RateLimit_ReturnsErrBackoff(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-RateLimit-Remaining", "0")
