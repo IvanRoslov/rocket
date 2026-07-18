@@ -54,6 +54,11 @@ func Run(cfg *config.Config) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
+	// Reconcile store vs live sessions/worktrees before serving
+	if err := mgr.Reconcile(ctx); err != nil {
+		slog.Error("reconcile failed (non-fatal)", "error", err)
+	}
+
 	shutdownCalled := make(chan struct{})
 	var shutdownOnce func()
 	shutdownOnce = func() {
