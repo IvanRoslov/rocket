@@ -2,10 +2,61 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 )
+
+// TestIsTaskID tests digit-detection used by `rocket attach` to distinguish
+// a task id from a session id.
+func TestIsTaskID(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"empty", "", false},
+		{"single digit", "1", true},
+		{"multi digit", "12345", true},
+		{"session id", "demo-orch-a1b2", false},
+		{"leading letter", "a12", false},
+		{"trailing letter", "12a", false},
+		{"negative sign", "-12", false},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isTaskID(tt.in); got != tt.want {
+				t.Errorf("isTaskID(%q) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestAttachUsage tests usage violations for attach.
+func TestAttachUsage(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"no args", []string{}},
+		{"too many args", []string{"a", "b"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newAttachCmd()
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Errorf("expected error for args %v", tt.args)
+			}
+			var usageErr *usageError
+			if !errors.As(err, &usageErr) {
+				t.Errorf("expected usageError, got %T: %v", err, err)
+			}
+		})
+	}
+}
 
 func TestHumanAgeBoundaries(t *testing.T) {
 	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)

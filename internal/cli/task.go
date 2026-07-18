@@ -6,9 +6,11 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/IvanRoslov/rocket/internal/client"
 	"github.com/spf13/cobra"
 )
 
@@ -71,6 +73,33 @@ type taskLogRow struct {
 	CreatedAt int64  `json:"created_at"`
 }
 
+// questionMessageRow is the JSON shape of a single entry in a question's
+// thread, mirroring internal/api.questionMessageResponse.
+type questionMessageRow struct {
+	ID        int64  `json:"id"`
+	Author    string `json:"author,omitempty"`
+	Kind      string `json:"kind"`
+	Body      string `json:"body"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+// questionRow is the JSON shape of a question and its thread, mirroring
+// internal/api.questionResponse.
+type questionRow struct {
+	ID         int64                `json:"id"`
+	TaskID     int64                `json:"task_id"`
+	Ordinal    int                  `json:"ordinal"`
+	AskedBy    string               `json:"asked_by"`
+	Body       string               `json:"body"`
+	Context    string               `json:"context,omitempty"`
+	Status     string               `json:"status"`
+	Resolution string               `json:"resolution,omitempty"`
+	WhoseTurn  string               `json:"whose_turn,omitempty"`
+	AskedAt    int64                `json:"asked_at"`
+	ResolvedAt int64                `json:"resolved_at,omitempty"`
+	Messages   []questionMessageRow `json:"messages"`
+}
+
 func newTaskCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "task",
@@ -84,6 +113,10 @@ func newTaskCmd() *cobra.Command {
 	cmd.AddCommand(newTaskStartCmd())
 	cmd.AddCommand(newTaskDocCmd())
 	cmd.AddCommand(newTaskLogCmd())
+	cmd.AddCommand(newTaskAskCmd())
+	cmd.AddCommand(newTaskQuestionsCmd())
+	cmd.AddCommand(newTaskReplyCmd())
+	cmd.AddCommand(newTaskAnswerCmd())
 	return cmd
 }
 
@@ -501,6 +534,268 @@ func newTaskLogCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&kind, "kind", "", "тип записи (decision|problem|note|status)")
 	return cmd
+}
+
+func newTaskAskCmd() *cobra.Command {
+	var context string
+
+	cmd := &cobra.Command{
+		Use:   "ask <task-id> \"<вопрос>\"",
+		Short: "Задать вопрос пользователю по задаче",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 2 {
+				return &usageError{message: "usage: rocket task ask <task-id> \"<вопрос>\" [--context <md>]"}
+			}
+			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
+				return &usageError{message: "invalid task id"}
+			}
+
+			c, _, err := connect(true)
+			if err != nil {
+				return err
+			}
+
+			reqBody := map[string]any{"body": args[1]}
+			if context != "" {
+				reqBody["context"] = context
+			}
+
+			path := apiPath("v1", "tasks", args[0], "questions")
+			var resp questionRow
+			if err := c.Post(path, reqBody, &resp); err != nil {
+				return err
+			}
+
+			if flags.JSON {
+				return printJSON(cmd, resp)
+			}
+			cmd.Printf("question Q%d (#%d) opened\n", resp.Ordinal, resp.ID)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&context, "context", "", "дополнительный контекст (MD)")
+	return cmd
+}
+
+// fetchQuestions retrieves the questions thread for a task, optionally
+// filtered to open-only.
+func fetchQuestions(c *client.Client, taskID string, openOnly bool) ([]questionRow, error) {
+	q := url.Values{}
+	if openOnly {
+		q.Set("status", "open")
+	}
+	path := apiPath("v1", "tasks", taskID, "questions")
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
+	var resp struct {
+		Questions []questionRow `json:"questions"`
+	}
+	if err := c.Get(path, nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Questions, nil
+}
+
+func newTaskQuestionsCmd() *cobra.Command {
+	var openOnly bool
+
+	cmd := &cobra.Command{
+		Use:   "questions [<task-id>]",
+		Short: "Показать вопросы задачи (или всех корневых задач)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 1 {
+				return &usageError{message: "usage: rocket task questions [<task-id>] [--open]"}
+			}
+			if len(args) == 1 {
+				if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
+					return &usageError{message: "invalid task id"}
+				}
+			}
+
+			c, _, err := connect(true)
+			if err != nil {
+				return err
+			}
+
+			if len(args) == 1 {
+				taskID, _ := strconv.ParseInt(args[0], 10, 64)
+				qs, err := fetchQuestions(c, args[0], openOnly)
+				if err != nil {
+					return err
+				}
+
+				if flags.JSON {
+					return printJSON(cmd, qs)
+				}
+				cmd.Print(renderQuestions(taskID, qs))
+				return nil
+			}
+
+			// No task id given: iterate root tasks.
+			var listResp struct {
+				Tasks []taskRow `json:"tasks"`
+			}
+			if err := c.Get("/v1/tasks", nil, &listResp); err != nil {
+				return err
+			}
+
+			if flags.JSON {
+				out := map[string][]questionRow{}
+				for _, t := range listResp.Tasks {
+					qs, err := fetchQuestions(c, strconv.FormatInt(t.ID, 10), openOnly)
+					if err != nil {
+						return err
+					}
+					if len(qs) > 0 {
+						out[strconv.FormatInt(t.ID, 10)] = qs
+					}
+				}
+				return printJSON(cmd, out)
+			}
+
+			var sb strings.Builder
+			for _, t := range listResp.Tasks {
+				qs, err := fetchQuestions(c, strconv.FormatInt(t.ID, 10), openOnly)
+				if err != nil {
+					return err
+				}
+				if len(qs) == 0 {
+					continue
+				}
+				sb.WriteString(renderQuestions(t.ID, qs))
+			}
+			cmd.Print(sb.String())
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&openOnly, "open", false, "показать только открытые вопросы")
+	return cmd
+}
+
+func newTaskReplyCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "reply <question-id> \"<текст>\"",
+		Short: "Ответить в тред вопроса",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 2 {
+				return &usageError{message: "usage: rocket task reply <question-id> \"<текст>\""}
+			}
+			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
+				return &usageError{message: "invalid question id"}
+			}
+
+			c, _, err := connect(true)
+			if err != nil {
+				return err
+			}
+
+			reqBody := map[string]any{"body": args[1]}
+			path := apiPath("v1", "questions", args[0], "reply")
+			var resp questionRow
+			if err := c.Post(path, reqBody, &resp); err != nil {
+				return err
+			}
+
+			if flags.JSON {
+				return printJSON(cmd, resp)
+			}
+			cmd.Printf("reply added to Q%d (#%d)\n", resp.Ordinal, resp.ID)
+			return nil
+		},
+	}
+	return cmd
+}
+
+func newTaskAnswerCmd() *cobra.Command {
+	var dismiss bool
+
+	cmd := &cobra.Command{
+		Use:   "answer <question-id> [\"<ответ>\"]",
+		Short: "Ответить на вопрос или закрыть его без ответа",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			usage := &usageError{message: "usage: rocket task answer <question-id> \"<ответ>\" | --dismiss (exactly one)"}
+			if len(args) < 1 || len(args) > 2 {
+				return usage
+			}
+			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
+				return &usageError{message: "invalid question id"}
+			}
+
+			hasBody := len(args) == 2
+			if hasBody == dismiss {
+				return usage
+			}
+
+			c, _, err := connect(true)
+			if err != nil {
+				return err
+			}
+
+			reqBody := map[string]any{}
+			if dismiss {
+				reqBody["dismiss"] = true
+			} else {
+				reqBody["body"] = args[1]
+			}
+
+			path := apiPath("v1", "questions", args[0], "answer")
+			var resp questionRow
+			if err := c.Post(path, reqBody, &resp); err != nil {
+				return err
+			}
+
+			if flags.JSON {
+				return printJSON(cmd, resp)
+			}
+			if dismiss {
+				cmd.Printf("question Q%d (#%d) dismissed\n", resp.Ordinal, resp.ID)
+			} else {
+				cmd.Printf("question Q%d (#%d) answered\n", resp.Ordinal, resp.ID)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&dismiss, "dismiss", false, "закрыть вопрос без ответа")
+	return cmd
+}
+
+// renderQuestions renders a task's questions block: a "task #<id>" header
+// followed by, per question, a header line "Q<ordinal> (#<id>) [status]
+// <arrow>" (arrow indicates whose turn it is to speak, empty when
+// resolved), the indented question body, an optional indented context
+// line, and indented thread lines ("  [user] ..." / "  [<session>] ...").
+// Returns "" if qs is empty (callers should skip empty tasks entirely).
+func renderQuestions(taskID int64, qs []questionRow) string {
+	if len(qs) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "task #%d\n", taskID)
+	for _, q := range qs {
+		arrow := ""
+		switch q.WhoseTurn {
+		case "user":
+			arrow = " → ждёт ответа пользователя"
+		case "orchestrator":
+			arrow = " → ждёт оркестратора"
+		}
+		fmt.Fprintf(&sb, "Q%d (#%d) [%s]%s\n", q.Ordinal, q.ID, q.Status, arrow)
+		fmt.Fprintf(&sb, "  %s\n", q.Body)
+		if q.Context != "" {
+			fmt.Fprintf(&sb, "  context: %s\n", q.Context)
+		}
+		for _, m := range q.Messages {
+			author := m.Author
+			if author == "" {
+				author = "user"
+			}
+			fmt.Fprintf(&sb, "  [%s] %s\n", author, m.Body)
+		}
+	}
+	sb.WriteString("\n")
+	return sb.String()
 }
 
 // renderTaskBoard writes a kanban board view to w, grouping tasks by status.

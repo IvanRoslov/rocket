@@ -232,6 +232,211 @@ func TestTaskLogUsage(t *testing.T) {
 	}
 }
 
+// TestTaskAskUsage tests usage violations for task ask.
+func TestTaskAskUsage(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"no args", []string{}},
+		{"one arg", []string{"1"}},
+		{"too many args", []string{"1", "q", "extra"}},
+		{"invalid id", []string{"not-a-number", "q"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newTaskAskCmd()
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Errorf("expected error for args %v", tt.args)
+			}
+			var usageErr *usageError
+			if !errors.As(err, &usageErr) {
+				t.Errorf("expected usageError, got %T: %v", err, err)
+			}
+		})
+	}
+}
+
+// TestTaskQuestionsUsage tests usage violations for task questions.
+func TestTaskQuestionsUsage(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"too many args", []string{"1", "2"}},
+		{"invalid id", []string{"not-a-number"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newTaskQuestionsCmd()
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Errorf("expected error for args %v", tt.args)
+			}
+			var usageErr *usageError
+			if !errors.As(err, &usageErr) {
+				t.Errorf("expected usageError, got %T: %v", err, err)
+			}
+		})
+	}
+}
+
+// TestTaskReplyUsage tests usage violations for task reply.
+func TestTaskReplyUsage(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"no args", []string{}},
+		{"one arg", []string{"1"}},
+		{"too many args", []string{"1", "text", "extra"}},
+		{"invalid id", []string{"not-a-number", "text"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newTaskReplyCmd()
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Errorf("expected error for args %v", tt.args)
+			}
+			var usageErr *usageError
+			if !errors.As(err, &usageErr) {
+				t.Errorf("expected usageError, got %T: %v", err, err)
+			}
+		})
+	}
+}
+
+// TestTaskAnswerUsage tests usage violations for task answer, including the
+// XOR between a body argument and --dismiss.
+func TestTaskAnswerUsage(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"no args", []string{}},
+		{"too many args", []string{"1", "a", "b"}},
+		{"invalid id", []string{"not-a-number", "answer"}},
+		{"neither body nor dismiss", []string{"1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newTaskAnswerCmd()
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Errorf("expected error for args %v", tt.args)
+			}
+			var usageErr *usageError
+			if !errors.As(err, &usageErr) {
+				t.Errorf("expected usageError, got %T: %v", err, err)
+			}
+		})
+	}
+
+	t.Run("both body and dismiss", func(t *testing.T) {
+		cmd := newTaskAnswerCmd()
+		cmd.SetArgs([]string{"1", "answer", "--dismiss"})
+		err := cmd.Execute()
+		if err == nil {
+			t.Errorf("expected error when both body and --dismiss given")
+		}
+		var usageErr *usageError
+		if !errors.As(err, &usageErr) {
+			t.Errorf("expected usageError, got %T: %v", err, err)
+		}
+	})
+}
+
+// TestRenderQuestionsEmpty tests that an empty question list renders nothing.
+func TestRenderQuestionsEmpty(t *testing.T) {
+	out := renderQuestions(1, nil)
+	if out != "" {
+		t.Errorf("expected empty output for no questions, got %q", out)
+	}
+}
+
+// TestRenderQuestionsWhoseTurnUser tests the "waits for user" arrow.
+func TestRenderQuestionsWhoseTurnUser(t *testing.T) {
+	qs := []questionRow{
+		{ID: 5, Ordinal: 1, Status: "open", WhoseTurn: "user", Body: "Which approach?"},
+	}
+	out := renderQuestions(42, qs)
+	if !strings.Contains(out, "task #42") {
+		t.Errorf("expected task header, got: %q", out)
+	}
+	if !strings.Contains(out, "Q1 (#5) [open]") {
+		t.Errorf("expected question header, got: %q", out)
+	}
+	if !strings.Contains(out, "ждёт ответа пользователя") {
+		t.Errorf("expected user-turn arrow, got: %q", out)
+	}
+	if !strings.Contains(out, "Which approach?") {
+		t.Errorf("expected body, got: %q", out)
+	}
+}
+
+// TestRenderQuestionsWhoseTurnOrchestrator tests the "waits for orchestrator" arrow.
+func TestRenderQuestionsWhoseTurnOrchestrator(t *testing.T) {
+	qs := []questionRow{
+		{ID: 6, Ordinal: 2, Status: "open", WhoseTurn: "orchestrator", Body: "Question body"},
+	}
+	out := renderQuestions(42, qs)
+	if !strings.Contains(out, "ждёт оркестратора") {
+		t.Errorf("expected orchestrator-turn arrow, got: %q", out)
+	}
+}
+
+// TestRenderQuestionsResolvedNoArrow tests that a resolved question shows no arrow.
+func TestRenderQuestionsResolvedNoArrow(t *testing.T) {
+	qs := []questionRow{
+		{ID: 7, Ordinal: 3, Status: "resolved", WhoseTurn: "", Body: "Done question"},
+	}
+	out := renderQuestions(42, qs)
+	if !strings.Contains(out, "Q3 (#7) [resolved]") {
+		t.Errorf("expected resolved header, got: %q", out)
+	}
+	if strings.Contains(out, "ждёт") {
+		t.Errorf("expected no turn arrow for resolved question, got: %q", out)
+	}
+}
+
+// TestRenderQuestionsWithContext tests that context renders when present.
+func TestRenderQuestionsWithContext(t *testing.T) {
+	qs := []questionRow{
+		{ID: 8, Ordinal: 1, Status: "open", WhoseTurn: "user", Body: "Body", Context: "extra context here"},
+	}
+	out := renderQuestions(42, qs)
+	if !strings.Contains(out, "extra context here") {
+		t.Errorf("expected context in output, got: %q", out)
+	}
+}
+
+// TestRenderQuestionsThreadLines tests that thread messages render with
+// author prefixes: "[user]" for a human entry, "[<session>]" for an agent.
+func TestRenderQuestionsThreadLines(t *testing.T) {
+	qs := []questionRow{
+		{
+			ID: 9, Ordinal: 1, Status: "open", WhoseTurn: "orchestrator", Body: "Q body",
+			Messages: []questionMessageRow{
+				{ID: 1, Author: "", Kind: "reply", Body: "human reply text"},
+				{ID: 2, Author: "demo-orch-abc", Kind: "reply", Body: "orch reply text"},
+			},
+		},
+	}
+	out := renderQuestions(42, qs)
+	if !strings.Contains(out, "[user] human reply text") {
+		t.Errorf("expected user thread line, got: %q", out)
+	}
+	if !strings.Contains(out, "[demo-orch-abc] orch reply text") {
+		t.Errorf("expected session thread line, got: %q", out)
+	}
+}
+
 // TestRenderTaskBoardEmpty tests rendering an empty board.
 func TestRenderTaskBoardEmpty(t *testing.T) {
 	board := map[string][]taskRow{}
