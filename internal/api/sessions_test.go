@@ -618,6 +618,192 @@ func TestKillCascadeKillsOrchestratorAndWorkers(t *testing.T) {
 	}
 }
 
+func TestKillSessionWorkerCannotKillSibling(t *testing.T) {
+	d := sessionsTestDeps(t)
+	srv := newTestServer(t, d)
+	orchID, _ := seedOrchestratorWithTask(t, d, "proj1", "myfeat")
+
+	for _, wid := range []string{"myfeat-w1", "myfeat-w2"} {
+		if err := d.Store.AddSession(store.Session{
+			ID: wid, Kind: "worker", ProjectID: "proj1", RepoID: "proj1-repo",
+			FeatureSlug: "myfeat", ParentID: orchID, Agent: "fake",
+			Branch: "feature/myfeat/" + wid, TmuxName: wid, State: "running",
+		}); err != nil {
+			t.Fatalf("AddSession %s: %v", wid, err)
+		}
+	}
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/sessions/myfeat-w2/kill", "myfeat-w1", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	if eb := decodeErr(t, resp); eb.Error.Code != "forbidden" {
+		t.Errorf("code = %q, want forbidden", eb.Error.Code)
+	}
+
+	sess, err := d.Store.GetSession("myfeat-w2")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.State != "running" {
+		t.Errorf("state = %q, want running (kill must not have happened)", sess.State)
+	}
+}
+
+func TestKillSessionWorkerCannotKillOrchestrator(t *testing.T) {
+	d := sessionsTestDeps(t)
+	srv := newTestServer(t, d)
+	orchID, _ := seedOrchestratorWithTask(t, d, "proj1", "myfeat")
+
+	if err := d.Store.AddSession(store.Session{
+		ID: "myfeat-w1", Kind: "worker", ProjectID: "proj1", RepoID: "proj1-repo",
+		FeatureSlug: "myfeat", ParentID: orchID, Agent: "fake",
+		Branch: "feature/myfeat/w1", TmuxName: "myfeat-w1", State: "running",
+	}); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/sessions/"+orchID+"/kill", "myfeat-w1", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	if eb := decodeErr(t, resp); eb.Error.Code != "forbidden" {
+		t.Errorf("code = %q, want forbidden", eb.Error.Code)
+	}
+}
+
+func TestKillSessionOrchestratorCanKillOwnWorker(t *testing.T) {
+	d := sessionsTestDeps(t)
+	srv := newTestServer(t, d)
+	orchID, _ := seedOrchestratorWithTask(t, d, "proj1", "myfeat")
+
+	if err := d.Store.AddSession(store.Session{
+		ID: "myfeat-w1", Kind: "worker", ProjectID: "proj1", RepoID: "proj1-repo",
+		FeatureSlug: "myfeat", ParentID: orchID, Agent: "fake",
+		Branch: "feature/myfeat/w1", TmuxName: "myfeat-w1", State: "running",
+	}); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/sessions/myfeat-w1/kill", orchID, nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	sess, err := d.Store.GetSession("myfeat-w1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.State != "killed" {
+		t.Errorf("state = %q, want killed", sess.State)
+	}
+}
+
+func TestKillSessionWorkerCanKillSelf(t *testing.T) {
+	d := sessionsTestDeps(t)
+	srv := newTestServer(t, d)
+	orchID, _ := seedOrchestratorWithTask(t, d, "proj1", "myfeat")
+
+	if err := d.Store.AddSession(store.Session{
+		ID: "myfeat-w1", Kind: "worker", ProjectID: "proj1", RepoID: "proj1-repo",
+		FeatureSlug: "myfeat", ParentID: orchID, Agent: "fake",
+		Branch: "feature/myfeat/w1", TmuxName: "myfeat-w1", State: "running",
+	}); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/sessions/myfeat-w1/kill", "myfeat-w1", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	sess, err := d.Store.GetSession("myfeat-w1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.State != "killed" {
+		t.Errorf("state = %q, want killed", sess.State)
+	}
+}
+
+func TestKillSessionWorkerCannotCascadeKillSelf(t *testing.T) {
+	d := sessionsTestDeps(t)
+	srv := newTestServer(t, d)
+	orchID, _ := seedOrchestratorWithTask(t, d, "proj1", "myfeat")
+
+	if err := d.Store.AddSession(store.Session{
+		ID: "myfeat-w1", Kind: "worker", ProjectID: "proj1", RepoID: "proj1-repo",
+		FeatureSlug: "myfeat", ParentID: orchID, Agent: "fake",
+		Branch: "feature/myfeat/w1", TmuxName: "myfeat-w1", State: "running",
+	}); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/sessions/myfeat-w1/kill?cascade=true", "myfeat-w1", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+}
+
+func TestKillSessionOrchestratorCanCascadeKillSelf(t *testing.T) {
+	d := sessionsTestDeps(t)
+	srv := newTestServer(t, d)
+	orchID, _ := seedOrchestratorWithTask(t, d, "proj1", "myfeat")
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/sessions/"+orchID+"/kill?cascade=true", orchID, nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestRestoreSessionWorkerCannotRestoreSibling(t *testing.T) {
+	d := sessionsTestDeps(t)
+	srv := newTestServer(t, d)
+	orchID, _ := seedOrchestratorWithTask(t, d, "proj1", "myfeat")
+
+	for _, wid := range []string{"myfeat-w1", "myfeat-w2"} {
+		if err := d.Store.AddSession(store.Session{
+			ID: wid, Kind: "worker", ProjectID: "proj1", RepoID: "proj1-repo",
+			FeatureSlug: "myfeat", ParentID: orchID, Agent: "fake",
+			Branch: "feature/myfeat/" + wid, TmuxName: wid, State: "killed",
+		}); err != nil {
+			t.Fatalf("AddSession %s: %v", wid, err)
+		}
+	}
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/sessions/myfeat-w2/restore", "myfeat-w1", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+}
+
+func TestRestoreSessionOrchestratorCanRestoreOwnWorker(t *testing.T) {
+	d := sessionsTestDeps(t)
+	srv := newTestServer(t, d)
+	orchID, _ := seedOrchestratorWithTask(t, d, "proj1", "myfeat")
+
+	if err := d.Store.AddSession(store.Session{
+		ID: "myfeat-w1", Kind: "worker", ProjectID: "proj1", RepoID: "proj1-repo",
+		FeatureSlug: "myfeat", ParentID: orchID, Agent: "fake",
+		Branch: "feature/myfeat/w1", TmuxName: "myfeat-w1", State: "killed",
+	}); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/sessions/myfeat-w1/restore", orchID, nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
 func TestPostSessionSpawnFailureCancelsAutoSubtask(t *testing.T) {
 	d := sessionsTestDepsWithErrorWorkspace(t)
 	srv := newTestServer(t, d)

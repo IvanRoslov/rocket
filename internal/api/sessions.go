@@ -313,6 +313,28 @@ func handleGetSession(w http.ResponseWriter, r *http.Request, d Deps) {
 	writeJSON(w, http.StatusOK, toSessionResponse(s))
 }
 
+// canKillOrRestoreSession reports whether caller may kill/restore the
+// session identified by target. caller == nil means a human user, who is
+// unrestricted. An agent caller may act on its own session (self), or —
+// for non-cascading operations — on a session it is the parent of (an
+// orchestrator managing its own worker). A cascading kill is restricted
+// further: only the orchestrator acting on itself (or a human) may cascade,
+// since cascade tears down the whole fleet under a root task.
+func canKillOrRestoreSession(caller *store.Session, target store.Session, cascade bool) bool {
+	if caller == nil {
+		return true
+	}
+	if cascade {
+		// Cascade tears down a whole fleet: only the orchestrator acting on
+		// itself may trigger it (a worker has no fleet under it to cascade).
+		return caller.ID == target.ID && caller.Kind == "orchestrator"
+	}
+	if caller.ID == target.ID {
+		return true
+	}
+	return target.ParentID == caller.ID
+}
+
 func handleKillSession(w http.ResponseWriter, r *http.Request, d Deps) {
 	id := r.PathValue("id")
 	cleanup := false
@@ -328,7 +350,25 @@ func handleKillSession(w http.ResponseWriter, r *http.Request, d Deps) {
 		}
 	}
 
-	var err error
+	caller, err := callerSession(r, d.Store)
+	if writeCallerErr(w, err) {
+		return
+	}
+
+	target, err := d.Store.GetSession(id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "session_not_found", "session not found")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	if !canKillOrRestoreSession(caller, target, cascade) {
+		writeErr(w, http.StatusForbidden, "forbidden", "caller may not kill this session")
+		return
+	}
+
 	if cascade {
 		err = d.Manager.KillCascade(r.Context(), id, cleanup)
 	} else {
@@ -343,6 +383,25 @@ func handleKillSession(w http.ResponseWriter, r *http.Request, d Deps) {
 
 func handleRestoreSession(w http.ResponseWriter, r *http.Request, d Deps) {
 	id := r.PathValue("id")
+
+	caller, err := callerSession(r, d.Store)
+	if writeCallerErr(w, err) {
+		return
+	}
+
+	target, err := d.Store.GetSession(id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "session_not_found", "session not found")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	if !canKillOrRestoreSession(caller, target, false) {
+		writeErr(w, http.StatusForbidden, "forbidden", "caller may not restore this session")
+		return
+	}
 
 	if err := d.Manager.Restore(r.Context(), id); err != nil {
 		writeManagerErr(w, err)
