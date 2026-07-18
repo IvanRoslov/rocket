@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/IvanRoslov/rocket/internal/github"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -78,14 +80,25 @@ func registerRepoRoutes(mux *http.ServeMux, d Deps) {
 }
 
 type postRepoRequest struct {
-	ID   string `json:"id"`
-	Path string `json:"path"`
+	ID     string `json:"id"`
+	Path   string `json:"path"`
+	Github string `json:"github"`
 }
 
 func handlePostRepo(w http.ResponseWriter, r *http.Request, d Deps) {
 	var req postRepoRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+
+	if req.Github != "" && req.Path != "" {
+		writeErr(w, http.StatusBadRequest, "bad_request", "specify either path or github, not both")
+		return
+	}
+
+	if req.Github != "" {
+		handlePostRepoGithub(w, r, d, req)
 		return
 	}
 
@@ -125,6 +138,174 @@ func handlePostRepo(w http.ResponseWriter, r *http.Request, d Deps) {
 		}
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
+	}
+
+	created, err := d.Store.GetRepo(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, toRepoResponse(created))
+}
+
+// githubRepoPattern matches the "owner/name" shorthand GitHub uses to
+// identify a repository.
+var githubRepoPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`)
+
+// parseGithubRepo splits "owner/name" into its two parts, reporting ok=false
+// if s doesn't match that shape.
+func parseGithubRepo(s string) (owner, name string, ok bool) {
+	if !githubRepoPattern.MatchString(s) {
+		return "", "", false
+	}
+	parts := strings.SplitN(s, "/", 2)
+	return parts[0], parts[1], true
+}
+
+// tokenInCloneURLRE matches the credential portion of a GitHub HTTPS clone
+// URL (https://x-access-token:<token>@github.com/...), used to scrub a
+// leaked token out of git's error output before it's logged or returned to
+// a client.
+var tokenInCloneURLRE = regexp.MustCompile(`://x-access-token:[^@]*@`)
+
+// sanitizeCloneError strips the GitHub token from git's (possibly
+// multi-line) output: first a literal replace of the known token value (if
+// any), then a regex scrub of the credential portion of any clone URL that
+// might still be present (e.g. if git echoed a differently-encoded form of
+// the URL). The result is safe to log or return to a client.
+func sanitizeCloneError(output, token string) string {
+	msg := strings.TrimSpace(output)
+	if token != "" {
+		msg = strings.ReplaceAll(msg, token, "***")
+	}
+	msg = tokenInCloneURLRE.ReplaceAllString(msg, "://x-access-token:***@")
+	return msg
+}
+
+// buildCloneURL returns the URL `git clone` should fetch owner/name from.
+// If cfg.GithubCloneBase is set (a test hook, e.g. "file:///tmp/bares/"),
+// it's used verbatim as a prefix. Otherwise the standard GitHub HTTPS clone
+// URL is built, authenticated with token.
+func buildCloneURL(cloneBase, owner, name, token string) string {
+	if cloneBase != "" {
+		return cloneBase + owner + "/" + name + ".git"
+	}
+	return "https://x-access-token:" + token + "@github.com/" + owner + "/" + name + ".git"
+}
+
+// resolveClonedDefaultBranch determines the default branch of a freshly
+// cloned repo at path: it prefers `git symbolic-ref` against the clone's
+// own origin/HEAD, falling back to the GitHub catalog's cached
+// default_branch for owner/name (if the catalog happens to already know
+// it), and finally to "main".
+func resolveClonedDefaultBranch(path, owner, name string) string {
+	branch := defaultBranch(path)
+	if branch != "main" {
+		return branch
+	}
+
+	full := owner + "/" + name
+	catalogCache.mu.Lock()
+	repos := catalogCache.repos
+	catalogCache.mu.Unlock()
+	for _, r := range repos {
+		if r.FullName == full && r.DefaultBranch != "" {
+			return r.DefaultBranch
+		}
+	}
+	return branch
+}
+
+// handlePostRepoGithub handles POST /v1/repos {github: "owner/name", id?}:
+// it clones the repo from GitHub (or, in tests, from d.Cfg.GithubCloneBase)
+// into d.Cfg.ReposDir and registers it, publishing repo.clone_started,
+// repo.clone_done/repo.clone_failed events along the way.
+func handlePostRepoGithub(w http.ResponseWriter, r *http.Request, d Deps, req postRepoRequest) {
+	owner, name, ok := parseGithubRepo(req.Github)
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "invalid_github_repo", "github must be in owner/name format")
+		return
+	}
+	full := owner + "/" + name
+
+	id := req.ID
+	if id == "" {
+		id = normalizeID(name)
+		if id == "" || !idPattern.MatchString(id) {
+			writeErr(w, http.StatusBadRequest, "invalid_id", "derived id from repo name is empty; pass --id explicitly")
+			return
+		}
+	} else if !idPattern.MatchString(id) {
+		writeErr(w, http.StatusBadRequest, "invalid_id", "id must match ^[a-z0-9-]+$")
+		return
+	}
+
+	if _, err := d.Store.GetRepo(id); err == nil {
+		writeErr(w, http.StatusConflict, "repo_exists", "repo id already exists")
+		return
+	} else if !errors.Is(err, store.ErrNotFound) {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	token := ""
+	if d.Cfg.GithubCloneBase == "" {
+		if d.GH == nil {
+			writeErr(w, http.StatusBadRequest, "no_token", "no GitHub token configured")
+			return
+		}
+		client, err := d.GH()
+		if err != nil {
+			if errors.Is(err, github.ErrNoToken) {
+				writeErr(w, http.StatusBadRequest, "no_token", "no GitHub token configured")
+				return
+			}
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		token = client.Token()
+	}
+
+	if err := os.MkdirAll(d.Cfg.ReposDir, 0700); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	targetDir := filepath.Join(d.Cfg.ReposDir, owner+"__"+name)
+
+	slog.Default().Info("cloning github repo", "repo", full)
+	if d.Bus != nil {
+		d.Bus.Publish("repo.clone_started", "", map[string]any{"repo": full})
+	}
+
+	cloneURL := buildCloneURL(d.Cfg.GithubCloneBase, owner, name, token)
+	cmd := exec.CommandContext(r.Context(), "git", "clone", cloneURL, targetDir)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		sanitized := sanitizeCloneError(string(out), token)
+		slog.Default().Error("github clone failed", "repo", full, "error", sanitized)
+		if d.Bus != nil {
+			d.Bus.Publish("repo.clone_failed", "", map[string]any{"repo": full, "error": sanitized})
+		}
+		writeErr(w, http.StatusBadGateway, "clone_failed", sanitized)
+		return
+	}
+
+	repo := store.Repo{
+		ID:            id,
+		Path:          targetDir,
+		DefaultBranch: resolveClonedDefaultBranch(targetDir, owner, name),
+	}
+	if err := d.Store.AddRepo(repo); err != nil {
+		if errors.Is(err, store.ErrExists) {
+			writeErr(w, http.StatusConflict, "repo_exists", "repo id already exists")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	if d.Bus != nil {
+		d.Bus.Publish("repo.clone_done", "", map[string]any{"repo": full})
 	}
 
 	created, err := d.Store.GetRepo(id)

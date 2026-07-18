@@ -61,6 +61,11 @@ func New(baseURL, token string) *Client {
 	}
 }
 
+// Token returns the bearer token this Client was constructed with.
+func (c *Client) Token() string {
+	return c.token
+}
+
 // Repo is a subset of the GitHub repository resource.
 type Repo struct {
 	FullName      string `json:"full_name"`
