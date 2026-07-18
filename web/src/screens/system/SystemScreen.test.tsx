@@ -133,4 +133,44 @@ describe('SystemScreen', () => {
 
     await waitFor(() => expect(killedId).toBe('s-billing-v2-w1'))
   })
+
+  it('cancel button in kill modal closes without calling the handler', async () => {
+    let handlerCalled = false
+    server.use(
+      http.post('/v1/sessions/:id/kill', () => {
+        handlerCalled = true
+        return HttpResponse.json({ status: 'killed' })
+      }),
+    )
+
+    const user = userEvent.setup()
+    renderScreen()
+
+    await screen.findByText('billing-v2-w1')
+    const row = screen.getByText('billing-v2-w1').closest('[data-testid="session-row"]') as HTMLElement
+    const killBtn = within(row).getByRole('button', { name: /kill/i })
+    await user.click(killBtn)
+
+    const modal = await screen.findByRole('dialog')
+    const cancelBtn = within(modal).getByRole('button', { name: /cancel/i })
+    await user.click(cancelBtn)
+
+    // Wait a short time to ensure the handler is not called
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(handlerCalled).toBe(false)
+  })
+
+  it('kill modal checkbox default is unchecked', async () => {
+    const user = userEvent.setup()
+    renderScreen()
+
+    await screen.findByText('billing-v2-w1')
+    const row = screen.getByText('billing-v2-w1').closest('[data-testid="session-row"]') as HTMLElement
+    const killBtn = within(row).getByRole('button', { name: /kill/i })
+    await user.click(killBtn)
+
+    const modal = await screen.findByRole('dialog')
+    const checkbox = within(modal).getByRole('checkbox') as HTMLInputElement
+    expect(checkbox.checked).toBe(false)
+  })
 })

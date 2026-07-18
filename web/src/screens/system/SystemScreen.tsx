@@ -132,7 +132,7 @@ interface KillConfirmModalProps {
 }
 
 function KillConfirmModal({ session, onClose, onConfirm, pending }: KillConfirmModalProps) {
-  const [cleanup, setCleanup] = useState(true)
+  const [cleanup, setCleanup] = useState(false)
   return (
     <Modal title="Kill session?" onClose={onClose}>
       <p className="kill-confirm__body">
@@ -202,6 +202,7 @@ export function SystemScreen() {
       </div>
 
       <div className="system-stats">
+        {/* liveCount is intentionally used for both tiles until the API distinguishes session vs agent counts */}
         <StatTile label="Live sessions" value={liveCount} unit="tmux" />
         <StatTile label="Agents running" value={liveCount} unit="claude/codex" />
         <StatTile label="Orphans" value={orphanCount} unit="reconcile" highlight={orphanCount > 0} />
@@ -262,8 +263,10 @@ export function SystemScreen() {
                 <div className="queue-tile__label">failed</div>
               </div>
             </div>
+            {/* Shows failures of live sessions only; disagrees with queue.failed tile if queue has
+                messages from sessions no longer in tmux */}
             {failedPlate && (
-              <div className="queue-plate">
+              <div className="queue-plate" title="shows failures of live sessions only">
                 msg#{failedPlate.id} → {failedPlate.to}
                 <br />
                 failed ×{failedPlate.attempts} · {failedPlate.reason}
