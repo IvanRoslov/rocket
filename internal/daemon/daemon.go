@@ -64,6 +64,13 @@ func Run(cfg *config.Config) error {
 		slog.Error("reconcile failed (non-fatal)", "error", err)
 	}
 
+	// Sweep activity synchronously once, after reconcile and BEFORE
+	// q.Recover: without this, Recover's startup Wakes can race stale store
+	// activity left over from before a restart (e.g. a session still marked
+	// "active" from the moment of a crash), making delivery wait a full poll
+	// cycle before re-checking. Run below still does its own initial sweep;
+	// that duplicate is harmless.
+	mon.SweepOnce(ctx)
 	go mon.Run(ctx)
 
 	// Recover synchronously (ResetDelivering + initial Wakes) BEFORE serving

@@ -200,6 +200,44 @@ func TestSweepAgentActive(t *testing.T) {
 	}
 }
 
+// TestSweepOnceUpdatesStoreActivity verifies that Monitor.SweepOnce, called
+// directly (as the daemon does synchronously at startup, before
+// queue.Recover), performs a real synchronous sweep pass that updates store
+// activity — not a no-op or async-only trigger.
+func TestSweepOnceUpdatesStoreActivity(t *testing.T) {
+	rt := &fakeRuntime{names: []string{"sess1"}}
+	prober := &fakeProber{onlyShell: map[string]bool{}}
+	now := time.Now()
+	agents := map[string]*fakeAgent{"fake": {state: activity.Active, ts: now}}
+	m, st, b := testMonitor(t, rt, prober, agents)
+
+	seedSession(t, st, store.Session{ID: "sess1", Agent: "fake", TmuxName: "sess1"})
+
+	ch, cancel := b.Subscribe()
+	defer cancel()
+
+	m.SweepOnce(context.Background())
+
+	sess, err := st.GetSession("sess1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.Activity != string(activity.Active) {
+		t.Errorf("Activity = %q, want active", sess.Activity)
+	}
+
+	events := drainEvents(ch)
+	found := false
+	for _, e := range events {
+		if e.Type == "session.activity_changed" && e.SessionID == "sess1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected session.activity_changed event from SweepOnce, got %v", events)
+	}
+}
+
 // TestSweepReadyOldPastThresholdBecomesIdle verifies the Ready->Idle
 // threshold based on ReadyToIdle.
 func TestSweepReadyOldPastThresholdBecomesIdle(t *testing.T) {

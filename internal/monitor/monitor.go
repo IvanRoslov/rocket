@@ -120,6 +120,20 @@ func New(st *store.Store, b *bus.Bus, rt runtime.Runtime, cfg *config.Config, re
 	}
 }
 
+// SweepOnce runs a single synchronous pass of the activity polling cascade
+// over all live sessions. It exists so callers (namely the daemon at
+// startup) can force activity state in the store to be current before
+// depending on it, without waiting for Run's background ticker.
+//
+// In particular, the daemon must call SweepOnce AFTER session reconciliation
+// but BEFORE queue.Recover: otherwise Recover's startup Wakes can hit
+// recipients whose store activity is stale from before a restart (e.g. still
+// "active" from the crash moment), causing delivery to needlessly wait a
+// full poll cycle before re-checking.
+func (m *Monitor) SweepOnce(ctx context.Context) {
+	m.sweep(ctx)
+}
+
 // Run polls the activity cascade at cfg.ActivityPollInterval, blocking until
 // ctx is cancelled. It performs one immediate sweep before the first tick.
 func (m *Monitor) Run(ctx context.Context) {
