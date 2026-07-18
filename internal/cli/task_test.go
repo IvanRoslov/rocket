@@ -133,6 +133,7 @@ func TestTaskMoveUsage(t *testing.T) {
 		{"no args", []string{}},
 		{"one arg", []string{"1"}},
 		{"invalid id", []string{"not-a-number", "in_progress"}},
+		{"cancelled status", []string{"1", "cancelled"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

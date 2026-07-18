@@ -453,6 +453,11 @@ func handlePatchTask(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
+	if req.Status != nil && *req.Status == "cancelled" {
+		writeErr(w, http.StatusBadRequest, "use_cancel", "use POST /v1/tasks/{id}/cancel (rocket task cancel) to cancel — it also stops sessions")
+		return
+	}
+
 	if req.Status != nil {
 		if err := applyTaskStatusChange(d, task, caller, *req.Status); err != nil {
 			// UpdateTaskStatus's only failure mode here is a status value

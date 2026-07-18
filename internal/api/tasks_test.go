@@ -547,6 +547,34 @@ func TestPatchTaskInvalidStatus(t *testing.T) {
 	}
 }
 
+func TestPatchTaskCancelledRejected(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+
+	id, err := d.Store.AddTask(store.Task{Title: "T", ProjectID: "proj1"})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	resp := patchJSON(t, srv.URL+"/v1/tasks/"+itoa(id), map[string]any{"status": "cancelled"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if eb := decodeErr(t, resp); eb.Error.Code != "use_cancel" {
+		t.Errorf("code = %q, want use_cancel", eb.Error.Code)
+	}
+
+	task, err := d.Store.GetTask(id)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.Status == "cancelled" {
+		t.Errorf("task status should not have changed to cancelled")
+	}
+}
+
 func TestPatchTaskNotFound(t *testing.T) {
 	d := tasksTestDeps(t)
 	srv := newTestServer(t, d)

@@ -362,6 +362,10 @@ func newTaskMoveCmd() *cobra.Command {
 				return &usageError{message: "invalid task id"}
 			}
 
+			if args[1] == "cancelled" {
+				return &usageError{message: "use `rocket task cancel <id>` to cancel — it also stops sessions"}
+			}
+
 			c, _, err := connect(true)
 			if err != nil {
 				return err
