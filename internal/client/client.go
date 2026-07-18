@@ -138,6 +138,9 @@ func (c *Client) do(method, path string, in, out any) error {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	if sid := os.Getenv("ROCKET_SESSION_ID"); sid != "" {
+		req.Header.Set("X-Rocket-Session", sid)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
