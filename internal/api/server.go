@@ -13,6 +13,7 @@ import (
 
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
+	"github.com/IvanRoslov/rocket/internal/monitor"
 	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 	"github.com/IvanRoslov/rocket/internal/version"
@@ -29,6 +30,7 @@ type Deps struct {
 	Bus       *bus.Bus
 	Cfg       *config.Config
 	Manager   *session.Manager
+	Monitor   *monitor.Monitor
 	Shutdown  func()
 	StartedAt time.Time
 }

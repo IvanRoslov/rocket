@@ -12,10 +12,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/IvanRoslov/rocket/internal/agent"
 	_ "github.com/IvanRoslov/rocket/internal/agent/claudecode" // register the claude-code agent
 	"github.com/IvanRoslov/rocket/internal/api"
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
+	"github.com/IvanRoslov/rocket/internal/monitor"
 	"github.com/IvanRoslov/rocket/internal/runtime"
 	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -50,6 +52,7 @@ func Run(cfg *config.Config) error {
 	rt := runtime.NewTmux()
 	ws := workspace.New(cfg.WorktreesDir)
 	mgr := session.NewManager(st, b, rt, ws, cfg)
+	mon := monitor.New(st, b, rt, cfg, agent.Get)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -58,6 +61,8 @@ func Run(cfg *config.Config) error {
 	if err := mgr.Reconcile(ctx); err != nil {
 		slog.Error("reconcile failed (non-fatal)", "error", err)
 	}
+
+	go mon.Run(ctx)
 
 	shutdownCalled := make(chan struct{})
 	var shutdownOnce func()
@@ -76,6 +81,7 @@ func Run(cfg *config.Config) error {
 		Bus:       b,
 		Cfg:       cfg,
 		Manager:   mgr,
+		Monitor:   mon,
 		Shutdown:  shutdownOnce,
 		StartedAt: time.Now(),
 	}
