@@ -1,0 +1,24 @@
+/* ---------- TermPanel ---------- */
+.term-panel {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  background: var(--dark-surface, #161618);
+}
+.term-panel__xterm {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 18px 22px;
+}
+.term-panel__banner {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  padding: 4px 10px;
+  border-radius: var(--radius-badge-lg);
+  background: var(--warn-bg, #fef3c7);
+  color: var(--warn-text-2, #92400e);
+  font: 600 11.5px var(--font-mono, monospace);
+}

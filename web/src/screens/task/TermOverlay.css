@@ -1,0 +1,80 @@
+/* ---------- TermOverlay ---------- */
+.term-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--overlay-bg);
+  backdrop-filter: blur(var(--overlay-blur));
+  z-index: 20;
+  display: flex;
+  padding: 18px;
+}
+.term-overlay__panel {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--dark-surface, #161618);
+  border: 1px solid #2a2a2e;
+  border-radius: var(--radius-panel-lg);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.term-overlay__header {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 16px;
+  background: var(--dark-header, #1f1f22);
+  border-bottom: 1px solid #000;
+  flex: none;
+}
+.term-overlay__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ok, #16a34a);
+  flex: none;
+}
+.term-overlay__name {
+  font: 600 13.5px var(--font-mono);
+  color: var(--dark-text-2, #e4e4e7);
+}
+.term-overlay__meta {
+  font: 11.5px var(--font-mono);
+  color: var(--text-3, #71717a);
+}
+.term-overlay__spacer {
+  flex: 1;
+}
+.term-overlay__geometry {
+  font: 11.5px var(--font-mono);
+  color: var(--text-3, #71717a);
+}
+.term-overlay__attach,
+.term-overlay__close {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: var(--radius-btn-sm);
+  font: 600 11.5px var(--font-ui);
+  cursor: pointer;
+}
+.term-overlay__attach {
+  background: #2a2a2e;
+  border: 1px solid #3a3a3f;
+  color: var(--dark-text, #d4d4d8);
+}
+.term-overlay__close {
+  background: none;
+  border: 1px solid #3a3a3f;
+  color: var(--text-4, #a1a1aa);
+}
+.term-overlay__copied {
+  position: absolute;
+  top: 54px;
+  right: 22px;
+  font: 11px var(--font-mono);
+  color: var(--ok, #16a34a);
+}
