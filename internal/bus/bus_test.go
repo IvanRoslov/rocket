@@ -43,8 +43,17 @@ func TestPublishWritesToStoreAndDeliversToSubscribers(t *testing.T) {
 			t.Errorf("subscriber 1: got type=%q sessionID=%q, want type=%q sessionID=%q",
 				event.Type, event.SessionID, eventType, sessionID)
 		}
-		if id, ok := event.Data["user_id"].(float64); !ok || int(id) != 456 {
-			t.Errorf("subscriber 1: got data=%v, want user_id=456", event.Data)
+		var userID int
+		switch v := event.Data["user_id"].(type) {
+		case int:
+			userID = v
+		case float64:
+			userID = int(v)
+		default:
+			t.Errorf("subscriber 1: user_id has unexpected type %T", v)
+		}
+		if userID != 456 {
+			t.Errorf("subscriber 1: got user_id=%d, want 456", userID)
 		}
 	case <-ctx.Done():
 		t.Fatal("subscriber 1: event not received")

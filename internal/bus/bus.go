@@ -3,7 +3,7 @@ package bus
 import (
 	"log/slog"
 	"sync"
-	"sync/atomic"
+	"time"
 
 	"github.com/IvanRoslov/rocket/internal/store"
 )
@@ -14,7 +14,7 @@ type Bus struct {
 
 	mu          sync.RWMutex
 	subscribers map[int64]chan store.Event
-	nextID      atomic.Int64
+	nextID      int64
 }
 
 // New creates a new Bus backed by the given store.
@@ -36,28 +36,20 @@ func (b *Bus) Publish(typ, sessionID string, data map[string]any) {
 		Data:      data,
 	}
 
-	// Append to store (sets TS if zero and returns the ID)
+	// Set TS before appending to store (so we know the exact value)
+	if e.TS == 0 {
+		e.TS = time.Now().Unix()
+	}
+
+	// Append to store and get the assigned ID
 	id, err := b.st.AppendEvent(e)
 	if err != nil {
 		slog.Default().Error("failed to append event to store", "error", err)
 		return // skip fan-out if store fails
 	}
 
-	// Populate ID and TS from store
+	// Populate ID from store
 	e.ID = id
-	// TS was set by AppendEvent if it was 0
-	if e.TS == 0 {
-		// This shouldn't happen if AppendEvent works correctly,
-		// but just in case, we set it here
-		e.TS = store.Event{}.TS
-	}
-	// Re-read the event from store to get the exact TS that was stored
-	events, err := b.st.ListEvents(id-1, 1, "")
-	if err != nil || len(events) == 0 {
-		slog.Default().Error("failed to retrieve published event from store", "error", err)
-		return
-	}
-	e = events[0]
 
 	// Fan out to subscribers with non-blocking send
 	b.mu.RLock()
@@ -78,9 +70,10 @@ func (b *Bus) Publish(typ, sessionID string, data map[string]any) {
 // The cancel function unsubscribes and closes the channel; it is idempotent.
 func (b *Bus) Subscribe() (ch <-chan store.Event, cancel func()) {
 	eventCh := make(chan store.Event, 64)
-	id := b.nextID.Add(1)
 
 	b.mu.Lock()
+	b.nextID++
+	id := b.nextID
 	b.subscribers[id] = eventCh
 	b.mu.Unlock()
 
