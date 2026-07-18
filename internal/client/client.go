@@ -83,6 +83,11 @@ func (c *Client) Patch(path string, in, out any) error {
 	return c.do(http.MethodPatch, path, in, out)
 }
 
+// Put performs a PUT request to path, decoding the JSON response into out.
+func (c *Client) Put(path string, in, out any) error {
+	return c.do(http.MethodPut, path, in, out)
+}
+
 // Delete performs a DELETE request to path, decoding the JSON response into out.
 func (c *Client) Delete(path string, in, out any) error {
 	return c.do(http.MethodDelete, path, in, out)
@@ -137,6 +142,9 @@ func (c *Client) do(method, path string, in, out any) error {
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if sid := os.Getenv("ROCKET_SESSION_ID"); sid != "" {
+		req.Header.Set("X-Rocket-Session", sid)
 	}
 
 	resp, err := c.http.Do(req)

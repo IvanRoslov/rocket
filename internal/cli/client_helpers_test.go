@@ -54,6 +54,57 @@ func TestLoadConfigNoOverrideWhenSocketFlagEmpty(t *testing.T) {
 	}
 }
 
+// TestLoadConfigFallsBackToRocketSocketEnv proves that when neither --socket
+// nor ROCKET_HOME point at the right daemon instance, the ROCKET_SOCKET env
+// var (already exported into every orchestrator/worker session by
+// claudecode.Env) is honored as the socket override. Without this, agent
+// sessions launched with a non-default ROCKET_HOME can never reach the
+// daemon that spawned them via the `rocket` CLI, because loadConfig only
+// ever resolves the *default* <ROCKET_HOME or ~/.rocket>/rocket.sock path
+// and tmux sessions don't inherit ROCKET_HOME set after the tmux server
+// started.
+func TestLoadConfigFallsBackToRocketSocketEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("ROCKET_HOME", home)
+
+	prev := flags.Socket
+	t.Cleanup(func() { flags.Socket = prev })
+	flags.Socket = ""
+
+	sockEnv := filepath.Join(home, "session.sock")
+	t.Setenv("ROCKET_SOCKET", sockEnv)
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.SocketPath() != sockEnv {
+		t.Errorf("cfg.SocketPath() = %q, want %q (from ROCKET_SOCKET env)", cfg.SocketPath(), sockEnv)
+	}
+}
+
+// TestLoadConfigSocketFlagBeatsRocketSocketEnv proves the explicit --socket
+// flag still wins over the ROCKET_SOCKET env fallback.
+func TestLoadConfigSocketFlagBeatsRocketSocketEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("ROCKET_HOME", home)
+
+	prev := flags.Socket
+	t.Cleanup(func() { flags.Socket = prev })
+
+	flagSock := filepath.Join(home, "flag.sock")
+	flags.Socket = flagSock
+	t.Setenv("ROCKET_SOCKET", filepath.Join(home, "env.sock"))
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.SocketPath() != flagSock {
+		t.Errorf("cfg.SocketPath() = %q, want %q (--socket flag)", cfg.SocketPath(), flagSock)
+	}
+}
+
 // TestApiPathEscapesTraversal proves apiPath escapes a crafted id like
 // "../shutdown?" so it cannot be used to rewrite the request to a different
 // endpoint (e.g. turning POST /v1/sessions/<id>/restore into

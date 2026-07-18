@@ -2,6 +2,7 @@ package cli
 
 import (
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/IvanRoslov/rocket/internal/client"
@@ -26,6 +27,13 @@ func apiPath(parts ...string) string {
 // applying the global --socket override (if given) to cfg.SocketOverride
 // so every consumer of cfg — the HTTP client, daemon autostart, and
 // `daemon run` itself — agrees on the socket path.
+//
+// Falls back to $ROCKET_SOCKET when --socket is not given. This env var is
+// exported into every orchestrator/worker session (claudecode.Env) but
+// tmux sessions don't inherit $ROCKET_HOME set after the tmux server first
+// started, so without this fallback a `rocket` CLI call made from inside an
+// agent session can silently resolve to the wrong (or no) daemon whenever
+// ROCKET_HOME isn't the default ~/.rocket.
 func loadConfig() (*config.Config, error) {
 	cfg, err := config.Load("")
 	if err != nil {
@@ -33,6 +41,8 @@ func loadConfig() (*config.Config, error) {
 	}
 	if flags.Socket != "" {
 		cfg.SocketOverride = flags.Socket
+	} else if sock := os.Getenv("ROCKET_SOCKET"); sock != "" {
+		cfg.SocketOverride = sock
 	}
 	return cfg, nil
 }
