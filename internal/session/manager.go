@@ -625,6 +625,8 @@ func (m *Manager) Restore(ctx context.Context, id string) error {
 		SocketPath:   m.cfg.SocketPath(),
 	}
 
+	m.fillRestorePrompt(&spec, sess, repo, path)
+
 	env := mergeEnv(repo.Env, ag.Env(spec))
 	cmd := shellJoin(ag.LaunchCommand(spec))
 
@@ -645,6 +647,85 @@ func (m *Manager) Restore(ctx context.Context, id string) error {
 	m.bus.Publish("session.restored", id, nil)
 
 	return nil
+}
+
+// fillRestorePrompt best-effort repopulates spec.SystemPrompt and
+// spec.FirstMessage for a restored orchestrator or worker session. A bare
+// relaunch (the old behavior) starts a brand new agent process with no
+// system prompt and no first message: since claudecode.LaunchCommand
+// never resumes prior chat history, that process has no idea what feature
+// or subtask it owns, breaking the very recovery path the orchestrator is
+// told to use for stalled workers ("rocket restore <id>").
+//
+// The task that owns sess (found via GetTaskBySessionID: the root task for
+// an orchestrator, the subtask for a worker) carries everything needed to
+// rebuild the same system prompt Start/Spawn used. If no such task is
+// found (e.g. a session restored outside the task system, or in tests),
+// spec is left untouched and Restore proceeds exactly as before.
+func (m *Manager) fillRestorePrompt(spec *agent.LaunchSpec, sess store.Session, repo store.Repo, worktreePath string) {
+	task, err := m.st.GetTaskBySessionID(sess.ID)
+	if err != nil {
+		return
+	}
+
+	proj, err := m.st.GetProject(sess.ProjectID)
+	if err != nil {
+		return
+	}
+
+	switch sess.Kind {
+	case "orchestrator":
+		allowedRepos, err := allowedReposDesc(m.st, proj)
+		if err != nil {
+			return
+		}
+		sysPrompt, err := prompts.Render(m.cfg.Home, "orchestrator", prompts.Vars{
+			"feature_slug":   sess.FeatureSlug,
+			"task_id":        fmt.Sprint(task.ID),
+			"project_name":   proj.Name,
+			"main_repo":      proj.MainRepo,
+			"main_repo_path": repo.Path,
+			"allowed_repos":  allowedRepos,
+			"session_id":     sess.ID,
+			"worktree_path":  worktreePath,
+			"project_rules":  "",
+		})
+		if err != nil {
+			return
+		}
+		spec.SystemPrompt = sysPrompt
+		spec.FirstMessage = fmt.Sprintf(
+			"[rocket restore] You were relaunched after a crash or interruption. "+
+				"This is task #%d %q. Run `rocket task show %d` to see the spec, decisions, "+
+				"subtasks and Q&A you already recorded, then continue from there.",
+			task.ID, task.Title, task.ID,
+		)
+	case "worker":
+		sysPrompt, err := prompts.Render(m.cfg.Home, "worker", prompts.Vars{
+			"task_name":     task.Title,
+			"subtask_id":    fmt.Sprint(task.ID),
+			"feature_slug":  sess.FeatureSlug,
+			"project_name":  proj.Name,
+			"repo_id":       sess.RepoID,
+			"branch":        sess.Branch,
+			"session_id":    sess.ID,
+			"worktree_path": worktreePath,
+			"parent_id":     sess.ParentID,
+		})
+		if err != nil {
+			return
+		}
+		spec.SystemPrompt = sysPrompt
+		msg := fmt.Sprintf(
+			"[rocket restore] You were relaunched after a crash or interruption. "+
+				"Your branch is %q; check `git status`/`git log` for progress already made.",
+			sess.Branch,
+		)
+		if sess.Prompt != "" {
+			msg += "\n\nYour original brief:\n\n" + sess.Prompt
+		}
+		spec.FirstMessage = msg
+	}
 }
 
 // Output returns the last `lines` lines of the session's runtime pane.

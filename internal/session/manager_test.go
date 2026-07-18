@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -801,6 +802,90 @@ func TestRestoreFromErrored(t *testing.T) {
 	}
 	if testFakeAgent.launchCalls[len(testFakeAgent.launchCalls)-1].FirstMessage != "" {
 		t.Errorf("restore should launch without FirstMessage")
+	}
+}
+
+// TestRestoreRepopulatesOrchestratorPrompt proves that restoring an
+// orchestrator session whose owning task is still findable (via
+// store.GetTaskBySessionID) relaunches it with the same system prompt
+// Start would have used, plus a short restore notice pointing at the task
+// — instead of the old bare-relaunch behavior (empty system prompt, empty
+// first message) that left a restored orchestrator with no idea what
+// feature or task it owned.
+func TestRestoreRepopulatesOrchestratorPrompt(t *testing.T) {
+	m, st, _, _, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	sess := seedRunningSession(t, st, "orch1")
+	sess.Kind = "orchestrator"
+	sess.State = "errored"
+	if err := st.UpdateSession(sess); err != nil {
+		t.Fatalf("UpdateSession: %v", err)
+	}
+	taskID, err := st.AddTask(store.Task{
+		Title:     "Add ping docs",
+		ProjectID: "proj1",
+		SessionID: "orch1",
+	})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	if err := m.Restore(context.Background(), "orch1"); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	last := testFakeAgent.launchCalls[len(testFakeAgent.launchCalls)-1]
+	if last.SystemPrompt == "" {
+		t.Error("SystemPrompt is empty, want the orchestrator prompt rebuilt from the owning task")
+	}
+	if last.FirstMessage == "" {
+		t.Error("FirstMessage is empty, want a restore notice")
+	}
+	wantSub := fmt.Sprintf("task #%d", taskID)
+	if !strings.Contains(last.FirstMessage, wantSub) {
+		t.Errorf("FirstMessage = %q, want it to mention %q", last.FirstMessage, wantSub)
+	}
+}
+
+// TestRestoreRepopulatesWorkerPrompt proves the same for a worker session:
+// its owning subtask and its original spawn Prompt (persisted on
+// store.Session) are used to rebuild the worker system prompt and to
+// remind it of its original brief.
+func TestRestoreRepopulatesWorkerPrompt(t *testing.T) {
+	m, st, _, _, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	parent := seedRunningSession(t, st, "orch1")
+	parent.Kind = "orchestrator"
+	if err := st.UpdateSession(parent); err != nil {
+		t.Fatalf("UpdateSession parent: %v", err)
+	}
+
+	sess := seedRunningSession(t, st, "worker1")
+	sess.ParentID = "orch1"
+	sess.Prompt = "Create PING.md with the word pong."
+	sess.State = "errored"
+	if err := st.UpdateSession(sess); err != nil {
+		t.Fatalf("UpdateSession: %v", err)
+	}
+	if _, err := st.AddTask(store.Task{
+		Title:     "ping-repo1",
+		ProjectID: "proj1",
+		RepoID:    "repo1",
+		SessionID: "worker1",
+	}); err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	if err := m.Restore(context.Background(), "worker1"); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	last := testFakeAgent.launchCalls[len(testFakeAgent.launchCalls)-1]
+	if last.SystemPrompt == "" {
+		t.Error("SystemPrompt is empty, want the worker prompt rebuilt from the owning subtask")
+	}
+	if !strings.Contains(last.FirstMessage, sess.Prompt) {
+		t.Errorf("FirstMessage = %q, want it to include the original brief %q", last.FirstMessage, sess.Prompt)
 	}
 }
 

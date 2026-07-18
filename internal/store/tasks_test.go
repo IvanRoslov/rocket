@@ -86,6 +86,36 @@ func TestAddTask_ParentAndFieldsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestGetTaskBySessionID(t *testing.T) {
+	s := openTestStore(t)
+	mustAddTaskSession(t, s, "sess-1")
+
+	id, err := s.AddTask(Task{
+		Title:     "Root",
+		ProjectID: "billing",
+		SessionID: "sess-1",
+	})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	got, err := s.GetTaskBySessionID("sess-1")
+	if err != nil {
+		t.Fatalf("GetTaskBySessionID: %v", err)
+	}
+	if got.ID != id {
+		t.Errorf("ID = %d, want %d", got.ID, id)
+	}
+}
+
+func TestGetTaskBySessionID_NotFound(t *testing.T) {
+	s := openTestStore(t)
+
+	if _, err := s.GetTaskBySessionID("no-such-session"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
 func TestListTasks_Filters(t *testing.T) {
 	s := openTestStore(t)
 

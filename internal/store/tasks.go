@@ -92,6 +92,18 @@ func (s *Store) GetTask(id int64) (Task, error) {
 	return scanTask(row)
 }
 
+// GetTaskBySessionID returns the task owning the given session id (the
+// orchestrator session for a root task, or the worker session for a
+// subtask), or ErrNotFound if no task references it.
+func (s *Store) GetTaskBySessionID(sessionID string) (Task, error) {
+	row := s.db.QueryRow(
+		`SELECT id, parent_id, title, description, project_id, repo_id, status, feature_slug,
+		        session_id, created_by, created_at, updated_at, completed_at
+		 FROM tasks WHERE session_id = ?`, sessionID,
+	)
+	return scanTask(row)
+}
+
 // ListTasks returns tasks matching the filter, ordered by id.
 func (s *Store) ListTasks(f TaskFilter) ([]Task, error) {
 	query := `SELECT id, parent_id, title, description, project_id, repo_id, status, feature_slug,
