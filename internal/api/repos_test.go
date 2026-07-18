@@ -148,6 +148,23 @@ func TestPostRepoExplicitInvalidID(t *testing.T) {
 	}
 }
 
+func TestPostRepoDerivedIDEmpty(t *testing.T) {
+	d := reposTestDeps(t)
+	srv := newTestServer(t, d)
+
+	repoDir := filepath.Join(t.TempDir(), "___")
+	initGitRepo(t, repoDir)
+
+	resp := postJSON(t, srv.URL+"/v1/repos", map[string]string{"path": repoDir})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	eb := decodeErr(t, resp)
+	if eb.Error.Code != "invalid_id" {
+		t.Errorf("code = %q, want invalid_id", eb.Error.Code)
+	}
+}
+
 func TestPostRepoNonexistentPath(t *testing.T) {
 	d := reposTestDeps(t)
 	srv := newTestServer(t, d)

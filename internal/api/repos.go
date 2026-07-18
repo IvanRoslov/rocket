@@ -103,6 +103,10 @@ func handlePostRepo(w http.ResponseWriter, r *http.Request, d Deps) {
 	id := req.ID
 	if id == "" {
 		id = normalizeID(filepath.Base(path))
+		if id == "" || !idPattern.MatchString(id) {
+			writeErr(w, http.StatusBadRequest, "invalid_id", "derived id from path is empty; pass --id explicitly")
+			return
+		}
 	} else if !idPattern.MatchString(id) {
 		writeErr(w, http.StatusBadRequest, "invalid_id", "id must match ^[a-z0-9-]+$")
 		return
