@@ -243,6 +243,85 @@ func TestListQueuedRecipients(t *testing.T) {
 	}
 }
 
+func TestExpireQueuedBefore_ConcurrentDeliveringNotExpired(t *testing.T) {
+	s := openTestStore(t)
+
+	queuedExpired, _ := s.AddMessage(Message{ToSession: "b", Body: "queued-expired", CreatedAt: 100})
+	deliveringExpired, _ := s.AddMessage(Message{ToSession: "b", Body: "delivering-expired", CreatedAt: 100})
+	if err := s.UpdateMessageStatus(deliveringExpired, "delivering", 1, 0); err != nil {
+		t.Fatalf("UpdateMessageStatus: %v", err)
+	}
+
+	expired, err := s.ExpireQueuedBefore(500)
+	if err != nil {
+		t.Fatalf("ExpireQueuedBefore: %v", err)
+	}
+	if len(expired) != 1 || expired[0].ID != queuedExpired {
+		t.Fatalf("expired = %+v, want just %d (queued one)", expired, queuedExpired)
+	}
+
+	m, err := s.GetMessage(deliveringExpired)
+	if err != nil {
+		t.Fatalf("GetMessage(deliveringExpired): %v", err)
+	}
+	if m.Status != "delivering" {
+		t.Errorf("delivering message status = %q, want unchanged delivering", m.Status)
+	}
+}
+
+func TestResetDelivering(t *testing.T) {
+	s := openTestStore(t)
+
+	delivering1, _ := s.AddMessage(Message{ToSession: "a", Body: "1"})
+	if err := s.UpdateMessageStatus(delivering1, "delivering", 1, 0); err != nil {
+		t.Fatalf("UpdateMessageStatus: %v", err)
+	}
+	delivering2, _ := s.AddMessage(Message{ToSession: "b", Body: "2"})
+	if err := s.UpdateMessageStatus(delivering2, "delivering", 2, 0); err != nil {
+		t.Fatalf("UpdateMessageStatus: %v", err)
+	}
+	queued, _ := s.AddMessage(Message{ToSession: "c", Body: "3"})
+	delivered, _ := s.AddMessage(Message{ToSession: "d", Body: "4"})
+	if err := s.UpdateMessageStatus(delivered, "delivered", 1, 10); err != nil {
+		t.Fatalf("UpdateMessageStatus: %v", err)
+	}
+
+	n, err := s.ResetDelivering()
+	if err != nil {
+		t.Fatalf("ResetDelivering: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("n = %d, want 2", n)
+	}
+
+	for _, id := range []int64{delivering1, delivering2} {
+		m, err := s.GetMessage(id)
+		if err != nil {
+			t.Fatalf("GetMessage(%d): %v", id, err)
+		}
+		if m.Status != "queued" {
+			t.Errorf("message %d status = %q, want queued", id, m.Status)
+		}
+	}
+
+	// Untouched statuses remain untouched.
+	if m, _ := s.GetMessage(queued); m.Status != "queued" {
+		t.Errorf("queued message status = %q, want queued", m.Status)
+	}
+	if m, _ := s.GetMessage(delivered); m.Status != "delivered" {
+		t.Errorf("delivered message status = %q, want delivered", m.Status)
+	}
+
+	// Idempotent: nothing left to reset.
+	n2, err := s.ResetDelivering()
+	if err != nil {
+		t.Fatalf("ResetDelivering (second call): %v", err)
+	}
+	if n2 != 0 {
+		t.Fatalf("n2 = %d, want 0", n2)
+	}
+}
+
 func TestPurgeOld(t *testing.T) {
 	s := openTestStore(t)
 

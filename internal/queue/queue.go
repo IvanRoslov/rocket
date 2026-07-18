@@ -42,12 +42,23 @@ type Queue struct {
 	cfg         *config.Config
 	getActivity func(sessionID string) (activity.State, bool)
 
+	// getSession looks up a recipient's session. Defaults to st.GetSession;
+	// overridable by tests to simulate transient (non-ErrNotFound) lookup
+	// errors without a real store failure.
+	getSession func(sessionID string) (store.Session, error)
+
 	// backoff computes the sleep duration after a failed delivery attempt
 	// (1-based attempt number that just failed). Overridable by tests.
 	backoff func(attempt int) time.Duration
 
 	mu      sync.Mutex
 	workers map[string]bool
+
+	ctxMu sync.RWMutex
+	// runCtx is the context passed to Run, stored so Wake-spawned delivery
+	// goroutines can honor daemon shutdown instead of running forever. It is
+	// nil until Run is called.
+	runCtxVal context.Context
 }
 
 // New builds a Queue. getActivity is typically Monitor.Activity.
@@ -58,15 +69,48 @@ func New(st *store.Store, b *bus.Bus, rt runtime.Runtime, cfg *config.Config, ge
 		rt:          rt,
 		cfg:         cfg,
 		getActivity: getActivity,
+		getSession:  st.GetSession,
 		backoff:     defaultBackoff,
 		workers:     make(map[string]bool),
 	}
 }
 
-// Run starts a delivery worker for every recipient with an already-queued
+// runCtx returns the context passed to Run, or context.Background() if Run
+// hasn't been called yet (e.g. Wake is invoked very early, before the
+// daemon's goroutine running Queue.Run has had a chance to start — the
+// normal daemon wiring calls Run before serving, so this fallback is only
+// hit in that narrow startup window).
+func (q *Queue) runCtx() context.Context {
+	q.ctxMu.RLock()
+	defer q.ctxMu.RUnlock()
+	if q.runCtxVal != nil {
+		return q.runCtxVal
+	}
+	return context.Background()
+}
+
+// Run recovers messages orphaned in status "delivering" by a previous
+// crash, starts a delivery worker for every recipient with a queued
 // message, then runs housekeeping (timeout expiry every minute, retention
 // purge once a day) until ctx is cancelled.
 func (q *Queue) Run(ctx context.Context) {
+	q.ctxMu.Lock()
+	q.runCtxVal = ctx
+	q.ctxMu.Unlock()
+
+	// Recover messages orphaned in "delivering" by a prior crash: no query
+	// anywhere reads that status back into the live queue, so without this
+	// they would be silently lost, breaking FIFO for anything queued behind
+	// them. This must run BEFORE any workers are spawned below, so that
+	// recovered messages are picked up by ListQueuedRecipients/Wake like any
+	// other queued message. See store.ResetDelivering for the accepted
+	// duplicate-delivery tradeoff.
+	if n, err := q.st.ResetDelivering(); err != nil {
+		slog.Error("queue: reset delivering messages", "error", err)
+	} else if n > 0 {
+		slog.Warn("queue: recovered messages orphaned in delivering status", "count", n)
+	}
+
 	recipients, err := q.st.ListQueuedRecipients()
 	if err != nil {
 		slog.Error("queue: list queued recipients", "error", err)
@@ -140,9 +184,18 @@ func (q *Queue) Wake(to string) {
 // against the classic lost-wakeup race: after deciding to exit, it
 // re-checks the queue before actually unregistering.
 func (q *Queue) deliverLoop(to string) {
-	ctx := context.Background()
+	ctx := q.runCtx()
 
 	for {
+		if ctx.Err() != nil {
+			// Shutting down: don't spin re-fetching the same still-queued
+			// message forever (deliver returns immediately without changing
+			// its status once ctx is cancelled). It will be picked up again
+			// on the next Wake/Run.
+			q.unregister(to)
+			return
+		}
+
 		msg, ok, err := q.st.NextQueuedMessage(to)
 		if err != nil {
 			slog.Error("queue: next queued message", "to", to, "error", err)
@@ -206,8 +259,23 @@ func (q *Queue) unregisterIfStillEmpty(to string) bool {
 // for the recipient to be ready, injecting, and retrying/failing.
 func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 	for {
-		sess, err := q.st.GetSession(msg.ToSession)
-		if err != nil || sess.State != "running" {
+		sess, err := q.getSession(msg.ToSession)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				q.fail(msg, "recipient_gone")
+				return
+			}
+			// Transient lookup failure (e.g. a momentary DB error): don't
+			// fail the message on a fluke. Log and retry after a short
+			// wait via the same fallback-tick mechanism used while waiting
+			// for the recipient to become ready.
+			slog.Error("queue: get session (transient, will retry)", "to", msg.ToSession, "error", err)
+			if !q.waitForReady(ctx, msg.ToSession) {
+				return // ctx cancelled
+			}
+			continue
+		}
+		if sess.State != "running" {
 			q.fail(msg, "recipient_gone")
 			return
 		}

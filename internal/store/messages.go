@@ -120,13 +120,26 @@ func (s *Store) UpdateMessageStatus(id int64, status string, attempts int, deliv
 // ExpireQueuedBefore sets status = 'failed' on all queued messages with
 // created_at < ts, and returns the affected messages (post-update, i.e. with
 // status "failed").
+//
+// The select-and-update is wrapped in a single transaction (using
+// UPDATE ... RETURNING) so that a message which transitions from "queued" to
+// "delivering" concurrently (between a separate SELECT and UPDATE) can never
+// be spuriously expired: the WHERE clause is evaluated atomically against the
+// same row state that gets updated.
 func (s *Store) ExpireQueuedBefore(ts int64) ([]Message, error) {
-	rows, err := s.db.Query(
-		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at
-		 FROM messages WHERE status = 'queued' AND created_at < ?`, ts,
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("begin expire tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op if committed
+
+	rows, err := tx.Query(
+		`UPDATE messages SET status = 'failed'
+		 WHERE status = 'queued' AND created_at < ?
+		 RETURNING id, from_session, to_session, body, status, attempts, created_at, delivered_at`, ts,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("query expiring messages: %w", err)
+		return nil, fmt.Errorf("expire messages: %w", err)
 	}
 
 	var out []Message
@@ -136,7 +149,6 @@ func (s *Store) ExpireQueuedBefore(ts int64) ([]Message, error) {
 			rows.Close()
 			return nil, err
 		}
-		m.Status = "failed"
 		out = append(out, m)
 	}
 	if err := rows.Err(); err != nil {
@@ -145,17 +157,34 @@ func (s *Store) ExpireQueuedBefore(ts int64) ([]Message, error) {
 	}
 	rows.Close()
 
-	if len(out) == 0 {
-		return nil, nil
-	}
-
-	if _, err := s.db.Exec(
-		`UPDATE messages SET status = 'failed' WHERE status = 'queued' AND created_at < ?`, ts,
-	); err != nil {
-		return nil, fmt.Errorf("expire messages: %w", err)
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit expire tx: %w", err)
 	}
 
 	return out, nil
+}
+
+// ResetDelivering resets every message stuck in status "delivering" back to
+// "queued". It exists to recover messages orphaned by a daemon crash: since
+// no query anywhere reads status = 'delivering' back into the live queue,
+// such messages would otherwise be silently lost forever, breaking FIFO for
+// anything queued behind them. It is intended to be called once, at
+// Queue.Run startup, before any delivery workers are spawned.
+//
+// Tradeoff: if the crash happened after the recipient actually received the
+// injected text but before the status update was persisted, this causes a
+// duplicate re-delivery of that one message. That is accepted as the lesser
+// evil versus silently losing the message forever.
+func (s *Store) ResetDelivering() (int, error) {
+	res, err := s.db.Exec(`UPDATE messages SET status = 'queued' WHERE status = 'delivering'`)
+	if err != nil {
+		return 0, fmt.Errorf("reset delivering messages: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("reset delivering messages rows affected: %w", err)
+	}
+	return int(n), nil
 }
 
 // ListQueuedRecipients returns the distinct to_session values of messages

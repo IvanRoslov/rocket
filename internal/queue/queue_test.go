@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -139,7 +140,12 @@ func (h *testHarness) addRunningSession(t *testing.T, id string, state activity.
 
 func waitUntil(t *testing.T, cond func() bool, msg string) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	waitUntilTimeout(t, 3*time.Second, cond, msg)
+}
+
+func waitUntilTimeout(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
 	for {
 		if cond() {
 			return
@@ -397,6 +403,121 @@ func TestQueue_WakeIsIdempotent(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if n := h.rt.callCount(); n != 1 {
 		t.Fatalf("Inject called %d times, want exactly 1 (Wake must be idempotent)", n)
+	}
+}
+
+func TestQueue_RunRecoversOrphanedDeliveringMessages(t *testing.T) {
+	h := newTestQueue(t)
+	h.addRunningSession(t, "recv", activity.Ready)
+
+	id, err := h.st.AddMessage(store.Message{ToSession: "recv", Body: "orphaned"})
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+	// Simulate a crash mid-delivery: message stuck in "delivering".
+	if err := h.st.UpdateMessageStatus(id, "delivering", 1, 0); err != nil {
+		t.Fatalf("UpdateMessageStatus: %v", err)
+	}
+
+	// ListQueuedRecipients (used by Run to decide who to Wake) never sees
+	// "delivering" messages, so without recovery this message would never
+	// be picked up at all.
+	if got := messageStatus(t, h.st, id); got != "delivering" {
+		t.Fatalf("precondition: status = %q, want delivering", got)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.q.Run(ctx)
+
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" },
+		"orphaned delivering message recovered and delivered")
+}
+
+func TestQueue_CtxCancelStopsWaitingWorker(t *testing.T) {
+	h := newTestQueue(t)
+	// Activity stays "active" forever: the worker will sit in waitForReady.
+	h.addRunningSession(t, "recv", activity.Active)
+
+	id, err := h.st.AddMessage(store.Message{ToSession: "recv", Body: "hello"})
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go h.q.Run(ctx)
+
+	// Let Run's startup Wake spin the worker up into its wait loop.
+	waitUntil(t, func() bool {
+		h.q.mu.Lock()
+		defer h.q.mu.Unlock()
+		return h.q.workers["recv"]
+	}, "worker registered")
+
+	cancel()
+
+	waitUntil(t, func() bool {
+		h.q.mu.Lock()
+		defer h.q.mu.Unlock()
+		return !h.q.workers["recv"]
+	}, "worker exits after ctx cancel")
+
+	// The message must be left untouched (still queued), to be recovered on
+	// the next start rather than lost or silently marked otherwise.
+	if got := messageStatus(t, h.st, id); got != "queued" {
+		t.Fatalf("status after ctx cancel = %q, want queued", got)
+	}
+	if n := h.rt.callCount(); n != 0 {
+		t.Fatalf("Inject called %d times, want 0 (never became ready)", n)
+	}
+}
+
+func TestQueue_TransientGetSessionErrorDoesNotFailMessage(t *testing.T) {
+	h := newTestQueue(t)
+	h.addRunningSession(t, "recv", activity.Ready)
+
+	id, err := h.st.AddMessage(store.Message{ToSession: "recv", Body: "hello"})
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+
+	var calls int32
+	h.q.getSession = func(to string) (store.Session, error) {
+		n := atomic.AddInt32(&calls, 1)
+		if n == 1 {
+			return store.Session{}, errors.New("transient db hiccup")
+		}
+		return h.st.GetSession(to)
+	}
+
+	h.q.Wake("recv")
+
+	waitUntilTimeout(t, 5*time.Second, func() bool { return messageStatus(t, h.st, id) == "delivered" },
+		"message delivered after transient GetSession error retried")
+
+	if n := h.rt.callCount(); n != 1 {
+		t.Fatalf("Inject called %d times, want 1", n)
+	}
+}
+
+func TestQueue_NotFoundGetSessionFailsMessageAsRecipientGone(t *testing.T) {
+	h := newTestQueue(t)
+
+	id, err := h.st.AddMessage(store.Message{ToSession: "ghost", Body: "hello"})
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+
+	h.q.getSession = func(to string) (store.Session, error) {
+		return store.Session{}, store.ErrNotFound
+	}
+
+	h.q.Wake("ghost")
+
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "failed" },
+		"message failed for not-found recipient")
+	if n := h.rt.callCount(); n != 0 {
+		t.Fatalf("Inject called %d times, want 0", n)
 	}
 }
 
