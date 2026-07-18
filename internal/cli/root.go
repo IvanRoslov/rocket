@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 
+	"github.com/IvanRoslov/rocket/internal/client"
 	"github.com/IvanRoslov/rocket/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -70,12 +71,8 @@ func exitCode(err error) int {
 	if errors.As(err, &daemonErr) {
 		return 2
 	}
-	return 1
-}
-
-func newDaemonCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "daemon",
-		Short: "Управление демоном rocketd",
+	if errors.Is(err, client.ErrDaemonUnavailable) {
+		return 2
 	}
+	return 1
 }
