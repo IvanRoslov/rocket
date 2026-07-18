@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -52,6 +53,40 @@ func (sessFakeWorkspace) Destroy(ctx context.Context, repo store.Repo, sessionID
 	return nil
 }
 
+// sessFakeRuntimeErrorOnCreate returns error from Create, used to test spawn
+// failure scenarios.
+type sessFakeRuntimeErrorOnCreate struct{}
+
+func (sessFakeRuntimeErrorOnCreate) Create(ctx context.Context, spec runtime.CreateSpec) (runtime.Handle, error) {
+	return runtime.Handle{}, fmt.Errorf("fake runtime create failed")
+}
+func (sessFakeRuntimeErrorOnCreate) Inject(ctx context.Context, h runtime.Handle, text string) error {
+	return nil
+}
+func (sessFakeRuntimeErrorOnCreate) Capture(ctx context.Context, h runtime.Handle, lines int) (string, error) {
+	return "", nil
+}
+func (sessFakeRuntimeErrorOnCreate) Alive(ctx context.Context, h runtime.Handle) bool    { return true }
+func (sessFakeRuntimeErrorOnCreate) Destroy(ctx context.Context, h runtime.Handle) error { return nil }
+func (sessFakeRuntimeErrorOnCreate) AttachCommand(h runtime.Handle) []string {
+	return []string{"tmux", "attach", "-t", h.Name}
+}
+func (sessFakeRuntimeErrorOnCreate) List(ctx context.Context) ([]string, error) { return nil, nil }
+
+// sessFakeWorkspaceErrorOnCreate returns error from Create, used to test spawn
+// failure scenarios.
+type sessFakeWorkspaceErrorOnCreate struct{}
+
+func (sessFakeWorkspaceErrorOnCreate) Create(ctx context.Context, repo store.Repo, sessionID, branch string) (workspace.CreateResult, error) {
+	return workspace.CreateResult{}, fmt.Errorf("fake workspace create failed")
+}
+func (sessFakeWorkspaceErrorOnCreate) Restore(ctx context.Context, repo store.Repo, sessionID, branch string) (string, error) {
+	return "/fake/wt/" + sessionID, nil
+}
+func (sessFakeWorkspaceErrorOnCreate) Destroy(ctx context.Context, repo store.Repo, sessionID string) error {
+	return nil
+}
+
 type sessFakeAgent struct{}
 
 func (sessFakeAgent) Name() string                                 { return "fake" }
@@ -82,6 +117,52 @@ func sessionsTestDeps(t *testing.T) Deps {
 	b := bus.New(st)
 	cfg := &config.Config{Home: dir, DefaultAgent: "fake"}
 	mgr := session.NewManager(st, b, sessFakeRuntime{}, sessFakeWorkspace{}, cfg)
+
+	d := testDeps(t, nil)
+	d.Store = st
+	d.Bus = b
+	d.Cfg = cfg
+	d.Manager = mgr
+	return d
+}
+
+// sessionsTestDepsWithErrorRuntime builds Deps like sessionsTestDeps but with
+// a runtime that errors on Create, for testing spawn failure scenarios.
+func sessionsTestDepsWithErrorRuntime(t *testing.T) Deps {
+	t.Helper()
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "rocket.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	b := bus.New(st)
+	cfg := &config.Config{Home: dir, DefaultAgent: "fake"}
+	mgr := session.NewManager(st, b, sessFakeRuntimeErrorOnCreate{}, sessFakeWorkspace{}, cfg)
+
+	d := testDeps(t, nil)
+	d.Store = st
+	d.Bus = b
+	d.Cfg = cfg
+	d.Manager = mgr
+	return d
+}
+
+// sessionsTestDepsWithErrorWorkspace builds Deps like sessionsTestDeps but with
+// a workspace that errors on Create, for testing spawn failure scenarios.
+func sessionsTestDepsWithErrorWorkspace(t *testing.T) Deps {
+	t.Helper()
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "rocket.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	b := bus.New(st)
+	cfg := &config.Config{Home: dir, DefaultAgent: "fake"}
+	mgr := session.NewManager(st, b, sessFakeRuntime{}, sessFakeWorkspaceErrorOnCreate{}, cfg)
 
 	d := testDeps(t, nil)
 	d.Store = st
@@ -534,5 +615,76 @@ func TestKillCascadeKillsOrchestratorAndWorkers(t *testing.T) {
 	}
 	if unrelated.State != "running" {
 		t.Errorf("unrelated session state = %q, want running (unaffected by cascade)", unrelated.State)
+	}
+}
+
+func TestPostSessionSpawnFailureCancelsAutoSubtask(t *testing.T) {
+	d := sessionsTestDepsWithErrorWorkspace(t)
+	srv := newTestServer(t, d)
+	orchID, rootID := seedOrchestratorWithTask(t, d, "proj1", "myfeat")
+
+	// Spawn without subtask_id: auto-creates a subtask.
+	resp := postJSONWithHeader(t, srv.URL+"/v1/sessions", orchID,
+		map[string]any{"repo": "proj1-repo", "task": "mytask"})
+	defer resp.Body.Close()
+
+	// Spawn fails because workspace.Create errors.
+	if resp.StatusCode < 400 {
+		t.Fatalf("status = %d, want 4xx/5xx", resp.StatusCode)
+	}
+
+	// Verify the auto-created subtask was cancelled.
+	tasks, err := d.Store.ListTasks(store.TaskFilter{ParentSet: true, Parent: rootID})
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 auto-created subtask, got %d", len(tasks))
+	}
+	sub := tasks[0]
+	if sub.Status != "cancelled" {
+		t.Errorf("auto-created subtask status = %q, want cancelled", sub.Status)
+	}
+	if sub.SessionID != "" {
+		t.Errorf("auto-created subtask SessionID should be empty but got %q", sub.SessionID)
+	}
+}
+
+func TestPostSessionSpawnFailureLeavesExistingSubtask(t *testing.T) {
+	d := sessionsTestDepsWithErrorWorkspace(t)
+	srv := newTestServer(t, d)
+	orchID, rootID := seedOrchestratorWithTask(t, d, "proj1", "myfeat")
+
+	// Create a pre-existing subtask in backlog state.
+	subID, err := d.Store.AddTask(store.Task{
+		Title:     "presub",
+		ParentID:  rootID,
+		ProjectID: "proj1",
+		Status:    "backlog",
+	})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	// Spawn with subtask_id: uses the existing subtask.
+	resp := postJSONWithHeader(t, srv.URL+"/v1/sessions", orchID,
+		map[string]any{"repo": "proj1-repo", "task": "mytask", "subtask_id": subID})
+	defer resp.Body.Close()
+
+	// Spawn fails because workspace.Create errors.
+	if resp.StatusCode < 400 {
+		t.Fatalf("status = %d, want 4xx/5xx", resp.StatusCode)
+	}
+
+	// Verify the existing subtask was left untouched.
+	sub, err := d.Store.GetTask(subID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if sub.Status != "backlog" {
+		t.Errorf("subtask status = %q, want backlog (unchanged)", sub.Status)
+	}
+	if sub.SessionID != "" {
+		t.Errorf("subtask SessionID should remain empty but got %q", sub.SessionID)
 	}
 }
