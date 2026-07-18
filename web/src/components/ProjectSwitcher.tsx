@@ -14,6 +14,7 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
   const [query, setQuery] = useState('')
   const navigate = useNavigate()
   const rootRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
 
   const current = projects?.find((p) => p.id === currentProjectId)
 
@@ -32,7 +33,10 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
     }
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key === 'Escape') {
+        setOpen(false)
+        triggerRef.current?.focus()
+      }
     }
     document.addEventListener('pointerdown', handlePointerDown)
     document.addEventListener('keydown', handleKeyDown)
@@ -52,8 +56,10 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
     <div className="project-switcher" ref={rootRef}>
       <button
         type="button"
+        ref={triggerRef}
         className="project-switcher__trigger"
         onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
         aria-expanded={open}
       >
         <span
@@ -69,7 +75,7 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
         <span className="project-switcher__caret">▾</span>
       </button>
       {open && (
-        <div className="project-switcher__panel">
+        <div className="project-switcher__panel" role="listbox">
           <input
             className="project-switcher__search"
             type="text"
@@ -82,6 +88,8 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
             <button
               key={p.id}
               type="button"
+              role="option"
+              aria-selected={p.id === currentProjectId}
               className="project-switcher__item"
               onClick={() => select(p)}
             >

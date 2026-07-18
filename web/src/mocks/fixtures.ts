@@ -54,6 +54,16 @@ export const repos: Repo[] = [
     post_create: [],
     created_at: NOW - 200 * DAY,
   },
+  {
+    id: 'data',
+    path: '/home/dev/repos/data',
+    default_branch: 'main',
+    auto_cleanup: true,
+    env: {},
+    symlinks: [],
+    post_create: [],
+    created_at: NOW - 200 * DAY,
+  },
 ]
 
 export const projects: Project[] = [
@@ -65,6 +75,15 @@ export const projects: Project[] = [
     live_sessions: 3,
     tasks: { backlog: 1, in_progress: 1, review: 1, done: 1 },
     created_at: NOW - 150 * DAY,
+  },
+  {
+    id: 'analytics',
+    name: 'Analytics',
+    main: 'data',
+    linked: [],
+    live_sessions: 0,
+    tasks: { backlog: 0, in_progress: 0, review: 0, done: 0 },
+    created_at: NOW - 100 * DAY,
   },
 ]
 
