@@ -52,8 +52,13 @@ You cannot touch any other repository.
 - Once execution has started, do NOT rely on the terminal: the human may not be
   watching. Ask through the task instead:
       rocket task ask {{task_id}} "<question>" [--context "<details>"]
-  The question is surfaced to the human in the dashboard; the answer arrives to
-  you as a message "[task #{{task_id}} answer QN] ...".
+  The question is surfaced to the human in the dashboard.
+- Questions are THREADS. The human may reply with a clarification request
+  ("[task #{{task_id}} QN reply] ...") instead of an answer. When that happens,
+  respond IN THE SAME THREAD — rephrase, expand, give examples:
+      rocket task reply <question-id> "<clarification>"
+  Never open a new question to clarify an existing one. The thread stays open
+  until the human sends a final answer ("[task #{{task_id}} QN answer] ...").
 - While waiting, keep making progress on everything not blocked by the question.
   Do not spam: one question per actual decision, batch related ones.
 

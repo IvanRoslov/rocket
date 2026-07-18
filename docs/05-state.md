@@ -141,13 +141,23 @@ CREATE TABLE task_questions (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id     INTEGER NOT NULL REFERENCES tasks(id),
   asked_by    TEXT NOT NULL,                 -- session id оркестратора
-  body        TEXT NOT NULL,
+  body        TEXT NOT NULL,                 -- исходный вопрос
   context     TEXT,                          -- опциональный markdown-контекст
-  status      TEXT NOT NULL DEFAULT 'open',  -- open|answered
-  answer      TEXT,
+  status      TEXT NOT NULL DEFAULT 'open',  -- open|resolved
+  resolution  TEXT,                          -- answered|dismissed (когда resolved)
   asked_at    INTEGER NOT NULL,
-  answered_at INTEGER
+  resolved_at INTEGER
 );
+
+CREATE TABLE question_messages (             -- тред вопроса
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  question_id INTEGER NOT NULL REFERENCES task_questions(id),
+  author      TEXT,                          -- session id оркестратора; NULL = пользователь
+  kind        TEXT NOT NULL DEFAULT 'reply', -- reply|answer
+  body        TEXT NOT NULL,
+  created_at  INTEGER NOT NULL
+);
+-- чья очередь отвечать — производное от автора последней записи треда
 
 CREATE TABLE events (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

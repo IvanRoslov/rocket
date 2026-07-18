@@ -14,8 +14,10 @@ rocket task start <id> [--agent <name>]          # назначить оркес
 rocket task move <id> <status>
 rocket task doc put <id> --kind spec|plan|report --title "..." --file <f.md>
 rocket task log <id> --kind decision|problem|note "<текст>"
-rocket task questions [<id>] [--open]            # вопросы, ждущие ответа
-rocket task answer <question-id> "<ответ>"       # ответ уходит оркестратору
+rocket task questions [<id>] [--open]            # вопросы и их треды
+rocket task reply <question-id> "<уточнение>"    # реплика в тред, вопрос открыт
+rocket task answer <question-id> "<ответ>"       # финальный ответ, закрывает
+rocket task answer <question-id> --dismiss       # закрыть как неактуальный
 rocket task cancel <id>
     Подробности — 12-tasks.md.
 
@@ -77,9 +79,10 @@ rocket task ... (см. выше)
     Оркестратор ведёт доки/журнал своей задачи, воркер — своей подзадачи.
 
 rocket task ask <id> "<вопрос>" [--context <md>]
-    Только для оркестраторов: вопрос пользователю через задачу. Пользователь
-    увидит его в дашборде/CLI; ответ придёт входящим сообщением
-    "[task #N answer QM] ...".
+    Только для оркестраторов: открыть вопрос пользователю через задачу.
+    Пользователь увидит его в дашборде/CLI. Вопрос — тред: уточнения приходят
+    как "[task #N QM reply] ..." (отвечать rocket task reply в тот же тред),
+    финальный ответ — "[task #N QM answer] ...".
 
 rocket send <session> "<текст>"
     То же, что у пользователя; from заполняется из ROCKET_SESSION_ID,
