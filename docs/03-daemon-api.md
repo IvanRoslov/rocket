@@ -85,7 +85,7 @@ HTTP+JSON, префикс `/v1`. Листенеры: Unix-сокет `~/.rocket/
 | GET | `/v1/events?since=<id>&limit=N&session=` | Журнал |
 | GET | `/v1/events/stream` | SSE; `?session=` — фильтр |
 
-Формат события: `{id, ts, type, session_id?, data{}}`. Типы: `session.spawned|state_changed|activity_changed|killed|restored`, `message.queued|delivered|failed`, `pr.opened|ci_changed|merged`, `orchestrator.heartbeat_sent`, `workspace.branch_collision|cleanup` и т.д.
+Формат события: `{id, ts, type, session_id?, data{}}`. Типы: `session.spawned|state_changed|activity_changed|killed|restored`, `message.queued|delivered|failed`, `pr.opened|ci_changed|merged`, `orchestrator.heartbeat_sent`, `workspace.branch_collision|cleanup`, `repo.clone_started|clone_done|clone_failed` и т.д.
 
 ## Внутренние (для hook-скриптов агентов)
 
