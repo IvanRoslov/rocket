@@ -48,8 +48,19 @@ HTTP+JSON, префикс `/v1`. Листенеры: Unix-сокет `~/.rocket/
 | POST | `/v1/workers` | `{caller, task, repo, prompt, agent?}` → спавн воркера; caller обязан быть живым оркестратором, repo ∈ репозитории проекта caller (main + linked) |
 | POST | `/v1/sessions/{id}/kill` | Убить сессию: tmux destroy + `state=killed`; `?cleanup=true` — ещё и worktree |
 | POST | `/v1/sessions/{id}/restore` | Восстановить упавшую сессию (worktree restore + перезапуск агента) |
-| GET | `/v1/sessions/{id}/output?lines=N` | capture-pane |
+| GET | `/v1/sessions/{id}/output?lines=N` | capture-pane (одноразовый снимок) |
 | GET | `/v1/sessions/{id}/attach` | `{command: ["tmux","attach","-t","=..."]}` |
+| WS | `/v1/sessions/{id}/term` | Живой терминал сессии (см. ниже) |
+
+### WebSocket-терминал
+
+`GET /v1/sessions/{id}/term` с Upgrade на WebSocket. На каждое соединение демон запускает `tmux attach -t =<name>` в собственном PTY (Go: `creack/pty`) и гоняет байты в обе стороны:
+
+- **server → client**: бинарные фреймы — вывод терминала (рендерится xterm.js как есть);
+- **client → server**: бинарные фреймы — ввод пользователя; текстовые фреймы — контрол-сообщения JSON: `{type:"resize", cols, rows}` (resize PTY), `{type:"ping"}`.
+- `?readonly=true` — ввод игнорируется (режим наблюдения).
+
+Несколько параллельных зрителей — это просто несколько tmux-клиентов одной сессии (штатно для tmux). Закрытие WS убивает только attach-клиент, сессию не трогает. Доступ — как у всего API: localhost/socket, без внешней аутентификации.
 
 Спавн-эндпоинты отвечают сразу после резервирования (`state=spawning`); завершение спавна видно по событиям/GET.
 

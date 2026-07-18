@@ -21,7 +21,7 @@
 ## Компоненты демона
 
 ### api
-HTTP+JSON. Два листенера с одним роутером: Unix-сокет `~/.rocket/rocket.sock` (mode 0600) и `127.0.0.1:<port>` для дашборда. SSE-эндпоинт `/v1/events/stream`. Никакой аутентификации в v1 — доступ ограничен правами на сокет и localhost.
+HTTP+JSON. Два листенера с одним роутером: Unix-сокет `~/.rocket/rocket.sock` (mode 0600) и `127.0.0.1:<port>` для дашборда. SSE-эндпоинт `/v1/events/stream`; WebSocket-терминалы `/v1/sessions/{id}/term` — на каждое соединение демон держит `tmux attach` в PTY (`creack/pty`) и проксирует байты (см. [03-daemon-api.md](03-daemon-api.md)). Никакой аутентификации в v1 — доступ ограничен правами на сокет и localhost.
 
 ### store
 SQLite (`~/.rocket/rocket.db`, драйвер без cgo — `modernc.org/sqlite`). Единственный писатель — демон. Таблицы: `repos`, `projects`, `sessions`, `tasks`, `task_docs`, `task_log`, `messages`, `events` — реестр репозиториев и проектов тоже в базе, config.yaml содержит только настройки демона. Схема — [05-state.md](05-state.md). Миграции — embedded SQL, применяются при старте.
