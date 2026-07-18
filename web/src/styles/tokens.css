@@ -95,5 +95,5 @@
   --overlay-blur: 2px;
 
   /* Segmented control */
-  --segmented-bg: #f4f4f2;
+  --segmented-bg: var(--surface-3);
 }

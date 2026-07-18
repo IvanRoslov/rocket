@@ -145,6 +145,90 @@ describe('Modal', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(onClose).toHaveBeenCalledTimes(1)
   })
+
+  it('moves focus into the dialog on open', () => {
+    render(
+      <Modal title="t" onClose={() => {}}>
+        <button>inside</button>
+      </Modal>,
+    )
+    const panel = screen.getByRole('dialog')
+    expect(panel).toContainElement(document.activeElement as HTMLElement)
+  })
+
+  it('traps focus: Tab from the last focusable element wraps to the first', () => {
+    render(
+      <Modal title="t" onClose={() => {}}>
+        <button>one</button>
+        <button>two</button>
+      </Modal>,
+    )
+    const panel = screen.getByRole('dialog')
+    const focusables = panel.querySelectorAll('button')
+    const first = focusables[0] as HTMLElement
+    const last = focusables[focusables.length - 1] as HTMLElement
+    last.focus()
+    expect(document.activeElement).toBe(last)
+    fireEvent.keyDown(panel, { key: 'Tab' })
+    expect(document.activeElement).toBe(first)
+  })
+
+  it('traps focus: Shift+Tab from the first focusable element wraps to the last', () => {
+    render(
+      <Modal title="t" onClose={() => {}}>
+        <button>one</button>
+        <button>two</button>
+      </Modal>,
+    )
+    const panel = screen.getByRole('dialog')
+    const focusables = panel.querySelectorAll('button')
+    const first = focusables[0] as HTMLElement
+    const last = focusables[focusables.length - 1] as HTMLElement
+    first.focus()
+    expect(document.activeElement).toBe(first)
+    fireEvent.keyDown(panel, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(last)
+  })
+
+  it('restores focus to the trigger element on close', () => {
+    function Wrapper() {
+      const [open, setOpen] = useState(false)
+      return (
+        <div>
+          <button onClick={() => setOpen(true)}>open trigger</button>
+          {open && (
+            <Modal title="t" onClose={() => setOpen(false)}>
+              body
+            </Modal>
+          )}
+        </div>
+      )
+    }
+    render(<Wrapper />)
+    const trigger = screen.getByRole('button', { name: 'open trigger' })
+    trigger.focus()
+    expect(document.activeElement).toBe(trigger)
+    fireEvent.click(trigger)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it('labels the panel with the title element via aria-labelledby', () => {
+    render(
+      <Modal title="Attach session" onClose={() => {}}>
+        body
+      </Modal>,
+    )
+    const panel = screen.getByRole('dialog')
+    const labelledBy = panel.getAttribute('aria-labelledby')
+    expect(labelledBy).toBeTruthy()
+    const titleEl = document.getElementById(labelledBy!)
+    expect(titleEl).toHaveTextContent('Attach session')
+    expect(titleEl?.tagName).toBe('H2')
+    expect(panel).not.toHaveAttribute('aria-label')
+  })
 })
 
 describe('Tabs', () => {
