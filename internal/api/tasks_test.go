@@ -1129,6 +1129,78 @@ func TestPostTaskStartNotFound(t *testing.T) {
 	}
 }
 
+func TestPostTaskStartConcurrentStartsSerializedCorrectly(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+
+	id, err := d.Store.AddTask(store.Task{Title: "Concurrent start test", ProjectID: "proj1"})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	// Spawn two concurrent POST requests to start the same task.
+	// Due to the startMu lock, exactly one should succeed (201) and the other
+	// should get a 409 conflict. We also verify that exactly one orchestrator
+	// session exists in the store.
+	type result struct {
+		statusCode int
+		err        error
+	}
+
+	resultCh := make(chan result, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			resp := postJSON(t, srv.URL+"/v1/tasks/"+itoa(id)+"/start", nil)
+			defer resp.Body.Close()
+			resultCh <- result{statusCode: resp.StatusCode}
+		}()
+	}
+
+	// Collect results from both goroutines
+	res1 := <-resultCh
+	res2 := <-resultCh
+
+	// Sort results so we can check them consistently
+	results := []int{res1.statusCode, res2.statusCode}
+	created := 0
+	conflict := 0
+	for _, r := range results {
+		if r == http.StatusCreated {
+			created++
+		} else if r == http.StatusConflict {
+			conflict++
+		} else {
+			t.Errorf("unexpected status code: %d", r)
+		}
+	}
+
+	if created != 1 {
+		t.Errorf("expected exactly 1 success (201), got %d", created)
+	}
+	if conflict != 1 {
+		t.Errorf("expected exactly 1 conflict (409), got %d", conflict)
+	}
+
+	// Verify the task now has a session_id
+	task, err := d.Store.GetTask(id)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.SessionID == "" {
+		t.Errorf("task.SessionID is empty, want a session id")
+	}
+
+	// Verify exactly one session exists for this task
+	sess, err := d.Store.GetSession(task.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession %s: %v", task.SessionID, err)
+	}
+	if sess.ID == "" {
+		t.Errorf("session.ID is empty")
+	}
+}
+
 // itoa is a tiny helper to avoid importing strconv in every test that needs
 // to interpolate a task id into a URL.
 func itoa(n int64) string {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 
 	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -18,6 +19,14 @@ import (
 var (
 	validDocKinds = map[string]bool{"spec": true, "plan": true, "report": true, "doc": true}
 	validLogKinds = map[string]bool{"decision": true, "problem": true, "note": true, "status": true}
+
+	// startMu serializes task start attempts within this daemon process.
+	// This is a coarse-grained, process-level lock sufficient at this scale
+	// to prevent two concurrent starts from spawning two orchestrators for
+	// the same task. Each start caller must hold the lock for the entire
+	// start operation, re-fetching the task within the lock to detect if
+	// a concurrent caller already started it.
+	startMu sync.Mutex
 )
 
 // taskResponse is the JSON shape of a task as returned by the API.
@@ -567,6 +576,14 @@ func handlePostTaskStart(w http.ResponseWriter, r *http.Request, d Deps) {
 	if !ok {
 		return
 	}
+
+	// Serialize all task starts with startMu to prevent two concurrent requests
+	// from both spawning orchestrators for the same task. We lock for the entire
+	// operation and re-fetch the task within the lock to detect any concurrent
+	// changes.
+	startMu.Lock()
+	defer startMu.Unlock()
+
 	task, ok := getTaskOr404(w, d, id)
 	if !ok {
 		return

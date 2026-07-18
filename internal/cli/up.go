@@ -78,6 +78,15 @@ func newUpCmd() *cobra.Command {
 			startPath := apiPath("v1", "tasks", fmt.Sprint(addResp.ID), "start")
 			var startResp taskStartResponse
 			if err := c.Post(startPath, startReqBody, &startResp); err != nil {
+				// Start failed after task creation. Print task ID and error so the user
+				// can retry with: rocket task start <id>
+				if flags.JSON {
+					return printJSON(cmd, map[string]any{
+						"task_id": addResp.ID,
+						"error":   err.Error(),
+					})
+				}
+				cmd.Printf("TASK=#%d created (start failed: retry with: rocket task start %d)\n", addResp.ID, addResp.ID)
 				return err
 			}
 
