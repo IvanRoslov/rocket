@@ -803,6 +803,13 @@ func TestRestoreFromErrored(t *testing.T) {
 	if testFakeAgent.launchCalls[len(testFakeAgent.launchCalls)-1].FirstMessage != "" {
 		t.Errorf("restore should launch without FirstMessage")
 	}
+
+	if len(testFakeAgent.setupCalls) != 1 {
+		t.Fatalf("SetupWorkspace calls = %d, want 1", len(testFakeAgent.setupCalls))
+	}
+	if testFakeAgent.setupCalls[0].SessionID != "sess1" {
+		t.Errorf("SetupWorkspace called with SessionID = %q, want sess1", testFakeAgent.setupCalls[0].SessionID)
+	}
 }
 
 // TestRestoreRepopulatesOrchestratorPrompt proves that restoring an
@@ -845,6 +852,20 @@ func TestRestoreRepopulatesOrchestratorPrompt(t *testing.T) {
 	if !strings.Contains(last.FirstMessage, wantSub) {
 		t.Errorf("FirstMessage = %q, want it to mention %q", last.FirstMessage, wantSub)
 	}
+
+	if len(testFakeAgent.setupCalls) != 1 {
+		t.Fatalf("SetupWorkspace calls = %d, want 1", len(testFakeAgent.setupCalls))
+	}
+	setup := testFakeAgent.setupCalls[0]
+	if setup.SessionID != "orch1" {
+		t.Errorf("SetupWorkspace called with SessionID = %q, want orch1", setup.SessionID)
+	}
+	if setup.SystemPrompt == "" {
+		t.Error("SetupWorkspace spec.SystemPrompt is empty, want orchestrator prompt")
+	}
+	if setup.FirstMessage == "" {
+		t.Error("SetupWorkspace spec.FirstMessage is empty, want restore notice")
+	}
 }
 
 // TestRestoreRepopulatesWorkerPrompt proves the same for a worker session:
@@ -886,6 +907,20 @@ func TestRestoreRepopulatesWorkerPrompt(t *testing.T) {
 	}
 	if !strings.Contains(last.FirstMessage, sess.Prompt) {
 		t.Errorf("FirstMessage = %q, want it to include the original brief %q", last.FirstMessage, sess.Prompt)
+	}
+
+	if len(testFakeAgent.setupCalls) != 1 {
+		t.Fatalf("SetupWorkspace calls = %d, want 1", len(testFakeAgent.setupCalls))
+	}
+	setup := testFakeAgent.setupCalls[0]
+	if setup.SessionID != "worker1" {
+		t.Errorf("SetupWorkspace called with SessionID = %q, want worker1", setup.SessionID)
+	}
+	if setup.SystemPrompt == "" {
+		t.Error("SetupWorkspace spec.SystemPrompt is empty, want worker prompt")
+	}
+	if setup.FirstMessage == "" {
+		t.Error("SetupWorkspace spec.FirstMessage is empty, want restore notice with original brief")
 	}
 }
 

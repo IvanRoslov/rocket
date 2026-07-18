@@ -627,6 +627,11 @@ func (m *Manager) Restore(ctx context.Context, id string) error {
 
 	m.fillRestorePrompt(&spec, sess, repo, path)
 
+	if err := ag.SetupWorkspace(spec); err != nil {
+		m.markErrored(id, err)
+		return err
+	}
+
 	env := mergeEnv(repo.Env, ag.Env(spec))
 	cmd := shellJoin(ag.LaunchCommand(spec))
 
