@@ -36,6 +36,7 @@ func NewRootCmd() *cobra.Command {
 	root.PersistentFlags().BoolVar(&flags.JSON, "json", false, "машинный вывод")
 	root.PersistentFlags().StringVar(&flags.Socket, "socket", "", "путь к сокету демона")
 	root.AddCommand(newDaemonCmd())
+	root.AddCommand(newRepoCmd())
 	return root
 }
 

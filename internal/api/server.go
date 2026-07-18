@@ -54,6 +54,8 @@ func NewHandler(d Deps) http.Handler {
 		go d.Shutdown()
 	})
 
+	registerRepoRoutes(mux, d)
+
 	// Catch-all: anything not matched by a more specific pattern above is a
 	// 404, rendered in the standard error JSON shape.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
