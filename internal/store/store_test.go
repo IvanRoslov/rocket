@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"reflect"
@@ -45,6 +46,42 @@ func TestOpen_ReopenIsIdempotent(t *testing.T) {
 	}
 	if r.Path != "/tmp/api" {
 		t.Fatalf("Path = %q, want /tmp/api", r.Path)
+	}
+}
+
+func TestOpen_PragmasOnFreshConnections(t *testing.T) {
+	s := openTestStore(t)
+
+	ctx := context.Background()
+
+	// Get two concurrent connections from the pool
+	conn1, err := s.db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("Conn 1: %v", err)
+	}
+	defer conn1.Close()
+
+	conn2, err := s.db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("Conn 2: %v", err)
+	}
+	defer conn2.Close()
+
+	// Verify foreign_keys pragma is set on both connections
+	var fkEnabled1 int
+	if err := conn1.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&fkEnabled1); err != nil {
+		t.Fatalf("Query PRAGMA foreign_keys on conn1: %v", err)
+	}
+	if fkEnabled1 != 1 {
+		t.Fatalf("foreign_keys on conn1 = %d, want 1", fkEnabled1)
+	}
+
+	var fkEnabled2 int
+	if err := conn2.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&fkEnabled2); err != nil {
+		t.Fatalf("Query PRAGMA foreign_keys on conn2: %v", err)
+	}
+	if fkEnabled2 != 1 {
+		t.Fatalf("foreign_keys on conn2 = %d, want 1", fkEnabled2)
 	}
 }
 
