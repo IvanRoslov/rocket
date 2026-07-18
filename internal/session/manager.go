@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -364,6 +366,168 @@ func (m *Manager) AttachCommand(id string) ([]string, error) {
 		return nil, err
 	}
 	return m.rt.AttachCommand(runtime.Handle{Name: sess.TmuxName}), nil
+}
+
+// TmuxInfo describes one live tmux session for /v1/system inspection.
+type TmuxInfo struct {
+	// Name is the tmux session name.
+	Name string
+	// SessionID is the store session that owns this tmux name, or "" if
+	// Orphan is true.
+	SessionID string
+	// Orphan is true when the tmux session is live but no live (spawning/
+	// running) session in the store references it.
+	Orphan bool
+}
+
+// WorktreeInfo describes one on-disk worktree directory for /v1/system
+// inspection.
+type WorktreeInfo struct {
+	// Path is the absolute path to the worktree directory.
+	Path string
+	// SessionID is the session the worktree's directory name identifies
+	// (regardless of whether that session still exists/is live).
+	SessionID string
+	// SizeBytes is the worktree's on-disk size.
+	SizeBytes int64
+	// Orphan is true when no live (spawning/running) session in the
+	// store references this worktree path.
+	Orphan bool
+}
+
+// ListTmux returns every live tmux session whose name looks like a rocket
+// session name, flagged with whether it's orphaned (see TmuxInfo.Orphan).
+func (m *Manager) ListTmux(ctx context.Context) ([]TmuxInfo, error) {
+	return m.tmuxInfos(ctx)
+}
+
+// ListWorktrees returns every worktree directory found on disk, flagged
+// with whether it's orphaned (see WorktreeInfo.Orphan).
+func (m *Manager) ListWorktrees() ([]WorktreeInfo, error) {
+	return m.worktreeInfos()
+}
+
+// tmuxInfos is the unlocked implementation shared by ListTmux and Cleanup.
+func (m *Manager) tmuxInfos(ctx context.Context) ([]TmuxInfo, error) {
+	names, err := m.rt.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	live, err := m.st.ListSessions(store.SessionFilter{})
+	if err != nil {
+		return nil, err
+	}
+	liveByTmux := make(map[string]string, len(live))
+	for _, s := range live {
+		liveByTmux[s.TmuxName] = s.ID
+	}
+
+	out := make([]TmuxInfo, 0, len(names))
+	for _, name := range names {
+		if !idPattern.MatchString(name) {
+			// Not a rocket-shaped session name; not ours to report or
+			// touch.
+			continue
+		}
+		id, ok := liveByTmux[name]
+		out = append(out, TmuxInfo{Name: name, SessionID: id, Orphan: !ok})
+	}
+	return out, nil
+}
+
+// worktreeInfos is the unlocked implementation shared by ListWorktrees and
+// Cleanup.
+func (m *Manager) worktreeInfos() ([]WorktreeInfo, error) {
+	entries, err := m.ws.List()
+	if err != nil {
+		return nil, err
+	}
+
+	live, err := m.st.ListSessions(store.SessionFilter{})
+	if err != nil {
+		return nil, err
+	}
+	liveByPath := make(map[string]bool, len(live))
+	for _, s := range live {
+		if s.WorktreePath != "" {
+			liveByPath[s.WorktreePath] = true
+		}
+	}
+
+	out := make([]WorktreeInfo, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, WorktreeInfo{
+			Path:      e.Path,
+			SessionID: e.SessionID,
+			SizeBytes: e.SizeBytes,
+			Orphan:    !liveByPath[e.Path],
+		})
+	}
+	return out, nil
+}
+
+// Cleanup destroys every orphaned tmux session and removes every orphaned
+// worktree directory (see TmuxInfo.Orphan / WorktreeInfo.Orphan), never
+// touching a resource referenced by a live session. It returns the names/
+// paths actually cleaned up; errors from individual operations are
+// collected and joined, but cleanup continues for the rest.
+func (m *Manager) Cleanup(ctx context.Context) (killedTmux, removedWorktrees []string, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var errs []error
+
+	tmux, terr := m.tmuxInfos(ctx)
+	if terr != nil {
+		errs = append(errs, terr)
+	}
+	for _, t := range tmux {
+		if !t.Orphan {
+			continue
+		}
+		if derr := m.rt.Destroy(ctx, runtime.Handle{Name: t.Name}); derr != nil {
+			errs = append(errs, derr)
+			continue
+		}
+		killedTmux = append(killedTmux, t.Name)
+	}
+
+	wt, werr := m.worktreeInfos()
+	if werr != nil {
+		errs = append(errs, werr)
+	}
+	for _, e := range wt {
+		if !e.Orphan {
+			continue
+		}
+		// e.SessionID's parent directory name doubles as the repo ID
+		// (worktreesDir/<repo-id>/<session-id>/), so we can look up the
+		// repo even for a worktree whose store session record is long
+		// gone.
+		repoID := filepath.Base(filepath.Dir(e.Path))
+		if repo, gerr := m.st.GetRepo(repoID); gerr == nil {
+			if derr := m.ws.Destroy(ctx, repo, e.SessionID); derr != nil {
+				errs = append(errs, derr)
+				continue
+			}
+		} else {
+			// No known repo to run `git worktree remove` against
+			// (e.g. the repo itself was deleted): fall back to a
+			// plain directory removal. This never touches a branch
+			// ref, consistent with the package's iron rule.
+			if derr := os.RemoveAll(e.Path); derr != nil {
+				errs = append(errs, derr)
+				continue
+			}
+		}
+		removedWorktrees = append(removedWorktrees, e.Path)
+	}
+
+	if len(errs) > 0 {
+		err = errors.Join(errs...)
+	}
+	return killedTmux, removedWorktrees, err
 }
 
 // markErrored transitions a session to "errored" and publishes

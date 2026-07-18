@@ -65,6 +65,7 @@ func NewHandler(d Deps) http.Handler {
 	registerSSERoutes(mux, d)
 	registerInternalActivityRoutes(mux, d)
 	registerMessageRoutes(mux, d)
+	registerSystemRoutes(mux, d)
 
 	// Any /v1 path not matched by a more specific route above is a 404,
 	// rendered in the standard error JSON shape. This is a prefix pattern,

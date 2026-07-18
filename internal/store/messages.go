@@ -237,6 +237,31 @@ func (s *Store) ListQueuedRecipients() ([]string, error) {
 	return out, nil
 }
 
+// CountMessagesByStatus returns the number of messages in each status
+// (queued, delivering, delivered, failed), keyed by status. Statuses with
+// no messages are omitted from the map (i.e. absent means zero).
+func (s *Store) CountMessagesByStatus() (map[string]int, error) {
+	rows, err := s.db.Query(`SELECT status, COUNT(*) FROM messages GROUP BY status`)
+	if err != nil {
+		return nil, fmt.Errorf("count messages by status: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]int)
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, fmt.Errorf("scan message status count: %w", err)
+		}
+		out[status] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PurgeOld deletes messages and events with created_at/ts < before.
 func (s *Store) PurgeOld(before int64) error {
 	if _, err := s.db.Exec(`DELETE FROM messages WHERE created_at < ?`, before); err != nil {

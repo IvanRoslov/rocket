@@ -102,6 +102,22 @@ HTTP+JSON, префикс `/v1`. Листенеры: Unix-сокет `~/.rocket/
 
 Формат события: `{id, ts, type, session_id?, data{}}`. Типы: `session.spawned|state_changed|activity_changed|killed|restored`, `message.queued|delivered|failed`, `pr.opened|ci_changed|merged`, `orchestrator.heartbeat_sent`, `workspace.branch_collision|cleanup`, `repo.clone_started|clone_done|clone_failed`, `task.question_asked|question_replied|question_resolved` и т.д.
 
+## Система
+
+| Метод | Путь | Описание |
+|---|---|---|
+| GET | `/v1/system` | Обзор для экрана System дашборда: даемон, очередь, tmux, worktree'ы, хвост лога |
+| POST | `/v1/system/cleanup` | Убивает осиротевшие tmux-сессии и удаляет осиротевшие worktree-директории |
+
+`GET /v1/system` → `{"daemon":{"version","uptime_s","port","socket","db_path","config_path"},"queue":{"queued":N,"failed":N},"tmux":[{"name","session_id?","orphan":bool}],"worktrees":[{"path","session_id?","size_bytes","orphan":bool}],"log_tail":["..."]}`.
+
+- `queue.queued`/`queue.failed` — число сообщений в очереди сообщений (`internal/store`) в соответствующем статусе.
+- `tmux[]` — все живые tmux-сессии с именем, похожим на сессию rocket (`^[a-z0-9-]+$`); `orphan: true`, если ни одна сессия в сторе в состоянии `spawning`/`running` не ссылается на это имя (`session_id` в этом случае отсутствует).
+- `worktrees[]` — все директории ворктри на диске (`<worktrees_dir>/<repo-id>/<session-id>/`) с их размером на диске; `orphan: true`, если ни одна живая сессия не ссылается на этот путь.
+- `log_tail` — последние строки `rocketd.log`, не более 200 строк и не более 64 КиБ с конца файла.
+
+`POST /v1/system/cleanup` → `{"killed_tmux":[names], "removed_worktrees":[paths]}` — убивает **только** осиротевшие tmux-сессии (см. `orphan` выше) и удаляет **только** осиротевшие worktree-директории (ветку при этом никогда не удаляет — только рабочую копию). Ресурсы живых сессий не трогает.
+
 ## Внутренние (для hook-скриптов агентов)
 
 | Метод | Путь | Описание |

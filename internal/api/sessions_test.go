@@ -50,6 +50,7 @@ func (sessFakeWorkspace) Restore(ctx context.Context, repo store.Repo, sessionID
 func (sessFakeWorkspace) Destroy(ctx context.Context, repo store.Repo, sessionID string) error {
 	return nil
 }
+func (sessFakeWorkspace) List() ([]workspace.Entry, error) { return nil, nil }
 
 type sessFakeAgent struct{}
 
