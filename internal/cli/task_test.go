@@ -34,6 +34,30 @@ func TestTaskAddUsage(t *testing.T) {
 	}
 }
 
+// TestNeedsProjectDefault verifies that `task add --parent` skips default
+// project resolution (leaving the project empty for the API to inherit from
+// the parent task), while a bare `task add` still resolves a default.
+func TestNeedsProjectDefault(t *testing.T) {
+	tests := []struct {
+		name      string
+		projectID string
+		parentID  int64
+		want      bool
+	}{
+		{"no project, no parent", "", 0, true},
+		{"no project, with parent", "", 5, false},
+		{"project given, no parent", "proj1", 0, false},
+		{"project given, with parent", "proj1", 5, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := needsProjectDefault(tt.projectID, tt.parentID); got != tt.want {
+				t.Errorf("needsProjectDefault(%q, %d) = %v, want %v", tt.projectID, tt.parentID, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestTaskAddMutuallyExclusive tests that --desc and --desc-file are mutually exclusive.
 func TestTaskAddDescMutuallyExclusive(t *testing.T) {
 	cmd := newTaskAddCmd()

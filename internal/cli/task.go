@@ -172,6 +172,16 @@ func newTaskStartCmd() *cobra.Command {
 	return cmd
 }
 
+// needsProjectDefault reports whether `rocket task add` must resolve a
+// default project from the daemon before creating the task. It's only
+// needed when --project wasn't given AND there's no --parent: with a
+// parent, the API inherits the project from the parent task, so sending an
+// empty project is correct (and required, since --parent may target a task
+// in a project other than the CLI's guessed default).
+func needsProjectDefault(projectID string, parentID int64) bool {
+	return projectID == "" && parentID == 0
+}
+
 func newTaskAddCmd() *cobra.Command {
 	var projectID string
 	var parentID int64
@@ -196,8 +206,10 @@ func newTaskAddCmd() *cobra.Command {
 				return err
 			}
 
-			// If project not specified, try to get default
-			if projectID == "" {
+			// If project not specified and a parent task is given, leave it
+			// empty — the API inherits the project from the parent task.
+			// Otherwise, try to resolve a default project.
+			if needsProjectDefault(projectID, parentID) {
 				var projects []map[string]any
 				if err := c.Get("/v1/projects", nil, &projects); err != nil {
 					return err

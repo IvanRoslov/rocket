@@ -141,6 +141,30 @@ func TestPostTaskParentNotFound(t *testing.T) {
 	}
 }
 
+func TestPostTaskParentInheritsProjectWhenProjectEmpty(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+	addTestProject(t, d, "proj2")
+
+	rootID, err := d.Store.AddTask(store.Task{Title: "Root", ProjectID: "proj2"})
+	if err != nil {
+		t.Fatalf("AddTask root: %v", err)
+	}
+
+	resp := postJSON(t, srv.URL+"/v1/tasks", map[string]any{
+		"title": "Sub", "parent_id": rootID,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	body := decodeRepo(t, resp)
+	if body["project_id"] != "proj2" {
+		t.Errorf("project_id = %v, want proj2 (inherited from parent)", body["project_id"])
+	}
+}
+
 func TestPostTaskNestedSubtaskRejected(t *testing.T) {
 	d := tasksTestDeps(t)
 	srv := newTestServer(t, d)

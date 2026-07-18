@@ -273,15 +273,6 @@ func handlePostTask(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
-	if _, err := d.Store.GetProject(req.Project); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeErr(w, http.StatusBadRequest, "project_not_found", "project not found: "+req.Project)
-			return
-		}
-		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
-	}
-
 	var parent store.Task
 	if req.ParentID != 0 {
 		parent, err = d.Store.GetTask(req.ParentID)
@@ -297,6 +288,21 @@ func handlePostTask(w http.ResponseWriter, r *http.Request, d Deps) {
 			writeErr(w, http.StatusBadRequest, "nested_subtask", "parent task must be a root task")
 			return
 		}
+		if req.Project == "" {
+			// Inherit project from the (already-validated) parent task, so
+			// `rocket task add --parent N` works without --project even when
+			// multiple projects exist.
+			req.Project = parent.ProjectID
+		}
+	}
+
+	if _, err := d.Store.GetProject(req.Project); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, http.StatusBadRequest, "project_not_found", "project not found: "+req.Project)
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
 	}
 
 	createdBy := "user"
