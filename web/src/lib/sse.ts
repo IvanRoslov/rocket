@@ -46,10 +46,11 @@ export function useEventStream(onEvent: (e: RocketEvent) => void): void {
     let cancelled = false
 
     function connect() {
-      es = new EventSource('/v1/events/stream')
+      const source = new EventSource('/v1/events/stream')
+      es = source
 
       for (const type of EVENT_TYPES) {
-        es.addEventListener(type, (ev: MessageEvent) => {
+        source.addEventListener(type, (ev: MessageEvent) => {
           try {
             const parsed = JSON.parse(ev.data) as RocketEvent
             onEventRef.current(parsed)
@@ -59,8 +60,8 @@ export function useEventStream(onEvent: (e: RocketEvent) => void): void {
         })
       }
 
-      es.onerror = () => {
-        es?.close()
+      source.onerror = () => {
+        source.close()
         if (!cancelled) {
           reconnectTimer = setTimeout(connect, RECONNECT_DELAY_MS)
         }

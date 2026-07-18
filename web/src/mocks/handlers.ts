@@ -47,6 +47,21 @@ export const handlers = [
     const url = new URL(request.url)
     const project = url.searchParams.get('project')
     const result = project ? allTasks.filter((t) => t.project_id === project) : allTasks
+
+    if (url.searchParams.get('board') === 'true') {
+      const columns = {
+        backlog: [] as typeof result,
+        in_progress: [] as typeof result,
+        review: [] as typeof result,
+        done: [] as typeof result,
+        cancelled: [] as typeof result,
+      }
+      for (const task of result) {
+        columns[task.status].push(task)
+      }
+      return HttpResponse.json({ columns })
+    }
+
     return HttpResponse.json(result)
   }),
 
@@ -59,7 +74,15 @@ export const handlers = [
         { status: 404 },
       )
     }
-    return HttpResponse.json(task)
+    const taskSubtasks = subtasks.filter((t) => t.parent_id === id)
+    const session = task.session_id ? sessions.find((s) => s.id === task.session_id) : undefined
+    return HttpResponse.json({
+      ...task,
+      subtasks: taskSubtasks,
+      session: session
+        ? { id: session.id, tmux_name: session.tmux_name, attach: ['rocket', 'attach', session.id] }
+        : undefined,
+    })
   }),
 
   http.get('/v1/tasks/:id/docs', ({ params }) => {

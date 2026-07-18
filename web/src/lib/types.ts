@@ -126,6 +126,21 @@ export interface Task {
   completed_at?: number
 }
 
+/**
+ * Contract type (phase 3): `GET /v1/tasks/{id}` per docs/03-daemon-api.md
+ * returns the task's fields plus its subtasks and the session it's bound to
+ * (with `tmux_name` and the attach command). To be reconciled with the real
+ * response shape at phase-3 integration.
+ */
+export interface TaskDetail extends Task {
+  subtasks: Task[]
+  session?: {
+    id: string
+    tmux_name: string
+    attach: string[]
+  }
+}
+
 export type TaskDocKind = 'spec' | 'plan' | 'report' | 'doc'
 
 /** Contract type (phase 3): docs/12-tasks.md «Документы и журнал задачи». */

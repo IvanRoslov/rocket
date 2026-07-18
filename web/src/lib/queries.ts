@@ -19,6 +19,7 @@ import type {
   RocketEvent,
   Session,
   Task,
+  TaskDetail,
   TaskDoc,
   TaskLogEntry,
 } from './types'
@@ -87,28 +88,40 @@ export interface TaskBoard {
   done: Task[]
 }
 
+/**
+ * Contract type (phase 3): the raw `{columns:{...}}` shape returned by
+ * `GET /v1/tasks?project=&board=true` (docs/03-daemon-api.md). This is the
+ * ONE adapter over that response — reconcile it here at phase-3 integration
+ * if the real shape differs.
+ */
+interface TaskBoardResponse {
+  columns: {
+    backlog: Task[]
+    in_progress: Task[]
+    review: Task[]
+    done: Task[]
+    cancelled: Task[]
+  }
+}
+
 export function useTasksBoard(projectId: string | undefined): UseQueryResult<TaskBoard> {
   return useQuery({
     queryKey: ['tasks', projectId],
     queryFn: async () => {
-      const list = await api.get<Task[]>(
+      const res = await api.get<TaskBoardResponse>(
         `/v1/tasks?project=${encodeURIComponent(projectId ?? '')}&board=true`,
       )
-      const board: TaskBoard = { backlog: [], in_progress: [], review: [], done: [] }
-      for (const task of list) {
-        if (task.status === 'cancelled') continue
-        board[task.status].push(task)
-      }
-      return board
+      const { backlog, in_progress, review, done } = res.columns
+      return { backlog, in_progress, review, done }
     },
     enabled: projectId !== undefined,
   })
 }
 
-export function useTask(id: number | undefined): UseQueryResult<Task> {
+export function useTask(id: number | undefined): UseQueryResult<TaskDetail> {
   return useQuery({
     queryKey: ['task', id],
-    queryFn: () => api.get<Task>(`/v1/tasks/${id}`),
+    queryFn: () => api.get<TaskDetail>(`/v1/tasks/${id}`),
     enabled: id !== undefined,
   })
 }
