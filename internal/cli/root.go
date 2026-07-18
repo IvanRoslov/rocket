@@ -4,8 +4,8 @@ import (
 	"errors"
 	"os"
 
-	"github.com/spf13/cobra"
 	"github.com/IvanRoslov/rocket/internal/version"
+	"github.com/spf13/cobra"
 )
 
 type globalFlags struct {
