@@ -1,8 +1,10 @@
 package claudecode
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/IvanRoslov/rocket/internal/agent"
@@ -215,6 +217,222 @@ func TestSetupWorkspaceEmptyPrompt(t *testing.T) {
 	if !os.IsNotExist(err) {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+func TestSetupWorkspaceWritesActivityHookScript(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cc := New()
+	spec := agent.LaunchSpec{WorktreePath: tmpDir}
+
+	if err := cc.SetupWorkspace(spec); err != nil {
+		t.Fatalf("SetupWorkspace failed: %v", err)
+	}
+
+	scriptPath := filepath.Join(tmpDir, ".rocket", "activity-hook.sh")
+	info, err := os.Stat(scriptPath)
+	if err != nil {
+		t.Fatalf("stat hook script: %v", err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o700 {
+		t.Errorf("hook script mode = %o, want 0700", mode)
+	}
+
+	content, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("read hook script: %v", err)
+	}
+	if !strings.HasPrefix(string(content), "#!/bin/sh") {
+		t.Errorf("hook script does not start with shebang: %q", string(content))
+	}
+	if !strings.Contains(string(content), "ROCKET_SOCKET") || !strings.Contains(string(content), "ROCKET_SESSION_ID") {
+		t.Errorf("hook script missing expected env var references: %q", string(content))
+	}
+	if !strings.Contains(string(content), "/v1/internal/activity") {
+		t.Errorf("hook script missing internal activity endpoint: %q", string(content))
+	}
+}
+
+func TestSetupWorkspaceWritesFreshSettingsJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cc := New()
+	spec := agent.LaunchSpec{WorktreePath: tmpDir}
+
+	if err := cc.SetupWorkspace(spec); err != nil {
+		t.Fatalf("SetupWorkspace failed: %v", err)
+	}
+
+	settings := readSettings(t, tmpDir)
+	hooks, ok := settings["hooks"].(map[string]any)
+	if !ok {
+		t.Fatalf("settings.json missing hooks object: %+v", settings)
+	}
+
+	wantEventState := map[string]string{
+		"PreToolUse":   "active",
+		"PostToolUse":  "active",
+		"Stop":         "ready",
+		"Notification": "waiting_input",
+		"SessionEnd":   "exited",
+	}
+	for event, state := range wantEventState {
+		cmd := findHookCommand(t, hooks, event)
+		want := "sh .rocket/activity-hook.sh " + state
+		if cmd != want {
+			t.Errorf("hooks[%s] command = %q, want %q", event, cmd, want)
+		}
+	}
+}
+
+func TestSetupWorkspacePreservesForeignSettingsAndAppendsHooks(t *testing.T) {
+	tmpDir := t.TempDir()
+	claudeDir := filepath.Join(tmpDir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatalf("mkdir .claude: %v", err)
+	}
+
+	existing := `{
+  "model": "opus",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "echo custom"}]
+      }
+    ]
+  }
+}`
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+	if err := os.WriteFile(settingsPath, []byte(existing), 0o644); err != nil {
+		t.Fatalf("write existing settings.json: %v", err)
+	}
+
+	cc := New()
+	spec := agent.LaunchSpec{WorktreePath: tmpDir}
+	if err := cc.SetupWorkspace(spec); err != nil {
+		t.Fatalf("SetupWorkspace failed: %v", err)
+	}
+
+	settings := readSettings(t, tmpDir)
+	if settings["model"] != "opus" {
+		t.Errorf("model = %v, want opus (foreign key preserved)", settings["model"])
+	}
+
+	hooks, ok := settings["hooks"].(map[string]any)
+	if !ok {
+		t.Fatalf("settings.json missing hooks object: %+v", settings)
+	}
+
+	preToolUse, ok := hooks["PreToolUse"].([]any)
+	if !ok {
+		t.Fatalf("hooks.PreToolUse is not an array: %+v", hooks["PreToolUse"])
+	}
+
+	var foundCustom, foundOurs bool
+	for _, raw := range preToolUse {
+		group, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		matcher, _ := group["matcher"].(string)
+		hookList, _ := group["hooks"].([]any)
+		for _, hRaw := range hookList {
+			h, ok := hRaw.(map[string]any)
+			if !ok {
+				continue
+			}
+			cmd, _ := h["command"].(string)
+			if matcher == "Bash" && cmd == "echo custom" {
+				foundCustom = true
+			}
+			if matcher == "*" && cmd == "sh .rocket/activity-hook.sh active" {
+				foundOurs = true
+			}
+		}
+	}
+	if !foundCustom {
+		t.Errorf("existing custom PreToolUse hook was dropped: %+v", preToolUse)
+	}
+	if !foundOurs {
+		t.Errorf("our PreToolUse hook was not appended: %+v", preToolUse)
+	}
+}
+
+func TestSetupWorkspaceHooksIdempotent(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cc := New()
+	spec := agent.LaunchSpec{WorktreePath: tmpDir}
+
+	if err := cc.SetupWorkspace(spec); err != nil {
+		t.Fatalf("first SetupWorkspace failed: %v", err)
+	}
+	if err := cc.SetupWorkspace(spec); err != nil {
+		t.Fatalf("second SetupWorkspace failed: %v", err)
+	}
+
+	settings := readSettings(t, tmpDir)
+	hooks, ok := settings["hooks"].(map[string]any)
+	if !ok {
+		t.Fatalf("settings.json missing hooks object: %+v", settings)
+	}
+
+	preToolUse, ok := hooks["PreToolUse"].([]any)
+	if !ok {
+		t.Fatalf("hooks.PreToolUse is not an array: %+v", hooks["PreToolUse"])
+	}
+	if len(preToolUse) != 1 {
+		t.Fatalf("len(hooks.PreToolUse) = %d, want 1 (no duplicate groups)", len(preToolUse))
+	}
+	group := preToolUse[0].(map[string]any)
+	hookList := group["hooks"].([]any)
+	if len(hookList) != 1 {
+		t.Fatalf("len(hooks.PreToolUse[0].hooks) = %d, want 1 (no duplicate command)", len(hookList))
+	}
+}
+
+// readSettings reads and JSON-decodes <worktreePath>/.claude/settings.json.
+func readSettings(t *testing.T, worktreePath string) map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(worktreePath, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatalf("read settings.json: %v", err)
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("decode settings.json: %v", err)
+	}
+	return settings
+}
+
+// findHookCommand returns the single command string wired for event in
+// hooks (as decoded from settings.json), failing the test if it's not
+// found in exactly the expected shape.
+func findHookCommand(t *testing.T, hooks map[string]any, event string) string {
+	t.Helper()
+	groupsRaw, ok := hooks[event]
+	if !ok {
+		t.Fatalf("hooks missing event %q: %+v", event, hooks)
+	}
+	groups, ok := groupsRaw.([]any)
+	if !ok || len(groups) == 0 {
+		t.Fatalf("hooks[%s] is not a non-empty array: %+v", event, groupsRaw)
+	}
+	group, ok := groups[0].(map[string]any)
+	if !ok {
+		t.Fatalf("hooks[%s][0] is not an object: %+v", event, groups[0])
+	}
+	hookList, ok := group["hooks"].([]any)
+	if !ok || len(hookList) == 0 {
+		t.Fatalf("hooks[%s][0].hooks is not a non-empty array: %+v", event, group["hooks"])
+	}
+	h, ok := hookList[0].(map[string]any)
+	if !ok {
+		t.Fatalf("hooks[%s][0].hooks[0] is not an object: %+v", event, hookList[0])
+	}
+	cmd, _ := h["command"].(string)
+	return cmd
 }
 
 func TestName(t *testing.T) {
