@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/bus"
@@ -56,6 +57,21 @@ type Manager struct {
 	rt  runtime.Runtime
 	ws  workspace.Workspace
 	cfg *config.Config
+
+	// mu serializes Spawn, Kill, Restore, and Reconcile end-to-end. Without
+	// it, a Kill racing a concurrent Spawn between the session's
+	// AddSession (state "spawning") and its final UpdateSession (state
+	// "running") can lose: Kill marks the session "killed" first, then
+	// Spawn's final write clobbers it back to "running" — a zombie session
+	// the store believes is running but nothing is actually managing.
+	//
+	// A single manager-wide mutex (rather than per-session locking) is
+	// intentionally coarse: at phase-1 scale (one operator, a handful of
+	// concurrent sessions) simplicity and an easy-to-reason-about
+	// invariant ("only one lifecycle operation touches store+runtime+
+	// workspace state at a time") beat the complexity of per-id locks.
+	// Revisit if contention becomes a real bottleneck.
+	mu sync.Mutex
 }
 
 // NewManager builds a Manager wired to the given dependencies.
@@ -69,6 +85,9 @@ func NewManager(st *store.Store, b *bus.Bus, rt runtime.Runtime, ws workspace.Wo
 // "errored" (and its worktree, if created, in place for debugging) and is
 // returned to the caller.
 func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	proj, err := m.st.GetProject(req.Project)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -219,6 +238,9 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 // errored) is idempotent: no state change and no session.killed event, but
 // cleanup still runs if requested.
 func (m *Manager) Kill(ctx context.Context, id string, cleanup bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	sess, err := m.st.GetSession(id)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -253,6 +275,9 @@ func (m *Manager) Kill(ctx context.Context, id string, cleanup bool) error {
 // marks it running. It is only allowed from state "errored"/"killed", or
 // from "running" when the runtime handle is no longer alive.
 func (m *Manager) Restore(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	sess, err := m.st.GetSession(id)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {

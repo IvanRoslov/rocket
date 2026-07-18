@@ -15,6 +15,13 @@ import (
 // in store) as a single event. Errors from store/runtime are collected
 // and returned joined, but reconciliation continues for other sessions.
 func (m *Manager) Reconcile(ctx context.Context) error {
+	// Reconcile also mutates session state, so it shares Spawn/Kill/
+	// Restore's mutex for consistency. In practice it runs once at
+	// daemon startup before the API begins serving requests, so there is
+	// no real contention here.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	// List all live tmux sessions from runtime
 	liveNames, err := m.rt.List(ctx)
 	if err != nil {

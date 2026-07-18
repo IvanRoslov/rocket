@@ -76,6 +76,14 @@ type fakeWorkspace struct {
 	createResult workspace.CreateResult
 	createCalls  []workspaceCreateCall
 
+	// createStarted, if non-nil, receives a (non-blocking) signal the
+	// moment Create is entered, and createBlock, if non-nil, is waited on
+	// before Create returns. Together they let tests pause a Spawn in the
+	// middle of its workspace-creation step to interleave it with another
+	// Manager call.
+	createStarted chan struct{}
+	createBlock   chan struct{}
+
 	restorePath string
 	restoreErr  error
 
@@ -84,6 +92,15 @@ type fakeWorkspace struct {
 
 func (f *fakeWorkspace) Create(ctx context.Context, repo store.Repo, sessionID, branch string) (workspace.CreateResult, error) {
 	f.createCalls = append(f.createCalls, workspaceCreateCall{repo.ID, sessionID, branch})
+	if f.createStarted != nil {
+		select {
+		case f.createStarted <- struct{}{}:
+		default:
+		}
+	}
+	if f.createBlock != nil {
+		<-f.createBlock
+	}
 	if f.createErr != nil {
 		return workspace.CreateResult{}, f.createErr
 	}
@@ -578,6 +595,81 @@ func TestKillIdempotentOnAlreadyKilled(t *testing.T) {
 	events := drainEvents(ch)
 	if len(events) != 1 || events[0].Type != "workspace.cleanup" {
 		t.Errorf("events = %v, want only [workspace.cleanup] (no repeated session.killed)", events)
+	}
+}
+
+// TestKillDuringSpawnDoesNotResurrect proves Manager.mu serializes Spawn and
+// Kill end-to-end: a Kill that races a concurrent Spawn (started while the
+// session already exists in state "spawning" but before Spawn's final
+// UpdateSession writes "running") must not be clobbered back to "running".
+//
+// A coarse manager-wide mutex makes deterministic interleaving at any
+// specific point hard to arrange directly, so instead this asserts
+// serialization indirectly: fakeWorkspace.Create blocks on a channel mid-
+// Spawn (after AddSession has already persisted the session), a concurrent
+// Kill is issued, and only then is Create unblocked. Because Kill must wait
+// for Manager.mu — held by Spawn for its entire duration — Kill cannot run
+// until Spawn has fully finished (including its final "running" write).
+// Kill must then still observe and correctly transition the session,
+// leaving it "killed", not resurrected to "running".
+func TestKillDuringSpawnDoesNotResurrect(t *testing.T) {
+	m, st, _, rt, ws := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+
+	ws.createBlock = make(chan struct{})
+	started := make(chan struct{}, 1)
+	ws.createStarted = started
+
+	spawnDone := make(chan error, 1)
+	go func() {
+		_, err := m.Spawn(context.Background(), SpawnReq{
+			Project: "proj1", Repo: "repo1", Task: "mytask", Feature: "myfeat", AgentName: "fake",
+		})
+		spawnDone <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for workspace.Create to start")
+	}
+
+	// At this point the session exists in the store as "spawning" but
+	// Spawn is blocked mid-flight holding Manager.mu. Issue a concurrent
+	// Kill: it must block on the mutex rather than racing Spawn's
+	// remaining steps.
+	killDone := make(chan error, 1)
+	go func() {
+		killDone <- m.Kill(context.Background(), "myfeat-mytask", false)
+	}()
+
+	// Give Kill a moment to reach (and block on) the mutex before we let
+	// Spawn proceed, so the interleaving this test targets actually has a
+	// chance to occur if the mutex were missing.
+	time.Sleep(50 * time.Millisecond)
+
+	close(ws.createBlock)
+
+	if err := <-spawnDone; err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if err := <-killDone; err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+
+	stored, err := st.GetSession("myfeat-mytask")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if stored.State != "killed" {
+		t.Errorf("State = %q, want killed (Kill during Spawn must not be resurrected to running)", stored.State)
+	}
+
+	rt.mu.Lock()
+	destroyed := append([]string(nil), rt.destroyed...)
+	rt.mu.Unlock()
+	if len(destroyed) != 1 || destroyed[0] != "myfeat-mytask" {
+		t.Errorf("runtime.Destroy calls = %v, want [myfeat-mytask]", destroyed)
 	}
 }
 
