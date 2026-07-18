@@ -61,6 +61,7 @@ func NewHandler(d Deps) http.Handler {
 	registerRepoRoutes(mux, d)
 	registerProjectRoutes(mux, d)
 	registerSessionRoutes(mux, d)
+	registerTermRoutes(mux, d)
 	registerEventsRoutes(mux, d)
 	registerSSERoutes(mux, d)
 	registerInternalActivityRoutes(mux, d)
