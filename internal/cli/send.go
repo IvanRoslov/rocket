@@ -5,37 +5,33 @@ import (
 	"os"
 	"time"
 
+	"github.com/IvanRoslov/rocket/internal/client"
 	"github.com/spf13/cobra"
 )
 
+// pollInterval is the delay between --wait polls of GET /v1/messages/{id}.
+// Overridden in tests to keep them fast.
+var pollInterval = 2 * time.Second
+
 // buildSendBody extracts the message body from args and/or filePath.
-// Expects args to be [<session>, <text>?] where exactly one of the following holds:
-//   - len(args) == 2 and filePath == "" (body from args[1])
-//   - len(args) == 1 and filePath != "" (body from file)
 //
-// Returns an error if usage is violated or if body is empty.
+// Argument-shape (XOR) validation — no args, wrong arg count, or both a
+// positional body and --file supplied — is the caller's (RunE's)
+// responsibility so that all usage violations map to exit code 3
+// consistently. buildSendBody assumes it is called with a valid shape and
+// only reads the body from whichever source was given, then checks it is
+// non-empty.
 func buildSendBody(args []string, filePath string) (string, error) {
-	hasTextArg := len(args) == 2
-	hasFileArg := filePath != ""
-
-	// Check usage constraints
-	if !hasTextArg && !hasFileArg {
-		return "", fmt.Errorf("exactly one session id and one body source required")
-	}
-	if hasTextArg && hasFileArg {
-		return "", fmt.Errorf("cannot use both positional body and --file")
-	}
-
 	var body string
 	var err error
 
-	if hasTextArg {
-		body = args[1]
-	} else {
+	if filePath != "" {
 		body, err = readFile(filePath)
 		if err != nil {
 			return "", err
 		}
+	} else if len(args) == 2 {
+		body = args[1]
 	}
 
 	if body == "" {
@@ -69,6 +65,12 @@ func newSendCmd() *cobra.Command {
 
 			// If --file is provided, args should be [session] only
 			if filePath != "" && len(args) != 1 {
+				return &usageError{message: "usage: rocket send <session> [<text>] [--file <path>] [--wait]"}
+			}
+
+			// If neither --file nor a positional body is given, there is no
+			// message body at all — usage violation.
+			if filePath == "" && len(args) == 1 {
 				return &usageError{message: "usage: rocket send <session> [<text>] [--file <path>] [--wait]"}
 			}
 
@@ -106,18 +108,20 @@ func newSendCmd() *cobra.Command {
 				return err
 			}
 
-			if flags.JSON {
-				return printJSON(cmd, resp)
+			if !wait {
+				if flags.JSON {
+					return printJSON(cmd, resp)
+				}
+				cmd.Printf("message %d queued\n", resp.ID)
+				return nil
 			}
 
-			cmd.Printf("message %d queued\n", resp.ID)
+			if !flags.JSON {
+				cmd.Printf("message %d queued\n", resp.ID)
+			}
 
 			// If --wait, poll until delivered or failed
-			if wait {
-				return waitForMessage(cmd, c, resp.ID)
-			}
-
-			return nil
+			return waitForMessage(cmd, c, resp.ID)
 		},
 	}
 
@@ -127,25 +131,23 @@ func newSendCmd() *cobra.Command {
 	return cmd
 }
 
-// waitForMessage polls GET /v1/messages/{id} every 2s until status is delivered or failed.
-func waitForMessage(cmd *cobra.Command, c any, msgID int64) error {
-	type msgResp struct {
-		ID       int64  `json:"id"`
-		Status   string `json:"status"`
-		Attempts int    `json:"attempts"`
-		Reason   string `json:"reason,omitempty"`
-		Error    string `json:"error,omitempty"`
-	}
+// msgResp mirrors the message DTO returned by GET /v1/messages/{id}.
+type msgResp struct {
+	ID       int64  `json:"id"`
+	Status   string `json:"status"`
+	Attempts int    `json:"attempts"`
+	Reason   string `json:"reason,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
 
-	// Type assertion to get the actual client type
-	client, ok := c.(interface {
-		Get(path string, query map[string]string, out any) error
-	})
-	if !ok {
-		return fmt.Errorf("internal error: invalid client type")
-	}
-
-	ticker := time.NewTicker(2 * time.Second)
+// waitForMessage polls GET /v1/messages/{id} every pollInterval until the
+// message reaches a terminal status. "queued" and "delivering" are
+// non-terminal and keep the loop going; "delivered" and "failed" are
+// terminal. Any other status is treated as non-terminal too (logged, not
+// errored) so that future statuses added server-side don't break existing
+// clients.
+func waitForMessage(cmd *cobra.Command, c *client.Client, msgID int64) error {
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -153,12 +155,15 @@ func waitForMessage(cmd *cobra.Command, c any, msgID int64) error {
 		case <-ticker.C:
 			path := apiPath("v1", "messages", fmt.Sprintf("%d", msgID))
 			var msg msgResp
-			if err := client.Get(path, nil, &msg); err != nil {
+			if err := c.Get(path, nil, &msg); err != nil {
 				return err
 			}
 
 			switch msg.Status {
 			case "delivered":
+				if flags.JSON {
+					return printJSON(cmd, msg)
+				}
 				cmd.Printf("message %d delivered\n", msgID)
 				return nil
 			case "failed":
@@ -169,13 +174,19 @@ func waitForMessage(cmd *cobra.Command, c any, msgID int64) error {
 				if reason == "" {
 					reason = "unknown error"
 				}
-				cmd.PrintErrf("message %d failed: %s\n", msgID, reason)
+				if flags.JSON {
+					_ = printJSON(cmd, msg)
+				} else {
+					cmd.PrintErrf("message %d failed: %s\n", msgID, reason)
+				}
 				return fmt.Errorf("message delivery failed")
-			case "queued":
-				// Still waiting, continue polling
+			case "queued", "delivering":
+				// Still in flight, continue polling.
 				continue
 			default:
-				return fmt.Errorf("unknown message status: %s", msg.Status)
+				// Unknown/future status: keep polling rather than erroring.
+				cmd.PrintErrf("debug: message %d has unrecognized status %q, continuing to poll\n", msgID, msg.Status)
+				continue
 			}
 		}
 	}
