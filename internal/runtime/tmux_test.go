@@ -184,6 +184,87 @@ func TestTmux_DestroyIdempotent(t *testing.T) {
 	}
 }
 
+// TestTmux_InjectPackedTUI_MarkerAbsent reproduces a reviewer-reported
+// false-negative: a full-screen (alt-screen) TUI that, on submit,
+// redraws the exact same number of lines with the exact same static
+// footer, only clearing the input box. Under the old detection
+// (line-count growth OR last-line change) this scenario false-negatives
+// because neither line count nor last line changes across the redraw.
+// The new marker-absent signal must catch it: the injected text no
+// longer appears in the tail after redraw.
+func TestTmux_InjectPackedTUI_MarkerAbsent(t *testing.T) {
+	requireTmux(t)
+	ctx := context.Background()
+	rt := NewTmux()
+
+	// A tiny alt-screen "TUI": fills the screen with numbered lines plus
+	// a static footer, reads a line, and on submit redraws the identical
+	// screen (same line count, same footer) with the input box cleared.
+	script := `printf '\033[?1049h'
+redraw() {
+  printf '\033[2J\033[H'
+  i=1
+  while [ "$i" -le 8 ]; do
+    printf 'line %d\n' "$i"
+    i=$((i+1))
+  done
+  printf -- '---static-footer---\n'
+  printf '> '
+}
+redraw
+while IFS= read -r line; do
+  redraw
+done`
+
+	name := uniqueName(t, "")
+	h, err := rt.Create(ctx, CreateSpec{
+		Name:    name,
+		Dir:     t.TempDir(),
+		Command: script,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer rt.Destroy(ctx, h)
+
+	// Let the alt-screen render before injecting.
+	waitFor(t, func() bool {
+		out, err := rt.Capture(ctx, h, 20)
+		if err != nil {
+			return false
+		}
+		return strings.Contains(out, "---static-footer---")
+	}, "packed TUI to render its initial screen")
+
+	done := make(chan error, 1)
+	go func() {
+		done <- rt.Inject(ctx, h, "hello")
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Inject: expected success via marker-absent detection, got: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("Inject did not return within timeout (likely burned all retries)")
+	}
+
+	// The screen should still show the same static content (redraw
+	// happened, not a scroll/append), confirming this was genuinely the
+	// packed-TUI redraw case rather than count-growth.
+	out, err := rt.Capture(ctx, h, 20)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	if !strings.Contains(out, "---static-footer---") {
+		t.Fatalf("expected footer to still be present after submit, got: %q", out)
+	}
+	if strings.Contains(out, "hello") {
+		t.Fatalf("expected injected text to be cleared from input box after submit, got: %q", out)
+	}
+}
+
 func TestTmux_InvalidNameRejected(t *testing.T) {
 	requireTmux(t)
 	ctx := context.Background()

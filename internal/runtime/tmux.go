@@ -3,6 +3,7 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,18 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrSubmitUnconfirmed is returned by Inject when the text was pasted and
+// Enter was sent the configured number of times, but submission could not
+// be confirmed via the poll predicate before attempts were exhausted. This
+// does NOT necessarily mean delivery failed — the text may well have been
+// submitted; it means Inject could not verify it. Callers MUST NOT
+// blindly re-inject on this error, since the original text may already
+// have reached the target program: re-injecting risks sending a duplicate
+// message. Callers should typically surface this to the operator or fall
+// back to an out-of-band check (e.g. Capture) before deciding whether to
+// retry.
+var ErrSubmitUnconfirmed = errors.New("inject: submission unconfirmed after exhausting attempts")
 
 // nameRE is the set of characters permitted in a session name. It is
 // deliberately restrictive: session names are interpolated into tmux
@@ -95,6 +108,27 @@ func (t *tmuxRuntime) Create(ctx context.Context, spec CreateSpec) (Handle, erro
 	return Handle{Name: spec.Name}, nil
 }
 
+// Inject clears any draft on the target pane's input line, pastes text,
+// and presses Enter, retrying Enter up to maxAttempts times while polling
+// for confirmation that the submit was processed. Submission is confirmed
+// against the bottom 5-line tail of the pane (captured via `capture-pane
+// -S -5`) as soon as EITHER of two independent signals fires:
+//
+//   - marker-absent: the last non-empty line of the injected text is no
+//     longer present anywhere in the captured tail. This covers
+//     full-screen / alt-screen TUIs that redraw on submit and clear the
+//     input box, even when the redraw leaves the surrounding line count
+//     and footer unchanged.
+//   - count-growth: the number of non-blank lines in the tail grew versus
+//     the pre-Enter baseline. This covers simple echo-style consumers
+//     (e.g. `cat`) where the submitted text lingers in the tail as an
+//     echoed line, so marker-absent alone would never fire.
+//
+// If attempts are exhausted without either signal firing, Inject returns
+// ErrSubmitUnconfirmed (wrapped with context) rather than a generic
+// error, since by that point the text has very likely already been
+// delivered to the target program even though Inject could not verify
+// it — see ErrSubmitUnconfirmed's doc comment for the caller contract.
 func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 	if err := validateName(h.Name); err != nil {
 		return err
@@ -154,6 +188,7 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 		return fmt.Errorf("capture baseline: %w", err)
 	}
 	baseCount := nonBlankLineCount(baseline)
+	marker := lastLine(text)
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if _, _, err := runTmux(ctx, "send-keys", "-t", paneTarget(h.Name), "Enter"); err != nil {
@@ -166,16 +201,16 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 			if err != nil {
 				return fmt.Errorf("poll capture-pane: %w", err)
 			}
-			// The draft occupies the (single) input line while pending.
-			// Once tmux/the target program processes Enter, either the
-			// draft's content moves off the input line and is replaced
-			// (e.g. by an echoed copy plus a fresh, distinct prompt
-			// line) or the line the cursor sits on no longer matches
-			// the draft. We detect this generically: the pane grew a
-			// new non-blank line, which happens once Enter is actually
-			// processed (a new prompt, an echoed line, or program
-			// output appears) as opposed to being swallowed.
-			if nonBlankLineCount(out) > baseCount || lastLine(out) != lastLine(baseline) {
+			// marker-absent: the injected text's last line no longer
+			// appears anywhere in the tail — the input box was cleared.
+			// Handles full-screen/alt-screen TUIs that redraw with a
+			// static line count and footer on submit.
+			markerAbsent := marker != "" && !strings.Contains(out, marker)
+			// count-growth: the tail gained non-blank lines vs baseline
+			// — handles echo-style consumers (e.g. cat) where the
+			// marker lingers in the tail.
+			countGrowth := nonBlankLineCount(out) > baseCount
+			if markerAbsent || countGrowth {
 				return nil
 			}
 			if time.Now().After(deadline) {
@@ -185,7 +220,7 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 		}
 	}
 
-	return fmt.Errorf("inject: draft not submitted after %d attempts", maxAttempts)
+	return fmt.Errorf("%w: after %d attempts", ErrSubmitUnconfirmed, maxAttempts)
 }
 
 // lastLine returns the final non-blank line of s, or "" if s has no
