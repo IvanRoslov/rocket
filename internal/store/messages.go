@@ -16,7 +16,8 @@ type Message struct {
 	Status      string // queued|delivering|delivered|failed
 	Attempts    int
 	CreatedAt   int64
-	DeliveredAt int64 // 0 = not delivered
+	DeliveredAt int64  // 0 = not delivered
+	Reason      string // empty = none; set on status "failed" (e.g. "timeout", "delivery_failed", "recipient_gone")
 }
 
 // AddMessage inserts a new message with status "queued" (unless already set)
@@ -43,7 +44,7 @@ func (s *Store) AddMessage(m Message) (int64, error) {
 // GetMessage returns the message with the given id, or ErrNotFound.
 func (s *Store) GetMessage(id int64) (Message, error) {
 	row := s.db.QueryRow(
-		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at
+		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason
 		 FROM messages WHERE id = ?`, id,
 	)
 	return scanMessage(row)
@@ -53,7 +54,7 @@ func (s *Store) GetMessage(id int64) (Message, error) {
 // or from_session = sessionID, in ascending id order. A limit <= 0 means no
 // limit.
 func (s *Store) ListMessages(sessionID string, limit int) ([]Message, error) {
-	query := `SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at
+	query := `SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason
 	          FROM messages WHERE to_session = ? OR from_session = ? ORDER BY id DESC`
 	args := []any{sessionID, sessionID}
 	if limit > 0 {
@@ -91,7 +92,7 @@ func (s *Store) ListMessages(sessionID string, limit int) ([]Message, error) {
 // message for to.
 func (s *Store) NextQueuedMessage(to string) (Message, bool, error) {
 	row := s.db.QueryRow(
-		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at
+		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason
 		 FROM messages WHERE to_session = ? AND status = 'queued' ORDER BY id LIMIT 1`, to,
 	)
 	m, err := scanMessage(row)
@@ -129,12 +130,13 @@ func (s *Store) ClaimMessage(id int64) (bool, error) {
 	return n == 1, nil
 }
 
-// UpdateMessageStatus updates a message's status, attempts, and delivered_at
-// (0 stored as NULL). Returns ErrNotFound if the message doesn't exist.
-func (s *Store) UpdateMessageStatus(id int64, status string, attempts int, deliveredAt int64) error {
+// UpdateMessageStatus updates a message's status, attempts, delivered_at
+// (0 stored as NULL), and reason (empty string stored as NULL). Returns
+// ErrNotFound if the message doesn't exist.
+func (s *Store) UpdateMessageStatus(id int64, status string, attempts int, deliveredAt int64, reason string) error {
 	res, err := s.db.Exec(
-		`UPDATE messages SET status = ?, attempts = ?, delivered_at = ? WHERE id = ?`,
-		status, attempts, nullIfZero(deliveredAt), id,
+		`UPDATE messages SET status = ?, attempts = ?, delivered_at = ?, reason = ? WHERE id = ?`,
+		status, attempts, nullIfZero(deliveredAt), nullIfEmpty(reason), id,
 	)
 	if err != nil {
 		return fmt.Errorf("update message status: %w", err)
@@ -159,9 +161,9 @@ func (s *Store) ExpireQueuedBefore(ts int64) ([]Message, error) {
 	defer tx.Rollback() //nolint:errcheck // no-op if committed
 
 	rows, err := tx.Query(
-		`UPDATE messages SET status = 'failed'
+		`UPDATE messages SET status = 'failed', reason = 'timeout'
 		 WHERE status = 'queued' AND created_at < ?
-		 RETURNING id, from_session, to_session, body, status, attempts, created_at, delivered_at`, ts,
+		 RETURNING id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason`, ts,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("expire messages: %w", err)
@@ -250,9 +252,10 @@ func scanMessage(row interface{ Scan(...any) error }) (Message, error) {
 	var m Message
 	var fromSession sql.NullString
 	var deliveredAt sql.NullInt64
+	var reason sql.NullString
 
 	err := row.Scan(
-		&m.ID, &fromSession, &m.ToSession, &m.Body, &m.Status, &m.Attempts, &m.CreatedAt, &deliveredAt,
+		&m.ID, &fromSession, &m.ToSession, &m.Body, &m.Status, &m.Attempts, &m.CreatedAt, &deliveredAt, &reason,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Message{}, ErrNotFound
@@ -263,6 +266,7 @@ func scanMessage(row interface{ Scan(...any) error }) (Message, error) {
 
 	m.FromSession = fromSession.String
 	m.DeliveredAt = deliveredAt.Int64
+	m.Reason = reason.String
 
 	return m, nil
 }

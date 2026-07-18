@@ -415,7 +415,7 @@ func TestQueue_RunRecoversOrphanedDeliveringMessages(t *testing.T) {
 		t.Fatalf("AddMessage: %v", err)
 	}
 	// Simulate a crash mid-delivery: message stuck in "delivering".
-	if err := h.st.UpdateMessageStatus(id, "delivering", 1, 0); err != nil {
+	if err := h.st.UpdateMessageStatus(id, "delivering", 1, 0, ""); err != nil {
 		t.Fatalf("UpdateMessageStatus: %v", err)
 	}
 
@@ -443,7 +443,7 @@ func TestQueue_RecoverAloneResetsDeliveringWithoutRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddMessage: %v", err)
 	}
-	if err := h.st.UpdateMessageStatus(id, "delivering", 1, 0); err != nil {
+	if err := h.st.UpdateMessageStatus(id, "delivering", 1, 0, ""); err != nil {
 		t.Fatalf("UpdateMessageStatus: %v", err)
 	}
 
@@ -605,7 +605,7 @@ func TestQueue_ClaimMessageRaceSkipsExpiredMessage(t *testing.T) {
 
 	// Simulate expiry racing the worker: mark the message failed directly,
 	// bypassing the normal delivery path (as expireTimedOut's UPDATE would).
-	if err := h.st.UpdateMessageStatus(id, "failed", 0, 0); err != nil {
+	if err := h.st.UpdateMessageStatus(id, "failed", 0, 0, ""); err != nil {
 		t.Fatalf("UpdateMessageStatus: %v", err)
 	}
 

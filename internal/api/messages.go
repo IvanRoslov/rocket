@@ -27,6 +27,7 @@ type messageResponse struct {
 	Attempts    int    `json:"attempts"`
 	CreatedAt   int64  `json:"created_at"`
 	DeliveredAt int64  `json:"delivered_at,omitempty"`
+	Reason      string `json:"reason,omitempty"`
 }
 
 func toMessageResponse(m store.Message) messageResponse {
@@ -39,6 +40,7 @@ func toMessageResponse(m store.Message) messageResponse {
 		Attempts:    m.Attempts,
 		CreatedAt:   m.CreatedAt,
 		DeliveredAt: m.DeliveredAt,
+		Reason:      m.Reason,
 	}
 }
 

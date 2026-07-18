@@ -98,7 +98,7 @@ func TestNextQueuedMessage_FIFOAndNone(t *testing.T) {
 		t.Errorf("ID = %d, want %d (FIFO)", m.ID, id1)
 	}
 
-	if err := s.UpdateMessageStatus(id1, "delivered", 1, 123); err != nil {
+	if err := s.UpdateMessageStatus(id1, "delivered", 1, 123, ""); err != nil {
 		t.Fatalf("UpdateMessageStatus: %v", err)
 	}
 
@@ -114,7 +114,7 @@ func TestNextQueuedMessage_FIFOAndNone(t *testing.T) {
 func TestUpdateMessageStatus_NotFound(t *testing.T) {
 	s := openTestStore(t)
 
-	err := s.UpdateMessageStatus(999, "delivered", 1, 100)
+	err := s.UpdateMessageStatus(999, "delivered", 1, 100, "")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
@@ -124,7 +124,7 @@ func TestUpdateMessageStatus_DeliveredAtZeroIsNull(t *testing.T) {
 	s := openTestStore(t)
 
 	id, _ := s.AddMessage(Message{ToSession: "b", Body: "hi"})
-	if err := s.UpdateMessageStatus(id, "delivering", 1, 0); err != nil {
+	if err := s.UpdateMessageStatus(id, "delivering", 1, 0, ""); err != nil {
 		t.Fatalf("UpdateMessageStatus: %v", err)
 	}
 
@@ -140,13 +140,46 @@ func TestUpdateMessageStatus_DeliveredAtZeroIsNull(t *testing.T) {
 	}
 }
 
+// TestUpdateMessageStatus_ReasonRoundTrip verifies that a non-empty reason
+// passed to UpdateMessageStatus is persisted and read back, and that an
+// empty reason is stored/read back as empty (not a literal "NULL" or
+// similar).
+func TestUpdateMessageStatus_ReasonRoundTrip(t *testing.T) {
+	s := openTestStore(t)
+
+	id, _ := s.AddMessage(Message{ToSession: "b", Body: "hi"})
+
+	if err := s.UpdateMessageStatus(id, "failed", 1, 0, "delivery_failed"); err != nil {
+		t.Fatalf("UpdateMessageStatus: %v", err)
+	}
+	m, err := s.GetMessage(id)
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if m.Reason != "delivery_failed" {
+		t.Errorf("Reason = %q, want delivery_failed", m.Reason)
+	}
+
+	// Empty reason (e.g. a "delivered" transition) round-trips as empty.
+	if err := s.UpdateMessageStatus(id, "delivered", 1, 100, ""); err != nil {
+		t.Fatalf("UpdateMessageStatus: %v", err)
+	}
+	m2, err := s.GetMessage(id)
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if m2.Reason != "" {
+		t.Errorf("Reason = %q, want empty", m2.Reason)
+	}
+}
+
 func TestExpireQueuedBefore(t *testing.T) {
 	s := openTestStore(t)
 
 	old, _ := s.AddMessage(Message{ToSession: "b", Body: "old", CreatedAt: 100})
 	recent, _ := s.AddMessage(Message{ToSession: "b", Body: "recent", CreatedAt: 1000})
 	delivered, _ := s.AddMessage(Message{ToSession: "b", Body: "delivered", CreatedAt: 50})
-	if err := s.UpdateMessageStatus(delivered, "delivered", 1, 60); err != nil {
+	if err := s.UpdateMessageStatus(delivered, "delivered", 1, 60, ""); err != nil {
 		t.Fatalf("UpdateMessageStatus: %v", err)
 	}
 
@@ -160,6 +193,9 @@ func TestExpireQueuedBefore(t *testing.T) {
 	if expired[0].Status != "failed" {
 		t.Errorf("expired status = %q, want failed", expired[0].Status)
 	}
+	if expired[0].Reason != "timeout" {
+		t.Errorf("expired reason = %q, want timeout", expired[0].Reason)
+	}
 
 	m, err := s.GetMessage(old)
 	if err != nil {
@@ -167,6 +203,9 @@ func TestExpireQueuedBefore(t *testing.T) {
 	}
 	if m.Status != "failed" {
 		t.Errorf("persisted status = %q, want failed", m.Status)
+	}
+	if m.Reason != "timeout" {
+		t.Errorf("persisted reason = %q, want timeout", m.Reason)
 	}
 
 	m2, err := s.GetMessage(recent)
@@ -211,7 +250,7 @@ func TestListQueuedRecipients(t *testing.T) {
 	_, _ = s.AddMessage(Message{ToSession: "a", Body: "2"})
 	_, _ = s.AddMessage(Message{ToSession: "b", Body: "3"})
 	delivered, _ := s.AddMessage(Message{ToSession: "c", Body: "4"})
-	if err := s.UpdateMessageStatus(delivered, "delivered", 1, 10); err != nil {
+	if err := s.UpdateMessageStatus(delivered, "delivered", 1, 10, ""); err != nil {
 		t.Fatalf("UpdateMessageStatus: %v", err)
 	}
 
@@ -227,7 +266,7 @@ func TestListQueuedRecipients(t *testing.T) {
 		t.Fatalf("recips = %v, want [a b]", recips)
 	}
 
-	if err := s.UpdateMessageStatus(id1, "failed", 1, 0); err != nil {
+	if err := s.UpdateMessageStatus(id1, "failed", 1, 0, ""); err != nil {
 		t.Fatalf("UpdateMessageStatus: %v", err)
 	}
 	recips, err = s.ListQueuedRecipients()
@@ -248,7 +287,7 @@ func TestExpireQueuedBefore_ConcurrentDeliveringNotExpired(t *testing.T) {
 
 	queuedExpired, _ := s.AddMessage(Message{ToSession: "b", Body: "queued-expired", CreatedAt: 100})
 	deliveringExpired, _ := s.AddMessage(Message{ToSession: "b", Body: "delivering-expired", CreatedAt: 100})
-	if err := s.UpdateMessageStatus(deliveringExpired, "delivering", 1, 0); err != nil {
+	if err := s.UpdateMessageStatus(deliveringExpired, "delivering", 1, 0, ""); err != nil {
 		t.Fatalf("UpdateMessageStatus: %v", err)
 	}
 
@@ -273,16 +312,16 @@ func TestResetDelivering(t *testing.T) {
 	s := openTestStore(t)
 
 	delivering1, _ := s.AddMessage(Message{ToSession: "a", Body: "1"})
-	if err := s.UpdateMessageStatus(delivering1, "delivering", 1, 0); err != nil {
+	if err := s.UpdateMessageStatus(delivering1, "delivering", 1, 0, ""); err != nil {
 		t.Fatalf("UpdateMessageStatus: %v", err)
 	}
 	delivering2, _ := s.AddMessage(Message{ToSession: "b", Body: "2"})
-	if err := s.UpdateMessageStatus(delivering2, "delivering", 2, 0); err != nil {
+	if err := s.UpdateMessageStatus(delivering2, "delivering", 2, 0, ""); err != nil {
 		t.Fatalf("UpdateMessageStatus: %v", err)
 	}
 	queued, _ := s.AddMessage(Message{ToSession: "c", Body: "3"})
 	delivered, _ := s.AddMessage(Message{ToSession: "d", Body: "4"})
-	if err := s.UpdateMessageStatus(delivered, "delivered", 1, 10); err != nil {
+	if err := s.UpdateMessageStatus(delivered, "delivered", 1, 10, ""); err != nil {
 		t.Fatalf("UpdateMessageStatus: %v", err)
 	}
 

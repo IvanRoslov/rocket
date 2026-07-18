@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -269,7 +271,8 @@ func TestWaitForMessageDeliveringThenDelivered(t *testing.T) {
 }
 
 // TestWaitForMessageFailed asserts a "failed" status is reported as an
-// error.
+// error, and that the failure reason returned by the server is printed in
+// the CLI's stderr output.
 func TestWaitForMessageFailed(t *testing.T) {
 	restore := setPollIntervalForTest(t, 10*time.Millisecond)
 	defer restore()
@@ -283,9 +286,16 @@ func TestWaitForMessageFailed(t *testing.T) {
 	c := newUnixSocketTestServer(t, mux)
 
 	cmd := &cobra.Command{}
+	var errBuf bytes.Buffer
+	cmd.SetErr(&errBuf)
+
 	err := waitForMessage(cmd, c, 7)
 	if err == nil {
 		t.Fatal("expected error for failed status, got nil")
+	}
+
+	if !strings.Contains(errBuf.String(), "recipient gone") {
+		t.Errorf("stderr output = %q, want it to contain the failure reason %q", errBuf.String(), "recipient gone")
 	}
 }
 

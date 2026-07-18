@@ -380,7 +380,7 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 			claimed = true
 		}
 
-		if err := q.st.UpdateMessageStatus(msg.ID, "delivering", msg.Attempts, 0); err != nil {
+		if err := q.st.UpdateMessageStatus(msg.ID, "delivering", msg.Attempts, 0, ""); err != nil {
 			slog.Error("queue: update message delivering", "id", msg.ID, "error", err)
 		}
 
@@ -425,7 +425,7 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 // deliverSuccess marks a message delivered and publishes message.delivered.
 func (q *Queue) deliverSuccess(msg store.Message) {
 	now := time.Now().Unix()
-	if err := q.st.UpdateMessageStatus(msg.ID, "delivered", msg.Attempts, now); err != nil {
+	if err := q.st.UpdateMessageStatus(msg.ID, "delivered", msg.Attempts, now, ""); err != nil {
 		slog.Error("queue: update message delivered", "id", msg.ID, "error", err)
 	}
 	q.bus.Publish("message.delivered", msg.ToSession, map[string]any{
@@ -437,7 +437,7 @@ func (q *Queue) deliverSuccess(msg store.Message) {
 
 // fail marks a message failed and publishes message.failed with reason.
 func (q *Queue) fail(msg store.Message, reason string) {
-	if err := q.st.UpdateMessageStatus(msg.ID, "failed", msg.Attempts, 0); err != nil {
+	if err := q.st.UpdateMessageStatus(msg.ID, "failed", msg.Attempts, 0, reason); err != nil {
 		slog.Error("queue: update message failed", "id", msg.ID, "error", err)
 	}
 	q.bus.Publish("message.failed", msg.ToSession, map[string]any{
