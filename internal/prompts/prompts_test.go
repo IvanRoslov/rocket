@@ -92,10 +92,13 @@ func TestRenderMultipleMissingVars(t *testing.T) {
 		t.Error("expected error for missing variables")
 	}
 
-	// Error should name at least one unresolved placeholder
+	// Error should name all missing placeholders
 	errMsg := err.Error()
-	if !strings.Contains(errMsg, "{{") {
-		t.Errorf("error should name unresolved placeholder, got: %v", err)
+	if !strings.Contains(errMsg, "{{feature_slug}}") {
+		t.Errorf("error should name feature_slug, got: %v", err)
+	}
+	if !strings.Contains(errMsg, "{{session_id}}") {
+		t.Errorf("error should name session_id, got: %v", err)
 	}
 }
 
@@ -251,5 +254,43 @@ func TestRenderInvalidTemplate(t *testing.T) {
 	_, err := Render("", "nonexistent", vars)
 	if err == nil {
 		t.Error("expected error for nonexistent template")
+	}
+}
+
+func TestRenderValueWithLiteralPlaceholder(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Create override directory and file with literal {{ }} in a variable value
+	promptsDir := filepath.Join(tempDir, "prompts")
+	if err := os.MkdirAll(promptsDir, 0755); err != nil {
+		t.Fatalf("failed to create prompts dir: %v", err)
+	}
+
+	// Template with task_description containing literal {{ }}
+	overrideContent := "Task: {{task_title}}\nDescription: {{task_description}}"
+	overridePath := filepath.Join(promptsDir, "test.md")
+	if err := os.WriteFile(overridePath, []byte(overrideContent), 0644); err != nil {
+		t.Fatalf("failed to write override file: %v", err)
+	}
+
+	// Value containing literal {{ }} should not cause error
+	vars := Vars{
+		"task_title":       "Implement feature",
+		"task_description": "wrap vars in {{variable}} syntax",
+	}
+
+	result, err := Render(tempDir, "test", vars)
+	if err != nil {
+		t.Fatalf("Render failed for value with literal {{...}}: %v", err)
+	}
+
+	// Check the output contains the literal {{ }} from the value
+	if !strings.Contains(result, "{{variable}}") {
+		t.Error("rendered output should preserve literal {{}} from variable value")
+	}
+
+	// Check substitutions worked
+	if !strings.Contains(result, "Implement feature") {
+		t.Error("task_title not properly substituted")
 	}
 }

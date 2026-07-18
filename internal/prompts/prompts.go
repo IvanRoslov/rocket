@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -15,8 +17,7 @@ var templates embed.FS
 type Vars map[string]string
 
 // Render loads the template (override file <home>/prompts/<name>.md if it exists, else embedded),
-// replaces every {{key}} with v[key], and errors if any {{...}} placeholder remains
-// (except {{project_rules}} which may legitimately be empty string).
+// replaces every {{key}} with v[key], and errors if any required placeholder is missing from Vars.
 func Render(home, name string, v Vars) (string, error) {
 	var content string
 
@@ -39,24 +40,40 @@ func Render(home, name string, v Vars) (string, error) {
 		content = string(data)
 	}
 
-	// Build replacer from Vars
+	// Extract all placeholders from the template
+	placeholderRe := regexp.MustCompile(`\{\{([a-z_]+)\}\}`)
+	matches := placeholderRe.FindAllStringSubmatch(content, -1)
+
+	// Collect all missing variable names
+	var missing []string
+	seen := make(map[string]bool)
+	for _, match := range matches {
+		varName := match[1]
+		if !seen[varName] {
+			if _, ok := v[varName]; !ok {
+				missing = append(missing, varName)
+				seen[varName] = true
+			}
+		}
+	}
+
+	// Error if any variables are missing
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		placeholders := make([]string, len(missing))
+		for i, varName := range missing {
+			placeholders[i] = "{{" + varName + "}}"
+		}
+		return "", fmt.Errorf("unresolved placeholders in template %q: %s", name, strings.Join(placeholders, ", "))
+	}
+
+	// Build replacer from Vars and perform substitution
 	pairs := make([]string, 0, len(v)*2)
 	for key, value := range v {
 		pairs = append(pairs, "{{"+key+"}}", value)
 	}
 	replacer := strings.NewReplacer(pairs...)
 	result := replacer.Replace(content)
-
-	// Check for unresolved placeholders
-	if idx := strings.Index(result, "{{"); idx != -1 {
-		// Extract the placeholder name
-		endIdx := strings.Index(result[idx:], "}}")
-		if endIdx == -1 {
-			return "", fmt.Errorf("unresolved placeholder in template %q: malformed placeholder at position %d", name, idx)
-		}
-		placeholder := result[idx : idx+endIdx+2]
-		return "", fmt.Errorf("unresolved placeholder in template %q: %s", name, placeholder)
-	}
 
 	return result, nil
 }
