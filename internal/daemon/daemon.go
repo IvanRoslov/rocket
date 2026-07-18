@@ -17,6 +17,7 @@ import (
 	"github.com/IvanRoslov/rocket/internal/api"
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
+	"github.com/IvanRoslov/rocket/internal/heartbeat"
 	"github.com/IvanRoslov/rocket/internal/monitor"
 	"github.com/IvanRoslov/rocket/internal/queue"
 	"github.com/IvanRoslov/rocket/internal/runtime"
@@ -55,6 +56,7 @@ func Run(cfg *config.Config) error {
 	mgr := session.NewManager(st, b, rt, ws, cfg)
 	mon := monitor.New(st, b, rt, cfg, agent.Get)
 	q := queue.New(st, b, rt, cfg, mon.Activity)
+	hb := heartbeat.New(st, b, cfg, mon.Activity, q.Wake)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -78,6 +80,8 @@ func Run(cfg *config.Config) error {
 	// whose delivery worker races the recovery pass. See Queue.Recover.
 	q.Recover(ctx)
 	go q.Run(ctx)
+
+	go hb.Run(ctx)
 
 	shutdownCalled := make(chan struct{})
 	var shutdownOnce func()
