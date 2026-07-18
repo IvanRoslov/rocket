@@ -438,6 +438,37 @@ func TestAppendListEvents(t *testing.T) {
 	if len(bySession) != 1 || bySession[0].SessionID != "s2" {
 		t.Fatalf("ListEvents by session = %+v", bySession)
 	}
+
+	tail, err := s.ListEventsTail(2, "")
+	if err != nil {
+		t.Fatalf("ListEventsTail: %v", err)
+	}
+	if len(tail) != 2 {
+		t.Fatalf("ListEventsTail len = %d, want 2", len(tail))
+	}
+	// Must be the last 2 events, in ascending order.
+	if tail[0].ID >= tail[1].ID {
+		t.Fatalf("ListEventsTail not ascending: %+v", tail)
+	}
+	if tail[1].ID != all[len(all)-1].ID {
+		t.Fatalf("ListEventsTail last id = %d, want %d", tail[1].ID, all[len(all)-1].ID)
+	}
+
+	tailAll, err := s.ListEventsTail(0, "")
+	if err != nil {
+		t.Fatalf("ListEventsTail(0): %v", err)
+	}
+	if len(tailAll) != len(all) {
+		t.Fatalf("ListEventsTail(0) len = %d, want %d", len(tailAll), len(all))
+	}
+
+	tailBySession, err := s.ListEventsTail(10, "s2")
+	if err != nil {
+		t.Fatalf("ListEventsTail by session: %v", err)
+	}
+	if len(tailBySession) != 1 || tailBySession[0].SessionID != "s2" {
+		t.Fatalf("ListEventsTail by session = %+v", tailBySession)
+	}
 }
 
 func TestOpen_EscapedDSNPath(t *testing.T) {

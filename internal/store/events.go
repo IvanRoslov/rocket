@@ -86,3 +86,54 @@ func (s *Store) ListEvents(sinceID int64, limit int, sessionID string) ([]Event,
 	}
 	return out, nil
 }
+
+// ListEventsTail returns the last limit events, optionally filtered by
+// sessionID (when non-empty), ordered by id ascending. A limit <= 0 means
+// no limit (i.e. all matching events).
+func (s *Store) ListEventsTail(limit int, sessionID string) ([]Event, error) {
+	query := `SELECT id, ts, type, session_id, data FROM events`
+	args := []any{}
+
+	if sessionID != "" {
+		query += ` WHERE session_id = ?`
+		args = append(args, sessionID)
+	}
+	query += ` ORDER BY id DESC`
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query events tail: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Event
+	for rows.Next() {
+		var e Event
+		var sessID sql.NullString
+		var dataJSON string
+
+		if err := rows.Scan(&e.ID, &e.TS, &e.Type, &sessID, &dataJSON); err != nil {
+			return nil, fmt.Errorf("scan event: %w", err)
+		}
+		e.SessionID = sessID.String
+
+		if err := json.Unmarshal([]byte(dataJSON), &e.Data); err != nil {
+			return nil, fmt.Errorf("unmarshal data: %w", err)
+		}
+
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Reverse to ascending order.
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
