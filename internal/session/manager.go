@@ -40,7 +40,10 @@ func validationErr(code, msg string) *ValidationError {
 
 // SpawnReq describes a request to spawn a new session. Feature defaults to
 // Task when empty; Kind defaults to "worker" (the only kind spawn accepts
-// in phase 1).
+// in phase 1). ParentID and SubtaskID are set by the orchestrator-spawn API
+// path (internal/api's POST /v1/sessions): when ParentID is non-empty, Spawn
+// renders the worker system prompt (internal/prompts, template "worker")
+// instead of leaving it empty, and stores ParentID on the new session.
 type SpawnReq struct {
 	Project   string
 	Repo      string
@@ -49,6 +52,8 @@ type SpawnReq struct {
 	Prompt    string
 	AgentName string
 	Kind      string
+	ParentID  string
+	SubtaskID int64
 }
 
 // Manager owns session lifecycle: spawn, kill, restore.
@@ -163,6 +168,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 			ProjectID:   req.Project,
 			RepoID:      req.Repo,
 			FeatureSlug: feature,
+			ParentID:    req.ParentID,
 			Agent:       agentName,
 			Branch:      branch,
 			TmuxName:    id,
@@ -205,6 +211,25 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 		WorktreePath: wtRes.Path,
 		FirstMessage: req.Prompt,
 		SocketPath:   m.cfg.SocketPath(),
+	}
+
+	if req.ParentID != "" {
+		sysPrompt, err := prompts.Render(m.cfg.Home, "worker", prompts.Vars{
+			"task_name":     req.Task,
+			"subtask_id":    fmt.Sprint(req.SubtaskID),
+			"feature_slug":  feature,
+			"project_name":  proj.Name,
+			"repo_id":       req.Repo,
+			"branch":        branch,
+			"session_id":    id,
+			"worktree_path": wtRes.Path,
+			"parent_id":     req.ParentID,
+		})
+		if err != nil {
+			m.markErrored(id, err)
+			return store.Session{}, err
+		}
+		spec.SystemPrompt = sysPrompt
 	}
 
 	if err := ag.SetupWorkspace(spec); err != nil {
@@ -517,6 +542,38 @@ func (m *Manager) Kill(ctx context.Context, id string, cleanup bool) error {
 	}
 
 	return nil
+}
+
+// KillCascade kills id. When id names a live orchestrator session, every
+// live session with ParentID == id (its workers) is killed first, then the
+// orchestrator itself — so an orchestrator never outlives the workers it
+// spawned. cleanup is applied to every session killed. Killing a
+// non-orchestrator session behaves exactly like Kill.
+func (m *Manager) KillCascade(ctx context.Context, id string, cleanup bool) error {
+	sess, err := m.st.GetSession(id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return validationErr("session_not_found", "session not found: "+id)
+		}
+		return err
+	}
+
+	if sess.Kind == "orchestrator" {
+		all, err := m.st.ListSessions(store.SessionFilter{All: true})
+		if err != nil {
+			return err
+		}
+		for _, w := range all {
+			if w.ParentID != id || isTerminal(w.State) {
+				continue
+			}
+			if err := m.Kill(ctx, w.ID, cleanup); err != nil {
+				return err
+			}
+		}
+	}
+
+	return m.Kill(ctx, id, cleanup)
 }
 
 // Restore recreates a dead/errored session's workspace and runtime, then

@@ -480,6 +480,82 @@ func TestSpawnEnvMergeAgentOverridesRepo(t *testing.T) {
 	}
 }
 
+func TestSpawnWithParentIDRendersWorkerSystemPrompt(t *testing.T) {
+	m, st, _, _, ws := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	if err := st.AddSession(store.Session{
+		ID: "myfeat-orch", Kind: "orchestrator", ProjectID: "proj1", RepoID: "repo1",
+		FeatureSlug: "myfeat", Agent: "fake", Branch: "orch/myfeat",
+		WorktreePath: "/fake/wt/myfeat-orch", TmuxName: "myfeat-orch", State: "running",
+	}); err != nil {
+		t.Fatalf("seed orchestrator: %v", err)
+	}
+
+	sess, err := m.Spawn(context.Background(), SpawnReq{
+		Project: "proj1", Repo: "repo1", Task: "mytask", Feature: "myfeat",
+		Prompt: "go do it", AgentName: "fake",
+		ParentID: "myfeat-orch", SubtaskID: 7,
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	if sess.ParentID != "myfeat-orch" {
+		t.Errorf("ParentID = %q, want myfeat-orch", sess.ParentID)
+	}
+
+	stored, err := st.GetSession(sess.ID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if stored.ParentID != "myfeat-orch" {
+		t.Errorf("stored ParentID = %q, want myfeat-orch", stored.ParentID)
+	}
+
+	if len(testFakeAgent.setupCalls) != 1 {
+		t.Fatalf("SetupWorkspace calls = %d, want 1", len(testFakeAgent.setupCalls))
+	}
+	spec := testFakeAgent.setupCalls[0]
+	if !strings.Contains(spec.SystemPrompt, "mytask") {
+		t.Errorf("SystemPrompt missing task name: %s", spec.SystemPrompt)
+	}
+	if !strings.Contains(spec.SystemPrompt, "subtask #7") {
+		t.Errorf("SystemPrompt missing subtask id: %s", spec.SystemPrompt)
+	}
+	if !strings.Contains(spec.SystemPrompt, "myfeat-orch") {
+		t.Errorf("SystemPrompt missing parent id: %s", spec.SystemPrompt)
+	}
+	if !strings.Contains(spec.SystemPrompt, "myfeat") {
+		t.Errorf("SystemPrompt missing feature slug: %s", spec.SystemPrompt)
+	}
+	if !strings.Contains(spec.SystemPrompt, ws.createResult.Path) && !strings.Contains(spec.SystemPrompt, "/fake/wt/myfeat-mytask") {
+		t.Errorf("SystemPrompt missing worktree path: %s", spec.SystemPrompt)
+	}
+	// FirstMessage is the raw prompt, not template-rendered.
+	if spec.FirstMessage != "go do it" {
+		t.Errorf("FirstMessage = %q, want raw prompt unchanged", spec.FirstMessage)
+	}
+}
+
+func TestSpawnWithoutParentIDLeavesSystemPromptEmpty(t *testing.T) {
+	m, st, _, _, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+
+	_, err := m.Spawn(context.Background(), SpawnReq{
+		Project: "proj1", Repo: "repo1", Task: "mytask", Feature: "myfeat", AgentName: "fake",
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	if len(testFakeAgent.setupCalls) != 1 {
+		t.Fatalf("SetupWorkspace calls = %d, want 1", len(testFakeAgent.setupCalls))
+	}
+	if testFakeAgent.setupCalls[0].SystemPrompt != "" {
+		t.Errorf("SystemPrompt = %q, want empty when ParentID unset", testFakeAgent.setupCalls[0].SystemPrompt)
+	}
+}
+
 func assertValidationCode(t *testing.T, err error, code string) {
 	t.Helper()
 	var verr *ValidationError

@@ -162,14 +162,14 @@ func newAttachCmd() *cobra.Command {
 }
 
 func newKillCmd() *cobra.Command {
-	var cleanup bool
+	var cleanup, cascade bool
 
 	cmd := &cobra.Command{
 		Use:   "kill <session>",
 		Short: "Остановить сессию",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return &usageError{message: "usage: rocket kill <session> [--cleanup]"}
+				return &usageError{message: "usage: rocket kill <session> [--cleanup] [--cascade]"}
 			}
 
 			c, _, err := connect(true)
@@ -177,9 +177,16 @@ func newKillCmd() *cobra.Command {
 				return err
 			}
 
-			path := apiPath("v1", "sessions", args[0], "kill")
+			q := url.Values{}
 			if cleanup {
-				path += "?cleanup=true"
+				q.Set("cleanup", "true")
+			}
+			if cascade {
+				q.Set("cascade", "true")
+			}
+			path := apiPath("v1", "sessions", args[0], "kill")
+			if len(q) > 0 {
+				path += "?" + q.Encode()
 			}
 
 			var resp map[string]any
@@ -196,6 +203,7 @@ func newKillCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&cleanup, "cleanup", false, "удалить worktree и tmux-сессию")
+	cmd.Flags().BoolVar(&cascade, "cascade", false, "убить оркестратора вместе со всеми его воркерами")
 	return cmd
 }
 
