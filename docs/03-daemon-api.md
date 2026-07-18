@@ -33,6 +33,23 @@ HTTP+JSON, префикс `/v1`. Листенеры: Unix-сокет `~/.rocket/
 
 Спавн-эндпоинты отвечают сразу после резервирования (`state=spawning`); завершение спавна видно по событиям/GET.
 
+## Задачи
+
+| Метод | Путь | Описание |
+|---|---|---|
+| GET | `/v1/tasks` | Список; фильтры `?status=&project=&parent=`; `?board=true` — сгруппировано по колонкам |
+| POST | `/v1/tasks` | `{title, description?, project, parent_id?}` |
+| GET | `/v1/tasks/{id}` | Карточка: поля + подзадачи + привязанная сессия (с `tmux_name` и attach-командой) |
+| PATCH | `/v1/tasks/{id}` | `{status?, title?, description?}` — ручной move и правки |
+| POST | `/v1/tasks/{id}/start` | Создать оркестратора и назначить на задачу (`{agent?}`); задача → `in_progress` |
+| POST | `/v1/tasks/{id}/cancel` | Отмена; каскадно убивает сессии задачи |
+| GET | `/v1/tasks/{id}/docs` | Документы (последние версии; `?history=true` — все) |
+| PUT | `/v1/tasks/{id}/docs` | `{kind, title, body}` — создаёт новую версию |
+| GET | `/v1/tasks/{id}/log` | Журнал; `?kind=` |
+| POST | `/v1/tasks/{id}/log` | `{kind, body}` |
+
+Права: вызовы от агентов (определяются по `from`/env сессии) ограничены — оркестратор пишет только в свою задачу и её подзадачи, воркер — только в свою подзадачу. Автопереходы статусов (spawn → подзадача `in_progress`, PR open → `review`, merged → `done`) делает демон и записывает в `task_log` с `kind=status`.
+
 ## Сообщения
 
 | Метод | Путь | Описание |

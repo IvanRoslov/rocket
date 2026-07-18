@@ -7,9 +7,19 @@
 ## Для пользователя
 
 ```
+rocket task add "<title>" [--project <id>] [--desc <md>|--desc-file <f>]
+rocket task ls [--status <s>] [--project <id>]   # канбан в терминале
+rocket task show <id>       # карточка: подзадачи, доки, журнал, attach-команда
+rocket task start <id> [--agent <name>]          # назначить оркестратора
+rocket task move <id> <status>
+rocket task doc put <id> --kind spec|plan|report --title "..." --file <f.md>
+rocket task log <id> --kind decision|problem|note "<текст>"
+rocket task cancel <id>
+    Подробности — 12-tasks.md.
+
 rocket up "<описание фичи>" [--project <id>] [--agent <name>]
-    Запустить оркестратор под фичу. Проект по умолчанию — определяется по cwd,
-    иначе обязателен. Печатает feature slug и session id.
+    Шорткат: task add + task start. Проект по умолчанию — по cwd.
+    Печатает task id, feature slug и session id.
 
 rocket ls [--project <id>] [--feature <slug>] [--all]
     Таблица сессий: id, kind, project, activity, PR/CI, возраст.
@@ -18,8 +28,9 @@ rocket ls [--project <id>] [--feature <slug>] [--all]
 rocket status <feature-slug>
     Сводка фичи: оркестратор + его воркеры со статусами, PR, CI.
 
-rocket attach <session>
-    exec tmux attach к сессии.
+rocket attach <session|task-id>
+    exec tmux attach (изнутри tmux — switch-client). Числовой аргумент
+    трактуется как id задачи и резолвится в её сессию.
 
 rocket send <session> "<текст>" | --file <path>
     Положить сообщение в очередь. Возвращается сразу; --wait — дождаться доставки.
@@ -45,9 +56,15 @@ rocket doctor                           # проверка окружения: t
 ## Для агентов (вызываются оркестратором/воркером из своей сессии)
 
 ```
-rocket spawn --task <task> --project <id> --prompt "<бриф>" [--agent <name>]
-    Только для оркестраторов. Спавнит воркера <feature>-<task> на ветке
-    feature/<feature>/<task> в указанном проекте. Печатает session id.
+rocket spawn --task <name> --project <id> --prompt "<бриф>" [--agent <name>]
+             [--subtask <id>]
+    Только для оркестраторов. Спавнит воркера <feature>-<name> на ветке
+    feature/<feature>/<name> в указанном проекте. Автоматически создаёт
+    подзадачу (in_progress) и привязывает к воркеру; --subtask привязывает
+    к заранее созданной подзадаче. Печатает session id и subtask id.
+
+rocket task ... (см. выше)
+    Оркестратор ведёт доки/журнал своей задачи, воркер — своей подзадачи.
 
 rocket send <session> "<текст>"
     То же, что у пользователя; from заполняется из ROCKET_SESSION_ID,

@@ -73,6 +73,10 @@ spawning → running → done | killed | errored
 - не общается с пользователем — все вопросы через `rocket send` родителю;
 - при merge PR демон выполняет авто-cleanup (tmux + worktree; ветка остаётся).
 
+## Task
+
+Первоклассная запись фичи в базе демона и единица канбана: `backlog → in_progress → review → done`. Пользователь создаёт задачу, назначает на неё оркестратора; демон автоматически создаёт подзадачи под каждого воркера и двигает их статусы по PR-циклу. Оркестратор и воркеры складывают в задачу документы (spec/plan/report) и журнал решений и проблем. Задача переживает сессии и worktree — это durable-история фичи. Подробно: [12-tasks.md](12-tasks.md).
+
 ## Message
 
 Запись очереди в демоне: `id, from_session, to_session, body, status(queued|delivering|delivered|failed), attempts, created_at, delivered_at`. Подробности — [06-messaging.md](06-messaging.md).

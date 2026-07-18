@@ -24,7 +24,7 @@
 HTTP+JSON. Два листенера с одним роутером: Unix-сокет `~/.rocket/rocket.sock` (mode 0600) и `127.0.0.1:<port>` для дашборда. SSE-эндпоинт `/v1/events/stream`. Никакой аутентификации в v1 — доступ ограничен правами на сокет и localhost.
 
 ### store
-SQLite (`~/.rocket/rocket.db`, драйвер без cgo — `modernc.org/sqlite`). Единственный писатель — демон. Таблицы: `sessions`, `messages`, `events`. Схема — [05-state.md](05-state.md). Миграции — embedded SQL, применяются при старте.
+SQLite (`~/.rocket/rocket.db`, драйвер без cgo — `modernc.org/sqlite`). Единственный писатель — демон. Таблицы: `sessions`, `tasks`, `task_docs`, `task_log`, `messages`, `events`. Схема — [05-state.md](05-state.md). Миграции — embedded SQL, применяются при старте.
 
 ### session manager
 Оркестрирует спавн/kill/restore: резервирует имя, создаёт worktree (workspace), собирает команду запуска (agents), создаёт tmux-сессию (runtime), пишет запись в store, публикует события. Все переходы состояний — только через него.
@@ -68,7 +68,10 @@ type Runtime interface {
 Доставка сообщений: пер-получатель FIFO, доставка при `activity ∈ {ready, idle, waiting_input}` через `runtime.Inject`. См. [06-messaging.md](06-messaging.md).
 
 ### heartbeat
-Цикл (каждые ~5m): для каждого живого оркестратора собирает сводку по его воркерам; если есть застрявшие — кладёт сводку оркестратору в очередь. См. [08-orchestrators.md](08-orchestrators.md).
+Цикл (каждые ~5m): для каждого живого оркестратора с задачей в `in_progress` собирает сводку по его воркерам; если есть застрявшие — кладёт сводку оркестратору в очередь. См. [08-orchestrators.md](08-orchestrators.md).
+
+### tasks
+Канбан-слой: CRUD задач, автосоздание подзадач при спавне воркеров, автопереходы статусов по PR-циклу, документы и журнал. См. [12-tasks.md](12-tasks.md).
 
 ### github
 Цикл (каждые ~2m) поллит `gh` по PR воркеров: `pr_state`, `ci_state`; реакции (сообщение воркеру о красном CI) и авто-cleanup после merge. См. [09-github.md](09-github.md).

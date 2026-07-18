@@ -79,6 +79,41 @@ CREATE TABLE messages (
   delivered_at INTEGER
 );
 
+CREATE TABLE tasks (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  parent_id    INTEGER REFERENCES tasks(id),   -- NULL = задача, иначе подзадача
+  title        TEXT NOT NULL,
+  description  TEXT NOT NULL DEFAULT '',
+  project_id   TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'backlog', -- backlog|in_progress|review|done|cancelled
+  feature_slug TEXT,
+  session_id   TEXT REFERENCES sessions(id),   -- задача → оркестратор, подзадача → воркер
+  created_by   TEXT NOT NULL DEFAULT 'user',   -- user|orchestrator
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL,
+  completed_at INTEGER
+);
+
+CREATE TABLE task_docs (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id    INTEGER NOT NULL REFERENCES tasks(id),
+  kind       TEXT NOT NULL,                    -- spec|plan|report|doc
+  title      TEXT NOT NULL,
+  body       TEXT NOT NULL,                    -- markdown
+  version    INTEGER NOT NULL DEFAULT 1,      -- put того же (task,kind,title) — новая версия
+  author     TEXT,                             -- session id или NULL (пользователь)
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE task_log (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id    INTEGER NOT NULL REFERENCES tasks(id),
+  kind       TEXT NOT NULL,                    -- decision|problem|note|status
+  body       TEXT NOT NULL,
+  author     TEXT,                             -- session id или NULL
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE events (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   ts         INTEGER NOT NULL,
@@ -87,6 +122,9 @@ CREATE TABLE events (
   data       TEXT NOT NULL DEFAULT '{}'    -- JSON
 );
 
+CREATE INDEX idx_tasks_status ON tasks(status, parent_id);
+CREATE INDEX idx_task_docs ON task_docs(task_id, kind);
+CREATE INDEX idx_task_log ON task_log(task_id, id);
 CREATE INDEX idx_sessions_state ON sessions(state);
 CREATE INDEX idx_sessions_feature ON sessions(feature_slug);
 CREATE INDEX idx_messages_to ON messages(to_session, status);

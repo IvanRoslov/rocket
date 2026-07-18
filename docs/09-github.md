@@ -38,6 +38,7 @@ gh pr list --repo <repo> --head feature/<slug>/<task> --json number,state,...
 
 1. Grace-период 5m (воркер мог продолжать пост-merge действия).
 2. Если после grace воркер не `active`: kill tmux, destroy worktree (ветка остаётся), `state=done`, событие `workspace.cleanup`.
+3. Подзадача воркера автоматически переводится: PR открыт → `review`, PR смержен → `done` (запись в `task_log`).
 3. Оркестраторов авто-cleanup не касается никогда.
 
 Отключается per-project (`auto_cleanup: false` в конфиге проекта).
