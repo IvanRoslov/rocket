@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { NavLink, Outlet, useParams } from 'react-router-dom'
+import { NavLink, Outlet, useParams, useLocation } from 'react-router-dom'
 
 const navLinkStyle = ({ isActive }: { isActive: boolean }): CSSProperties => ({
   padding: '7px 11px',
@@ -11,6 +11,7 @@ const navLinkStyle = ({ isActive }: { isActive: boolean }): CSSProperties => ({
 
 export function AppShell() {
   const { projectId } = useParams()
+  const location = useLocation()
 
   return (
     <div style={{ minHeight: '100vh' }}>
@@ -73,11 +74,12 @@ export function AppShell() {
           <NavLink to="/" end style={navLinkStyle}>
             Projects
           </NavLink>
-          {projectId && (
-            <NavLink to={`/p/${projectId}`} style={navLinkStyle}>
-              Kanban
-            </NavLink>
-          )}
+          <NavLink
+            to={projectId ? `/p/${projectId}` : '/'}
+            style={({ isActive }) => navLinkStyle({ isActive: isActive && location.pathname.startsWith('/p/') })}
+          >
+            Kanban
+          </NavLink>
           <NavLink to="/system" style={navLinkStyle}>
             System
           </NavLink>
