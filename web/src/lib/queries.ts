@@ -18,6 +18,8 @@ import type {
   Repo,
   RocketEvent,
   Session,
+  SystemCleanupResult,
+  SystemInfo,
   Task,
   TaskDetail,
   TaskDoc,
@@ -150,16 +152,16 @@ export function useTaskQuestions(id: number | undefined): UseQueryResult<Questio
   })
 }
 
-export interface SystemHealth {
-  status: string
-  version: string
-  uptime: number
-}
-
-export function useSystem(): UseQueryResult<SystemHealth> {
+/**
+ * `GET /v1/system` (internal/api/system.go): daemon status, message queue
+ * depth, reconciled tmux sessions/worktrees (with orphan/state info) and a
+ * tail of rocketd.log. Polled every 5s for the System screen.
+ */
+export function useSystem(): UseQueryResult<SystemInfo> {
   return useQuery({
     queryKey: ['system'],
-    queryFn: () => api.get<SystemHealth>('/v1/health'),
+    queryFn: () => api.get<SystemInfo>('/v1/system'),
+    refetchInterval: 5000,
   })
 }
 
@@ -185,6 +187,12 @@ export function useKillSession(): UseMutationResult<
   return useMutation({
     mutationFn: ({ id, cleanup }) =>
       api.post(`/v1/sessions/${id}/kill${cleanup ? '?cleanup=true' : ''}`),
+  })
+}
+
+export function useSystemCleanup(): UseMutationResult<SystemCleanupResult, Error, void> {
+  return useMutation({
+    mutationFn: () => api.post<SystemCleanupResult>('/v1/system/cleanup'),
   })
 }
 

@@ -11,6 +11,7 @@ import type {
   Question,
   Repo,
   Session,
+  SystemInfo,
   Task,
   TaskDoc,
   TaskLogEntry,
@@ -317,4 +318,68 @@ export const messages: Message[] = [
     created_at: NOW - 2 * DAY + 60,
     delivered_at: NOW - 2 * DAY + 65,
   },
+  {
+    id: 812,
+    from: 'user',
+    to: 's-billing-v2-w2',
+    body: 'Ping — any update on the UI work?',
+    status: 'failed',
+    attempts: 3,
+    reason: 'recipient busy',
+    created_at: NOW - 5 * MIN,
+  },
 ]
+
+// System — internal/api/system.go. Mirrors docs/design/System.dc.html:
+// three live sessions reconciled with the store (orchestrator + 2 workers,
+// matching `sessions` above), one orphan tmux with no store record
+// (`webhook-retries-w1`), a killed session's leftover worktree (state
+// "killed", not an orphan — it still has a store record), queue depth
+// 2 queued / 1 failed (see the failed msg#812 above), and a short log tail.
+export const systemInfo: SystemInfo = {
+  daemon: {
+    version: 'rocketd 0.4.1',
+    uptime_s: 2 * DAY + 4 * HOUR,
+    port: 7420,
+    socket: '127.0.0.1:7420',
+    db_path: '/home/dev/.rocket/rocket.db',
+    config_path: '/home/dev/.rocket/config.toml',
+  },
+  queue: { queued: 2, failed: 1 },
+  tmux: [
+    { name: 'billing-v2-orch', session_id: 's-billing-v2-orch', state: 'running', orphan: false },
+    { name: 'billing-v2-w1', session_id: 's-billing-v2-w1', state: 'running', orphan: false },
+    { name: 'billing-v2-w2', session_id: 's-billing-v2-w2', state: 'running', orphan: false },
+    { name: 'webhook-retries-w1', orphan: true },
+  ],
+  worktrees: [
+    {
+      path: '/home/dev/.rocket/worktrees/billing-v2-orch',
+      session_id: 's-billing-v2-orch',
+      size_bytes: 642_000_000,
+      state: 'running',
+      orphan: false,
+    },
+    {
+      path: '/home/dev/.rocket/worktrees/billing-v2-w1',
+      session_id: 's-billing-v2-w1',
+      size_bytes: 522_000_000,
+      state: 'running',
+      orphan: false,
+    },
+    {
+      path: '/home/dev/.rocket/worktrees/legacy-migration-orch',
+      session_id: 's-legacy-migration-orch',
+      size_bytes: 251_000_000,
+      state: 'killed',
+      orphan: false,
+    },
+  ],
+  log_tail: [
+    '12:04:18  spawn      billing-v2-w1          agent=claude  ok',
+    '12:05:02  activity   billing-v2-w2          idle→blocked',
+    '12:11:33  deliver    msg#809 → billing-v2-orch  delivered',
+    '12:12:57  deliver    msg#812 → billing-v2-w2     FAILED (busy, attempt 3)',
+    '12:13:20  reconcile  webhook-retries-w1     orphan: in tmux, not in db',
+  ],
+}

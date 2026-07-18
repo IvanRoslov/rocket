@@ -1,6 +1,7 @@
 import { createBrowserRouter } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
 import { ProjectsScreen } from './screens/projects/ProjectsScreen'
+import { SystemScreen } from './screens/system/SystemScreen'
 
 function NewProjectPage() {
   return <div>New project</div>
@@ -12,10 +13,6 @@ function KanbanPage() {
 
 function TaskPage() {
   return <div>Task</div>
-}
-
-function SystemPage() {
-  return <div>System</div>
 }
 
 function SettingsPage() {
@@ -30,7 +27,7 @@ export const router = createBrowserRouter([
       { path: '/projects/new', element: <NewProjectPage /> },
       { path: '/p/:projectId', element: <KanbanPage /> },
       { path: '/p/:projectId/tasks/:taskId', element: <TaskPage /> },
-      { path: '/system', element: <SystemPage /> },
+      { path: '/system', element: <SystemScreen /> },
       { path: '/settings', element: <SettingsPage /> },
     ],
   },

@@ -30,3 +30,22 @@ export function shortSession(name: string): string {
   if (parts.length <= 2) return name
   return parts.slice(-2).join('-')
 }
+
+/** Renders a byte count as a short human string, e.g. "612 MB" / "1.8 GB". */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  const mb = bytes / (1024 * 1024)
+  if (mb < 1024) return `${Math.round(mb)} MB`
+  const gb = mb / 1024
+  return `${gb.toFixed(1)} GB`
+}
+
+/** Renders a duration in seconds as a short human string, e.g. "2d 4h". */
+export function formatUptime(seconds: number): string {
+  const d = Math.floor(seconds / 86400)
+  const h = Math.floor((seconds % 86400) / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  if (d > 0) return `${d}d ${h}h`
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
+}

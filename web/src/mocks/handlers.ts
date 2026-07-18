@@ -11,6 +11,7 @@ import {
   repos,
   sessions,
   subtasks,
+  systemInfo,
   taskDocs,
   taskLog,
   tasks,
@@ -29,6 +30,27 @@ export const handlers = [
   }),
 
   http.get('/v1/repos', () => HttpResponse.json(repos)),
+
+  http.get('/v1/system', () => HttpResponse.json(systemInfo)),
+
+  http.post('/v1/system/cleanup', () =>
+    HttpResponse.json({
+      killed_tmux: systemInfo.tmux.filter((t) => t.orphan).map((t) => t.name),
+      removed_worktrees: systemInfo.worktrees.filter((w) => w.orphan).map((w) => w.path),
+    }),
+  ),
+
+  http.post('/v1/sessions/:id/kill', ({ params }) => {
+    const id = params.id as string
+    const session = sessions.find((s) => s.id === id)
+    if (!session) {
+      return HttpResponse.json(
+        { error: { code: 'not_found', message: `session ${id} not found` } },
+        { status: 404 },
+      )
+    }
+    return HttpResponse.json({ status: 'killed' })
+  }),
 
   http.get('/v1/messages', ({ request }) => {
     const url = new URL(request.url)

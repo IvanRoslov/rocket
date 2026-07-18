@@ -102,6 +102,54 @@ export interface RocketEvent {
 }
 
 // ---------------------------------------------------------------------------
+// System — internal/api/system.go
+// ---------------------------------------------------------------------------
+
+export interface DaemonInfo {
+  version: string
+  uptime_s: number
+  port: number
+  socket: string
+  db_path: string
+  config_path: string
+}
+
+export interface QueueCounts {
+  queued: number
+  failed: number
+}
+
+export interface TmuxEntry {
+  name: string
+  session_id?: string
+  /** Owning session's state (e.g. "running", "killed"); omitted when orphan. */
+  state?: string
+  orphan: boolean
+}
+
+export interface WorktreeEntry {
+  path: string
+  session_id?: string
+  size_bytes: number
+  /** Owning session's state (e.g. "running", "killed"); omitted when orphan. */
+  state?: string
+  orphan: boolean
+}
+
+export interface SystemInfo {
+  daemon: DaemonInfo
+  queue: QueueCounts
+  tmux: TmuxEntry[]
+  worktrees: WorktreeEntry[]
+  log_tail: string[]
+}
+
+export interface SystemCleanupResult {
+  killed_tmux: string[]
+  removed_worktrees: string[]
+}
+
+// ---------------------------------------------------------------------------
 // Contract types — phase 3/4, not yet implemented by the daemon.
 // Shape follows docs/12-tasks.md «Поля» and docs/03-daemon-api.md
 // «Задачи» / «Настройки и GitHub».
