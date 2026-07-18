@@ -55,6 +55,7 @@ func NewHandler(d Deps) http.Handler {
 	})
 
 	registerRepoRoutes(mux, d)
+	registerProjectRoutes(mux, d)
 
 	// Catch-all: anything not matched by a more specific pattern above is a
 	// 404, rendered in the standard error JSON shape.
