@@ -4,12 +4,15 @@
 // `{error:{code,message}}` on failure.
 
 import { http, HttpResponse } from 'msw'
+import type { Settings } from '../lib/types'
 import {
+  githubRepos,
   messages,
   projects,
   questions,
   repos,
   sessions,
+  settings,
   subtasks,
   systemInfo,
   taskDocs,
@@ -18,6 +21,15 @@ import {
 } from './fixtures'
 
 const allTasks = [...tasks, ...subtasks]
+
+// Mutable copy of the settings fixture, written by `PUT /v1/settings`. Tests
+// that mutate this (e.g. "connect GitHub") should call `resetSettings()` in
+// `afterEach` to avoid leaking state into later tests in the same file.
+let settingsState: Settings = { ...settings }
+
+export function resetSettings(): void {
+  settingsState = { ...settings }
+}
 
 export const handlers = [
   http.get('/v1/projects', () => HttpResponse.json(projects)),
@@ -120,5 +132,81 @@ export const handlers = [
   http.get('/v1/tasks/:id/questions', ({ params }) => {
     const id = Number(params.id)
     return HttpResponse.json(questions.filter((q) => q.task_id === id))
+  }),
+
+  // ------------------------------------------------------------------------
+  // Settings & GitHub — contract types (phase 4), docs/03-daemon-api.md
+  // «Настройки и GitHub».
+  // ------------------------------------------------------------------------
+
+  http.get('/v1/settings', () => HttpResponse.json(settingsState)),
+
+  http.put('/v1/settings', async ({ request }) => {
+    const body = (await request.json()) as { github_token?: string }
+    settingsState = {
+      github_token: body.github_token,
+      github_authorized_as: body.github_token ? 'acme-bot' : undefined,
+    }
+    return HttpResponse.json(settingsState)
+  }),
+
+  http.get('/v1/github/repos', ({ request }) => {
+    if (!settingsState.github_token) {
+      return HttpResponse.json(
+        { error: { code: 'github_token_missing', message: 'no GitHub token configured' } },
+        { status: 404 },
+      )
+    }
+    const url = new URL(request.url)
+    const q = (url.searchParams.get('q') ?? '').toLowerCase()
+    const result = q ? githubRepos.filter((r) => r.full_name.toLowerCase().includes(q)) : githubRepos
+    return HttpResponse.json(result)
+  }),
+
+  // ------------------------------------------------------------------------
+  // Repo/project creation (New Project wizard).
+  // ------------------------------------------------------------------------
+
+  http.post('/v1/repos', async ({ request }) => {
+    const body = (await request.json()) as { id?: string; path?: string; github?: string }
+    if (body.github) {
+      const gh = githubRepos.find((r) => r.full_name === body.github)
+      const name = body.github.split('/').pop() ?? body.github
+      return HttpResponse.json({
+        id: body.id ?? name,
+        path: `/home/dev/.rocket/repos/${name}`,
+        default_branch: gh?.default_branch ?? 'main',
+        auto_cleanup: true,
+        env: {},
+        symlinks: [],
+        post_create: [],
+        created_at: Math.floor(Date.now() / 1000),
+      })
+    }
+    const path = body.path ?? ''
+    const name = path.split('/').filter(Boolean).pop() ?? 'repo'
+    return HttpResponse.json({
+      id: body.id ?? name,
+      path,
+      default_branch: 'main',
+      auto_cleanup: true,
+      env: {},
+      symlinks: [],
+      post_create: [],
+      created_at: Math.floor(Date.now() / 1000),
+    })
+  }),
+
+  http.post('/v1/projects', async ({ request }) => {
+    const body = (await request.json()) as { id?: string; name: string; main: string; linked?: string[] }
+    return HttpResponse.json({
+      id: body.id ?? body.name.toLowerCase().replace(/\s+/g, '-'),
+      name: body.name,
+      main: body.main,
+      linked: body.linked ?? [],
+      live_sessions: 0,
+      tasks: { backlog: 0, in_progress: 0, review: 0, done: 0 },
+      created_at: Math.floor(Date.now() / 1000),
+    })
   }),
 ]

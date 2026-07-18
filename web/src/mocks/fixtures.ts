@@ -6,11 +6,13 @@
 // a journal, and a message thread.
 
 import type {
+  GithubRepo,
   Message,
   Project,
   Question,
   Repo,
   Session,
+  Settings,
   SystemInfo,
   Task,
   TaskDoc,
@@ -383,3 +385,19 @@ export const systemInfo: SystemInfo = {
     '12:13:20  reconcile  webhook-retries-w1     orphan: in tmux, not in db',
   ],
 }
+
+// GitHub repos — contract type (phase 4), docs/09-github.md. A handful of
+// repos on the fictional "acme" account, matching docs/design/NewProject.dc.html.
+export const githubRepos: GithubRepo[] = [
+  { full_name: 'acme/api', private: true, default_branch: 'main' },
+  { full_name: 'acme/web', private: true, default_branch: 'main' },
+  { full_name: 'acme/infra', private: true, default_branch: 'main' },
+  { full_name: 'acme/docs', private: false, default_branch: 'main' },
+  { full_name: 'acme/billing-sdk', private: true, default_branch: 'main' },
+  { full_name: 'acme/notifications', private: true, default_branch: 'develop' },
+]
+
+// Settings — contract type (phase 4). No GitHub token configured by default,
+// so the GitHub tab in the New Project wizard shows the "Connect GitHub"
+// placeholder unless a test explicitly sets one via PUT /v1/settings.
+export const settings: Settings = {}

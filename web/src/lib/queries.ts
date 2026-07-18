@@ -12,12 +12,14 @@ import {
 } from '@tanstack/react-query'
 import { api } from './api'
 import type {
+  GithubRepo,
   Message,
   Project,
   Question,
   Repo,
   RocketEvent,
   Session,
+  Settings,
   SystemCleanupResult,
   SystemInfo,
   Task,
@@ -165,6 +167,34 @@ export function useSystem(): UseQueryResult<SystemInfo> {
   })
 }
 
+/**
+ * `GET /v1/settings` (contract, phase 4): secrets masked. Used to decide
+ * whether the GitHub tab shows the repo list or the "Connect GitHub"
+ * placeholder.
+ */
+export function useSettings(): UseQueryResult<Settings> {
+  return useQuery({
+    queryKey: ['settings'],
+    queryFn: () => api.get<Settings>('/v1/settings'),
+    retry: false,
+  })
+}
+
+/**
+ * `GET /v1/github/repos?q=` (contract, phase 4). Only enabled when `enabled`
+ * is true (i.e. the GitHub tab is active) — the daemon 404s / returns
+ * `github_token_missing` when no token is configured, which callers should
+ * treat as "show the Connect GitHub placeholder", not a hard error.
+ */
+export function useGithubRepos(q: string, enabled: boolean): UseQueryResult<GithubRepo[]> {
+  return useQuery({
+    queryKey: ['github-repos', q],
+    queryFn: () => api.get<GithubRepo[]>(`/v1/github/repos?q=${encodeURIComponent(q)}`),
+    enabled,
+    retry: false,
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Mutations
 // ---------------------------------------------------------------------------
@@ -203,6 +233,48 @@ export function useUpdateTaskStatus(): UseMutationResult<
 > {
   return useMutation({
     mutationFn: ({ id, status }) => api.patch<Task>(`/v1/tasks/${id}`, { status }),
+  })
+}
+
+/** `POST /v1/repos`: `{path}` for a local checkout, or `{github:"owner/name"}` to clone. */
+export function useRegisterRepo(): UseMutationResult<
+  Repo,
+  Error,
+  { path?: string; github?: string; id?: string }
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (payload) => api.post<Repo>('/v1/repos', payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['repos'] })
+    },
+  })
+}
+
+/** `POST /v1/projects`: `{id?, name, main, linked?}` — main/linked are repo ids. */
+export function useCreateProject(): UseMutationResult<
+  Project,
+  Error,
+  { id?: string; name: string; main: string; linked?: string[] }
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (payload) => api.post<Project>('/v1/projects', payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+}
+
+/** `PUT /v1/settings` (contract, phase 4): `{github_token}`. */
+export function useUpdateSettings(): UseMutationResult<Settings, Error, { github_token: string }> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (payload) => api.put<Settings>('/v1/settings', payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings'] })
+      queryClient.invalidateQueries({ queryKey: ['github-repos'] })
+    },
   })
 }
 
