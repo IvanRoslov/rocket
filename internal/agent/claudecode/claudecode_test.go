@@ -467,3 +467,26 @@ func TestAvailable(t *testing.T) {
 		t.Logf("claude command not available (ok for testing): %v", err)
 	}
 }
+
+func TestSetupWorkspaceNoLeftoverTempFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cc := New()
+	spec := agent.LaunchSpec{WorktreePath: tmpDir}
+
+	if err := cc.SetupWorkspace(spec); err != nil {
+		t.Fatalf("SetupWorkspace failed: %v", err)
+	}
+
+	claudeDir := filepath.Join(tmpDir, ".claude")
+	entries, err := os.ReadDir(claudeDir)
+	if err != nil {
+		t.Fatalf("read .claude directory: %v", err)
+	}
+
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".settings-") && strings.HasSuffix(entry.Name(), ".json") {
+			t.Errorf("leftover temp file in .claude: %s", entry.Name())
+		}
+	}
+}

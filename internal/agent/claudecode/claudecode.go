@@ -54,7 +54,8 @@ const activityHookRelPath = ".rocket/activity-hook.sh"
 // activityHookScript is a POSIX shell script that reports an activity state
 // to rocket's push endpoint over the unix socket. It never fails the
 // invoking hook: missing env vars or an unreachable daemon are silently
-// ignored (`|| true`, output discarded).
+// ignored (`|| true`, output discarded). Curl includes timeouts to prevent
+// the daemon hook from hanging.
 const activityHookScript = `#!/bin/sh
 # rocket activity push hook. Invoked by Claude Code as:
 #   ` + activityHookRelPath + ` <state>
@@ -65,7 +66,7 @@ if [ -z "$ROCKET_SOCKET" ] || [ -z "$ROCKET_SESSION_ID" ]; then
   exit 0
 fi
 
-curl -s --unix-socket "$ROCKET_SOCKET" \
+curl -s --max-time 2 --connect-timeout 1 --unix-socket "$ROCKET_SOCKET" \
   -X POST -H 'Content-Type: application/json' \
   -d "{\"session\":\"$ROCKET_SESSION_ID\",\"state\":\"$1\",\"ts\":$(date +%s)}" \
   http://rocket/v1/internal/activity >/dev/null 2>&1 || true
@@ -202,7 +203,28 @@ func upsertClaudeSettings(worktreePath string) error {
 		return err
 	}
 	out = append(out, '\n')
-	return os.WriteFile(path, out, 0o644)
+
+	// Write atomically: create temp file in same directory, then rename.
+	// This prevents corruption if write is interrupted mid-flight.
+	f, err := os.CreateTemp(dir, ".settings-*.json")
+	if err != nil {
+		return fmt.Errorf("create temp settings file: %w", err)
+	}
+	tempPath := f.Name()
+	if _, err := f.Write(out); err != nil {
+		f.Close()
+		os.Remove(tempPath)
+		return fmt.Errorf("write temp settings file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tempPath)
+		return fmt.Errorf("close temp settings file: %w", err)
+	}
+	if err := os.Chmod(tempPath, 0o644); err != nil {
+		os.Remove(tempPath)
+		return fmt.Errorf("chmod temp settings file: %w", err)
+	}
+	return os.Rename(tempPath, path)
 }
 
 // LaunchCommand builds the command to launch claude with the given spec.
