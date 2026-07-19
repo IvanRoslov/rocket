@@ -454,3 +454,70 @@ func TestBackoffSanity(t *testing.T) {
 		t.Fatalf("expected ErrBackoff, got %v", err)
 	}
 }
+
+func TestTick_Discovery_CIFailing(t *testing.T) {
+	st, b := setupEnv(t)
+	addWorker(t, st, "w1", "feature-branch")
+
+	m := newMockGitHubServer()
+	m.checkConclusion = "failure" // CI already failing at discovery
+	srv := httptest.NewServer(m.handler())
+	defer srv.Close()
+
+	notify := &fakeNotifier{}
+	p := New(st, b, ghFactory(srv.URL), testConfig(), notify)
+
+	if err := p.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick 1 (discovery): %v", err)
+	}
+
+	got, err := st.GetSession("w1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if got.CIState != "failing" {
+		t.Fatalf("expected CIState=failing at discovery, got %q", got.CIState)
+	}
+
+	if _, ciFailing, _, _ := notify.counts(); ciFailing != 1 {
+		t.Fatalf("expected 1 CIFailing call at discovery, got %d", ciFailing)
+	}
+
+	// Second tick with same CI state: should not re-fire.
+	if err := p.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick 2: %v", err)
+	}
+	if _, ciFailing, _, _ := notify.counts(); ciFailing != 1 {
+		t.Fatalf("expected CIFailing still called only once, got %d", ciFailing)
+	}
+}
+
+func TestTick_Discovery_ChangesRequested(t *testing.T) {
+	st, b := setupEnv(t)
+	addWorker(t, st, "w1", "feature-branch")
+
+	m := newMockGitHubServer()
+	// Set up reviews so that reviewDecision computes to "changes_requested"
+	m.reviews = []reviewStub{{login: "bob", state: "CHANGES_REQUESTED", submittedAt: "2024-01-01T00:00:00Z"}}
+	srv := httptest.NewServer(m.handler())
+	defer srv.Close()
+
+	notify := &fakeNotifier{}
+	p := New(st, b, ghFactory(srv.URL), testConfig(), notify)
+
+	if err := p.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick 1 (discovery): %v", err)
+	}
+
+	if _, _, changesRequested, _ := notify.counts(); changesRequested != 1 {
+		t.Fatalf("expected 1 ChangesRequested call at discovery, got %d", changesRequested)
+	}
+
+	// Second tick with same review decision: should not re-fire.
+	if err := p.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick 2: %v", err)
+	}
+	if _, _, changesRequested, _ := notify.counts(); changesRequested != 1 {
+		t.Fatalf("expected ChangesRequested still called only once, got %d", changesRequested)
+	}
+}

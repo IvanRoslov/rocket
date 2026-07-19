@@ -182,12 +182,21 @@ func (p *Poller) tickSession(ctx context.Context, client *github.Client, sess st
 }
 
 func (p *Poller) discoverPR(ctx context.Context, client *github.Client, sess store.Session, owner, repo string) error {
-	pr, err := client.FindPRByBranch(ctx, owner, repo, sess.Branch)
+	prStub, err := client.FindPRByBranch(ctx, owner, repo, sess.Branch)
 	if err != nil {
 		return err
 	}
-	if pr == nil {
+	if prStub == nil {
 		return nil
+	}
+
+	// FindPRByBranch returns minimal data without ReviewDecision; fetch the
+	// full PR to get authoritative review state. This one extra API call per
+	// discovery (a rare event) is acceptable to avoid seeding incorrect
+	// notification state.
+	pr, err := client.GetPR(ctx, owner, repo, prStub.Number)
+	if err != nil {
+		return err
 	}
 
 	ci, err := client.CheckRollup(ctx, owner, repo, pr.HeadSHA)
@@ -207,6 +216,14 @@ func (p *Poller) discoverPR(ctx context.Context, client *github.Client, sess sto
 		// Stale discovery: the PR was already merged by the time we found it.
 		p.bus.Publish("pr.merged", sess.ID, map[string]any{"number": pr.Number})
 		p.notify.Merged(sess, pr)
+	}
+
+	// Fire notifications for alert states at discovery time.
+	if ci == "failing" {
+		p.notify.CIFailing(sess, pr, "checks failing")
+	}
+	if pr.ReviewDecision == "changes_requested" {
+		p.notify.ChangesRequested(sess, pr)
 	}
 
 	p.setLastReviewState(sess.ID, pr.ReviewDecision)
