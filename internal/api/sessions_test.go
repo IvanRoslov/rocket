@@ -31,6 +31,9 @@ func (sessFakeRuntime) Create(ctx context.Context, spec runtime.CreateSpec) (run
 	return runtime.Handle{Name: spec.Name}, nil
 }
 func (sessFakeRuntime) Inject(ctx context.Context, h runtime.Handle, text string) error { return nil }
+func (sessFakeRuntime) SendKeys(ctx context.Context, h runtime.Handle, key string, literal bool) error {
+	return nil
+}
 func (sessFakeRuntime) Capture(ctx context.Context, h runtime.Handle, lines int) (string, error) {
 	return "", nil
 }
@@ -68,6 +71,9 @@ func (sessFakeRuntimeErrorOnCreate) Create(ctx context.Context, spec runtime.Cre
 	return runtime.Handle{}, fmt.Errorf("fake runtime create failed")
 }
 func (sessFakeRuntimeErrorOnCreate) Inject(ctx context.Context, h runtime.Handle, text string) error {
+	return nil
+}
+func (sessFakeRuntimeErrorOnCreate) SendKeys(ctx context.Context, h runtime.Handle, key string, literal bool) error {
 	return nil
 }
 func (sessFakeRuntimeErrorOnCreate) Capture(ctx context.Context, h runtime.Handle, lines int) (string, error) {

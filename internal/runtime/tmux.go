@@ -319,6 +319,26 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 	return fmt.Errorf("%w: after %d attempts", ErrSubmitUnconfirmed, maxAttempts)
 }
 
+// SendKeys sends one logical key to the pane: a tmux key name (e.g.
+// "Enter", "Tab", "Down", "Space", or a bare digit character) when literal
+// is false, or raw literal text via send-keys -l when literal is true. See
+// the Runtime.SendKeys doc comment for the contract.
+func (t *tmuxRuntime) SendKeys(ctx context.Context, h Handle, key string, literal bool) error {
+	if err := validateName(h.Name); err != nil {
+		return err
+	}
+	args := []string{"send-keys", "-t", paneTarget(h.Name)}
+	if literal {
+		args = append(args, "-l", key)
+	} else {
+		args = append(args, key)
+	}
+	if _, _, err := runTmux(ctx, args...); err != nil {
+		return fmt.Errorf("send-keys %q (literal=%v) to %q: %w", key, literal, h.Name, err)
+	}
+	return nil
+}
+
 // lastLine returns the final non-blank line of s, or "" if s has no
 // non-blank content.
 func lastLine(s string) string {

@@ -27,6 +27,17 @@ type Runtime interface {
 	Create(ctx context.Context, spec CreateSpec) (Handle, error)
 	// Inject types text into the session's active pane and submits it.
 	Inject(ctx context.Context, h Handle, text string) error
+	// SendKeys sends a single logical key to the session's active pane via
+	// tmux send-keys: either a key name tmux recognizes (e.g. "Enter",
+	// "Tab", "Down", "Space", a bare digit) when literal is false, or raw
+	// literal text (sent with tmux's -l flag, bypassing key-name lookup so
+	// e.g. punctuation isn't misinterpreted) when literal is true. Unlike
+	// Inject, SendKeys does not clear any draft first and does not attempt
+	// to confirm delivery — it is a single low-level keystroke, for callers
+	// (the quiz-answer keystroke injector in internal/session) that need to
+	// drive a multi-step TUI flow one key at a time rather than submit one
+	// block of text.
+	SendKeys(ctx context.Context, h Handle, key string, literal bool) error
 	// Capture returns the last `lines` lines of the session's pane output.
 	Capture(ctx context.Context, h Handle, lines int) (string, error)
 	// Alive reports whether the session still exists.

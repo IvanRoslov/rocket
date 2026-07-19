@@ -133,13 +133,17 @@ type sessionRef struct {
 	Kind     string `json:"kind"`
 	State    string `json:"state"`
 	Activity string `json:"activity,omitempty"`
+
+	// PendingQuiz mirrors sessionResponse.PendingQuiz — see its doc comment.
+	PendingQuiz *quizResponse `json:"pending_quiz,omitempty"`
 }
 
 func toSessionRef(s store.Session) sessionRef {
 	return sessionRef{
-		ID:       s.ID,
-		Kind:     s.Kind,
-		State:    s.State,
-		Activity: s.Activity,
+		ID:          s.ID,
+		Kind:        s.Kind,
+		State:       s.State,
+		Activity:    s.Activity,
+		PendingQuiz: parseQuizResponse(s.PendingQuiz),
 	}
 }

@@ -21,12 +21,21 @@ import (
 
 // --- fakes ---------------------------------------------------------------
 
+// sentKey records one fakeRuntime.SendKeys call.
+type sentKey struct {
+	handle  string
+	key     string
+	literal bool
+}
+
 type fakeRuntime struct {
 	mu        sync.Mutex
 	created   []runtime.CreateSpec
 	destroyed []string
 	aliveMap  map[string]bool
 	listNames []string
+	sentKeys  []sentKey
+	sendErr   error
 }
 
 func (f *fakeRuntime) Create(ctx context.Context, spec runtime.CreateSpec) (runtime.Handle, error) {
@@ -41,6 +50,13 @@ func (f *fakeRuntime) Create(ctx context.Context, spec runtime.CreateSpec) (runt
 }
 
 func (f *fakeRuntime) Inject(ctx context.Context, h runtime.Handle, text string) error { return nil }
+
+func (f *fakeRuntime) SendKeys(ctx context.Context, h runtime.Handle, key string, literal bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sentKeys = append(f.sentKeys, sentKey{handle: h.Name, key: key, literal: literal})
+	return f.sendErr
+}
 
 func (f *fakeRuntime) Capture(ctx context.Context, h runtime.Handle, lines int) (string, error) {
 	return "fake output", nil

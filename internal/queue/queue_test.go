@@ -45,6 +45,10 @@ func (f *fakeRuntime) Inject(ctx context.Context, h runtime.Handle, text string)
 	return nil
 }
 
+func (f *fakeRuntime) SendKeys(ctx context.Context, h runtime.Handle, key string, literal bool) error {
+	return nil
+}
+
 func (f *fakeRuntime) Capture(ctx context.Context, h runtime.Handle, lines int) (string, error) {
 	f.mu.Lock()
 	fn := f.captureFn

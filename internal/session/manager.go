@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/bus"
@@ -85,11 +86,25 @@ type Manager struct {
 	// injected into session environments. If nil or returns empty string, no
 	// token is injected.
 	getToken func() string
+
+	// quizSleepFn is called between each keystroke AnswerQuiz sends (see
+	// quiz.go's sendQuizKeys); defaults to time.Sleep, overridable via
+	// SetQuizTiming so tests don't pay quizKeySettle in wall-clock time.
+	quizSleepFn func(time.Duration)
+	// quizUnconfirmedTimeout bounds how long watchQuizUnconfirmed waits for
+	// a session.quiz_resolved event before publishing
+	// session.quiz_answer_unconfirmed; defaults to 60s, overridable via
+	// SetQuizTiming.
+	quizUnconfirmedTimeout time.Duration
 }
 
 // NewManager builds a Manager wired to the given dependencies.
 func NewManager(st *store.Store, b *bus.Bus, rt runtime.Runtime, ws workspace.Workspace, cfg *config.Config) *Manager {
-	return &Manager{st: st, bus: b, rt: rt, ws: ws, cfg: cfg}
+	return &Manager{
+		st: st, bus: b, rt: rt, ws: ws, cfg: cfg,
+		quizSleepFn:            time.Sleep,
+		quizUnconfirmedTimeout: 60 * time.Second,
+	}
 }
 
 // SetTokenSource sets the function used to retrieve the GitHub token for
