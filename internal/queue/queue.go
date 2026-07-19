@@ -320,9 +320,9 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 			// Recipient has a pending AskUserQuestion quiz on screen: text
 			// injected now would corrupt the TUI widget. Hold the message
 			// (stays queued, no failure, no events, no retries burned) and
-			// wait/re-check the same way as an active/unknown activity
-			// state — the resolved hook clearing PendingQuiz publishes a
-			// bus event that wakes this straight back up.
+			// wait/re-check: the quiz-resolve path publishes a
+			// session.quiz_resolved bus event that wakes this straight back
+			// up (with the 2s fallback ticker as a backstop).
 			if !q.waitForReady(ctx, msg.ToSession) {
 				return // ctx cancelled
 			}
@@ -349,9 +349,10 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 	}
 }
 
-// waitForReady blocks until the recipient's activity changes (via bus
-// subscription) or a 2s fallback tick fires, then returns true so the
-// caller re-checks eligibility. Returns false if ctx is cancelled.
+// waitForReady blocks until a bus event signals the recipient may be ready
+// (session.activity_changed, or session.quiz_resolved when a held quiz
+// clears) or a 2s fallback tick fires, then returns true so the caller
+// re-checks eligibility. Returns false if ctx is cancelled.
 func (q *Queue) waitForReady(ctx context.Context, to string) bool {
 	ch, cancel := q.bus.Subscribe()
 	defer cancel()
@@ -369,7 +370,10 @@ func (q *Queue) waitForReady(ctx context.Context, to string) bool {
 			if !ok {
 				return true
 			}
-			if e.Type == "session.activity_changed" && e.SessionID == to {
+			if e.SessionID != to {
+				continue
+			}
+			if e.Type == "session.activity_changed" || e.Type == "session.quiz_resolved" {
 				return true
 			}
 		}

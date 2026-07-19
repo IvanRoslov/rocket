@@ -239,7 +239,9 @@ func TestQueue_WaitsWhileActiveThenDelivers(t *testing.T) {
 // TestQueue_PendingQuizHoldsDeliveryThenResumesAfterClear verifies that a
 // message to a recipient with a pending AskUserQuestion quiz on screen is
 // held (stays queued, no Inject call, no failure) until the quiz is
-// cleared, at which point the normal delivery cycle picks it up.
+// cleared, at which point the normal delivery cycle picks it up. The wake
+// is driven by the real session.quiz_resolved bus event, matching what the
+// production quiz-resolve handler publishes.
 func TestQueue_PendingQuizHoldsDeliveryThenResumesAfterClear(t *testing.T) {
 	h := newTestQueue(t)
 	h.addRunningSession(t, "recv", activity.Ready)
@@ -275,10 +277,14 @@ func TestQueue_PendingQuizHoldsDeliveryThenResumesAfterClear(t *testing.T) {
 	default:
 	}
 
+	// Resume via the real production wake path: the quiz-resolve handler
+	// (internal/api/internal_quiz.go) clears PendingQuiz in the store and
+	// then publishes session.quiz_resolved on the bus — not
+	// session.activity_changed.
 	if err := h.st.ClearPendingQuiz("recv"); err != nil {
 		t.Fatalf("ClearPendingQuiz: %v", err)
 	}
-	h.b.Publish("session.activity_changed", "recv", map[string]any{"to": "ready"})
+	h.b.Publish("session.quiz_resolved", "recv", map[string]any{})
 
 	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" },
 		"message delivered after quiz cleared")
