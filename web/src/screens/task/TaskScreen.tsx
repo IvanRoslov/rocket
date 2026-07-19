@@ -46,6 +46,7 @@ export function TaskScreen() {
 
   const { data: projects } = useProjects()
   const { data: task } = useTask(taskId)
+  const { data: parentTask } = useTask(task?.parent_id)
   const { data: docs } = useTaskDocs(taskId)
   const { data: log } = useTaskLog(taskId)
   const { data: questions } = useTaskQuestions(taskId)
@@ -83,9 +84,16 @@ export function TaskScreen() {
     <div className="task-screen">
       <div className="task-screen__content">
         <div className="task-screen__inner">
-          <Link to={`/p/${projectId}`} className="task-screen__back">
-            ← {project?.name ?? projectId} board
-          </Link>
+          <div className="task-screen__crumbs">
+            <Link to={`/p/${projectId}`} className="task-screen__back">
+              ← {project?.name ?? projectId} board
+            </Link>
+            {task.parent_id !== undefined && (
+              <Link to={`/p/${projectId}/tasks/${task.parent_id}`} className="task-screen__back">
+                ← #{task.parent_id} {parentTask?.title ?? '…'}
+              </Link>
+            )}
+          </div>
 
           <div className="task-screen__title-row">
             <span className="task-screen__id">#{task.id}</span>

@@ -68,28 +68,32 @@ export function OverviewTab({ projectId, task, subtasks, sessions, docs }: Overv
         <p className="overview-tab__description-empty">No description.</p>
       )}
 
-      <h3 className="overview-tab__heading">Subtasks · decomposition</h3>
-      <div className="overview-tab__subtasks">
-        {subtasks.length === 0 && <p className="overview-tab__empty">No subtasks yet.</p>}
-        {subtasks.map((s) => {
-          const session = s.session_id ? sessions?.find((sess) => sess.id === s.session_id) : undefined
-          const pr = prLabel(session)
-          return (
-            <Link key={s.id} to={`/p/${projectId}/tasks/${s.id}`} className="overview-tab__subtask">
-              <span className={`overview-tab__dot ${subtaskDot(session)}`} />
-              <span className="overview-tab__subtask-id">#{s.id}</span>
-              <div className="overview-tab__subtask-main">
-                <div className="overview-tab__subtask-title">{s.title}</div>
-                <div className="overview-tab__subtask-meta">
-                  {session ? session.tmux_name : '—'} · {s.repo_id ?? '—'}
-                </div>
-              </div>
-              <span className={`overview-tab__status ${STATUS_TONE[s.status]}`}>{STATUS_LABEL[s.status]}</span>
-              <span className={`overview-tab__pr ${pr.tone}`}>{pr.text}</span>
-            </Link>
-          )
-        })}
-      </div>
+      {task.parent_id === undefined && (
+        <>
+          <h3 className="overview-tab__heading">Subtasks · decomposition</h3>
+          <div className="overview-tab__subtasks">
+            {subtasks.length === 0 && <p className="overview-tab__empty">No subtasks yet.</p>}
+            {subtasks.map((s) => {
+              const session = s.session_id ? sessions?.find((sess) => sess.id === s.session_id) : undefined
+              const pr = prLabel(session)
+              return (
+                <Link key={s.id} to={`/p/${projectId}/tasks/${s.id}`} className="overview-tab__subtask">
+                  <span className={`overview-tab__dot ${subtaskDot(session)}`} />
+                  <span className="overview-tab__subtask-id">#{s.id}</span>
+                  <div className="overview-tab__subtask-main">
+                    <div className="overview-tab__subtask-title">{s.title}</div>
+                    <div className="overview-tab__subtask-meta">
+                      {session ? session.tmux_name : '—'} · {s.repo_id ?? '—'}
+                    </div>
+                  </div>
+                  <span className={`overview-tab__status ${STATUS_TONE[s.status]}`}>{STATUS_LABEL[s.status]}</span>
+                  <span className={`overview-tab__pr ${pr.tone}`}>{pr.text}</span>
+                </Link>
+              )
+            })}
+          </div>
+        </>
+      )}
 
       <div className="overview-tab__report">
         <div className="overview-tab__report-label">Final report</div>

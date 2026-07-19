@@ -175,4 +175,19 @@ describe('TaskScreen', () => {
     expect(screen.queryByText(/Orchestrator spawned/)).not.toBeInTheDocument()
     expect(screen.getByText(/Prorated refund rounding/)).toBeInTheDocument()
   })
+
+  it('opening a subtask shows a breadcrumb link back to the parent task', async () => {
+    renderTask('billing', 13)
+    expect(await screen.findByText('Migrate billing schema')).toBeInTheDocument()
+
+    const parentLink = await screen.findByRole('link', { name: '← #12 Billing v2' })
+    expect(parentLink).toHaveAttribute('href', '/p/billing/tasks/12')
+  })
+
+  it('a root task does not show a parent breadcrumb', async () => {
+    renderTask()
+    expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+
+    expect(screen.queryByText(/^← #\d+/)).not.toBeInTheDocument()
+  })
 })
