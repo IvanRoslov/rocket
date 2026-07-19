@@ -1,6 +1,7 @@
 import { router } from 'expo-router'
 import { useMemo, useState } from 'react'
 import {
+  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -10,7 +11,16 @@ import {
   View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useCreateTask, useProjects, useSessions, useStartTask, useTasks } from '../../src/api/queries'
+import {
+  useCancelTask,
+  useCreateTask,
+  useMoveTask,
+  useProjects,
+  useSessions,
+  useStartTask,
+  useTasks,
+} from '../../src/api/queries'
+import { ActionSheet } from '../../src/components/ActionSheet'
 import type { Task, TaskStatus } from '../../src/api/types'
 import { Badge, Card, ChipTabs, Dot, EmptyState, GhostButton, MonoText, PrimaryButton } from '../../src/components/ui'
 import { sessionDot } from '../../src/lib/format'
@@ -24,14 +34,14 @@ const COLUMNS: { key: TaskStatus; title: string; dot: string }[] = [
   { key: 'done', title: 'Done', dot: colors.green },
 ]
 
-function TaskCard({ task, workers }: { task: Task; workers: number }) {
+function TaskCard({ task, workers, onLongPress }: { task: Task; workers: number; onLongPress: () => void }) {
   const start = useStartTask()
   const { data: sessions } = useSessions(task.project_id)
   const orch = sessions?.find((s) => s.id === task.session_id)
 
   return (
     <Card style={{ borderRadius: radius.xl }}>
-      <Pressable onPress={() => router.navigate(`/task/${task.id}`)}>
+      <Pressable onPress={() => router.navigate(`/task/${task.id}`)} onLongPress={onLongPress}>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: 9 }}>
           <MonoText style={{ fontSize: 12, fontWeight: '600', color: colors.textFaint }}>#{task.id}</MonoText>
           <Text style={styles.taskTitle}>{task.title}</Text>
@@ -118,6 +128,9 @@ export default function KanbanScreen() {
   const [col, setCol] = useState<TaskStatus>('in_progress')
   const [search, setSearch] = useState('')
   const [creating, setCreating] = useState(false)
+  const [menuTask, setMenuTask] = useState<Task | null>(null)
+  const move = useMoveTask()
+  const cancelTask = useCancelTask()
 
   const roots = useMemo(() => (tasksQ.data ?? []).filter((t) => !t.parent_id), [tasksQ.data])
   const visible = roots.filter(
@@ -175,7 +188,7 @@ export default function KanbanScreen() {
 
       <ScrollView contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 90 }}>
         {visible.map((t) => (
-          <TaskCard key={t.id} task={t} workers={workersOf(t)} />
+          <TaskCard key={t.id} task={t} workers={workersOf(t)} onLongPress={() => setMenuTask(t)} />
         ))}
         {visible.length === 0 ? <EmptyState text="No tasks in this column." /> : null}
       </ScrollView>
@@ -186,6 +199,31 @@ export default function KanbanScreen() {
         </Pressable>
       ) : null}
       {creating && projectId ? <NewTaskModal projectId={projectId} onClose={() => setCreating(false)} /> : null}
+      <ActionSheet
+        visible={menuTask !== null}
+        title={menuTask ? `#${menuTask.id} ${menuTask.title}` : ''}
+        onClose={() => setMenuTask(null)}
+        actions={
+          menuTask
+            ? [
+                ...COLUMNS.filter((c) => c.key !== menuTask.status).map((c) => ({
+                  label: `Move to ${c.title}`,
+                  onPress: () => move.mutate({ id: menuTask.id, status: c.key }),
+                })),
+                {
+                  label: 'Cancel task',
+                  destructive: true,
+                  disabled: menuTask.status === 'done' || menuTask.status === 'cancelled',
+                  onPress: () =>
+                    Alert.alert('Cancel task', `Cancel #${menuTask.id} and kill its sessions?`, [
+                      { text: 'Keep', style: 'cancel' },
+                      { text: 'Cancel task', style: 'destructive', onPress: () => cancelTask.mutate(menuTask.id) },
+                    ]),
+                },
+              ]
+            : []
+        }
+      />
     </SafeAreaView>
   )
 }

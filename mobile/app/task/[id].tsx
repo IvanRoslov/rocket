@@ -2,6 +2,7 @@ import * as Clipboard from 'expo-clipboard'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useState } from 'react'
 import {
+  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -14,9 +15,14 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import {
+  useCancelTask,
+  useKillSession,
   useMessages,
+  useMoveTask,
   useQuestionAnswer,
+  useQuestionDismiss,
   useQuestionReply,
+  useRestoreSession,
   useSendMessage,
   useSessions,
   useTaskDetail,
@@ -24,6 +30,7 @@ import {
   useTaskLog,
   useTaskQuestions,
 } from '../../src/api/queries'
+import { ActionSheet } from '../../src/components/ActionSheet'
 import type { Question, Session, TaskLogKind, TaskStatus } from '../../src/api/types'
 import { Badge, Card, ChipTabs, Dot, EmptyState, GhostButton, MonoText, PrimaryButton } from '../../src/components/ui'
 import { ago, sessionBadge, sessionDot } from '../../src/lib/format'
@@ -47,9 +54,16 @@ const LOG_BADGE: Record<TaskLogKind, { fg: string; bg: string; dot: string }> = 
 function QuestionCard({ q }: { q: Question }) {
   const reply = useQuestionReply()
   const answer = useQuestionAnswer()
+  const dismiss = useQuestionDismiss()
   const [text, setText] = useState('')
   const [ctxOpen, setCtxOpen] = useState(false)
-  const busy = reply.isPending || answer.isPending
+  const busy = reply.isPending || answer.isPending || dismiss.isPending
+
+  const confirmDismiss = () =>
+    Alert.alert('Dismiss question', `Close Q${q.ordinal} without an answer?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Dismiss', style: 'destructive', onPress: () => dismiss.mutate(q.id) },
+    ])
 
   const send = (final: boolean) => {
     const body = text.trim()
@@ -139,6 +153,11 @@ function QuestionCard({ q }: { q: Question }) {
               style={{ flex: 1 }}
             />
           </View>
+          <Pressable onPress={confirmDismiss} style={{ alignSelf: 'center', marginTop: 12 }}>
+            <Text style={{ fontSize: 12.5, fontWeight: '600', color: colors.textFaint }}>
+              Dismiss without answer
+            </Text>
+          </Pressable>
         </View>
       </View>
     </View>
@@ -155,6 +174,19 @@ function SessionsSheet({
   onClose: () => void
 }) {
   const [copied, setCopied] = useState(false)
+  const [menuFor, setMenuFor] = useState<Session | null>(null)
+  const kill = useKillSession()
+  const restore = useRestoreSession()
+
+  const confirmKill = (s: Session, cleanup: boolean) =>
+    Alert.alert(
+      cleanup ? 'Kill + cleanup' : 'Kill session',
+      `${s.tmux_name}: destroy the tmux session${cleanup ? ' and remove its worktree' : ''}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Kill', style: 'destructive', onPress: () => kill.mutate({ id: s.id, cleanup }) },
+      ],
+    )
   const copyAttach = (name: string) => {
     Clipboard.setStringAsync(`rocket attach ${name}`)
     setCopied(true)
@@ -185,6 +217,9 @@ function SessionsSheet({
                   <Text style={styles.sheetKindLabel}>ORCHESTRATOR</Text>
                   <View style={{ flex: 1 }} />
                   <Badge {...sessionBadge(orch.state, orch.activity)} />
+                  <Pressable onPress={() => setMenuFor(orch)} hitSlop={8}>
+                    <Text style={{ fontSize: 16, color: colors.textDim }}>⋯</Text>
+                  </Pressable>
                 </View>
                 <MonoText style={{ fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 11 }}>
                   {orch.tmux_name}
@@ -220,6 +255,9 @@ function SessionsSheet({
                       {w.tmux_name}
                     </MonoText>
                     <MonoText style={{ fontSize: 11, color: colors.textFaint }}>{w.repo_id}</MonoText>
+                    <Pressable onPress={() => setMenuFor(w)} hitSlop={8}>
+                      <Text style={{ fontSize: 16, color: colors.textDim }}>⋯</Text>
+                    </Pressable>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 11 }}>
                     <Badge {...sessionBadge(w.state, w.activity)} />
@@ -237,6 +275,34 @@ function SessionsSheet({
               ))}
             </View>
           </ScrollView>
+          <ActionSheet
+            visible={menuFor !== null}
+            title={menuFor?.tmux_name ?? ''}
+            onClose={() => setMenuFor(null)}
+            actions={
+              menuFor
+                ? [
+                    {
+                      label: 'Kill session',
+                      destructive: true,
+                      disabled: menuFor.state !== 'running' && menuFor.state !== 'spawning',
+                      onPress: () => confirmKill(menuFor, false),
+                    },
+                    {
+                      label: 'Kill + remove worktree',
+                      destructive: true,
+                      disabled: menuFor.state === 'done',
+                      onPress: () => confirmKill(menuFor, true),
+                    },
+                    {
+                      label: restore.isPending ? 'Restoring…' : 'Restore session',
+                      disabled: menuFor.state !== 'errored' && menuFor.state !== 'killed',
+                      onPress: () => restore.mutate(menuFor.id),
+                    },
+                  ]
+                : []
+            }
+          />
         </Pressable>
       </Pressable>
     </Modal>
@@ -256,16 +322,19 @@ export default function TaskScreen() {
   const sendMsg = useSendMessage()
   const [msgText, setMsgText] = useState('')
   const [sheetOpen, setSheetOpen] = useState(false)
+  const [taskMenu, setTaskMenu] = useState(false)
+  const move = useMoveTask()
+  const cancel = useCancelTask()
 
   const t = detail.data
   const open = (questions.data ?? []).filter((q) => q.status === 'open')
   const resolved = (questions.data ?? []).filter((q) => q.status === 'resolved')
   const awaiting = open.filter((q) => q.whose_turn === 'user')
   const orch = allSessions?.find((s) => s.id === t?.session?.id)
-  const workers = (allSessions ?? []).filter(
-    (s) => s.kind === 'worker' && s.parent_id === t?.session?.id && s.state === 'running',
-  )
-  const liveCount = (orch && orch.state === 'running' ? 1 : 0) + workers.length
+  const workers = (allSessions ?? []).filter((s) => s.kind === 'worker' && s.parent_id === t?.session?.id)
+  const liveWorkers = workers.filter((w) => w.state === 'running' || w.state === 'spawning')
+  const liveCount = (orch && (orch.state === 'running' || orch.state === 'spawning') ? 1 : 0) + liveWorkers.length
+  const hasSessions = !!orch || workers.length > 0
 
   if (!t) {
     return (
@@ -294,10 +363,37 @@ export default function TaskScreen() {
           {t.title}
         </Text>
         <Badge {...STATUS_BADGE[t.status]} />
+        <Pressable onPress={() => setTaskMenu(true)} hitSlop={8}>
+          <Text style={{ fontSize: 18, color: colors.textDim }}>⋯</Text>
+        </Pressable>
       </View>
 
+      <ActionSheet
+        visible={taskMenu}
+        title={`#${t.id} ${t.title}`}
+        onClose={() => setTaskMenu(false)}
+        actions={[
+          ...(['backlog', 'in_progress', 'review', 'done'] as const)
+            .filter((s) => s !== t.status)
+            .map((s) => ({
+              label: `Move to ${STATUS_BADGE[s].label}`,
+              onPress: () => move.mutate({ id: t.id, status: s }),
+            })),
+          {
+            label: 'Cancel task',
+            destructive: true,
+            disabled: t.status === 'done' || t.status === 'cancelled',
+            onPress: () =>
+              Alert.alert('Cancel task', `Cancel #${t.id} and kill all its sessions?`, [
+                { text: 'Keep', style: 'cancel' },
+                { text: 'Cancel task', style: 'destructive', onPress: () => cancel.mutate(t.id) },
+              ]),
+          },
+        ]}
+      />
+
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={{ paddingBottom: liveCount > 0 ? 90 : 24 }}>
+        <ScrollView contentContainerStyle={{ paddingBottom: hasSessions ? 90 : 24 }}>
           <View style={{ padding: 16, paddingBottom: 0 }}>
             <View style={styles.metaRow}>
               {t.feature_slug ? <MonoText style={{ fontSize: 12 }}>feature/{t.feature_slug}</MonoText> : null}
@@ -475,9 +571,9 @@ export default function TaskScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {liveCount > 0 ? (
+      {hasSessions ? (
         <Pressable style={styles.sessionsBar} onPress={() => setSheetOpen(true)}>
-          <Dot color="#22c55e" size={8} />
+          <Dot color={liveCount > 0 ? '#22c55e' : colors.slate} size={8} />
           <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>
             Sessions · {orch ? '1 orch' : '0 orch'}
             {workers.length > 0 ? ` + ${workers.length} workers` : ''}

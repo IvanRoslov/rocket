@@ -1,6 +1,6 @@
-import { ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useSessions, useSystem } from '../../src/api/queries'
+import { useSessions, useSystem, useSystemCleanup } from '../../src/api/queries'
 import { Badge, Card, Dot, EmptyState, MonoText, SectionTitle } from '../../src/components/ui'
 import { bytes, sessionBadge, sessionDot, uptime } from '../../src/lib/format'
 import { useServers } from '../../src/servers/ServerContext'
@@ -10,7 +10,28 @@ export default function SystemScreen() {
   const { active } = useServers()
   const system = useSystem()
   const { data: sessions } = useSessions()
+  const cleanup = useSystemCleanup()
   const s = system.data
+
+  const confirmCleanup = () =>
+    Alert.alert('Cleanup', 'Kill orphaned tmux sessions and remove orphaned worktrees?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Cleanup',
+        style: 'destructive',
+        onPress: () =>
+          cleanup.mutate(undefined, {
+            onSuccess: (r) =>
+              Alert.alert(
+                'Cleanup done',
+                `Killed tmux: ${r.killed_tmux.length ? r.killed_tmux.join(', ') : 'none'}\nRemoved worktrees: ${
+                  r.removed_worktrees.length ? r.removed_worktrees.join('\n') : 'none'
+                }`,
+              ),
+            onError: (e) => Alert.alert('Cleanup failed', (e as Error).message),
+          }),
+      },
+    ])
 
   const live = (sessions ?? []).filter((x) => x.state === 'running' || x.state === 'spawning')
   const orphans = (s?.tmux ?? []).filter((t) => t.orphan).length + (s?.worktrees ?? []).filter((w) => w.orphan).length
@@ -35,6 +56,12 @@ export default function SystemScreen() {
           <Text style={{ color: '#fff', fontFamily: mono, fontSize: 13, fontWeight: '700' }}>R</Text>
         </View>
         <Text style={{ fontSize: 17, fontWeight: '700', letterSpacing: -0.2 }}>System</Text>
+        <View style={{ flex: 1 }} />
+        <Pressable style={styles.cleanupBtn} onPress={confirmCleanup} disabled={cleanup.isPending}>
+          <Text style={{ fontSize: 12.5, fontWeight: '600', color: colors.redFg }}>
+            {cleanup.isPending ? 'Cleaning…' : '⌦ Cleanup'}
+          </Text>
+        </Pressable>
       </View>
       {system.isError ? (
         <EmptyState text="Server unreachable." />
@@ -157,6 +184,16 @@ const styles = StyleSheet.create({
     height: 26,
     borderRadius: 7,
     backgroundColor: colors.ink,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cleanupBtn: {
+    height: 34,
+    paddingHorizontal: 12,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: '#d4d4d1',
+    borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
