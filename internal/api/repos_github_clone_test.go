@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -223,6 +224,73 @@ func TestPostRepoGithubCloneFailure(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected repo.clone_failed event")
+	}
+}
+
+func TestBuildCloneCmdKeepsTokenOutOfArgs(t *testing.T) {
+	const token = "ghp_supersecrettoken123"
+
+	cmd := buildCloneCmd(context.Background(), "", "acme", "widgets", "/tmp/target", token)
+
+	for _, a := range cmd.Args {
+		if strings.Contains(a, token) {
+			t.Fatalf("cmd.Args contains token: %v", cmd.Args)
+		}
+	}
+	wantURL := "https://github.com/acme/widgets.git"
+	found := false
+	for _, a := range cmd.Args {
+		if a == wantURL {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("cmd.Args = %v, want to contain credential-free URL %q", cmd.Args, wantURL)
+	}
+
+	// The credential must instead travel via the process environment, not argv.
+	var gotHeader string
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "GIT_CONFIG_VALUE_0=") {
+			gotHeader = strings.TrimPrefix(e, "GIT_CONFIG_VALUE_0=")
+		}
+	}
+	if !strings.HasPrefix(gotHeader, "Authorization: Basic ") {
+		t.Fatalf("GIT_CONFIG_VALUE_0 = %q, want Authorization: Basic ...", gotHeader)
+	}
+	if strings.Contains(gotHeader, token) {
+		t.Errorf("env header contains raw token unexpectedly encoded: %q", gotHeader)
+	}
+}
+
+func TestBuildCloneCmdSkipsAuthForCloneBase(t *testing.T) {
+	cmd := buildCloneCmd(context.Background(), "file:///tmp/bares/", "acme", "widgets", "/tmp/target", "ghp_sometoken")
+
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "GIT_CONFIG_KEY_0=") || strings.HasPrefix(e, "GIT_CONFIG_VALUE_0=") {
+			t.Errorf("cmd.Env should carry no auth header in clone-base test mode, got %v", cmd.Env)
+		}
+	}
+}
+
+func TestPostRepoGithubCloneFailureCleansUpPartialDir(t *testing.T) {
+	d := reposTestDeps(t)
+	reposDir := t.TempDir()
+	d.Cfg.ReposDir = reposDir
+	// Points at a base with nothing cloneable at acme/widgets.git.
+	d.Cfg.GithubCloneBase = "file://" + t.TempDir() + "/"
+
+	srv := newTestServer(t, d)
+
+	resp := postJSON(t, srv.URL+"/v1/repos", map[string]string{"github": "acme/widgets"})
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	targetDir := filepath.Join(reposDir, "acme__widgets")
+	if _, err := os.Stat(targetDir); !os.IsNotExist(err) {
+		t.Errorf("target dir should have been removed after failed clone, stat err = %v", err)
 	}
 }
 

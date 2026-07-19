@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -11,10 +13,15 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/IvanRoslov/rocket/internal/github"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
+
+// cloneTimeout bounds how long a single `git clone` of a GitHub repo may
+// run before it's killed. A package var so tests can shrink it.
+var cloneTimeout = 10 * time.Minute
 
 // idPattern matches valid repo/project ids: lowercase alphanumerics and
 // hyphens only.
@@ -168,29 +175,59 @@ func parseGithubRepo(s string) (owner, name string, ok bool) {
 // a client.
 var tokenInCloneURLRE = regexp.MustCompile(`://x-access-token:[^@]*@`)
 
+// basicAuthInErrorRE matches an HTTP Basic auth header value that might
+// appear in git's error output, used to scrub a leaked credential before
+// it's logged or returned to a client.
+var basicAuthInErrorRE = regexp.MustCompile(`Basic [A-Za-z0-9+/=]+`)
+
 // sanitizeCloneError strips the GitHub token from git's (possibly
 // multi-line) output: first a literal replace of the known token value (if
-// any), then a regex scrub of the credential portion of any clone URL that
-// might still be present (e.g. if git echoed a differently-encoded form of
-// the URL). The result is safe to log or return to a client.
+// any), then a regex scrub of the credential portion of any clone URL or
+// Basic auth header that might still be present (e.g. if git echoed a
+// differently-encoded form of the URL, or the extraheader value). The
+// result is safe to log or return to a client.
 func sanitizeCloneError(output, token string) string {
 	msg := strings.TrimSpace(output)
 	if token != "" {
 		msg = strings.ReplaceAll(msg, token, "***")
 	}
 	msg = tokenInCloneURLRE.ReplaceAllString(msg, "://x-access-token:***@")
+	msg = basicAuthInErrorRE.ReplaceAllString(msg, "Basic ***")
 	return msg
 }
 
 // buildCloneURL returns the URL `git clone` should fetch owner/name from.
 // If cfg.GithubCloneBase is set (a test hook, e.g. "file:///tmp/bares/"),
-// it's used verbatim as a prefix. Otherwise the standard GitHub HTTPS clone
-// URL is built, authenticated with token.
-func buildCloneURL(cloneBase, owner, name, token string) string {
+// it's used verbatim as a prefix. Otherwise the standard, credential-free
+// GitHub HTTPS clone URL is built; authentication (when needed) is carried
+// separately via process environment, not embedded in the URL, so it never
+// appears in argv (see buildCloneCmd).
+func buildCloneURL(cloneBase, owner, name string) string {
 	if cloneBase != "" {
 		return cloneBase + owner + "/" + name + ".git"
 	}
-	return "https://x-access-token:" + token + "@github.com/" + owner + "/" + name + ".git"
+	return "https://github.com/" + owner + "/" + name + ".git"
+}
+
+// buildCloneCmd constructs the `git clone` command for cloning owner/name
+// into targetDir. When cloneBase is set (test mode, e.g. file://), no
+// authentication is used. Otherwise, if token is non-empty, credentials are
+// passed via GIT_CONFIG_* environment variables rather than argv or the
+// clone URL itself: a process's environment is not readable by other
+// non-root users on macOS/Linux the way argv is (visible to anyone via
+// `ps`), so this keeps the token out of that exposure surface.
+func buildCloneCmd(ctx context.Context, cloneBase, owner, name, targetDir, token string) *exec.Cmd {
+	cloneURL := buildCloneURL(cloneBase, owner, name)
+	cmd := exec.CommandContext(ctx, "git", "clone", cloneURL, targetDir)
+	if cloneBase == "" && token != "" {
+		basicAuth := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+		cmd.Env = append(os.Environ(),
+			"GIT_CONFIG_COUNT=1",
+			"GIT_CONFIG_KEY_0=http.extraheader",
+			"GIT_CONFIG_VALUE_0=Authorization: Basic "+basicAuth,
+		)
+	}
+	return cmd
 }
 
 // resolveClonedDefaultBranch determines the default branch of a freshly
@@ -277,10 +314,14 @@ func handlePostRepoGithub(w http.ResponseWriter, r *http.Request, d Deps, req po
 		d.Bus.Publish("repo.clone_started", "", map[string]any{"repo": full})
 	}
 
-	cloneURL := buildCloneURL(d.Cfg.GithubCloneBase, owner, name, token)
-	cmd := exec.CommandContext(r.Context(), "git", "clone", cloneURL, targetDir)
+	cloneCtx, cancel := context.WithTimeout(r.Context(), cloneTimeout)
+	defer cancel()
+	cmd := buildCloneCmd(cloneCtx, d.Cfg.GithubCloneBase, owner, name, targetDir, token)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if rmErr := os.RemoveAll(targetDir); rmErr != nil {
+			slog.Default().Warn("failed to clean up partial clone", "repo", full, "dir", targetDir, "error", rmErr)
+		}
 		sanitized := sanitizeCloneError(string(out), token)
 		slog.Default().Error("github clone failed", "repo", full, "error", sanitized)
 		if d.Bus != nil {
