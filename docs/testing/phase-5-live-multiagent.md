@@ -80,3 +80,9 @@ worker.
   session out from under it) — it's not specific to codex, but a fast
   `merge_grace`/`github_poll_interval` combined with a worker that's
   genuinely busy right at merge time is enough to trigger it in practice.
+- **A pre-existing tracked `AGENTS.md` will show up in worker diffs.** rocket
+  writes its rocket-managed block into `AGENTS.md` on every codex launch; if
+  the target repo already tracks `AGENTS.md` in git, rocket leaves it (and
+  `.git/info/exclude`) untouched, so that block will appear as part of the
+  worker's own uncommitted changes — reviewers should strip the
+  `<!-- rocket:start -->` … `<!-- rocket:end -->` block before merging.

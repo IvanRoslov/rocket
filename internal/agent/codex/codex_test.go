@@ -2,6 +2,7 @@ package codex
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -291,6 +292,95 @@ func TestSetupWorkspaceReplacesExistingRocketBlockIdempotently(t *testing.T) {
 	}
 
 	assertNoTempFiles(t, tmpDir)
+}
+
+// initGitRepo runs `git init` in dir so it behaves like a real worktree for
+// git-plumbing-based tests.
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %v\n%s", err, out)
+	}
+}
+
+func TestSetupWorkspaceExcludesUntrackedAgentsMD(t *testing.T) {
+	withCodexHome(t)
+	tmpDir := t.TempDir()
+	initGitRepo(t, tmpDir)
+
+	c := New()
+	spec := agent.LaunchSpec{WorktreePath: tmpDir, SystemPrompt: "Be a helpful worker."}
+	if err := c.SetupWorkspace(spec); err != nil {
+		t.Fatalf("SetupWorkspace failed: %v", err)
+	}
+
+	excludePath := filepath.Join(tmpDir, ".git", "info", "exclude")
+	data, err := os.ReadFile(excludePath)
+	if err != nil {
+		t.Fatalf("read info/exclude: %v", err)
+	}
+	lines := strings.Split(string(data), "\n")
+	count := 0
+	for _, l := range lines {
+		if strings.TrimSpace(l) == "AGENTS.md" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly one AGENTS.md entry in info/exclude, got %d: %q", count, string(data))
+	}
+
+	// Second run: idempotent, no duplicate entry.
+	if err := c.SetupWorkspace(spec); err != nil {
+		t.Fatalf("second SetupWorkspace failed: %v", err)
+	}
+	data2, err := os.ReadFile(excludePath)
+	if err != nil {
+		t.Fatalf("read info/exclude (2nd): %v", err)
+	}
+	count2 := 0
+	for _, l := range strings.Split(string(data2), "\n") {
+		if strings.TrimSpace(l) == "AGENTS.md" {
+			count2++
+		}
+	}
+	if count2 != 1 {
+		t.Errorf("expected exactly one AGENTS.md entry after second run, got %d: %q", count2, string(data2))
+	}
+}
+
+func TestSetupWorkspaceLeavesTrackedAgentsMDAlone(t *testing.T) {
+	withCodexHome(t)
+	tmpDir := t.TempDir()
+	initGitRepo(t, tmpDir)
+
+	// Seed and track AGENTS.md before SetupWorkspace runs.
+	agentsPath := filepath.Join(tmpDir, "AGENTS.md")
+	if err := os.WriteFile(agentsPath, []byte("# pre-existing tracked content\n"), 0o644); err != nil {
+		t.Fatalf("seed AGENTS.md: %v", err)
+	}
+	addCmd := exec.Command("git", "add", "AGENTS.md")
+	addCmd.Dir = tmpDir
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add failed: %v\n%s", err, out)
+	}
+
+	c := New()
+	spec := agent.LaunchSpec{WorktreePath: tmpDir, SystemPrompt: "Be a helpful worker."}
+	if err := c.SetupWorkspace(spec); err != nil {
+		t.Fatalf("SetupWorkspace failed: %v", err)
+	}
+
+	excludePath := filepath.Join(tmpDir, ".git", "info", "exclude")
+	data, err := os.ReadFile(excludePath)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read info/exclude: %v", err)
+	}
+	if strings.Contains(string(data), "AGENTS.md") {
+		t.Errorf("info/exclude should not have an AGENTS.md entry when it's tracked by git: %q", string(data))
+	}
 }
 
 func TestSeedCodexTrustWritesConfigToml(t *testing.T) {
