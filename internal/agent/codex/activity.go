@@ -181,44 +181,64 @@ func lastNonEmptyLine(path string) (string, error) {
 	return last, nil
 }
 
-// isErrorRecord reports whether the last JSONL record looks like an
-// error/failed-turn signal. Recon's live sample only ever showed
+// isErrorRecord reports whether a successfully-parsed JSONL record looks
+// like an error/failed-turn signal, classified strictly by its actual
+// "type" field structure. Recon's live sample only ever showed
 // event_msg{token_count, task_complete} on a clean turn, and explicitly
 // flagged the error-event taxonomy as unverified — so this is a
 // conservative best-effort check (a nested event payload "type" containing
 // "error", or a top-level "type":"error"), not an exhaustive list. Anything
 // that doesn't match falls through to Ready, per the binding instruction
-// ("unknown types → Ready").
-func isErrorRecord(raw string, top map[string]json.RawMessage) bool {
-	if typeRaw, ok := top["type"]; ok {
-		var t string
-		if err := json.Unmarshal(typeRaw, &t); err == nil {
-			if t == "error" {
-				return true
-			}
-			if t == "event_msg" {
-				if payloadRaw, ok := top["payload"]; ok {
-					var payload map[string]json.RawMessage
-					if err := json.Unmarshal(payloadRaw, &payload); err == nil {
-						if ptRaw, ok := payload["type"]; ok {
-							var pt string
-							if err := json.Unmarshal(ptRaw, &pt); err == nil && strings.Contains(strings.ToLower(pt), "error") {
-								return true
-							}
-						}
-					}
-				}
-			}
-		}
+// ("unknown types → Ready"). This must only be called with top from a
+// record whose JSON parsed successfully — see classify's raw-substring
+// fallback for the parse-failure case, which this function intentionally
+// does not duplicate (a record whose *content* happens to mention the
+// literal `"type":"error"` — e.g. a response_item echoing user-visible
+// text — must not be misclassified as Blocked just because that substring
+// appears somewhere in the line).
+func isErrorRecord(top map[string]json.RawMessage) bool {
+	typeRaw, ok := top["type"]
+	if !ok {
+		return false
 	}
-	return strings.Contains(raw, `"type":"error"`)
+	var t string
+	if err := json.Unmarshal(typeRaw, &t); err != nil {
+		return false
+	}
+	if t == "error" {
+		return true
+	}
+	if t != "event_msg" {
+		return false
+	}
+	payloadRaw, ok := top["payload"]
+	if !ok {
+		return false
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(payloadRaw, &payload); err != nil {
+		return false
+	}
+	ptRaw, ok := payload["type"]
+	if !ok {
+		return false
+	}
+	var pt string
+	if err := json.Unmarshal(ptRaw, &pt); err != nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(pt), "error")
 }
 
 // classify determines the activity state from the last session-file line
-// and the file's mtime. mtime within freshWindow always wins (Active);
-// otherwise an error-shaped last record is Blocked, and everything else
-// (including task_complete/turn-end records and any type this adapter
-// doesn't recognize) is Ready.
+// and the file's mtime. mtime within freshWindow always wins (Active).
+// Otherwise, if the record parses as JSON, it classifies strictly by its
+// actual type field (isErrorRecord) — a record whose text content happens
+// to mention `"type":"error"` is not enough on its own to flip it to
+// Blocked. Only when the record fails to parse as JSON at all does the raw
+// substring check apply, as a best-effort fallback for malformed/unknown
+// line shapes. Everything else (including task_complete/turn-end records
+// and any type this adapter doesn't recognize) is Ready.
 func classify(raw string, mtime time.Time) activity.State {
 	if time.Since(mtime) < freshWindow {
 		return activity.Active
@@ -226,10 +246,13 @@ func classify(raw string, mtime time.Time) activity.State {
 
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &top); err != nil {
+		if strings.Contains(raw, `"type":"error"`) {
+			return activity.Blocked
+		}
 		return activity.Ready
 	}
 
-	if isErrorRecord(raw, top) {
+	if isErrorRecord(top) {
 		return activity.Blocked
 	}
 

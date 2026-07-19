@@ -104,6 +104,31 @@ func TestActivityBlockedOnErrorEvent(t *testing.T) {
 	}
 }
 
+func TestActivityBenignTypeMentioningErrorSubstringIsReady(t *testing.T) {
+	// A record of an unrecognized-but-well-formed type (e.g. response_item)
+	// whose payload *text* happens to contain the literal `"type":"error"`
+	// must not be misclassified as Blocked just because that substring
+	// appears somewhere in the line — the JSON parsed successfully, so
+	// classification must go strictly by the record's actual type field.
+	home := withCodexHome(t)
+	wt := t.TempDir()
+	now := time.Now()
+	old := now.Add(-5 * time.Minute)
+
+	writeSessionFile(t, home, now, "rollout-1", wt,
+		[]string{`{"type":"response_item","timestamp":"x","payload":{"text":"I saw a log line containing \"type\":\"error\" in the output."}}`},
+		old)
+
+	c := New()
+	state, _, err := c.Activity(context.TODO(), agent.ActivityRef{WorktreePath: wt})
+	if err != nil {
+		t.Fatalf("Activity failed: %v", err)
+	}
+	if state != activity.Ready {
+		t.Errorf("state = %v, want Ready (benign type mentioning error substring must not flip to Blocked)", state)
+	}
+}
+
 func TestActivityUnknownTrailingTypeIsReady(t *testing.T) {
 	home := withCodexHome(t)
 	wt := t.TempDir()
