@@ -329,7 +329,13 @@ func (t *tmuxRuntime) SendKeys(ctx context.Context, h Handle, key string, litera
 	}
 	args := []string{"send-keys", "-t", paneTarget(h.Name)}
 	if literal {
-		args = append(args, "-l", key)
+		// "--" ends flag parsing so literal text starting with "-" (e.g.
+		// "-foo") is never mistaken for a send-keys flag, and
+		// escapeTrailingSemicolon neutralizes tmux's command-sequence
+		// separator, which it special-cases only for a trailing,
+		// unescaped ";" argument (see escapeTrailingSemicolon's doc
+		// comment and TestSendKeys_LiteralSafety).
+		args = append(args, "-l", "--", escapeTrailingSemicolon(key))
 	} else {
 		args = append(args, key)
 	}
@@ -337,6 +343,24 @@ func (t *tmuxRuntime) SendKeys(ctx context.Context, h Handle, key string, litera
 		return fmt.Errorf("send-keys %q (literal=%v) to %q: %w", key, literal, h.Name, err)
 	}
 	return nil
+}
+
+// escapeTrailingSemicolon escapes s's trailing ";" as "\;" if present and
+// not already escaped. tmux treats a bare trailing semicolon in a
+// send-keys argument as its command-sequence separator (letting multiple
+// tmux commands be chained on one command line) even under "-l" literal
+// mode and even behind "--"; verified empirically (tmux 3.6a) that
+// `send-keys -l -- 'bar;'` sends only "bar" while
+// `send-keys -l -- 'bar\;'` sends the literal "bar;". A semicolon anywhere
+// but the last character is unaffected and needs no escaping.
+func escapeTrailingSemicolon(s string) string {
+	if len(s) == 0 || s[len(s)-1] != ';' {
+		return s
+	}
+	if len(s) >= 2 && s[len(s)-2] == '\\' {
+		return s // already escaped
+	}
+	return s[:len(s)-1] + `\;`
 }
 
 // lastLine returns the final non-blank line of s, or "" if s has no

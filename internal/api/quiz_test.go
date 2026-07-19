@@ -90,6 +90,11 @@ func quizAnswerTestDeps(t *testing.T) (Deps, *quizAnswerFakeRuntime) {
 
 const quizAPIPendingJSON = `{"questions":[{"question":"Which color?","header":"Color","multiSelect":false,"options":[{"label":"Red","description":"warm"},{"label":"Green"},{"label":"Blue"}]}],"asked_at":42}`
 
+// quizAPITenOptionPendingJSON has 10 options, enough for an in-range
+// option_index (9) that still exceeds the single-digit limit remote
+// answering supports (see TestPostQuizAnswer_InvalidAnswerIs400).
+const quizAPITenOptionPendingJSON = `{"questions":[{"question":"Pick a number","header":"Number","multiSelect":false,"options":[{"label":"0"},{"label":"1"},{"label":"2"},{"label":"3"},{"label":"4"},{"label":"5"},{"label":"6"},{"label":"7"},{"label":"8"},{"label":"9"}]}],"asked_at":42}`
+
 func seedQuizSession(t *testing.T, st *store.Store, id string) {
 	t.Helper()
 	if err := st.AddRepo(store.Repo{ID: "repo1", Path: "/tmp/repo1", DefaultBranch: "main"}); err != nil {
@@ -328,21 +333,27 @@ func TestPostQuizAnswer_NoPendingQuizIs409(t *testing.T) {
 
 func TestPostQuizAnswer_InvalidAnswerIs400(t *testing.T) {
 	tests := []struct {
-		name    string
-		answers []map[string]any
+		name        string
+		pendingJSON string
+		answers     []map[string]any
 	}{
-		{"index out of range", []map[string]any{{"question_index": 7, "option_indices": []int{0}}}},
-		{"single-select not exactly one", []map[string]any{{"question_index": 0, "option_indices": []int{0, 1}}}},
-		{"both option_indices and text", []map[string]any{{"question_index": 0, "option_indices": []int{0}, "text": "x"}}},
-		{"empty text", []map[string]any{{"question_index": 0, "text": ""}}},
-		{"not all questions answered", []map[string]any{}},
+		{"index out of range", quizAPIPendingJSON, []map[string]any{{"question_index": 7, "option_indices": []int{0}}}},
+		{"single-select not exactly one", quizAPIPendingJSON, []map[string]any{{"question_index": 0, "option_indices": []int{0, 1}}}},
+		{"both option_indices and text", quizAPIPendingJSON, []map[string]any{{"question_index": 0, "option_indices": []int{0}, "text": "x"}}},
+		{"empty text", quizAPIPendingJSON, []map[string]any{{"question_index": 0, "text": ""}}},
+		{"not all questions answered", quizAPIPendingJSON, []map[string]any{}},
+		// LOW finding #4: option_index >= 9 is rejected even when in
+		// range for the question, since remote answering can only type
+		// single-digit option numbers reliably. quizAPITenOptionPendingJSON
+		// has 10 options so index 9 is in-range but still over the limit.
+		{"option_index 9 exceeds single-digit limit", quizAPITenOptionPendingJSON, []map[string]any{{"question_index": 0, "option_indices": []int{9}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			d, _ := quizAnswerTestDeps(t)
 			srv := newTestServer(t, d)
 			seedQuizSession(t, d.Store, "sess1")
-			if err := d.Store.SetPendingQuiz("sess1", quizAPIPendingJSON); err != nil {
+			if err := d.Store.SetPendingQuiz("sess1", tt.pendingJSON); err != nil {
 				t.Fatalf("SetPendingQuiz: %v", err)
 			}
 
@@ -356,6 +367,66 @@ func TestPostQuizAnswer_InvalidAnswerIs400(t *testing.T) {
 				t.Errorf("code = %q, want quiz_answer_invalid", body.Error.Code)
 			}
 		})
+	}
+}
+
+// TestPostQuizAnswer_InFlightIs409 verifies HIGH finding #1 end-to-end
+// through the HTTP layer: a second POST while the first answer's
+// keystroke injection is still running is rejected 409
+// quiz_answer_in_flight, and once the first injection resolves, a new
+// answer is accepted again.
+func TestPostQuizAnswer_InFlightIs409(t *testing.T) {
+	d, _ := quizAnswerTestDeps(t)
+	// A real, longer-than-instant sleep between keystrokes so the first
+	// injection is still in flight when the second POST lands right after.
+	d.Manager.SetQuizTiming(func(time.Duration) { time.Sleep(30 * time.Millisecond) }, 2*time.Second)
+	srv := newTestServer(t, d)
+	seedQuizSession(t, d.Store, "sess1")
+	if err := d.Store.SetPendingQuiz("sess1", quizAPIPendingJSON); err != nil {
+		t.Fatalf("SetPendingQuiz: %v", err)
+	}
+
+	resp1 := postJSON(t, srv.URL+"/v1/sessions/sess1/quiz/answer", map[string]any{
+		"answers": []map[string]any{{"question_index": 0, "option_indices": []int{0}}},
+	})
+	defer resp1.Body.Close()
+	if resp1.StatusCode != http.StatusAccepted {
+		t.Fatalf("first status = %d, want 202", resp1.StatusCode)
+	}
+
+	resp2 := postJSON(t, srv.URL+"/v1/sessions/sess1/quiz/answer", map[string]any{
+		"answers": []map[string]any{{"question_index": 0, "option_indices": []int{1}}},
+	})
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusConflict {
+		t.Fatalf("second status = %d, want 409", resp2.StatusCode)
+	}
+	body := decodeErr(t, resp2)
+	if body.Error.Code != "quiz_answer_in_flight" {
+		t.Errorf("code = %q, want quiz_answer_in_flight", body.Error.Code)
+	}
+
+	// Resolve the first injection so its in-flight flag clears.
+	d.Bus.Publish("session.quiz_resolved", "sess1", map[string]any{})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		resp3 := postJSON(t, srv.URL+"/v1/sessions/sess1/quiz/answer", map[string]any{
+			"answers": []map[string]any{{"question_index": 0, "option_indices": []int{0}}},
+		})
+		status := resp3.StatusCode
+		resp3.Body.Close()
+		if status == http.StatusAccepted {
+			d.Bus.Publish("session.quiz_resolved", "sess1", map[string]any{})
+			return
+		}
+		if status != http.StatusConflict {
+			t.Fatalf("unexpected status while polling for in-flight clear: %d", status)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for in-flight flag to clear after resolved")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

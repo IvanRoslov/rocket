@@ -106,6 +106,58 @@ func TestTmux_EnvVisible(t *testing.T) {
 	}, "captured output to contain env value")
 }
 
+// TestSendKeys_LiteralSafety verifies SendKeys delivers literal text
+// starting with "-" (which without "--" tmux would mistake for a
+// send-keys flag) and literal text ending with ";" (which tmux otherwise
+// treats as its command-sequence separator, dropping it) both intact.
+func TestSendKeys_LiteralSafety(t *testing.T) {
+	requireTmux(t)
+	ctx := context.Background()
+	rt := NewTmux()
+
+	name := uniqueName(t, "")
+	h, err := rt.Create(ctx, CreateSpec{Name: name, Dir: t.TempDir(), Command: "cat"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer rt.Destroy(ctx, h)
+
+	if err := rt.SendKeys(ctx, h, "-foo", true); err != nil {
+		t.Fatalf("SendKeys(-foo): %v", err)
+	}
+	waitFor(t, func() bool {
+		out, err := rt.Capture(ctx, h, 20)
+		return err == nil && strings.Contains(out, "-foo")
+	}, "captured output to contain literal -foo")
+
+	if err := rt.SendKeys(ctx, h, "bar;", true); err != nil {
+		t.Fatalf("SendKeys(bar;): %v", err)
+	}
+	waitFor(t, func() bool {
+		out, err := rt.Capture(ctx, h, 20)
+		return err == nil && strings.Contains(out, "-foobar;")
+	}, "captured output to contain literal bar; appended after -foo")
+}
+
+// TestEscapeTrailingSemicolon is a pure unit test of the escaping helper,
+// independent of tmux availability.
+func TestEscapeTrailingSemicolon(t *testing.T) {
+	cases := map[string]string{
+		"":      "",
+		"bar":   "bar",
+		"bar;":  `bar\;`,
+		"a;b":   "a;b",
+		`bar\;`: `bar\;`, // already escaped: unchanged
+		";":     `\;`,
+		"a;b;":  `a;b\;`,
+	}
+	for in, want := range cases {
+		if got := escapeTrailingSemicolon(in); got != want {
+			t.Errorf("escapeTrailingSemicolon(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestTmux_PrefixMatchSafety(t *testing.T) {
 	requireTmux(t)
 	ctx := context.Background()

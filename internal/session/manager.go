@@ -91,11 +91,19 @@ type Manager struct {
 	// quiz.go's sendQuizKeys); defaults to time.Sleep, overridable via
 	// SetQuizTiming so tests don't pay quizKeySettle in wall-clock time.
 	quizSleepFn func(time.Duration)
-	// quizUnconfirmedTimeout bounds how long watchQuizUnconfirmed waits for
-	// a session.quiz_resolved event before publishing
+	// quizUnconfirmedTimeout bounds how long waitQuizResolved waits for a
+	// session.quiz_resolved event before publishing
 	// session.quiz_answer_unconfirmed; defaults to 60s, overridable via
 	// SetQuizTiming.
 	quizUnconfirmedTimeout time.Duration
+
+	// quizInFlight tracks session IDs with an in-progress quiz-answer
+	// injection (see AnswerQuiz's tryStartQuizInFlight/clearQuizInFlight in
+	// quiz.go), guarded by mu. A second POST /v1/sessions/{id}/quiz/answer
+	// for a session already present in this set is rejected with
+	// "quiz_answer_in_flight" rather than interleaving a second keystroke
+	// sequence into the same tmux pane.
+	quizInFlight map[string]bool
 }
 
 // NewManager builds a Manager wired to the given dependencies.

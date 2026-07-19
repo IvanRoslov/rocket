@@ -96,6 +96,35 @@ func TestValidateQuizAnswers_OptionIndexOutOfRange(t *testing.T) {
 	}
 }
 
+// tenOptionQuestion has 10 options — enough to exercise the >=9
+// option_index rejection (remote answering can only type single-digit
+// option numbers reliably) independently of the plain out-of-range check,
+// which colorQuestion's 3 options can't do.
+func tenOptionQuestion() QuizQuestion {
+	opts := make([]QuizOption, 10)
+	for i := range opts {
+		opts[i] = QuizOption{Label: strconv.Itoa(i)}
+	}
+	return QuizQuestion{Question: "Pick a number", Header: "Number", MultiSelect: false, Options: opts}
+}
+
+func TestValidateQuizAnswers_OptionIndexNineOrAboveRejected(t *testing.T) {
+	quiz := Quiz{Questions: []QuizQuestion{tenOptionQuestion()}}
+	answers := []QuizAnswer{{QuestionIndex: 0, OptionIndices: []int{9}}}
+	err := validateQuizAnswers(quiz, answers)
+	if err == nil {
+		t.Fatal("want error for option_index 9 (>= 9 options unsupported), got nil")
+	}
+}
+
+func TestValidateQuizAnswers_OptionIndexEightIsAllowed(t *testing.T) {
+	quiz := Quiz{Questions: []QuizQuestion{tenOptionQuestion()}}
+	answers := []QuizAnswer{{QuestionIndex: 0, OptionIndices: []int{8}}}
+	if err := validateQuizAnswers(quiz, answers); err != nil {
+		t.Fatalf("option_index 8 (the 9th option, boundary) should be allowed: %v", err)
+	}
+}
+
 func TestValidateQuizAnswers_NotAllQuestionsAnswered(t *testing.T) {
 	quiz := Quiz{Questions: []QuizQuestion{colorQuestion(), fruitsQuestion()}}
 	answers := []QuizAnswer{{QuestionIndex: 0, OptionIndices: []int{0}}}

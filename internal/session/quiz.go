@@ -87,8 +87,10 @@ type keyStep struct {
 // with 400 quiz_answer_invalid: a question_index out of range, a
 // single-select answer without exactly one option_index, both
 // option_indices and text supplied together, empty/whitespace-only text,
-// an option_index out of range for its question, a duplicate answer for
-// the same question, or not every question answered.
+// an option_index out of range for its question, an option_index >= 9
+// (remote answering can only type single-digit option numbers reliably —
+// see quizKeySequence), a duplicate answer for the same question, or not
+// every question answered.
 func validateQuizAnswers(quiz Quiz, answers []QuizAnswer) error {
 	n := len(quiz.Questions)
 	seen := make(map[int]bool, n)
@@ -121,6 +123,9 @@ func validateQuizAnswers(quiz Quiz, answers []QuizAnswer) error {
 			for _, oi := range a.OptionIndices {
 				if oi < 0 || oi >= len(q.Options) {
 					return fmt.Errorf("question_index %d: option_index %d out of range [0,%d)", a.QuestionIndex, oi, len(q.Options))
+				}
+				if oi > 8 {
+					return fmt.Errorf("question_index %d: option_index %d: remote answering supports at most 9 options per question — multi-digit option numbers cannot be typed reliably", a.QuestionIndex, oi)
 				}
 			}
 		}
@@ -222,8 +227,24 @@ func quizKeyName(s keyStep) string {
 // sendQuizKeys executes steps against h via m.rt.SendKeys, pausing
 // m.quizSleepFn(step.Settle) after each one (see quizKeySettle). It stops
 // and returns the first error encountered.
-func (m *Manager) sendQuizKeys(ctx context.Context, h runtime.Handle, steps []keyStep) error {
+//
+// Before sending each step, it cheaply checks abort (closed when
+// session.quiz_resolved arrives for this session mid-injection — see
+// runQuizAnswer, which subscribes before the first keystroke is ever
+// sent): if already closed, sendQuizKeys stops immediately without sending
+// any further keys, since the quiz was resolved out from under it (e.g. a
+// human answered directly in the terminal while the remote injection was
+// still typing) and additional keystrokes would land on whatever screen
+// comes next, potentially misfiring. This is not an error condition, so it
+// returns nil.
+func (m *Manager) sendQuizKeys(ctx context.Context, h runtime.Handle, steps []keyStep, abort <-chan struct{}) error {
 	for _, s := range steps {
+		select {
+		case <-abort:
+			return nil
+		default:
+		}
+
 		var err error
 		if s.Kind == keyLiteral {
 			err = m.rt.SendKeys(ctx, h, s.Value, true)
@@ -250,7 +271,9 @@ func (m *Manager) sendQuizKeys(ctx context.Context, h runtime.Handle, steps []ke
 // Returns *ValidationError with code "session_not_found" (404),
 // "no_pending_quiz" (409, the session has nothing to answer — e.g. a
 // human already answered in the terminal, or a stale/duplicate request),
-// or "quiz_answer_invalid" (400, answers fails validateQuizAnswers).
+// "quiz_answer_in_flight" (409, a previous answer for this session's quiz
+// is still being typed by the injector — see quizInFlight), or
+// "quiz_answer_invalid" (400, answers fails validateQuizAnswers).
 func (m *Manager) AnswerQuiz(ctx context.Context, id string, answers []QuizAnswer) error {
 	sess, err := m.st.GetSession(id)
 	if err != nil {
@@ -274,53 +297,131 @@ func (m *Manager) AnswerQuiz(ctx context.Context, id string, answers []QuizAnswe
 		return validationErr("quiz_answer_invalid", err.Error())
 	}
 
+	if !m.tryStartQuizInFlight(id) {
+		return validationErr("quiz_answer_in_flight", "a quiz answer is already being injected for session: "+id)
+	}
+
 	h := runtime.Handle{Name: sess.TmuxName}
 	go m.runQuizAnswer(id, h, steps)
 
 	return nil
 }
 
-// runQuizAnswer sends steps to h (best-effort — a failure here is logged
-// but does not stop the unconfirmed watch, since even a partially-failed
-// injection may have already changed on-screen state a human now needs to
-// resolve) and then watches for the resolved hook, warning if it never
-// arrives.
-func (m *Manager) runQuizAnswer(id string, h runtime.Handle, steps []keyStep) {
-	if err := m.sendQuizKeys(context.Background(), h, steps); err != nil {
-		slog.Default().Warn("quiz answer: keystroke injection failed", "session", id, "error", err)
+// tryStartQuizInFlight atomically checks-and-sets id's in-flight flag,
+// guarded by m.mu (the same mutex Spawn/Kill/Restore use to serialize
+// session lifecycle operations). It returns false — meaning the caller
+// must reject the request as "quiz_answer_in_flight" — if a quiz-answer
+// injection is already running for id; a concurrent second
+// POST /v1/sessions/{id}/quiz/answer while the TUI is still being driven
+// would otherwise interleave two keystroke sequences into the same pane,
+// corrupting both.
+func (m *Manager) tryStartQuizInFlight(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.quizInFlight == nil {
+		m.quizInFlight = make(map[string]bool)
 	}
-	m.watchQuizUnconfirmed(id)
+	if m.quizInFlight[id] {
+		return false
+	}
+	m.quizInFlight[id] = true
+	return true
 }
 
-// watchQuizUnconfirmed subscribes to the bus and waits, up to
-// m.quizUnconfirmedTimeout, for a session.quiz_resolved event naming id —
-// the PostToolUse hook firing after the quiz is actually answered/declined
-// in the TUI (see internal/api's internal_quiz.go). If the timeout elapses
-// first, it publishes session.quiz_answer_unconfirmed{session_id:id}
-// (warn-logged) and returns without touching the session's pending_quiz —
-// per the design spec, only the resolved hook is authoritative for
-// clearing it.
-func (m *Manager) watchQuizUnconfirmed(id string) {
+// clearQuizInFlight clears id's in-flight flag (see tryStartQuizInFlight),
+// guarded by m.mu. It is always called via defer in runQuizAnswer, so the
+// flag is cleared exactly once per AnswerQuiz call, regardless of whether
+// the injection goroutine exits because the resolved event arrived, the
+// unconfirmed timer fired, or sendQuizKeys returned an error.
+func (m *Manager) clearQuizInFlight(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.quizInFlight, id)
+}
+
+// runQuizAnswer subscribes to the bus BEFORE sending any keystrokes — not
+// after, as an earlier version did — so a session.quiz_resolved that
+// arrives while the injector is still typing (or even before it starts) is
+// never missed: a background goroutine watches the subscription for it and
+// closes resolved, which sendQuizKeys checks between every keystroke to
+// abort early (see its doc comment) and which the final wait below also
+// honors immediately if already closed.
+//
+// It sends steps to h (best-effort — a failure here is logged but does not
+// stop the resolved/unconfirmed wait, since even a partially-failed
+// injection may have already changed on-screen state a human now needs to
+// resolve), then waits for resolved or the unconfirmed timeout via
+// waitQuizResolved. clearQuizInFlight always runs before returning (see its
+// doc comment), satisfying AnswerQuiz's in-flight-guard contract.
+func (m *Manager) runQuizAnswer(id string, h runtime.Handle, steps []keyStep) {
+	defer m.clearQuizInFlight(id)
+
 	ch, cancel := m.bus.Subscribe()
 	defer cancel()
+
+	resolved := make(chan struct{})
+	watchDone := make(chan struct{})
+	defer close(watchDone)
+
+	go func() {
+		for {
+			select {
+			case ev, ok := <-ch:
+				if !ok {
+					return
+				}
+				if ev.Type == "session.quiz_resolved" && ev.SessionID == id {
+					close(resolved)
+					return
+				}
+			case <-watchDone:
+				return
+			}
+		}
+	}()
+
+	if err := m.sendQuizKeys(context.Background(), h, steps, resolved); err != nil {
+		slog.Default().Warn("quiz answer: keystroke injection failed", "session", id, "error", err)
+	}
+
+	m.waitQuizResolved(id, resolved)
+}
+
+// waitQuizResolved waits, up to m.quizUnconfirmedTimeout, for resolved to
+// close — signalling a session.quiz_resolved event for this session
+// arrived (the PostToolUse hook firing after the quiz is actually
+// answered/declined in the TUI; see internal/api's internal_quiz.go),
+// whether that happened during injection (sendQuizKeys's abort check) or
+// after. If resolved is already closed, it returns immediately.
+//
+// If the timeout elapses first, it re-reads the session and, only if
+// PendingQuiz is still non-empty, publishes
+// session.quiz_answer_unconfirmed{session_id:id} (warn-logged) — belt and
+// braces against the resolved event having raced this call's subscription
+// (internal_quiz.go clears PendingQuiz before publishing quiz_resolved, so
+// an empty PendingQuiz here means the quiz was in fact resolved even
+// though this call somehow missed the event). Either way, it never touches
+// the session's pending_quiz itself — per the design spec, only the
+// resolved hook is authoritative for clearing it.
+func (m *Manager) waitQuizResolved(id string, resolved <-chan struct{}) {
+	select {
+	case <-resolved:
+		return
+	default:
+	}
 
 	timer := time.NewTimer(m.quizUnconfirmedTimeout)
 	defer timer.Stop()
 
-	for {
-		select {
-		case ev, ok := <-ch:
-			if !ok {
-				return
-			}
-			if ev.Type == "session.quiz_resolved" && ev.SessionID == id {
-				return
-			}
-		case <-timer.C:
-			slog.Default().Warn("quiz answer unconfirmed", "session", id, "timeout", m.quizUnconfirmedTimeout)
-			m.bus.Publish("session.quiz_answer_unconfirmed", id, map[string]any{})
+	select {
+	case <-resolved:
+		return
+	case <-timer.C:
+		if sess, err := m.st.GetSession(id); err == nil && sess.PendingQuiz == "" {
 			return
 		}
+		slog.Default().Warn("quiz answer unconfirmed", "session", id, "timeout", m.quizUnconfirmedTimeout)
+		m.bus.Publish("session.quiz_answer_unconfirmed", id, map[string]any{})
 	}
 }
 

@@ -2,11 +2,9 @@ package api
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 
 	"github.com/IvanRoslov/rocket/internal/session"
-	"github.com/IvanRoslov/rocket/internal/store"
 )
 
 // registerQuizRoutes wires the public quiz-answer route onto mux. This is
@@ -91,8 +89,13 @@ type quizAnswerRequest struct {
 // 2026-07-19-remote-quiz-design.md §4).
 //
 // Errors: 404 session_not_found, 409 no_pending_quiz (nothing to answer —
-// e.g. already answered in the terminal), 400 quiz_answer_invalid (bad
-// shape: see session.validateQuizAnswers's doc comment for every case).
+// e.g. already answered in the terminal), 409 quiz_answer_in_flight (a
+// previous answer for this session's quiz is still being typed by the
+// injector — see session.Manager.AnswerQuiz's in-flight guard; retry once
+// it resolves), 400 quiz_answer_invalid (bad shape: see
+// session.validateQuizAnswers's doc comment for every case). All four
+// codes are produced as a *session.ValidationError and mapped to their
+// HTTP status by writeManagerErr (internal/api/sessions.go).
 func handlePostQuizAnswer(w http.ResponseWriter, r *http.Request, d Deps) {
 	id := r.PathValue("id")
 
@@ -112,10 +115,6 @@ func handlePostQuizAnswer(w http.ResponseWriter, r *http.Request, d Deps) {
 	}
 
 	if err := d.Manager.AnswerQuiz(r.Context(), id, answers); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeErr(w, http.StatusNotFound, "session_not_found", "session not found")
-			return
-		}
 		writeManagerErr(w, err)
 		return
 	}
