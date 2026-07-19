@@ -256,7 +256,16 @@ func lockFile(lockPath string) (func(), error) {
 // auto-approval in interactive mode: `--sandbox workspace-write
 // --ask-for-approval never`. -m sets the model when given. The positional
 // PROMPT (confirmed live to become the first user message) carries
-// FirstMessage when given.
+// FirstMessage when given, preceded by a `--` separator so a brief that
+// happens to start with "-" (e.g. "-fix the bug") is never mistaken for a
+// flag by clap's argument parser. Verified live against codex-cli 0.138.0:
+// `codex --sandbox workspace-write --ask-for-approval never "-say ok"`
+// (no `--`) fails fast with a clap parse error ("the argument '--sandbox
+// <SANDBOX_MODE>' cannot be used multiple times" — clap re-parsing "-say"
+// as short flags), while the same invocation with `--` inserted before the
+// prompt parses cleanly and only fails later on "stdin is not a terminal"
+// (a runtime TTY issue, not an argument-parsing one) — proof clap accepts
+// `--` as the flags/positionals separator here.
 func (c *Codex) LaunchCommand(spec agent.LaunchSpec) []string {
 	cmd := []string{"codex", "--sandbox", "workspace-write", "--ask-for-approval", "never"}
 
@@ -265,7 +274,7 @@ func (c *Codex) LaunchCommand(spec agent.LaunchSpec) []string {
 	}
 
 	if spec.FirstMessage != "" {
-		cmd = append(cmd, spec.FirstMessage)
+		cmd = append(cmd, "--", spec.FirstMessage)
 	}
 
 	return cmd

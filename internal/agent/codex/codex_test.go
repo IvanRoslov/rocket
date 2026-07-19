@@ -62,7 +62,31 @@ func TestLaunchCommandFull(t *testing.T) {
 	want := []string{
 		"codex", "--sandbox", "workspace-write", "--ask-for-approval", "never",
 		"-m", "gpt-5-codex",
-		"Help me write a function.",
+		"--", "Help me write a function.",
+	}
+	if len(cmd) != len(want) {
+		t.Fatalf("expected %d args, got %d: %v", len(want), len(cmd), cmd)
+	}
+	for i := range want {
+		if cmd[i] != want[i] {
+			t.Errorf("cmd[%d] = %q, want %q (full: %v)", i, cmd[i], want[i], cmd)
+		}
+	}
+}
+
+func TestLaunchCommandFirstMessageStartingWithDashIsSeparated(t *testing.T) {
+	// A brief starting with "-" must not be parsed as a flag by codex's
+	// clap-based CLI; LaunchCommand must insert a `--` separator before it.
+	c := New()
+	spec := agent.LaunchSpec{
+		WorktreePath: "/tmp/wt",
+		FirstMessage: "-fix the login bug",
+	}
+
+	cmd := c.LaunchCommand(spec)
+	want := []string{
+		"codex", "--sandbox", "workspace-write", "--ask-for-approval", "never",
+		"--", "-fix the login bug",
 	}
 	if len(cmd) != len(want) {
 		t.Fatalf("expected %d args, got %d: %v", len(want), len(cmd), cmd)
