@@ -7,7 +7,7 @@
 
 BIN := bin/rocket
 
-.PHONY: build web-build go-build start stop restart status test clean
+.PHONY: build web-build go-build install start stop restart status test clean
 
 build: web-build go-build
 
@@ -20,6 +20,10 @@ web-build:
 go-build:
 	go build -o $(BIN) ./cmd/rocket
 	git checkout --quiet web/dist/index.html 2>/dev/null || true
+
+# Глобальная команда `rocket`: симлинк на bin/rocket — каждый make build обновляет её автоматически.
+install: build
+	ln -sf $(CURDIR)/$(BIN) /opt/homebrew/bin/rocket
 
 start: build
 	$(BIN) daemon start
