@@ -4,6 +4,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -17,6 +18,9 @@ import (
 	"github.com/IvanRoslov/rocket/internal/api"
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
+	"github.com/IvanRoslov/rocket/internal/ghpoller"
+	"github.com/IvanRoslov/rocket/internal/github"
+	"github.com/IvanRoslov/rocket/internal/heartbeat"
 	"github.com/IvanRoslov/rocket/internal/monitor"
 	"github.com/IvanRoslov/rocket/internal/queue"
 	"github.com/IvanRoslov/rocket/internal/runtime"
@@ -53,8 +57,24 @@ func Run(cfg *config.Config) error {
 	rt := runtime.NewTmux()
 	ws := workspace.New(cfg.WorktreesDir)
 	mgr := session.NewManager(st, b, rt, ws, cfg)
+
+	// Wire up the GitHub token source for session environment injection.
+	// The token is read fresh on each spawn/restore call, so it can be updated
+	// via `rocket github auth` without requiring a daemon restart.
+	mgr.SetTokenSource(func() string {
+		token, err := st.GetSetting("github_token")
+		if err != nil {
+			return ""
+		}
+		return token
+	})
+
 	mon := monitor.New(st, b, rt, cfg, agent.Get)
 	q := queue.New(st, b, rt, cfg, mon.Activity)
+	hb := heartbeat.New(st, b, cfg, mon.Activity, q.Wake)
+	reactions := ghpoller.NewReactions(st, b, q.Wake, mgr, mon.Activity, cfg)
+	defer reactions.Stop()
+	ghp := ghpoller.New(st, b, githubClientFactory(st, cfg), cfg, reactions)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -79,6 +99,9 @@ func Run(cfg *config.Config) error {
 	q.Recover(ctx)
 	go q.Run(ctx)
 
+	go hb.Run(ctx)
+	go ghp.Run(ctx)
+
 	shutdownCalled := make(chan struct{})
 	var shutdownOnce func()
 	shutdownOnce = func() {
@@ -100,12 +123,30 @@ func Run(cfg *config.Config) error {
 		Queue:     q,
 		Shutdown:  shutdownOnce,
 		StartedAt: time.Now(),
+		GH:        githubClientFactory(st, cfg),
 	}
 
 	slog.Info("rocketd starting", "pid", os.Getpid(), "socket", cfg.SocketPath())
 	err = api.Serve(ctx, deps)
 	slog.Info("rocketd stopped")
 	return err
+}
+
+// githubClientFactory returns a func suitable for api.Deps.GH: it reads the
+// GitHub token from settings fresh on every call (so a token saved via
+// `rocket github auth` takes effect without a daemon restart), returning
+// github.ErrNoToken if none is configured.
+func githubClientFactory(st *store.Store, cfg *config.Config) func() (*github.Client, error) {
+	return func() (*github.Client, error) {
+		token, err := st.GetSetting("github_token")
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, github.ErrNoToken
+			}
+			return nil, err
+		}
+		return github.New(cfg.GithubAPIBase, token), nil
+	}
 }
 
 // claimPidFile creates the pid file exclusively, writing this process's pid.

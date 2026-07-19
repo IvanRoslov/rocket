@@ -11,16 +11,21 @@ import (
 
 // Config represents the rocket daemon configuration.
 type Config struct {
-	Port                 int           `yaml:"port"`
-	HeartbeatInterval    time.Duration `yaml:"heartbeat_interval"`
-	GithubPollInterval   time.Duration `yaml:"github_poll_interval"`
-	DefaultAgent         string        `yaml:"default_agent"`
-	ReposDir             string        `yaml:"repos_dir"`
-	WorktreesDir         string        `yaml:"worktrees_dir"`
-	ActivityPollInterval time.Duration `yaml:"activity_poll_interval"`
-	ReadyToIdle          time.Duration `yaml:"ready_to_idle"`
-	QueueTimeout         time.Duration `yaml:"queue_timeout"`
-	Home                 string        `yaml:"-"`
+	Port                      int           `yaml:"port"`
+	HeartbeatInterval         time.Duration `yaml:"heartbeat_interval"`
+	GithubPollInterval        time.Duration `yaml:"github_poll_interval"`
+	DefaultAgent              string        `yaml:"default_agent"`
+	ReposDir                  string        `yaml:"repos_dir"`
+	WorktreesDir              string        `yaml:"worktrees_dir"`
+	ActivityPollInterval      time.Duration `yaml:"activity_poll_interval"`
+	ReadyToIdle               time.Duration `yaml:"ready_to_idle"`
+	QueueTimeout              time.Duration `yaml:"queue_timeout"`
+	WorkerStallThreshold      time.Duration `yaml:"worker_stall_threshold"`
+	QuestionReminderThreshold time.Duration `yaml:"question_reminder_threshold"`
+	GithubAPIBase             string        `yaml:"github_api_base"`
+	GithubCloneBase           string        `yaml:"github_clone_base"`
+	MergeGrace                time.Duration `yaml:"merge_grace"`
+	Home                      string        `yaml:"-"`
 
 	// SocketOverride, when non-empty, takes precedence over the default
 	// <home>/rocket.sock path returned by SocketPath. It is populated from
@@ -57,16 +62,21 @@ func Load(home string) (*Config, error) {
 
 	// Set defaults
 	cfg := &Config{
-		Port:                 4477,
-		HeartbeatInterval:    5 * time.Minute,
-		GithubPollInterval:   2 * time.Minute,
-		DefaultAgent:         "claude-code",
-		ReposDir:             filepath.Join(home, "repos"),
-		WorktreesDir:         filepath.Join(home, "worktrees"),
-		ActivityPollInterval: 5 * time.Second,
-		ReadyToIdle:          5 * time.Minute,
-		QueueTimeout:         30 * time.Minute,
-		Home:                 home,
+		Port:                      4477,
+		HeartbeatInterval:         5 * time.Minute,
+		GithubPollInterval:        2 * time.Minute,
+		DefaultAgent:              "claude-code",
+		ReposDir:                  filepath.Join(home, "repos"),
+		WorktreesDir:              filepath.Join(home, "worktrees"),
+		ActivityPollInterval:      5 * time.Second,
+		ReadyToIdle:               5 * time.Minute,
+		QueueTimeout:              30 * time.Minute,
+		WorkerStallThreshold:      15 * time.Minute,
+		QuestionReminderThreshold: 30 * time.Minute,
+		GithubAPIBase:             "https://api.github.com",
+		GithubCloneBase:           "",
+		MergeGrace:                5 * time.Minute,
+		Home:                      home,
 	}
 
 	// Try to load config.yaml

@@ -2,10 +2,61 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 )
+
+// TestIsTaskID tests digit-detection used by `rocket attach` to distinguish
+// a task id from a session id.
+func TestIsTaskID(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"empty", "", false},
+		{"single digit", "1", true},
+		{"multi digit", "12345", true},
+		{"session id", "demo-orch-a1b2", false},
+		{"leading letter", "a12", false},
+		{"trailing letter", "12a", false},
+		{"negative sign", "-12", false},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isTaskID(tt.in); got != tt.want {
+				t.Errorf("isTaskID(%q) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestAttachUsage tests usage violations for attach.
+func TestAttachUsage(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"no args", []string{}},
+		{"too many args", []string{"a", "b"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newAttachCmd()
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Errorf("expected error for args %v", tt.args)
+			}
+			var usageErr *usageError
+			if !errors.As(err, &usageErr) {
+				t.Errorf("expected usageError, got %T: %v", err, err)
+			}
+		})
+	}
+}
 
 func TestHumanAgeBoundaries(t *testing.T) {
 	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
@@ -64,7 +115,7 @@ func TestRenderSessionsColumnsAndDash(t *testing.T) {
 	renderSessions(sessions, &buf, now)
 	out := buf.String()
 
-	for _, col := range []string{"SESSION", "KIND", "PROJECT", "REPO", "STATE", "ACTIVITY", "AGE"} {
+	for _, col := range []string{"SESSION", "KIND", "PROJECT", "REPO", "STATE", "ACTIVITY", "PR", "CI", "AGE"} {
 		if !strings.Contains(out, col) {
 			t.Errorf("output missing header column %q; got:\n%s", col, out)
 		}
@@ -99,5 +150,61 @@ func TestRenderSessionsColumnsAndDash(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("did not find demo-orch row")
+	}
+}
+
+func TestRenderSessionsWithPRAndCI(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	sessions := []sessionRow{
+		{
+			ID:        "worker-with-pr",
+			Kind:      "worker",
+			ProjectID: "demo",
+			RepoID:    "scratch",
+			State:     "running",
+			Activity:  "editing",
+			PRNumber:  42,
+			PRState:   "open",
+			CIState:   "passing",
+			CreatedAt: now.Add(-5 * time.Minute).Unix(),
+		},
+		{
+			ID:        "worker-no-pr",
+			Kind:      "worker",
+			ProjectID: "demo",
+			RepoID:    "scratch",
+			State:     "running",
+			Activity:  "idle",
+			PRNumber:  0,
+			PRState:   "",
+			CIState:   "",
+			CreatedAt: now.Add(-10 * time.Minute).Unix(),
+		},
+	}
+
+	var buf bytes.Buffer
+	renderSessions(sessions, &buf, now)
+	out := buf.String()
+
+	if !strings.Contains(out, "#42") {
+		t.Errorf("output missing PR #42; got:\n%s", out)
+	}
+	if !strings.Contains(out, "passing") {
+		t.Errorf("output missing CI state passing; got:\n%s", out)
+	}
+
+	// Both should have dashes for missing PR/CI
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	foundNoPR := false
+	for _, l := range lines {
+		if strings.Contains(l, "worker-no-pr") {
+			foundNoPR = true
+			if !strings.Contains(l, "-") {
+				t.Errorf("expected worker-no-pr row to have dash for missing PR; got: %q", l)
+			}
+		}
+	}
+	if !foundNoPR {
+		t.Errorf("did not find worker-no-pr row")
 	}
 }

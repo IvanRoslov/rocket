@@ -3,7 +3,9 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -485,6 +487,82 @@ func TestSpawnEnvMergeAgentOverridesRepo(t *testing.T) {
 	}
 }
 
+func TestSpawnWithParentIDRendersWorkerSystemPrompt(t *testing.T) {
+	m, st, _, _, ws := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	if err := st.AddSession(store.Session{
+		ID: "myfeat-orch", Kind: "orchestrator", ProjectID: "proj1", RepoID: "repo1",
+		FeatureSlug: "myfeat", Agent: "fake", Branch: "orch/myfeat",
+		WorktreePath: "/fake/wt/myfeat-orch", TmuxName: "myfeat-orch", State: "running",
+	}); err != nil {
+		t.Fatalf("seed orchestrator: %v", err)
+	}
+
+	sess, err := m.Spawn(context.Background(), SpawnReq{
+		Project: "proj1", Repo: "repo1", Task: "mytask", Feature: "myfeat",
+		Prompt: "go do it", AgentName: "fake",
+		ParentID: "myfeat-orch", SubtaskID: 7,
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	if sess.ParentID != "myfeat-orch" {
+		t.Errorf("ParentID = %q, want myfeat-orch", sess.ParentID)
+	}
+
+	stored, err := st.GetSession(sess.ID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if stored.ParentID != "myfeat-orch" {
+		t.Errorf("stored ParentID = %q, want myfeat-orch", stored.ParentID)
+	}
+
+	if len(testFakeAgent.setupCalls) != 1 {
+		t.Fatalf("SetupWorkspace calls = %d, want 1", len(testFakeAgent.setupCalls))
+	}
+	spec := testFakeAgent.setupCalls[0]
+	if !strings.Contains(spec.SystemPrompt, "mytask") {
+		t.Errorf("SystemPrompt missing task name: %s", spec.SystemPrompt)
+	}
+	if !strings.Contains(spec.SystemPrompt, "subtask #7") {
+		t.Errorf("SystemPrompt missing subtask id: %s", spec.SystemPrompt)
+	}
+	if !strings.Contains(spec.SystemPrompt, "myfeat-orch") {
+		t.Errorf("SystemPrompt missing parent id: %s", spec.SystemPrompt)
+	}
+	if !strings.Contains(spec.SystemPrompt, "myfeat") {
+		t.Errorf("SystemPrompt missing feature slug: %s", spec.SystemPrompt)
+	}
+	if !strings.Contains(spec.SystemPrompt, ws.createResult.Path) && !strings.Contains(spec.SystemPrompt, "/fake/wt/myfeat-mytask") {
+		t.Errorf("SystemPrompt missing worktree path: %s", spec.SystemPrompt)
+	}
+	// FirstMessage is the raw prompt, not template-rendered.
+	if spec.FirstMessage != "go do it" {
+		t.Errorf("FirstMessage = %q, want raw prompt unchanged", spec.FirstMessage)
+	}
+}
+
+func TestSpawnWithoutParentIDLeavesSystemPromptEmpty(t *testing.T) {
+	m, st, _, _, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+
+	_, err := m.Spawn(context.Background(), SpawnReq{
+		Project: "proj1", Repo: "repo1", Task: "mytask", Feature: "myfeat", AgentName: "fake",
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	if len(testFakeAgent.setupCalls) != 1 {
+		t.Fatalf("SetupWorkspace calls = %d, want 1", len(testFakeAgent.setupCalls))
+	}
+	if testFakeAgent.setupCalls[0].SystemPrompt != "" {
+		t.Errorf("SystemPrompt = %q, want empty when ParentID unset", testFakeAgent.setupCalls[0].SystemPrompt)
+	}
+}
+
 func assertValidationCode(t *testing.T, err error, code string) {
 	t.Helper()
 	var verr *ValidationError
@@ -504,6 +582,20 @@ func seedRunningSession(t *testing.T, st *store.Store, id string) store.Session 
 		ID: id, Kind: "worker", ProjectID: "proj1", RepoID: "repo1",
 		FeatureSlug: "myfeat", Agent: "fake", Branch: "feature/myfeat/mytask",
 		WorktreePath: "/fake/wt/" + id, TmuxName: id, State: "running",
+	}
+	if err := st.AddSession(sess); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+	return sess
+}
+
+func seedErroredSession(t *testing.T, st *store.Store, id string) store.Session {
+	t.Helper()
+	sess := store.Session{
+		ID: id, Kind: "worker", ProjectID: "proj1", RepoID: "repo1",
+		FeatureSlug: "myfeat", Agent: "fake", Branch: "feature/myfeat/mytask",
+		WorktreePath: "/fake/wt/" + id, TmuxName: id, State: "errored",
+		Prompt: "test prompt",
 	}
 	if err := st.AddSession(sess); err != nil {
 		t.Fatalf("AddSession: %v", err)
@@ -731,6 +823,125 @@ func TestRestoreFromErrored(t *testing.T) {
 	if testFakeAgent.launchCalls[len(testFakeAgent.launchCalls)-1].FirstMessage != "" {
 		t.Errorf("restore should launch without FirstMessage")
 	}
+
+	if len(testFakeAgent.setupCalls) != 1 {
+		t.Fatalf("SetupWorkspace calls = %d, want 1", len(testFakeAgent.setupCalls))
+	}
+	if testFakeAgent.setupCalls[0].SessionID != "sess1" {
+		t.Errorf("SetupWorkspace called with SessionID = %q, want sess1", testFakeAgent.setupCalls[0].SessionID)
+	}
+}
+
+// TestRestoreRepopulatesOrchestratorPrompt proves that restoring an
+// orchestrator session whose owning task is still findable (via
+// store.GetTaskBySessionID) relaunches it with the same system prompt
+// Start would have used, plus a short restore notice pointing at the task
+// — instead of the old bare-relaunch behavior (empty system prompt, empty
+// first message) that left a restored orchestrator with no idea what
+// feature or task it owned.
+func TestRestoreRepopulatesOrchestratorPrompt(t *testing.T) {
+	m, st, _, _, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	sess := seedRunningSession(t, st, "orch1")
+	sess.Kind = "orchestrator"
+	sess.State = "errored"
+	if err := st.UpdateSession(sess); err != nil {
+		t.Fatalf("UpdateSession: %v", err)
+	}
+	taskID, err := st.AddTask(store.Task{
+		Title:     "Add ping docs",
+		ProjectID: "proj1",
+		SessionID: "orch1",
+	})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	if err := m.Restore(context.Background(), "orch1"); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	last := testFakeAgent.launchCalls[len(testFakeAgent.launchCalls)-1]
+	if last.SystemPrompt == "" {
+		t.Error("SystemPrompt is empty, want the orchestrator prompt rebuilt from the owning task")
+	}
+	if last.FirstMessage == "" {
+		t.Error("FirstMessage is empty, want a restore notice")
+	}
+	wantSub := fmt.Sprintf("task #%d", taskID)
+	if !strings.Contains(last.FirstMessage, wantSub) {
+		t.Errorf("FirstMessage = %q, want it to mention %q", last.FirstMessage, wantSub)
+	}
+
+	if len(testFakeAgent.setupCalls) != 1 {
+		t.Fatalf("SetupWorkspace calls = %d, want 1", len(testFakeAgent.setupCalls))
+	}
+	setup := testFakeAgent.setupCalls[0]
+	if setup.SessionID != "orch1" {
+		t.Errorf("SetupWorkspace called with SessionID = %q, want orch1", setup.SessionID)
+	}
+	if setup.SystemPrompt == "" {
+		t.Error("SetupWorkspace spec.SystemPrompt is empty, want orchestrator prompt")
+	}
+	if setup.FirstMessage == "" {
+		t.Error("SetupWorkspace spec.FirstMessage is empty, want restore notice")
+	}
+}
+
+// TestRestoreRepopulatesWorkerPrompt proves the same for a worker session:
+// its owning subtask and its original spawn Prompt (persisted on
+// store.Session) are used to rebuild the worker system prompt and to
+// remind it of its original brief.
+func TestRestoreRepopulatesWorkerPrompt(t *testing.T) {
+	m, st, _, _, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	parent := seedRunningSession(t, st, "orch1")
+	parent.Kind = "orchestrator"
+	if err := st.UpdateSession(parent); err != nil {
+		t.Fatalf("UpdateSession parent: %v", err)
+	}
+
+	sess := seedRunningSession(t, st, "worker1")
+	sess.ParentID = "orch1"
+	sess.Prompt = "Create PING.md with the word pong."
+	sess.State = "errored"
+	if err := st.UpdateSession(sess); err != nil {
+		t.Fatalf("UpdateSession: %v", err)
+	}
+	if _, err := st.AddTask(store.Task{
+		Title:     "ping-repo1",
+		ProjectID: "proj1",
+		RepoID:    "repo1",
+		SessionID: "worker1",
+	}); err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	if err := m.Restore(context.Background(), "worker1"); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	last := testFakeAgent.launchCalls[len(testFakeAgent.launchCalls)-1]
+	if last.SystemPrompt == "" {
+		t.Error("SystemPrompt is empty, want the worker prompt rebuilt from the owning subtask")
+	}
+	if !strings.Contains(last.FirstMessage, sess.Prompt) {
+		t.Errorf("FirstMessage = %q, want it to include the original brief %q", last.FirstMessage, sess.Prompt)
+	}
+
+	if len(testFakeAgent.setupCalls) != 1 {
+		t.Fatalf("SetupWorkspace calls = %d, want 1", len(testFakeAgent.setupCalls))
+	}
+	setup := testFakeAgent.setupCalls[0]
+	if setup.SessionID != "worker1" {
+		t.Errorf("SetupWorkspace called with SessionID = %q, want worker1", setup.SessionID)
+	}
+	if setup.SystemPrompt == "" {
+		t.Error("SetupWorkspace spec.SystemPrompt is empty, want worker prompt")
+	}
+	if setup.FirstMessage == "" {
+		t.Error("SetupWorkspace spec.FirstMessage is empty, want restore notice with original brief")
+	}
 }
 
 func TestRestoreRejectedWhenRunningAndAlive(t *testing.T) {
@@ -752,4 +963,436 @@ func TestRestoreUnknownSession(t *testing.T) {
 	m, _, _, _, _ := testManager(t)
 	err := m.Restore(context.Background(), "nope")
 	assertValidationCode(t, err, "session_not_found")
+}
+
+// --- slugFromTitle -------------------------------------------------------
+
+func TestSlugFromTitle(t *testing.T) {
+	cases := []struct {
+		name  string
+		title string
+		want  string
+	}{
+		{"simple", "Add login page", "add-login-page"},
+		{"punctuation", "Fix bug: NPE on save!!", "fix-bug-npe-on"},
+		{"unicode (non-ASCII letters stripped as non-alphanumeric)", "Реализовать OAuth-вход", "oauth"},
+		{"long title truncated to 4 words", "one two three four five six", "one-two-three-four"},
+		{"cap at 40 chars", "aaaaaaaaaa bbbbbbbbbb cccccccccc dddddddddd", "aaaaaaaaaa-bbbbbbbbbb-cccccccccc-ddddddd"},
+		{"leading/trailing punctuation", "  !!!Hello, World???  ", "hello-world"},
+		{"empty falls back to empty string", "", ""},
+		{"only punctuation falls back to empty string", "!!!???---", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := slugFromTitle(tc.title)
+			if got != tc.want {
+				t.Errorf("slugFromTitle(%q) = %q, want %q", tc.title, got, tc.want)
+			}
+			if len(got) > 40 {
+				t.Errorf("slugFromTitle(%q) = %q, longer than 40 chars", tc.title, got)
+			}
+		})
+	}
+}
+
+// --- SpawnOrchestrator ---------------------------------------------------
+
+func TestSpawnOrchestratorHappyPath(t *testing.T) {
+	m, st, b, rt, ws := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	proj, err := st.GetProject("proj1")
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+
+	ch, cancel := b.Subscribe()
+	defer cancel()
+
+	task := store.Task{ID: 42, Title: "Add login page", Description: "Users need to log in.", ProjectID: "proj1"}
+
+	sess, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake")
+	if err != nil {
+		t.Fatalf("SpawnOrchestrator: %v", err)
+	}
+
+	if sess.ID != "add-login-page-orch" {
+		t.Errorf("ID = %q, want add-login-page-orch", sess.ID)
+	}
+	if sess.Kind != "orchestrator" {
+		t.Errorf("Kind = %q, want orchestrator", sess.Kind)
+	}
+	if sess.Branch != "orch/add-login-page" {
+		t.Errorf("Branch = %q, want orch/add-login-page", sess.Branch)
+	}
+	if sess.FeatureSlug != "add-login-page" {
+		t.Errorf("FeatureSlug = %q, want add-login-page", sess.FeatureSlug)
+	}
+	if sess.ProjectID != "proj1" || sess.RepoID != "repo1" {
+		t.Errorf("ProjectID/RepoID = %q/%q, want proj1/repo1", sess.ProjectID, sess.RepoID)
+	}
+	if sess.ParentID != "" {
+		t.Errorf("ParentID = %q, want empty", sess.ParentID)
+	}
+	if sess.State != "running" {
+		t.Errorf("State = %q, want running", sess.State)
+	}
+	if sess.WorktreePath != "/fake/wt/add-login-page-orch" {
+		t.Errorf("WorktreePath = %q", sess.WorktreePath)
+	}
+
+	if len(ws.createCalls) != 1 {
+		t.Fatalf("workspace.Create calls = %d, want 1", len(ws.createCalls))
+	}
+	if ws.createCalls[0].branch != "orch/add-login-page" {
+		t.Errorf("workspace.Create branch = %q, want orch/add-login-page", ws.createCalls[0].branch)
+	}
+
+	if len(testFakeAgent.setupCalls) != 1 {
+		t.Fatalf("SetupWorkspace calls = %d, want 1", len(testFakeAgent.setupCalls))
+	}
+	spec := testFakeAgent.setupCalls[0]
+	if !strings.Contains(spec.SystemPrompt, "add-login-page") {
+		t.Errorf("SystemPrompt missing feature slug: %s", spec.SystemPrompt)
+	}
+	if !strings.Contains(spec.SystemPrompt, "42") {
+		t.Errorf("SystemPrompt missing task id: %s", spec.SystemPrompt)
+	}
+	if !strings.Contains(spec.FirstMessage, "Add login page") {
+		t.Errorf("FirstMessage missing task title: %s", spec.FirstMessage)
+	}
+	if !strings.Contains(spec.FirstMessage, "Users need to log in.") {
+		t.Errorf("FirstMessage missing task description: %s", spec.FirstMessage)
+	}
+
+	if len(rt.created) != 1 {
+		t.Fatalf("runtime.Create calls = %d, want 1", len(rt.created))
+	}
+
+	events := drainEvents(ch)
+	var types []string
+	for _, e := range events {
+		types = append(types, e.Type)
+	}
+	wantOrder := []string{"session.spawned", "session.state_changed"}
+	if len(types) != len(wantOrder) {
+		t.Fatalf("event types = %v, want %v", types, wantOrder)
+	}
+}
+
+func TestSpawnOrchestratorEmptyTitleFallsBackToTaskID(t *testing.T) {
+	m, st, _, _, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	proj, err := st.GetProject("proj1")
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+
+	task := store.Task{ID: 7, Title: "!!!", Description: "d", ProjectID: "proj1"}
+
+	sess, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake")
+	if err != nil {
+		t.Fatalf("SpawnOrchestrator: %v", err)
+	}
+	if sess.ID != "task-7-orch" {
+		t.Errorf("ID = %q, want task-7-orch", sess.ID)
+	}
+	if sess.FeatureSlug != "task-7" {
+		t.Errorf("FeatureSlug = %q, want task-7", sess.FeatureSlug)
+	}
+}
+
+func TestSpawnOrchestratorSlugCollisionGetsSuffix(t *testing.T) {
+	m, st, _, _, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	proj, err := st.GetProject("proj1")
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+
+	// Pre-seed a session already carrying feature_slug "add-login-page"
+	// (from an unrelated worker session, not necessarily an orchestrator).
+	if err := st.AddSession(store.Session{
+		ID: "add-login-page-mytask", Kind: "worker", ProjectID: "proj1", RepoID: "repo1",
+		FeatureSlug: "add-login-page", Agent: "fake", Branch: "feature/add-login-page/mytask",
+		WorktreePath: "/tmp/wt", TmuxName: "add-login-page-mytask", State: "running",
+	}); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+
+	task := store.Task{ID: 1, Title: "Add login page", Description: "d", ProjectID: "proj1"}
+
+	sess, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake")
+	if err != nil {
+		t.Fatalf("SpawnOrchestrator: %v", err)
+	}
+	if sess.ID != "add-login-page-2-orch" {
+		t.Errorf("ID = %q, want add-login-page-2-orch", sess.ID)
+	}
+	if sess.FeatureSlug != "add-login-page-2" {
+		t.Errorf("FeatureSlug = %q, want add-login-page-2", sess.FeatureSlug)
+	}
+}
+
+func TestSpawnOrchestratorAgentUnknown(t *testing.T) {
+	m, st, _, _, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	proj, err := st.GetProject("proj1")
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+
+	task := store.Task{ID: 1, Title: "Add login page", Description: "d", ProjectID: "proj1"}
+
+	_, err = m.SpawnOrchestrator(context.Background(), task, proj, "nope")
+	assertValidationCode(t, err, "agent_unknown")
+}
+
+// --- GitHub Token Injection -----------------------------------------------
+
+func TestSpawnInjectsGHTokenWhenTokenSourceSet(t *testing.T) {
+	m, st, _, rt, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+
+	// Set a token source on the manager
+	m.SetTokenSource(func() string { return "ghp_test_token_123" })
+
+	sess, err := m.Spawn(context.Background(), SpawnReq{
+		Project: "proj1", Repo: "repo1", Task: "mytask", Feature: "myfeat",
+		Prompt: "test", AgentName: "fake",
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	if len(rt.created) != 1 {
+		t.Fatalf("expected 1 runtime.Create call, got %d", len(rt.created))
+	}
+
+	env := rt.created[0].Env
+	if env["GH_TOKEN"] != "ghp_test_token_123" {
+		t.Errorf("GH_TOKEN = %q, want ghp_test_token_123", env["GH_TOKEN"])
+	}
+
+	// Verify session was created
+	if sess.ID != "myfeat-mytask" {
+		t.Errorf("Session ID = %q, want myfeat-mytask", sess.ID)
+	}
+}
+
+func TestSpawnDoesNotInjectGHTokenWhenTokenSourceNil(t *testing.T) {
+	m, st, _, rt, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+
+	// Don't set a token source (it's nil by default)
+
+	sess, err := m.Spawn(context.Background(), SpawnReq{
+		Project: "proj1", Repo: "repo1", Task: "mytask", Feature: "myfeat",
+		Prompt: "test", AgentName: "fake",
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	if len(rt.created) != 1 {
+		t.Fatalf("expected 1 runtime.Create call, got %d", len(rt.created))
+	}
+
+	env := rt.created[0].Env
+	if _, exists := env["GH_TOKEN"]; exists {
+		t.Errorf("GH_TOKEN should not be set, but got %q", env["GH_TOKEN"])
+	}
+
+	// Verify session was created
+	if sess.ID != "myfeat-mytask" {
+		t.Errorf("Session ID = %q, want myfeat-mytask", sess.ID)
+	}
+}
+
+func TestSpawnDoesNotInjectGHTokenWhenTokenSourceReturnsEmpty(t *testing.T) {
+	m, st, _, rt, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+
+	// Set a token source that returns empty string
+	m.SetTokenSource(func() string { return "" })
+
+	sess, err := m.Spawn(context.Background(), SpawnReq{
+		Project: "proj1", Repo: "repo1", Task: "mytask", Feature: "myfeat",
+		Prompt: "test", AgentName: "fake",
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	if len(rt.created) != 1 {
+		t.Fatalf("expected 1 runtime.Create call, got %d", len(rt.created))
+	}
+
+	env := rt.created[0].Env
+	if _, exists := env["GH_TOKEN"]; exists {
+		t.Errorf("GH_TOKEN should not be set, but got %q", env["GH_TOKEN"])
+	}
+
+	// Verify session was created
+	if sess.ID != "myfeat-mytask" {
+		t.Errorf("Session ID = %q, want myfeat-mytask", sess.ID)
+	}
+}
+
+func TestSpawnRespectsRepoEnvGHTokenOverride(t *testing.T) {
+	m, st, _, rt, _ := testManager(t)
+
+	// Add repo with GH_TOKEN already set in its environment
+	if err := st.AddRepo(store.Repo{
+		ID: "repo1", Path: "/tmp/repo1", DefaultBranch: "main",
+		Env: map[string]string{"GH_TOKEN": "ghp_repo_token_xyz"},
+	}); err != nil {
+		t.Fatalf("AddRepo: %v", err)
+	}
+
+	if err := st.AddProject(store.Project{ID: "proj1", Name: "proj1", MainRepo: "repo1"}); err != nil {
+		t.Fatalf("AddProject: %v", err)
+	}
+
+	// Set a token source on the manager
+	m.SetTokenSource(func() string { return "ghp_manager_token_abc" })
+
+	sess, err := m.Spawn(context.Background(), SpawnReq{
+		Project: "proj1", Repo: "repo1", Task: "mytask", Feature: "myfeat",
+		Prompt: "test", AgentName: "fake",
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	if len(rt.created) != 1 {
+		t.Fatalf("expected 1 runtime.Create call, got %d", len(rt.created))
+	}
+
+	env := rt.created[0].Env
+	// Repo env should win
+	if env["GH_TOKEN"] != "ghp_repo_token_xyz" {
+		t.Errorf("GH_TOKEN = %q, want ghp_repo_token_xyz (from repo.Env)", env["GH_TOKEN"])
+	}
+
+	// Verify session was created
+	if sess.ID != "myfeat-mytask" {
+		t.Errorf("Session ID = %q, want myfeat-mytask", sess.ID)
+	}
+}
+
+func TestSpawnOrchestratorInjectsGHToken(t *testing.T) {
+	m, st, _, rt, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	proj, err := st.GetProject("proj1")
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+
+	// Set a token source
+	m.SetTokenSource(func() string { return "ghp_orch_token_456" })
+
+	task := store.Task{ID: 1, Title: "Test task", Description: "d", ProjectID: "proj1"}
+
+	_, err = m.SpawnOrchestrator(context.Background(), task, proj, "fake")
+	if err != nil {
+		t.Fatalf("SpawnOrchestrator: %v", err)
+	}
+
+	if len(rt.created) != 1 {
+		t.Fatalf("expected 1 runtime.Create call, got %d", len(rt.created))
+	}
+
+	env := rt.created[0].Env
+	if env["GH_TOKEN"] != "ghp_orch_token_456" {
+		t.Errorf("GH_TOKEN = %q, want ghp_orch_token_456", env["GH_TOKEN"])
+	}
+}
+
+func TestRestoreInjectsGHToken(t *testing.T) {
+	m, st, _, rt, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	seedErroredSession(t, st, "worker1")
+
+	// Set a token source
+	m.SetTokenSource(func() string { return "ghp_restore_token_789" })
+
+	err := m.Restore(context.Background(), "worker1")
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	if len(rt.created) != 1 {
+		t.Fatalf("expected 1 runtime.Create call, got %d", len(rt.created))
+	}
+
+	env := rt.created[0].Env
+	if env["GH_TOKEN"] != "ghp_restore_token_789" {
+		t.Errorf("GH_TOKEN = %q, want ghp_restore_token_789", env["GH_TOKEN"])
+	}
+}
+
+// --- Complete ----------------------------------------------------------
+
+func TestComplete_TransitionsToDoneAndDestroysWorkspace(t *testing.T) {
+	m, st, b, rt, ws := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	seedRunningSession(t, st, "sess1")
+
+	ch, cancel := b.Subscribe()
+	defer cancel()
+
+	if err := m.Complete(context.Background(), "sess1"); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	stored, err := st.GetSession("sess1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if stored.State != "done" {
+		t.Errorf("State = %q, want done", stored.State)
+	}
+	if len(rt.destroyed) != 1 || rt.destroyed[0] != "sess1" {
+		t.Errorf("runtime.Destroy calls = %v", rt.destroyed)
+	}
+	if len(ws.destroyed) != 1 || ws.destroyed[0] != "sess1" {
+		t.Errorf("workspace.Destroy calls = %v", ws.destroyed)
+	}
+
+	events := drainEvents(ch)
+	if len(events) != 2 {
+		t.Fatalf("events = %d, want 2: %v", len(events), events)
+	}
+	if events[0].Type != "session.state_changed" || events[1].Type != "workspace.cleanup" {
+		t.Errorf("unexpected event types: %v, %v", events[0].Type, events[1].Type)
+	}
+}
+
+func TestComplete_IdempotentOnAlreadyDone(t *testing.T) {
+	m, st, _, rt, ws := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	seedRunningSession(t, st, "sess1")
+
+	if err := m.Complete(context.Background(), "sess1"); err != nil {
+		t.Fatalf("first Complete: %v", err)
+	}
+	destroyedBefore := len(rt.destroyed)
+
+	if err := m.Complete(context.Background(), "sess1"); err != nil {
+		t.Fatalf("second Complete: %v", err)
+	}
+
+	stored, err := st.GetSession("sess1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if stored.State != "done" {
+		t.Errorf("State = %q, want done (unchanged)", stored.State)
+	}
+	if len(rt.destroyed) != destroyedBefore {
+		t.Errorf("runtime.Destroy should not be called again: %v", rt.destroyed)
+	}
+	if len(ws.destroyed) != 2 || ws.destroyed[0] != "sess1" || ws.destroyed[1] != "sess1" {
+		t.Errorf("workspace.Destroy should still run on idempotent Complete: %v", ws.destroyed)
+	}
 }

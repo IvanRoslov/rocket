@@ -13,6 +13,7 @@ import (
 
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
+	"github.com/IvanRoslov/rocket/internal/github"
 	"github.com/IvanRoslov/rocket/internal/monitor"
 	"github.com/IvanRoslov/rocket/internal/queue"
 	"github.com/IvanRoslov/rocket/internal/session"
@@ -35,6 +36,12 @@ type Deps struct {
 	Queue     *queue.Queue
 	Shutdown  func()
 	StartedAt time.Time
+
+	// GH builds a GitHub API client using the currently stored token,
+	// reading it fresh from settings on every call (so a token change takes
+	// effect without a daemon restart). It returns github.ErrNoToken if no
+	// token is configured.
+	GH func() (*github.Client, error)
 }
 
 // NewHandler builds the routed http.Handler for rocket's API.
@@ -59,14 +66,18 @@ func NewHandler(d Deps) http.Handler {
 	})
 
 	registerRepoRoutes(mux, d)
+	registerGithubCatalogRoutes(mux, d)
 	registerProjectRoutes(mux, d)
 	registerSessionRoutes(mux, d)
 	registerTermRoutes(mux, d)
+	registerTaskRoutes(mux, d)
 	registerEventsRoutes(mux, d)
 	registerSSERoutes(mux, d)
 	registerInternalActivityRoutes(mux, d)
 	registerMessageRoutes(mux, d)
 	registerSystemRoutes(mux, d)
+	registerQuestionRoutes(mux, d)
+	registerSettingsRoutes(mux, d)
 
 	// Any /v1 path not matched by a more specific route above is a 404,
 	// rendered in the standard error JSON shape. This is a prefix pattern,

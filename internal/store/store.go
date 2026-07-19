@@ -18,9 +18,10 @@ var migrationsFS embed.FS
 
 // Sentinel errors returned by store DAOs.
 var (
-	ErrNotFound  = errors.New("not found")
-	ErrExists    = errors.New("already exists")
-	ErrRepoInUse = errors.New("repo is in use by a project")
+	ErrNotFound         = errors.New("not found")
+	ErrExists           = errors.New("already exists")
+	ErrRepoInUse        = errors.New("repo is in use by a project")
+	ErrQuestionResolved = errors.New("question already resolved")
 )
 
 // escapeDSNPath percent-encodes special characters in a file path for use in a

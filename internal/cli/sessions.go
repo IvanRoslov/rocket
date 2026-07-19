@@ -22,6 +22,9 @@ type sessionRow struct {
 	RepoID    string `json:"repo_id"`
 	State     string `json:"state"`
 	Activity  string `json:"activity,omitempty"`
+	PRNumber  int    `json:"pr_number,omitempty"`
+	PRState   string `json:"pr_state,omitempty"`
+	CIState   string `json:"ci_state,omitempty"`
 	CreatedAt int64  `json:"created_at"`
 }
 
@@ -79,19 +82,26 @@ func newLsCmd() *cobra.Command {
 }
 
 // renderSessions writes the ls table to w: SESSION, KIND, PROJECT, REPO,
-// STATE, ACTIVITY, AGE. PR/CI columns are omitted until phase 4. Empty
-// activity renders as "-".
+// STATE, ACTIVITY, PR, CI, AGE. Empty activity/PR/CI render as "-".
 func renderSessions(sessions []sessionRow, w io.Writer, now time.Time) {
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	_, _ = tw.Write([]byte("SESSION\tKIND\tPROJECT\tREPO\tSTATE\tACTIVITY\tAGE\n"))
+	_, _ = tw.Write([]byte("SESSION\tKIND\tPROJECT\tREPO\tSTATE\tACTIVITY\tPR\tCI\tAGE\n"))
 	for _, s := range sessions {
 		activity := s.Activity
 		if activity == "" {
 			activity = "-"
 		}
+		pr := "-"
+		if s.PRNumber > 0 {
+			pr = fmt.Sprintf("#%d", s.PRNumber)
+		}
+		ci := s.CIState
+		if ci == "" {
+			ci = "-"
+		}
 		_, _ = tw.Write([]byte(fmt.Sprintf(
-			"%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			s.ID, s.Kind, s.ProjectID, s.RepoID, s.State, activity, humanAge(s.CreatedAt, now),
+			"%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			s.ID, s.Kind, s.ProjectID, s.RepoID, s.State, activity, pr, ci, humanAge(s.CreatedAt, now),
 		)))
 	}
 	_ = tw.Flush()
@@ -116,13 +126,28 @@ func humanAge(unixSec int64, now time.Time) string {
 	}
 }
 
+// isTaskID reports whether s looks like a task id: a non-empty string of
+// ASCII digits. Used by `rocket attach` to distinguish a task id (e.g.
+// "12") from a session id (e.g. "demo-orch-a1b2").
+func isTaskID(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func newAttachCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "attach <session>",
-		Short: "Подключиться к tmux-сессии агента",
+		Use:   "attach <session|task-id>",
+		Short: "Подключиться к tmux-сессии агента (по id сессии или id задачи)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return &usageError{message: "usage: rocket attach <session>"}
+				return &usageError{message: "usage: rocket attach <session|task-id>"}
 			}
 
 			c, _, err := connect(true)
@@ -130,10 +155,22 @@ func newAttachCmd() *cobra.Command {
 				return err
 			}
 
+			sessionID := args[0]
+			if isTaskID(args[0]) {
+				var task taskDetailRow
+				if err := c.Get(apiPath("v1", "tasks", args[0]), nil, &task); err != nil {
+					return err
+				}
+				if task.Session == nil {
+					return fmt.Errorf("task #%s has no session", args[0])
+				}
+				sessionID = task.Session.ID
+			}
+
 			var resp struct {
 				Command []string `json:"command"`
 			}
-			if err := c.Get(apiPath("v1", "sessions", args[0], "attach"), nil, &resp); err != nil {
+			if err := c.Get(apiPath("v1", "sessions", sessionID, "attach"), nil, &resp); err != nil {
 				return err
 			}
 			if len(resp.Command) == 0 {
@@ -162,14 +199,14 @@ func newAttachCmd() *cobra.Command {
 }
 
 func newKillCmd() *cobra.Command {
-	var cleanup bool
+	var cleanup, cascade bool
 
 	cmd := &cobra.Command{
 		Use:   "kill <session>",
 		Short: "Остановить сессию",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return &usageError{message: "usage: rocket kill <session> [--cleanup]"}
+				return &usageError{message: "usage: rocket kill <session> [--cleanup] [--cascade]"}
 			}
 
 			c, _, err := connect(true)
@@ -177,9 +214,16 @@ func newKillCmd() *cobra.Command {
 				return err
 			}
 
-			path := apiPath("v1", "sessions", args[0], "kill")
+			q := url.Values{}
 			if cleanup {
-				path += "?cleanup=true"
+				q.Set("cleanup", "true")
+			}
+			if cascade {
+				q.Set("cascade", "true")
+			}
+			path := apiPath("v1", "sessions", args[0], "kill")
+			if len(q) > 0 {
+				path += "?" + q.Encode()
 			}
 
 			var resp map[string]any
@@ -196,6 +240,7 @@ func newKillCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&cleanup, "cleanup", false, "удалить worktree и tmux-сессию")
+	cmd.Flags().BoolVar(&cascade, "cascade", false, "убить оркестратора вместе со всеми его воркерами")
 	return cmd
 }
 

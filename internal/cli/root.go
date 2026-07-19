@@ -38,6 +38,8 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newDaemonCmd())
 	root.AddCommand(newRepoCmd())
 	root.AddCommand(newProjectCmd())
+	root.AddCommand(newTaskCmd())
+	root.AddCommand(newUpCmd())
 	root.AddCommand(newSpawnCmd())
 	root.AddCommand(newLsCmd())
 	root.AddCommand(newAttachCmd())
@@ -47,6 +49,8 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newLogsCmd())
 	root.AddCommand(newSendCmd())
 	root.AddCommand(newDoctorCmd())
+	root.AddCommand(newStatusCmd())
+	root.AddCommand(newGithubCmd())
 	return root
 }
 
