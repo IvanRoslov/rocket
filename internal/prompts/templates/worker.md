@@ -23,16 +23,22 @@ branch. Nothing more.
 
 ## Workflow (Superpowers is mandatory)
 
+<!-- skills:start -->
 You have the Superpowers skills plugin. Follow it, do not freestyle:
+<!-- skills:end -->
 
 1. Read the brief (your first message) carefully; ask the orchestrator about
    gaps (your "human partner" for any skill that expects one is the
    orchestrator, via rocket send).
+<!-- skills:start -->
 2. Plan: invoke superpowers:writing-plans for the implementation plan.
+<!-- skills:end -->
 3. Implement: superpowers:test-driven-development (or
    superpowers:subagent-driven-development for multi-part plans).
    Commit in small, coherent steps.
+<!-- skills:start -->
 4. Any bug or failing test — superpowers:systematic-debugging before fixes.
+<!-- skills:end -->
 5. Before declaring done — superpowers:verification-before-completion:
    run tests/linters, exercise the change end-to-end.
 6. Open the PR: gh pr create (meaningful title and description, reference
