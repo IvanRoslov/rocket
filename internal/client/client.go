@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -197,12 +198,35 @@ const (
 	autostartTimeout      = 5 * time.Second
 )
 
+// staleDaemonRetryWindow and staleDaemonPollInterval bound how long Connect
+// polls health when the socket is unreachable but the pid file names a
+// still-alive process. That combination is the profile of a daemon that is
+// mid graceful-shutdown (rocketd's shutdown sweep plus socket/pid-file
+// cleanup can take several seconds — see internal/daemon.Run and
+// internal/daemon.WaitForExit), not a crashed one. Racing straight to
+// spawnDaemon in that window just spawns a second daemon that loses the
+// pid-file claim to the still-alive old one and exits immediately,
+// surfacing as "daemon unavailable" (a recurring papercut when `daemon
+// start` runs right after `daemon stop`, e.g. via `make restart`).
+const (
+	staleDaemonRetryWindow  = 10 * time.Second
+	staleDaemonPollInterval = 200 * time.Millisecond
+)
+
 // Connect returns a Client bound to cfg's socket, verifying the daemon is
 // reachable via a health check first. If the daemon is not reachable:
 //   - autostart == false: returns ErrDaemonUnavailable immediately.
-//   - autostart == true: spawns `rocket daemon run` as a detached background
-//     process and polls health until it responds or autostartTimeout elapses,
-//     returning ErrDaemonUnavailable on timeout.
+//   - autostart == true: if the pid file names a still-alive process (the
+//     daemon is likely mid-shutdown), briefly retries the health check
+//     instead of immediately racing it to spawn a competing daemon; once
+//     that process is gone or staleDaemonRetryWindow elapses, spawns
+//     `rocket daemon run` as a detached background process and polls
+//     health until it responds or autostartTimeout elapses, returning
+//     ErrDaemonUnavailable on timeout.
+//
+// A healthy daemon is always detected immediately by the first health
+// check above — none of the stale-daemon tolerance below affects that
+// fast path.
 func Connect(cfg *config.Config, autostart bool) (*Client, error) {
 	c := New(cfg.SocketPath())
 	if healthy(c) {
@@ -210,6 +234,12 @@ func Connect(cfg *config.Config, autostart bool) (*Client, error) {
 	}
 	if !autostart {
 		return nil, ErrDaemonUnavailable
+	}
+
+	if pid, ok := readAlivePid(cfg); ok {
+		if waitForHealthyOrDead(c, pid, staleDaemonRetryWindow) {
+			return c, nil
+		}
 	}
 
 	if err := spawnDaemon(cfg.SocketOverride); err != nil {
@@ -224,6 +254,55 @@ func Connect(cfg *config.Config, autostart bool) (*Client, error) {
 		time.Sleep(autostartPollInterval)
 	}
 	return nil, ErrDaemonUnavailable
+}
+
+// readAlivePid reads cfg's pid file and reports whether it names a
+// currently-alive process. ok is false if the pid file is absent,
+// unparsable, or names a process that is no longer alive.
+func readAlivePid(cfg *config.Config) (pid int, ok bool) {
+	data, err := os.ReadFile(cfg.PidPath())
+	if err != nil {
+		return 0, false
+	}
+	pid, err = strconv.Atoi(string(data))
+	if err != nil {
+		return 0, false
+	}
+	return pid, pidAlive(pid)
+}
+
+// pidAlive reports whether pid refers to a live process, using signal 0
+// (an existence/permission check that delivers no actual signal) — the
+// same semantics internal/daemon uses to detect a stale pid file.
+func pidAlive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	if err == nil {
+		return true
+	}
+	if err == syscall.ESRCH {
+		return false
+	}
+	// EPERM (or anything else): the process exists but we can't signal it,
+	// treat as alive to be conservative.
+	return true
+}
+
+// waitForHealthyOrDead polls c's health endpoint until it responds healthy
+// (returns true), or pid is no longer alive (returns false, so the caller
+// can move on to spawning a replacement without waiting out the rest of
+// timeout), or timeout elapses (returns false).
+func waitForHealthyOrDead(c *Client, pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if healthy(c) {
+			return true
+		}
+		if !pidAlive(pid) {
+			return false
+		}
+		time.Sleep(staleDaemonPollInterval)
+	}
+	return false
 }
 
 func healthy(c *Client) bool {

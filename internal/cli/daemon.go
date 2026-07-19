@@ -58,7 +58,7 @@ func newDaemonStopCmd() *cobra.Command {
 		Use:   "stop",
 		Short: "Остановить rocketd",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, _, err := connect(false)
+			c, cfg, err := connect(false)
 			if err != nil {
 				if errors.Is(err, client.ErrDaemonUnavailable) {
 					cmd.Println("not running")
@@ -66,8 +66,17 @@ func newDaemonStopCmd() *cobra.Command {
 				}
 				return err
 			}
+			// Capture the pid before requesting shutdown: the daemon
+			// removes its pid file as part of the shutdown it's about to
+			// start, so we won't be able to read it afterwards.
+			pid, pidErr := daemon.ReadPid(cfg)
 			if err := c.Post("/v1/shutdown", nil, nil); err != nil {
 				return err
+			}
+			if pidErr == nil {
+				if err := daemon.WaitForExit(pid, daemon.StopWaitTimeout); err != nil {
+					return fmt.Errorf("daemon did not exit cleanly: %w", err)
+				}
 			}
 			cmd.Println("stopped")
 			return nil

@@ -3,6 +3,7 @@ package daemon
 import (
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -176,6 +177,80 @@ func TestRunFailsWhenAlreadyRunning(t *testing.T) {
 
 	if err := Run(cfg); err == nil {
 		t.Fatal("expected second Run to fail, got nil")
+	}
+}
+
+func TestReadPid(t *testing.T) {
+	home := shortHomeDir(t)
+	cfg := &config.Config{Home: home}
+
+	if _, err := ReadPid(cfg); err == nil {
+		t.Fatal("expected an error reading a missing pid file")
+	} else if !os.IsNotExist(err) {
+		t.Errorf("expected os.IsNotExist, got %v", err)
+	}
+
+	if err := os.WriteFile(cfg.PidPath(), []byte("4242"), 0600); err != nil {
+		t.Fatalf("write pid file: %v", err)
+	}
+	pid, err := ReadPid(cfg)
+	if err != nil {
+		t.Fatalf("ReadPid: %v", err)
+	}
+	if pid != 4242 {
+		t.Errorf("ReadPid = %d, want 4242", pid)
+	}
+
+	if err := os.WriteFile(cfg.PidPath(), []byte("not-a-pid"), 0600); err != nil {
+		t.Fatalf("write malformed pid file: %v", err)
+	}
+	if _, err := ReadPid(cfg); err == nil {
+		t.Fatal("expected an error parsing a malformed pid file")
+	}
+}
+
+// TestWaitForExitReturnsOnceProcessExits proves WaitForExit unblocks
+// promptly once the pid it's tracking actually dies, rather than always
+// waiting out its full timeout — this is what lets `rocket daemon stop`
+// return as soon as rocketd's graceful sweep finishes instead of a fixed
+// sleep.
+func TestWaitForExitReturnsOnceProcessExits(t *testing.T) {
+	cmd := exec.Command("sleep", "2")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+	pid := cmd.Process.Pid
+
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	start := time.Now()
+	if err := WaitForExit(pid, 5*time.Second); err != nil {
+		t.Fatalf("WaitForExit: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("WaitForExit took too long to notice process exit: %s", elapsed)
+	}
+}
+
+// TestWaitForExitTimesOutWhileProcessAlive proves `daemon stop` surfaces a
+// clear error rather than hanging forever if the daemon never actually
+// exits.
+func TestWaitForExitTimesOutWhileProcessAlive(t *testing.T) {
+	cmd := exec.Command("sleep", "5")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	if err := WaitForExit(cmd.Process.Pid, 200*time.Millisecond); err == nil {
+		t.Fatal("expected a timeout error, got nil")
 	}
 }
 

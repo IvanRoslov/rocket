@@ -153,6 +153,55 @@ func githubClientFactory(st *store.Store, cfg *config.Config) func() (*github.Cl
 	}
 }
 
+// stopWaitPollInterval bounds how often WaitForExit re-checks pid liveness.
+const stopWaitPollInterval = 100 * time.Millisecond
+
+// StopWaitTimeout bounds how long `rocket daemon stop` (via WaitForExit)
+// waits for a daemon to actually exit after POST /v1/shutdown succeeds,
+// before giving up and reporting an error.
+const StopWaitTimeout = 15 * time.Second
+
+// ReadPid reads and parses cfg's pid file. It returns an error (satisfying
+// os.IsNotExist when the file is missing, e.g. no daemon has ever run
+// against this home) if the pid file can't be read or its contents aren't a
+// valid pid.
+func ReadPid(cfg *config.Config) (int, error) {
+	data, err := os.ReadFile(cfg.PidPath())
+	if err != nil {
+		return 0, err
+	}
+	pid, err := strconv.Atoi(string(data))
+	if err != nil {
+		return 0, fmt.Errorf("parse pid file %s: %w", cfg.PidPath(), err)
+	}
+	return pid, nil
+}
+
+// WaitForExit polls pid (using the same kill(pid, 0) liveness check
+// claimPidFile uses to detect a stale pid file) until it is no longer
+// alive, returning nil. If pid is still alive once timeout elapses, it
+// returns an error.
+//
+// `rocket daemon stop` calls this after POST /v1/shutdown succeeds: the
+// shutdown handler responds to the client before Run's graceful sweep and
+// socket/pid-file cleanup actually finish (see Run and api.Serve), so
+// without waiting here, a `daemon start` launched immediately after `stop`
+// returns can race a socket/pid file that hasn't been removed yet and fail
+// with "daemon unavailable" (this was a recurring papercut with `make
+// restart`, which used to paper over it with a fixed `sleep 2`).
+func WaitForExit(pid int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if !processAlive(pid) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("daemon (pid %d) did not exit within %s", pid, timeout)
+		}
+		time.Sleep(stopWaitPollInterval)
+	}
+}
+
 // claimPidFile creates the pid file exclusively, writing this process's pid.
 // If a pid file already exists, it checks whether that pid is alive: if so,
 // it's a genuine conflict; if not, the stale file is removed and the claim

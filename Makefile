@@ -36,9 +36,9 @@ start: build
 stop:
 	$(BIN) daemon stop 2>/dev/null || { [ -x $(BIN) ] || go build -o $(BIN) ./cmd/rocket; $(BIN) daemon stop; }
 
-# пауза: сразу после stop сокет ещё зачищается и start может увидеть «daemon unavailable»
+# `daemon stop` blocks until rocketd has actually exited (see internal/daemon.WaitForExit),
+# so start can run right after without racing a socket/pid file that hasn't been cleaned up yet.
 restart: stop
-	sleep 2
 	$(MAKE) start
 
 status:
