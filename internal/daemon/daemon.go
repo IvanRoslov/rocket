@@ -56,6 +56,18 @@ func Run(cfg *config.Config) error {
 	rt := runtime.NewTmux()
 	ws := workspace.New(cfg.WorktreesDir)
 	mgr := session.NewManager(st, b, rt, ws, cfg)
+
+	// Wire up the GitHub token source for session environment injection.
+	// The token is read fresh on each spawn/restore call, so it can be updated
+	// via `rocket github auth` without requiring a daemon restart.
+	mgr.SetTokenSource(func() string {
+		token, err := st.GetSetting("github_token")
+		if err != nil {
+			return ""
+		}
+		return token
+	})
+
 	mon := monitor.New(st, b, rt, cfg, agent.Get)
 	q := queue.New(st, b, rt, cfg, mon.Activity)
 	hb := heartbeat.New(st, b, cfg, mon.Activity, q.Wake)

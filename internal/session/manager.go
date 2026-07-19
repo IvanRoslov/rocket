@@ -78,11 +78,41 @@ type Manager struct {
 	// workspace state at a time") beat the complexity of per-id locks.
 	// Revisit if contention becomes a real bottleneck.
 	mu sync.Mutex
+
+	// getToken is an optional function that returns the GitHub token to be
+	// injected into session environments. If nil or returns empty string, no
+	// token is injected.
+	getToken func() string
 }
 
 // NewManager builds a Manager wired to the given dependencies.
 func NewManager(st *store.Store, b *bus.Bus, rt runtime.Runtime, ws workspace.Workspace, cfg *config.Config) *Manager {
 	return &Manager{st: st, bus: b, rt: rt, ws: ws, cfg: cfg}
+}
+
+// SetTokenSource sets the function used to retrieve the GitHub token for
+// session environments. If f is nil or returns an empty string, no GH_TOKEN
+// will be injected into session environments.
+func (m *Manager) SetTokenSource(f func() string) {
+	m.getToken = f
+}
+
+// injectToken adds the GitHub token to the environment map if a token source
+// is configured and returns a non-empty token. It does not override GH_TOKEN
+// if it's already present in the environment (repo.Env takes precedence).
+func (m *Manager) injectToken(env map[string]string) {
+	// Don't inject if already set by repo config or if no token source
+	if _, exists := env["GH_TOKEN"]; exists {
+		return
+	}
+	if m.getToken == nil {
+		return
+	}
+
+	token := m.getToken()
+	if token != "" {
+		env["GH_TOKEN"] = token
+	}
 }
 
 // Spawn validates req, reserves a session name/branch, persists the session,
@@ -238,6 +268,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 	}
 
 	env := mergeEnv(repo.Env, ag.Env(spec))
+	m.injectToken(env)
 	cmd := shellJoin(ag.LaunchCommand(spec))
 
 	if _, err := m.rt.Create(ctx, runtime.CreateSpec{
@@ -424,6 +455,7 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 	}
 
 	env := mergeEnv(repo.Env, ag.Env(spec))
+	m.injectToken(env)
 	cmd := shellJoin(ag.LaunchCommand(spec))
 
 	if _, err := m.rt.Create(ctx, runtime.CreateSpec{
@@ -633,6 +665,7 @@ func (m *Manager) Restore(ctx context.Context, id string) error {
 	}
 
 	env := mergeEnv(repo.Env, ag.Env(spec))
+	m.injectToken(env)
 	cmd := shellJoin(ag.LaunchCommand(spec))
 
 	if _, err := m.rt.Create(ctx, runtime.CreateSpec{
