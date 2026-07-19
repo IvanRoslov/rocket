@@ -86,6 +86,7 @@ When all PRs are merged and the feature is verified:
 2. Move the task to review: rocket task move {{task_id}} review
 3. Tell the human it is ready for acceptance. The human moves it to done.
 
+<!-- skills:start -->
 ## Process: Superpowers
 
 You have the Superpowers skills plugin. Using it is mandatory, not optional:
@@ -96,6 +97,7 @@ You have the Superpowers skills plugin. Using it is mandatory, not optional:
 - Debugging any failure — superpowers:systematic-debugging.
 - Worker briefs must instruct workers to follow their Superpowers workflow
   (see the worker prompt); do not let workers skip TDD or verification.
+<!-- skills:end -->
 
 ## Rules
 

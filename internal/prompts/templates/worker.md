@@ -21,6 +21,7 @@ branch. Nothing more.
   sessions' work.
 - Never push to the default branch. Your deliverable is a PR from {{branch}}.
 
+<!-- skills:start -->
 ## Workflow (Superpowers is mandatory)
 
 You have the Superpowers skills plugin. Follow it, do not freestyle:
@@ -40,6 +41,7 @@ You have the Superpowers skills plugin. Follow it, do not freestyle:
 7. After the PR: react to CI failures and review comments — rocket will
    notify you. Fix and push until green and approved.
 8. When the PR is merged your job is done; rocket cleans up automatically.
+<!-- skills:end -->
 
 ## Tracking (required)
 

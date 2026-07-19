@@ -74,8 +74,38 @@ func Render(home, name string, v Vars) (string, error) {
 	}
 	replacer := strings.NewReplacer(pairs...)
 	result := replacer.Replace(content)
+	result = StripMarkers(result)
 
 	return result, nil
+}
+
+// skillsBlockRe matches a "<!-- skills:start -->" ... "<!-- skills:end -->" block,
+// including the marker lines themselves and the trailing newline after each marker.
+var skillsBlockRe = regexp.MustCompile(`(?s)<!-- skills:start -->\n.*?<!-- skills:end -->\n?`)
+
+// markerLineRe matches a single skills marker line (start or end), including its
+// trailing newline.
+var markerLineRe = regexp.MustCompile(`(?m)^<!-- skills:(?:start|end) -->\n?`)
+
+// tripleBlankRe collapses runs of 3+ consecutive newlines down to 2 (i.e. a single
+// blank line between paragraphs).
+var tripleBlankRe = regexp.MustCompile(`\n{3,}`)
+
+// StripSkills removes every "<!-- skills:start -->" ... "<!-- skills:end -->" block
+// (markers and content included) from text, then collapses the blank lines left
+// behind so the result reads as coherent prose with no more than one blank line
+// between paragraphs.
+func StripSkills(text string) string {
+	stripped := skillsBlockRe.ReplaceAllString(text, "")
+	stripped = tripleBlankRe.ReplaceAllString(stripped, "\n\n")
+	return stripped
+}
+
+// StripMarkers removes bare "<!-- skills:start -->" / "<!-- skills:end -->" marker
+// lines from text without touching the content between them. Render always applies
+// this so marker lines never leak into a rendered prompt, regardless of runtime.
+func StripMarkers(text string) string {
+	return markerLineRe.ReplaceAllString(text, "")
 }
 
 // Names returns the sorted list of available template names.

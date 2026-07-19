@@ -294,3 +294,113 @@ func TestRenderValueWithLiteralPlaceholder(t *testing.T) {
 		t.Error("task_title not properly substituted")
 	}
 }
+
+func TestRenderContainsNoMarkerLines(t *testing.T) {
+	vars := completeVars()
+
+	for _, name := range Names() {
+		t.Run(name, func(t *testing.T) {
+			result, err := Render("", name, vars)
+			if err != nil {
+				t.Fatalf("Render failed: %v", err)
+			}
+			if strings.Contains(result, "<!-- skills:start -->") || strings.Contains(result, "<!-- skills:end -->") {
+				t.Errorf("rendered %q output contains skills marker lines:\n%s", name, result)
+			}
+		})
+	}
+}
+
+func TestRenderWorkerAndOrchestratorStillReferenceSuperpowers(t *testing.T) {
+	// Sanity check: the (non-stripped, claude-code) render still carries the
+	// Superpowers content between the markers -- only the marker lines themselves
+	// are removed by Render.
+	vars := completeVars()
+
+	for _, name := range []string{"orchestrator", "worker"} {
+		result, err := Render("", name, vars)
+		if err != nil {
+			t.Fatalf("Render(%q) failed: %v", name, err)
+		}
+		if !strings.Contains(result, "Superpowers") {
+			t.Errorf("Render(%q) should still contain Superpowers content (markers only strip for codex via StripSkills)", name)
+		}
+	}
+}
+
+// rawTemplate reads the embedded, unrendered template source for name, so tests
+// can exercise StripSkills against the marker-delimited source text directly
+// (Render itself only removes bare marker lines, never whole skills blocks).
+func rawTemplate(t *testing.T, name string) string {
+	t.Helper()
+	data, err := templates.ReadFile(filepath.Join("templates", name+".md"))
+	if err != nil {
+		t.Fatalf("failed to read embedded template %q: %v", name, err)
+	}
+	return string(data)
+}
+
+func TestStripSkillsRemovesOrchestratorBlock(t *testing.T) {
+	raw := rawTemplate(t, "orchestrator")
+	stripped := StripSkills(raw)
+
+	if strings.Contains(stripped, "<!-- skills:start -->") || strings.Contains(stripped, "<!-- skills:end -->") {
+		t.Error("StripSkills left marker lines behind")
+	}
+	if strings.Contains(stripped, "Superpowers") || strings.Contains(stripped, "superpowers:") {
+		t.Errorf("StripSkills left Superpowers content behind:\n%s", stripped)
+	}
+	// The rest of the template must survive intact and coherent.
+	if !strings.Contains(stripped, "## Rules") {
+		t.Error("StripSkills should not remove content outside the skills block")
+	}
+	if !strings.Contains(stripped, "## Finishing") {
+		t.Error("StripSkills should not remove content outside the skills block")
+	}
+	if strings.Contains(stripped, "\n\n\n") {
+		t.Error("StripSkills should collapse blank lines left behind by a removed block")
+	}
+}
+
+func TestStripSkillsRemovesWorkerBlock(t *testing.T) {
+	raw := rawTemplate(t, "worker")
+	stripped := StripSkills(raw)
+
+	if strings.Contains(stripped, "<!-- skills:start -->") || strings.Contains(stripped, "<!-- skills:end -->") {
+		t.Error("StripSkills left marker lines behind")
+	}
+	if strings.Contains(stripped, "Superpowers") || strings.Contains(stripped, "superpowers:") {
+		t.Errorf("StripSkills left Superpowers content behind:\n%s", stripped)
+	}
+	// Surrounding sections must remain, and remain coherent (headings intact).
+	if !strings.Contains(stripped, "## Ground rules") {
+		t.Error("StripSkills should not remove content outside the skills block")
+	}
+	if !strings.Contains(stripped, "## Tracking (required)") {
+		t.Error("StripSkills should not remove content outside the skills block")
+	}
+	if !strings.Contains(stripped, "## Reporting") {
+		t.Error("StripSkills should not remove content outside the skills block")
+	}
+	if strings.Contains(stripped, "\n\n\n") {
+		t.Error("StripSkills should collapse blank lines left behind by a removed block")
+	}
+}
+
+func TestStripSkillsNoOpWithoutMarkers(t *testing.T) {
+	raw := rawTemplate(t, "kickoff")
+	stripped := StripSkills(raw)
+
+	if stripped != raw {
+		t.Error("StripSkills should be a no-op on text without any skills markers")
+	}
+}
+
+func TestStripMarkersOnlyRemovesMarkerLines(t *testing.T) {
+	text := "before\n<!-- skills:start -->\nkept content\n<!-- skills:end -->\nafter\n"
+	got := StripMarkers(text)
+	want := "before\nkept content\nafter\n"
+	if got != want {
+		t.Errorf("StripMarkers() = %q, want %q", got, want)
+	}
+}
