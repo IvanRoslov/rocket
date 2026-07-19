@@ -83,3 +83,14 @@
 **Files:** docs/testing/phase-4-live-github.md (права fine-grained PAT: Contents:read, Pull requests:read, Checks:read; classic — scope repo), internal/cli/doctor.go (+строка: github token set/absent через GET /v1/settings при живом демоне).
 
 - [ ] Commit: `docs+doctor: github token permission requirements`.
+
+### Дополнение к Task 7 (фидбек «сессии воркеров не убиты»)
+
+- Гейт review дополнительно проверяет ЖИВЫХ воркеров фичи (sessions kind=worker, parent=оркестратор задачи, state spawning|running): есть → тот же 409 (поле `live_workers:[ids]`), `--force` пропускает.
+- orchestrator.md Finishing — явная последовательность: 1) PR слит и проверен → сразу `task move <subtask> done`; 2) все подзадачи done → `rocket kill <worker> --cleanup` каждого; 3) `rocket status <slug>` и `tmux ls` пусты; 4) отчёт → `task move <id> review`. Плюс строка в Monitoring: «Verify merges by CONTENT (`git diff origin/main HEAD` empty), not by commit lists — squash merges hide original commits.»
+
+### Task 9: Тесты демона — эфемерный порт (env-коллизия)
+
+**Root cause:** internal/daemon тесты биндят дефолтный порт 4477; при живом пользовательском демоне порт занят → все Run-тесты падают «not healthy in 3s».
+- Fix: тестовый конфиг демона выбирает свободный порт (net.Listen("tcp","127.0.0.1:0") → закрыть → использовать номер; или Port:0 с поддержкой в api.Serve отдавать фактический — проще первый вариант, помеха-гонка приемлема в тестах).
+- [ ] Commit: `test(daemon): use ephemeral port to avoid collision with live daemon`.
