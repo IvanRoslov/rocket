@@ -1,0 +1,211 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { api } from './client'
+import { useServers } from '../servers/ServerContext'
+import type {
+  Health,
+  Message,
+  Project,
+  Question,
+  Repo,
+  Session,
+  Settings,
+  SystemInfo,
+  Task,
+  TaskDetail,
+  TaskDoc,
+  TaskLogEntry,
+} from './types'
+
+/** Base URL of the active server; components behind the servers screen can assume it exists. */
+export function useBaseUrl(): string {
+  const { baseUrl } = useServers()
+  return baseUrl ?? 'http://127.0.0.1:4477'
+}
+
+export function useHealth(baseUrl: string, enabled = true) {
+  return useQuery({
+    queryKey: [baseUrl, 'health'],
+    queryFn: () => api.get<Health>(baseUrl, '/v1/health'),
+    enabled,
+    refetchInterval: 7000,
+    retry: false,
+  })
+}
+
+export function useProjects() {
+  const baseUrl = useBaseUrl()
+  return useQuery({
+    queryKey: [baseUrl, 'projects'],
+    queryFn: () => api.get<Project[]>(baseUrl, '/v1/projects'),
+    refetchInterval: 5000,
+  })
+}
+
+export function useRepos() {
+  const baseUrl = useBaseUrl()
+  return useQuery({
+    queryKey: [baseUrl, 'repos'],
+    queryFn: () => api.get<Repo[]>(baseUrl, '/v1/repos'),
+    refetchInterval: 15000,
+  })
+}
+
+export function useSessions(project?: string) {
+  const baseUrl = useBaseUrl()
+  const qs = project ? `?project=${encodeURIComponent(project)}` : ''
+  return useQuery({
+    queryKey: [baseUrl, 'sessions', project ?? 'all'],
+    queryFn: () => api.get<Session[]>(baseUrl, `/v1/sessions${qs}`),
+    refetchInterval: 5000,
+  })
+}
+
+export function useTasks(project?: string) {
+  const baseUrl = useBaseUrl()
+  const qs = project ? `?project=${encodeURIComponent(project)}` : ''
+  return useQuery({
+    queryKey: [baseUrl, 'tasks', project ?? 'all'],
+    queryFn: async () => (await api.get<{ tasks: Task[] }>(baseUrl, `/v1/tasks${qs}`)).tasks ?? [],
+    refetchInterval: 5000,
+  })
+}
+
+export function useTaskDetail(id: number) {
+  const baseUrl = useBaseUrl()
+  return useQuery({
+    queryKey: [baseUrl, 'task', id],
+    queryFn: () => api.get<TaskDetail>(baseUrl, `/v1/tasks/${id}`),
+    refetchInterval: 3000,
+  })
+}
+
+export function useTaskDocs(id: number, enabled: boolean) {
+  const baseUrl = useBaseUrl()
+  return useQuery({
+    queryKey: [baseUrl, 'task', id, 'docs'],
+    queryFn: async () => (await api.get<{ docs: TaskDoc[] }>(baseUrl, `/v1/tasks/${id}/docs`)).docs ?? [],
+    enabled,
+    refetchInterval: 10000,
+  })
+}
+
+export function useTaskLog(id: number, enabled: boolean) {
+  const baseUrl = useBaseUrl()
+  return useQuery({
+    queryKey: [baseUrl, 'task', id, 'log'],
+    queryFn: async () => (await api.get<{ log: TaskLogEntry[] }>(baseUrl, `/v1/tasks/${id}/log`)).log ?? [],
+    enabled,
+    refetchInterval: 5000,
+  })
+}
+
+export function useTaskQuestions(id: number) {
+  const baseUrl = useBaseUrl()
+  return useQuery({
+    queryKey: [baseUrl, 'task', id, 'questions'],
+    queryFn: async () =>
+      (await api.get<{ questions: Question[] }>(baseUrl, `/v1/tasks/${id}/questions`)).questions ?? [],
+    refetchInterval: 3000,
+  })
+}
+
+export function useMessages(sessionId: string | undefined) {
+  const baseUrl = useBaseUrl()
+  return useQuery({
+    queryKey: [baseUrl, 'messages', sessionId],
+    queryFn: async () =>
+      (await api.get<{ messages: Message[] }>(baseUrl, `/v1/messages?session=${sessionId}&limit=50`)).messages ?? [],
+    enabled: !!sessionId,
+    refetchInterval: 4000,
+  })
+}
+
+export function useSystem() {
+  const baseUrl = useBaseUrl()
+  return useQuery({
+    queryKey: [baseUrl, 'system'],
+    queryFn: () => api.get<SystemInfo>(baseUrl, '/v1/system'),
+    refetchInterval: 5000,
+  })
+}
+
+export function useSettings() {
+  const baseUrl = useBaseUrl()
+  return useQuery({
+    queryKey: [baseUrl, 'settings'],
+    queryFn: () => api.get<Settings>(baseUrl, '/v1/settings'),
+  })
+}
+
+export function useSessionOutput(id: string, lines = 200) {
+  const baseUrl = useBaseUrl()
+  return useQuery({
+    queryKey: [baseUrl, 'output', id],
+    queryFn: () => api.get<{ output: string }>(baseUrl, `/v1/sessions/${id}/output?lines=${lines}`),
+    refetchInterval: 2000,
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Mutations
+// ---------------------------------------------------------------------------
+
+export function useSendMessage() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { to: string; body: string }) => api.post<Message>(baseUrl, '/v1/messages', p),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'messages'] }),
+  })
+}
+
+export function useCreateTask() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { title: string; description?: string; project: string }) =>
+      api.post<Task>(baseUrl, '/v1/tasks', p),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'tasks'] }),
+  })
+}
+
+export function useStartTask() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.post(baseUrl, `/v1/tasks/${id}/start`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'tasks'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'task'] })
+    },
+  })
+}
+
+export function useQuestionReply() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { id: number; body: string }) =>
+      api.post(baseUrl, `/v1/questions/${p.id}/reply`, { body: p.body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'task'] }),
+  })
+}
+
+export function useQuestionAnswer() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { id: number; body: string }) =>
+      api.post(baseUrl, `/v1/questions/${p.id}/answer`, { body: p.body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'task'] }),
+  })
+}
+
+export function useSaveSettings() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { github_token: string }) => api.put<Settings>(baseUrl, '/v1/settings', p),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'settings'] }),
+  })
+}
