@@ -6,7 +6,10 @@ package queue
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +24,12 @@ import (
 // maxAttempts is the total number of delivery attempts (including the
 // first) before a message is given up on and marked failed.
 const maxAttempts = 5
+
+// largeMessageLineThreshold is the line-count cutoff (independent of
+// cfg.LargeMessageThreshold's byte cutoff) above which a message body is
+// treated as "large" and routed via the worktree inbox file instead of
+// direct injection — see prepareText.
+const largeMessageLineThreshold = 20
 
 // defaultBackoff returns the real backoff schedule: 1s, 2s, 4s, 8s, 16s for
 // attempt 1..5 (attempt is 1-based, the number of the attempt that just
@@ -355,7 +364,7 @@ func (q *Queue) waitForReady(ctx context.Context, to string) bool {
 // after maxAttempts.
 func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess store.Session) {
 	handle := runtime.Handle{Name: sess.TmuxName}
-	text := formatBody(msg)
+	text := q.prepareText(msg, sess)
 
 	claimed := false
 	for {
@@ -453,6 +462,90 @@ func formatBody(msg store.Message) string {
 		return "[from " + msg.FromSession + "] " + msg.Body
 	}
 	return msg.Body
+}
+
+// prepareText returns the text to actually inject for msg: the full
+// (sender-prefixed) body for small messages, or — for large messages to a
+// recipient with a worktree — a short pointer to a file holding the full
+// body, written under the recipient's worktree.
+//
+// This exists because injecting large pastes (~6KB+) directly into a TUI's
+// input line intermittently loses them even though injection appears to
+// succeed (see runtime.Inject's settle-pause doc comment for the
+// mechanics). Routing large bodies through a file the recipient reads
+// itself sidesteps the paste path entirely for the risky case, while small
+// messages keep the original (already reliable) direct-injection path
+// unchanged.
+//
+// A message counts as "large" if its body exceeds cfg.LargeMessageThreshold
+// bytes OR has more than largeMessageLineThreshold lines. If writing the
+// inbox file fails for any reason, prepareText logs a warning and falls
+// back to the original full-body injection.
+func (q *Queue) prepareText(msg store.Message, sess store.Session) string {
+	large := len(msg.Body) > q.cfg.LargeMessageThreshold || lineCount(msg.Body) > largeMessageLineThreshold
+	if !large || sess.WorktreePath == "" {
+		return formatBody(msg)
+	}
+
+	relPath, err := writeInboxFile(sess.WorktreePath, msg.ID, msg.Body)
+	if err != nil {
+		slog.Warn("queue: write inbox file failed, falling back to full-body injection", "id", msg.ID, "to", msg.ToSession, "worktree", sess.WorktreePath, "error", err)
+		return formatBody(msg)
+	}
+
+	prefix := ""
+	if msg.FromSession != "" {
+		prefix = "[from " + msg.FromSession + "] "
+	}
+	return prefix + "[large message] Full text written to " + relPath + " — read that file now."
+}
+
+// lineCount returns the number of lines in body (1 for a body with no
+// newlines, 0 for an empty body).
+func lineCount(body string) int {
+	if body == "" {
+		return 0
+	}
+	return strings.Count(body, "\n") + 1
+}
+
+// writeInboxFile writes body to <worktreePath>/.rocket/inbox/msg-<id>.md,
+// creating the inbox directory if needed, and returns the path relative to
+// worktreePath (for use in the pointer message shown to the recipient). The
+// write is atomic (temp file + rename) so a concurrently-reading recipient
+// never observes a partial file. The file is intentionally never deleted —
+// it doubles as delivery history.
+func writeInboxFile(worktreePath string, id int64, body string) (string, error) {
+	dir := filepath.Join(worktreePath, ".rocket", "inbox")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("mkdir inbox dir: %w", err)
+	}
+
+	relPath := filepath.Join(".rocket", "inbox", fmt.Sprintf("msg-%d.md", id))
+	fullPath := filepath.Join(worktreePath, relPath)
+
+	tmp, err := os.CreateTemp(dir, "msg-*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath) // no-op once renamed away
+
+	if _, err := tmp.WriteString(body); err != nil {
+		tmp.Close()
+		return "", fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("close temp file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o644); err != nil {
+		return "", fmt.Errorf("chmod temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, fullPath); err != nil {
+		return "", fmt.Errorf("rename into place: %w", err)
+	}
+
+	return relPath, nil
 }
 
 // markerPresent reports whether the last non-empty line of text is still

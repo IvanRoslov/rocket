@@ -33,11 +33,17 @@ var ErrSubmitUnconfirmed = errors.New("inject: submission unconfirmed after exha
 var nameRE = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 // tmuxRuntime is the tmux-backed implementation of Runtime.
-type tmuxRuntime struct{}
+type tmuxRuntime struct {
+	// settleFn is called with a duration to pause before the first Enter
+	// attempt on a large paste (see the settle-pause comment in Inject).
+	// Defaults to time.Sleep; overridable by tests to observe the call
+	// without actually waiting.
+	settleFn func(time.Duration)
+}
 
 // NewTmux returns a Runtime that manages sessions via the tmux binary.
 func NewTmux() Runtime {
-	return &tmuxRuntime{}
+	return &tmuxRuntime{settleFn: time.Sleep}
 }
 
 func validateName(name string) error {
@@ -259,6 +265,25 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 		return fmt.Errorf("capture baseline: %w", err)
 	}
 	baseCount := nonBlankLineCount(tailLines(trimTrailingBlank(baseline), confirmWindow))
+
+	// Defense-in-depth against a live-production race reproduced 2026-07-19:
+	// Claude Code's TUI can intermittently lose a large paste even though
+	// tmux's paste-buffer injection itself succeeds — the paste appears to
+	// land, but the TUI hasn't finished registering it into its input
+	// buffer by the time Enter arrives, so Enter submits whatever partial
+	// (or empty) state the TUI has registered so far, silently dropping
+	// the rest. Giving the TUI a short settle pause before the first Enter
+	// — scaled by paste size, since larger pastes take proportionally
+	// longer to register — gives it time to catch up. Only worth paying
+	// for pastes long enough that the race is plausible; short injections
+	// are unaffected and get no pause.
+	if n := strings.Count(text, "\n") + 1; n > 20 {
+		settle := 200*time.Millisecond + time.Duration(n)*5*time.Millisecond
+		if settle > 2*time.Second {
+			settle = 2 * time.Second
+		}
+		t.settleFn(settle)
+	}
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if _, _, err := runTmux(ctx, "send-keys", "-t", paneTarget(h.Name), "Enter"); err != nil {

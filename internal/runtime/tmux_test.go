@@ -402,3 +402,100 @@ func TestTmux_InvalidNameRejected(t *testing.T) {
 		t.Fatalf("expected Destroy to reject invalid name")
 	}
 }
+
+// TestTmux_Inject_SettlePauseForLargeText verifies the defense-in-depth
+// settle pause: Inject should invoke settleFn before the first Enter when
+// the injected text has more than 20 lines, and must NOT invoke it for
+// short text, since the pause exists specifically to give a TUI extra time
+// to register a large paste before submission (see Inject's settle-pause
+// comment for the race it guards against).
+func TestTmux_Inject_SettlePauseForLargeText(t *testing.T) {
+	requireTmux(t)
+	ctx := context.Background()
+
+	t.Run("21 lines invokes settleFn", func(t *testing.T) {
+		var calls []time.Duration
+		rt := &tmuxRuntime{settleFn: func(d time.Duration) { calls = append(calls, d) }}
+		name := uniqueName(t, "")
+		h, err := rt.Create(ctx, CreateSpec{Name: name, Dir: t.TempDir(), Command: "cat"})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer rt.Destroy(ctx, h)
+
+		lines := make([]string, 21)
+		for i := range lines {
+			lines[i] = fmt.Sprintf("line %d", i)
+		}
+		text := strings.Join(lines, "\n")
+
+		// The settle pause is invoked before the confirmation/Enter loop,
+		// independent of whether submission is ultimately confirmed; cat
+		// echoes multi-line pastes idiosyncratically (each embedded newline
+		// acts like its own Enter), so don't assert on Inject's error here —
+		// only on whether the pause fired.
+		_ = rt.Inject(ctx, h, text)
+
+		if len(calls) != 1 {
+			t.Fatalf("settleFn called %d times, want 1", len(calls))
+		}
+		want := 200*time.Millisecond + 21*5*time.Millisecond
+		if calls[0] != want {
+			t.Errorf("settle duration = %v, want %v", calls[0], want)
+		}
+	})
+
+	t.Run("5 lines does not invoke settleFn", func(t *testing.T) {
+		var calls []time.Duration
+		rt := &tmuxRuntime{settleFn: func(d time.Duration) { calls = append(calls, d) }}
+		name := uniqueName(t, "")
+		h, err := rt.Create(ctx, CreateSpec{Name: name, Dir: t.TempDir(), Command: "cat"})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer rt.Destroy(ctx, h)
+
+		lines := make([]string, 5)
+		for i := range lines {
+			lines[i] = fmt.Sprintf("line %d", i)
+		}
+		text := strings.Join(lines, "\n")
+
+		_ = rt.Inject(ctx, h, text)
+
+		if len(calls) != 0 {
+			t.Fatalf("settleFn called %d times, want 0", len(calls))
+		}
+	})
+}
+
+// TestTmux_Inject_SettlePauseCappedAt2s verifies the settle pause is capped
+// at 2s even for very large texts.
+func TestTmux_Inject_SettlePauseCappedAt2s(t *testing.T) {
+	requireTmux(t)
+	ctx := context.Background()
+
+	var calls []time.Duration
+	rt := &tmuxRuntime{settleFn: func(d time.Duration) { calls = append(calls, d) }}
+	name := uniqueName(t, "")
+	h, err := rt.Create(ctx, CreateSpec{Name: name, Dir: t.TempDir(), Command: "cat"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer rt.Destroy(ctx, h)
+
+	lines := make([]string, 500) // 200ms + 500*5ms = 2.7s, should cap to 2s
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i)
+	}
+	text := strings.Join(lines, "\n")
+
+	_ = rt.Inject(ctx, h, text)
+
+	if len(calls) != 1 {
+		t.Fatalf("settleFn called %d times, want 1", len(calls))
+	}
+	if calls[0] != 2*time.Second {
+		t.Errorf("settle duration = %v, want capped 2s", calls[0])
+	}
+}

@@ -3,7 +3,10 @@ package queue
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -117,7 +120,7 @@ func newTestQueue(t *testing.T) *testHarness {
 	b := bus.New(st)
 	rt := &fakeRuntime{}
 	ac := newFakeActivity()
-	cfg := &config.Config{QueueTimeout: 30 * time.Minute}
+	cfg := &config.Config{QueueTimeout: 30 * time.Minute, LargeMessageThreshold: 2048}
 
 	q := New(st, b, rt, cfg, ac.get)
 	q.backoff = func(attempt int) time.Duration { return time.Millisecond }
@@ -673,5 +676,203 @@ func TestMarkerPresent(t *testing.T) {
 	}
 	if markerPresent("foo\nbar", "hello") {
 		t.Error("expected marker absent")
+	}
+}
+
+// --- large-message inbox delivery ---
+
+// addRunningSessionAt is like addRunningSession but lets the caller pick a
+// real worktree path (needed for tests that actually write inbox files).
+func (h *testHarness) addRunningSessionAt(t *testing.T, id, worktreePath string, state activity.State) {
+	t.Helper()
+	if err := h.st.AddSession(store.Session{
+		ID: id, Kind: "worker", ProjectID: "p", RepoID: "r", Agent: "claude-code",
+		Branch: "main", WorktreePath: worktreePath, TmuxName: id, State: "running",
+	}); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+	h.ac.set(id, state)
+}
+
+func readInboxFile(t *testing.T, worktreePath string, id int64) string {
+	t.Helper()
+	path := filepath.Join(worktreePath, ".rocket", "inbox", fmt.Sprintf("msg-%d.md", id))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read inbox file %s: %v", path, err)
+	}
+	return string(data)
+}
+
+func TestQueue_LargeBodyDeliveredViaInboxFile(t *testing.T) {
+	h := newTestQueue(t)
+	wt := t.TempDir()
+	h.addRunningSessionAt(t, "recv", wt, activity.Ready)
+
+	body := strings.Repeat("x", 3000) // exceeds LargeMessageThreshold (2048)
+	id, err := h.st.AddMessage(store.Message{ToSession: "recv", FromSession: "orch", Body: body})
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+
+	h.q.Wake("recv")
+
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" }, "large message delivered")
+
+	if got := readInboxFile(t, wt, id); got != body {
+		t.Errorf("inbox file content = %q (len %d), want original body (len %d)", got[:20]+"...", len(got), len(body))
+	}
+
+	calls := h.rt.calls()
+	if len(calls) != 1 {
+		t.Fatalf("calls = %v, want 1", calls)
+	}
+	injected := calls[0]
+	wantPointer := fmt.Sprintf(".rocket/inbox/msg-%d.md", id)
+	if !strings.Contains(injected, wantPointer) {
+		t.Errorf("injected text = %q, want it to contain %q", injected, wantPointer)
+	}
+	if !strings.HasPrefix(injected, "[from orch] ") {
+		t.Errorf("injected text = %q, want [from orch] prefix", injected)
+	}
+	if strings.Contains(injected, body) {
+		t.Error("injected text should not contain the full body")
+	}
+}
+
+func TestQueue_ManyLinesDeliveredViaInboxFile(t *testing.T) {
+	h := newTestQueue(t)
+	wt := t.TempDir()
+	h.addRunningSessionAt(t, "recv", wt, activity.Ready)
+
+	lines := make([]string, 25) // > largeMessageLineThreshold (20), well under byte threshold
+	for i := range lines {
+		lines[i] = "line"
+	}
+	body := strings.Join(lines, "\n")
+
+	id, err := h.st.AddMessage(store.Message{ToSession: "recv", Body: body})
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+
+	h.q.Wake("recv")
+
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" }, "many-line message delivered")
+
+	if got := readInboxFile(t, wt, id); got != body {
+		t.Errorf("inbox file content mismatch: got %d bytes, want %d bytes", len(got), len(body))
+	}
+
+	injected := h.rt.calls()[0]
+	wantPointer := fmt.Sprintf(".rocket/inbox/msg-%d.md", id)
+	if !strings.Contains(injected, wantPointer) {
+		t.Errorf("injected text = %q, want it to contain %q", injected, wantPointer)
+	}
+}
+
+func TestQueue_SmallBodyUnchangedDirectInjection(t *testing.T) {
+	h := newTestQueue(t)
+	wt := t.TempDir()
+	h.addRunningSessionAt(t, "recv", wt, activity.Ready)
+
+	id, err := h.st.AddMessage(store.Message{ToSession: "recv", FromSession: "orch", Body: "hello"})
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+
+	h.q.Wake("recv")
+
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" }, "small message delivered")
+
+	injected := h.rt.calls()[0]
+	if injected != "[from orch] hello" {
+		t.Errorf("injected text = %q, want %q", injected, "[from orch] hello")
+	}
+
+	if _, err := os.Stat(filepath.Join(wt, ".rocket", "inbox")); !os.IsNotExist(err) {
+		t.Errorf("inbox dir should not have been created for a small message, stat err = %v", err)
+	}
+}
+
+func TestQueue_LargeBodyWithoutWorktreeDeliveredInFull(t *testing.T) {
+	h := newTestQueue(t)
+	// No worktree path -> recipient has no worktree.
+	h.addRunningSessionAt(t, "recv", "", activity.Ready)
+
+	body := strings.Repeat("x", 3000)
+	id, err := h.st.AddMessage(store.Message{ToSession: "recv", Body: body})
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+
+	h.q.Wake("recv")
+
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" }, "large message without worktree delivered in full")
+
+	injected := h.rt.calls()[0]
+	if injected != body {
+		t.Errorf("injected text len = %d, want full body len %d (unchanged)", len(injected), len(body))
+	}
+}
+
+func TestQueue_InboxWriteFailureFallsBackToFullBody(t *testing.T) {
+	h := newTestQueue(t)
+	wt := t.TempDir()
+	// Make .rocket a regular file so MkdirAll(".rocket/inbox") fails.
+	if err := os.WriteFile(filepath.Join(wt, ".rocket"), []byte("not a dir"), 0o644); err != nil {
+		t.Fatalf("setup: write blocking file: %v", err)
+	}
+	h.addRunningSessionAt(t, "recv", wt, activity.Ready)
+
+	body := strings.Repeat("x", 3000)
+	id, err := h.st.AddMessage(store.Message{ToSession: "recv", Body: body})
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+
+	h.q.Wake("recv")
+
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" }, "message delivered via fallback despite write failure")
+
+	injected := h.rt.calls()[0]
+	if injected != body {
+		t.Errorf("injected text len = %d, want full body len %d (fallback)", len(injected), len(body))
+	}
+}
+
+func TestQueue_LargeBodyRetryDoesNotCorruptFile(t *testing.T) {
+	h := newTestQueue(t)
+	wt := t.TempDir()
+	h.addRunningSessionAt(t, "recv", wt, activity.Ready)
+
+	// Fail the first Inject attempt (retryable), succeed on the second.
+	h.rt.injectFn = func(idx int, hd runtime.Handle, text string) error {
+		if idx == 0 {
+			return errors.New("transient")
+		}
+		return nil
+	}
+
+	body := strings.Repeat("y", 3000)
+	id, err := h.st.AddMessage(store.Message{ToSession: "recv", Body: body})
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+
+	h.q.Wake("recv")
+
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" }, "large message delivered after retry")
+
+	if n := h.rt.callCount(); n != 2 {
+		t.Fatalf("Inject called %d times, want 2 (one retry)", n)
+	}
+	calls := h.rt.calls()
+	if calls[0] != calls[1] {
+		t.Errorf("retry injected different pointer text: %q vs %q", calls[0], calls[1])
+	}
+
+	if got := readInboxFile(t, wt, id); got != body {
+		t.Errorf("inbox file corrupted after retry: got %d bytes, want %d bytes", len(got), len(body))
 	}
 }

@@ -43,6 +43,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.QueueTimeout != 30*time.Minute {
 		t.Errorf("expected QueueTimeout 30m, got %v", cfg.QueueTimeout)
 	}
+	if cfg.LargeMessageThreshold != 2048 {
+		t.Errorf("expected LargeMessageThreshold 2048, got %d", cfg.LargeMessageThreshold)
+	}
 	if cfg.GithubAPIBase != "https://api.github.com" {
 		t.Errorf("expected GithubAPIBase https://api.github.com, got %q", cfg.GithubAPIBase)
 	}
