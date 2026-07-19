@@ -17,10 +17,9 @@ import type { ChatEntry } from '../../src/api/types'
 import { Markdown } from '../../src/components/Markdown'
 import { useToast } from '../../src/components/Toast'
 import { BackButton, Badge, Dot, MonoText, PrimaryButton } from '../../src/components/ui'
+import { classifyUserEntry } from '../../src/lib/chatDisplay'
 import { ago, sessionBadge, sessionDot } from '../../src/lib/format'
 import { colors, mono, radius } from '../../src/theme'
-
-const LARGE_POINTER = '[large message]'
 
 interface OutgoingMsg {
   msgId: number
@@ -30,6 +29,18 @@ interface OutgoingMsg {
 type Row =
   | { kind: 'entry'; key: string; entry: ChatEntry }
   | { kind: 'outgoing'; key: string; body: string; status: string; reason?: string }
+
+function SystemRow({ label, body }: { label: string; body: string }) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <Pressable style={styles.toolRow} onPress={() => setExpanded((v) => !v)}>
+      <Text style={styles.toolText} numberOfLines={expanded ? undefined : 1}>
+        <Text style={{ color: colors.textMid, fontWeight: '600' }}>⚙ {label} </Text>
+        {body.replace(/\s+/g, ' ')}
+      </Text>
+    </Pressable>
+  )
+}
 
 function EntryBubble({ entry }: { entry: ChatEntry }) {
   if (entry.role === 'tool') {
@@ -42,18 +53,35 @@ function EntryBubble({ entry }: { entry: ChatEntry }) {
       </View>
     )
   }
-  const isUser = entry.role === 'user'
+  if (entry.role === 'user') {
+    const d = classifyUserEntry(entry.text)
+    if (d.kind === 'system') return <SystemRow label={d.label} body={d.body} />
+    if (d.kind === 'agent') {
+      return (
+        <View style={{ alignItems: 'flex-start', marginVertical: 3 }}>
+          <View style={[styles.bubble, { backgroundColor: colors.amberBgSoft, borderColor: colors.amberBorder }]}>
+            <MonoText style={{ fontSize: 11, fontWeight: '600', color: colors.amberDeep, marginBottom: 3 }}>
+              from {d.from}
+            </MonoText>
+            <Markdown>{d.body}</Markdown>
+            {entry.ts > 0 ? <Text style={styles.bubbleMeta}>{ago(entry.ts)}</Text> : null}
+          </View>
+        </View>
+      )
+    }
+    return (
+      <View style={{ alignItems: 'flex-end', marginVertical: 3 }}>
+        <View style={[styles.bubble, { backgroundColor: colors.indigoBg, borderColor: colors.indigoBorder }]}>
+          <Text style={styles.bubbleText}>{entry.text}</Text>
+          {entry.ts > 0 ? <Text style={styles.bubbleMeta}>{ago(entry.ts)}</Text> : null}
+        </View>
+      </View>
+    )
+  }
   return (
-    <View style={{ alignItems: isUser ? 'flex-end' : 'flex-start', marginVertical: 3 }}>
-      <View
-        style={[
-          styles.bubble,
-          isUser
-            ? { backgroundColor: colors.indigoBg, borderColor: colors.indigoBorder }
-            : { backgroundColor: colors.card, borderColor: colors.border, maxWidth: '94%' },
-        ]}
-      >
-        {isUser ? <Text style={styles.bubbleText}>{entry.text}</Text> : <Markdown>{entry.text}</Markdown>}
+    <View style={{ alignItems: 'flex-start', marginVertical: 3 }}>
+      <View style={[styles.bubble, { backgroundColor: colors.card, borderColor: colors.border, maxWidth: '94%' }]}>
+        <Markdown>{entry.text}</Markdown>
         {entry.ts > 0 ? <Text style={styles.bubbleMeta}>{ago(entry.ts)}</Text> : null}
       </View>
     </View>
@@ -72,19 +100,21 @@ export default function ChatScreen() {
   const listRef = useRef<FlatList<Row>>(null)
 
   const canWrite = session?.kind === 'orchestrator' && session.state === 'running'
-  const toolCount = useMemo(() => entries.filter((e) => e.role === 'tool').length, [entries])
+
+  // Tool calls and system-injected user entries (task notifications,
+  // reminders, heartbeats) are noise for the phone view — hidden unless
+  // the header toggle is on.
+  const isNoise = (e: ChatEntry) =>
+    e.role === 'tool' || (e.role === 'user' && classifyUserEntry(e.text).kind === 'system')
+  const hiddenCount = useMemo(() => entries.filter(isNoise).length, [entries])
 
   const rows = useMemo<Row[]>(() => {
     const transcriptUserTexts = new Set(
       entries.filter((e) => e.role === 'user').map((e) => e.text),
     )
     const items: Row[] = entries
-      // The daemon injects a "[large message] …" pointer instead of a big
-      // body; our optimistic bubble keeps the real text, so hide pointers.
-      .filter((e) => !(e.role === 'user' && e.text.startsWith(LARGE_POINTER)))
-      // Tool calls are noise for the phone view; hidden unless toggled on.
       .map((e, i) => ({ e, i }))
-      .filter(({ e }) => showTools || e.role !== 'tool')
+      .filter(({ e }) => showTools || !isNoise(e))
       .map(({ e, i }) => ({ kind: 'entry' as const, key: `e${i}`, entry: e }))
     for (const o of outgoing) {
       // Once the reply shows up in the transcript, the optimistic bubble is
@@ -132,7 +162,7 @@ export default function ChatScreen() {
           style={[styles.toolsToggle, showTools && { backgroundColor: colors.slateBg, borderColor: colors.border }]}
         >
           <Text style={{ fontSize: 11, fontWeight: '600', color: showTools ? colors.textMid : colors.textFaint }}>
-            ⚙ {toolCount}
+            ⚙ {hiddenCount}
           </Text>
         </Pressable>
       </View>
