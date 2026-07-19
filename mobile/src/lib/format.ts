@@ -56,5 +56,5 @@ export function sessionBadge(state: SessionState, activity?: SessionActivity): {
 /** Strip ANSI escape sequences from tmux capture-pane output. */
 export function stripAnsi(s: string): string {
   // eslint-disable-next-line no-control-regex
-  return s.replace(/\[[0-9;?]*[a-zA-Z]|\][^]*|[()][0-9A-B]/g, '')
+  return s.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b[()][0-9A-B]|\x1b/g, '')
 }
