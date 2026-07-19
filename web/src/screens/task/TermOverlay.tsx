@@ -6,7 +6,7 @@
 // accessible the same way.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { TermPanel } from '../../components/TermPanel'
+import { DEFAULT_TERM_FONT_SIZE, TermPanel } from '../../components/TermPanel'
 import './TermOverlay.css'
 
 export interface TermOverlaySession {
@@ -24,11 +24,30 @@ const FOCUSABLE_SELECTOR =
 
 const COPY_FEEDBACK_MS = 2000
 
+/** localStorage key the A−/A+ control persists the chosen terminal font size under. */
+const FONT_SIZE_STORAGE_KEY = 'rocket.term.fontSize'
+const FONT_SIZE_STEP = 1
+const FONT_SIZE_MIN = 12
+const FONT_SIZE_MAX = 20
+
+function loadStoredFontSize(): number {
+  if (typeof window === 'undefined') return DEFAULT_TERM_FONT_SIZE
+  const raw = window.localStorage.getItem(FONT_SIZE_STORAGE_KEY)
+  const parsed = raw ? Number(raw) : NaN
+  if (!Number.isFinite(parsed)) return DEFAULT_TERM_FONT_SIZE
+  return Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, parsed))
+}
+
 export function TermOverlay({ session, onClose }: TermOverlayProps) {
   const panelRef = useRef<HTMLDivElement>(null)
   const previouslyFocusedRef = useRef<HTMLElement | null>(null)
   const [geometry, setGeometry] = useState<{ cols: number; rows: number } | null>(null)
   const [copied, setCopied] = useState(false)
+  const [fontSize, setFontSize] = useState<number>(loadStoredFontSize)
+
+  useEffect(() => {
+    window.localStorage.setItem(FONT_SIZE_STORAGE_KEY, String(fontSize))
+  }, [fontSize])
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -92,6 +111,14 @@ export function TermOverlay({ session, onClose }: TermOverlayProps) {
     setGeometry({ cols, rows })
   }, [])
 
+  function handleShrinkFont() {
+    setFontSize((size) => Math.max(FONT_SIZE_MIN, size - FONT_SIZE_STEP))
+  }
+
+  function handleGrowFont() {
+    setFontSize((size) => Math.min(FONT_SIZE_MAX, size + FONT_SIZE_STEP))
+  }
+
   async function handleCopyAttach() {
     const cmd = `rocket attach ${session.tmux_name}`
     try {
@@ -123,6 +150,26 @@ export function TermOverlay({ session, onClose }: TermOverlayProps) {
           <span className="term-overlay__geometry">
             {geometry ? `${geometry.cols}×${geometry.rows}` : '80×24'}
           </span>
+          <div className="term-overlay__fontsize" role="group" aria-label="Terminal font size">
+            <button
+              type="button"
+              className="term-overlay__fontsize-btn"
+              onClick={handleShrinkFont}
+              disabled={fontSize <= FONT_SIZE_MIN}
+              aria-label="Decrease terminal font size"
+            >
+              A−
+            </button>
+            <button
+              type="button"
+              className="term-overlay__fontsize-btn"
+              onClick={handleGrowFont}
+              disabled={fontSize >= FONT_SIZE_MAX}
+              aria-label="Increase terminal font size"
+            >
+              A+
+            </button>
+          </div>
           <button type="button" className="term-overlay__attach" onClick={handleCopyAttach}>
             attach ⧉
           </button>
@@ -133,7 +180,7 @@ export function TermOverlay({ session, onClose }: TermOverlayProps) {
         {copied && (
           <div className="term-overlay__copied">copied: rocket attach {session.tmux_name}</div>
         )}
-        <TermPanel sessionId={session.id} onResize={handleTermResize} />
+        <TermPanel sessionId={session.id} onResize={handleTermResize} fontSize={fontSize} />
       </div>
     </div>
   )

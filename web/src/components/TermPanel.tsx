@@ -20,7 +20,7 @@
 //     backoff/failure counters reset on the next successful open.
 
 import { FitAddon } from '@xterm/addon-fit'
-import { Terminal } from '@xterm/xterm'
+import { Terminal, type ITheme } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
 import './TermPanel.css'
@@ -30,10 +30,51 @@ export interface TermPanelProps {
   readonly?: boolean
   /** Called whenever the fitted terminal geometry changes (for the overlay header). */
   onResize?: (cols: number, rows: number) => void
+  /** Terminal font size in px (docs/design/SUMMARY.md: 13.5px min). Defaults to DEFAULT_FONT_SIZE. */
+  fontSize?: number
 }
 
 const PING_INTERVAL_MS = 30_000
 const RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000]
+
+/** Default terminal font size (px). Kept above the 13.5px design-doc floor
+ * for readability at the panel widths TermOverlay now targets. */
+export const DEFAULT_TERM_FONT_SIZE = 14
+
+/**
+ * xterm.js `Theme` — a plain object of hex/rgba strings, not CSS custom
+ * properties: xterm renders to canvas, which can't resolve `var(...)` at
+ * paint time, so the palette has to be literal color values here. This is
+ * the single source of truth for the terminal's colors; keep it in sync
+ * with the dark-surface tokens in styles/tokens.css (--dark-surface
+ * #161618, --dark-text-2 #e4e4e7) and docs/design/SUMMARY.md ("терминал:
+ * фон #161618, моно 13.5px, зелёный курсор"). Foreground and the ANSI
+ * "bright" variants are pushed lighter/more saturated than the base tokens
+ * so text and colored output stay legible on the dark background.
+ */
+const TERMINAL_THEME: ITheme = {
+  background: '#161618',
+  foreground: '#d6d6d9',
+  cursor: '#22c55e',
+  cursorAccent: '#161618',
+  selectionBackground: 'rgba(129, 140, 248, 0.35)',
+  black: '#3f3f46',
+  red: '#f87171',
+  green: '#4ade80',
+  yellow: '#fbbf24',
+  blue: '#60a5fa',
+  magenta: '#c084fc',
+  cyan: '#22d3ee',
+  white: '#d6d6d9',
+  brightBlack: '#71717a',
+  brightRed: '#fca5a5',
+  brightGreen: '#86efac',
+  brightYellow: '#fde047',
+  brightBlue: '#93c5fd',
+  brightMagenta: '#d8b4fe',
+  brightCyan: '#67e8f9',
+  brightWhite: '#f4f4f5',
+}
 
 /** Consecutive handshake failures (close before ever opening) before we
  * stop auto-retrying and ask the user to hit Retry. */
@@ -93,13 +134,18 @@ export function encodeResize(cols: number, rows: number): string {
   return JSON.stringify({ type: 'resize', cols, rows })
 }
 
-export function TermPanel({ sessionId, readonly, onResize }: TermPanelProps) {
+export function TermPanel({ sessionId, readonly, onResize, fontSize }: TermPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [banner, setBanner] = useState<Banner>(null)
   // Set by the effect below; the Retry button calls through this ref so a
   // retry reuses the existing terminal/socket machinery instead of
   // re-running the whole effect (which would recreate the xterm instance).
   const retryRef = useRef<() => void>(() => {})
+  // Set by the effect below so the fontSize-follow effect can resize the
+  // live terminal without recreating it (and without being in the main
+  // effect's dependency array, which would tear down the WebSocket).
+  const termRef = useRef<Terminal | null>(null)
+  const fitAddonRef = useRef<FitAddon | null>(null)
 
   // `onResize` is frequently an inline callback recreated on every parent
   // render (e.g. TermOverlay). Keeping only the *latest* value in a ref lets
@@ -119,19 +165,19 @@ export function TermPanel({ sessionId, readonly, onResize }: TermPanelProps) {
     const term = new Terminal({
       convertEol: true,
       fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-      fontSize: 13.5,
-      theme: {
-        background: '#161618',
-        foreground: '#d4d4d8',
-        cursor: '#16a34a',
-        cursorAccent: '#161618',
-      },
+      fontSize: fontSize ?? DEFAULT_TERM_FONT_SIZE,
+      lineHeight: 1.25,
+      fontWeight: 'normal',
+      fontWeightBold: '600',
+      theme: TERMINAL_THEME,
     })
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
     term.open(container)
     fitAddon.fit()
     onResizeRef.current?.(term.cols, term.rows)
+    termRef.current = term
+    fitAddonRef.current = fitAddon
 
     let ws: WebSocket | null = null
     let pingTimer: ReturnType<typeof setInterval> | null = null
@@ -254,13 +300,30 @@ export function TermPanel({ sessionId, readonly, onResize }: TermPanelProps) {
       resizeObserver.disconnect()
       ws?.close()
       term.dispose()
+      termRef.current = null
+      fitAddonRef.current = null
       retryRef.current = () => {}
     }
-    // Intentionally omit `onResize` — it's read via `onResizeRef` above so
-    // that a new callback identity from the parent never tears down and
-    // reopens this WebSocket. Only a real identity/mode change (a different
-    // session, or flipping readonly) should reconnect.
+    // Intentionally omit `onResize` and `fontSize` — `onResize` is read via
+    // `onResizeRef` above, and `fontSize` is applied live by the effect
+    // below, both so their churn never tears down and reopens this
+    // WebSocket. Only a real identity/mode change (a different session, or
+    // flipping readonly) should reconnect.
   }, [sessionId, readonly])
+
+  // Applies a fontSize change to the live terminal without recreating it
+  // (and thus without touching the WebSocket connection). fitAddon.fit()
+  // recomputes cols/rows for the new glyph size and, if they changed, fires
+  // the terminal's onResize handler above — which both updates the overlay
+  // header geometry and sends the WS resize control frame, so this reuses
+  // the existing resize protocol rather than duplicating it.
+  useEffect(() => {
+    const term = termRef.current
+    const fitAddon = fitAddonRef.current
+    if (!term || !fitAddon || fontSize === undefined) return
+    term.options.fontSize = fontSize
+    fitAddon.fit()
+  }, [fontSize])
 
   return (
     <div className="term-panel">

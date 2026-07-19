@@ -11,6 +11,12 @@
 .term-overlay__panel {
   position: relative;
   flex: 1;
+  /* Cap the panel so the terminal lands around ~140-160 cols at 14px mono
+   * on wide screens instead of stretching (and shrinking its font/cols)
+   * to fill the whole viewport. Below this width the panel still fills
+   * the available space, same as before. */
+  max-width: 1220px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   background: var(--dark-surface, #161618);
@@ -49,6 +55,31 @@
 .term-overlay__geometry {
   font: 11.5px var(--font-mono);
   color: var(--text-3, #71717a);
+}
+.term-overlay__fontsize {
+  display: flex;
+  gap: 2px;
+}
+.term-overlay__fontsize-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-btn-sm);
+  background: none;
+  border: 1px solid #3a3a3f;
+  color: var(--text-4, #a1a1aa);
+  font: 600 11px var(--font-mono);
+  cursor: pointer;
+}
+.term-overlay__fontsize-btn:hover:not(:disabled) {
+  color: var(--dark-text, #d4d4d8);
+  border-color: #4a4a50;
+}
+.term-overlay__fontsize-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .term-overlay__attach,
 .term-overlay__close {

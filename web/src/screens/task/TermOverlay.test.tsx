@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TermOverlay } from './TermOverlay'
 
 vi.mock('../../components/TermPanel', () => ({
+  DEFAULT_TERM_FONT_SIZE: 14,
   TermPanel: ({ sessionId }: { sessionId: string }) => (
     <div data-testid="term-panel-stub">term panel for {sessionId}</div>
   ),
@@ -12,6 +13,7 @@ const session = { id: 'sess-1', tmux_name: 'billing-v2-orch' }
 
 afterEach(() => {
   vi.restoreAllMocks()
+  window.localStorage.clear()
 })
 
 describe('TermOverlay', () => {
@@ -63,5 +65,23 @@ describe('TermOverlay', () => {
 
     expect(writeText).toHaveBeenCalledWith('rocket attach billing-v2-orch')
     expect(await screen.findByText('copied: rocket attach billing-v2-orch')).toBeInTheDocument()
+  })
+
+  it('persists the terminal font size to localStorage when A+/A- is clicked', () => {
+    render(<TermOverlay session={session} onClose={() => {}} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /increase terminal font size/i }))
+    expect(window.localStorage.getItem('rocket.term.fontSize')).toBe('15')
+
+    fireEvent.click(screen.getByRole('button', { name: /decrease terminal font size/i }))
+    fireEvent.click(screen.getByRole('button', { name: /decrease terminal font size/i }))
+    expect(window.localStorage.getItem('rocket.term.fontSize')).toBe('13')
+  })
+
+  it('restores a previously stored font size on mount', () => {
+    window.localStorage.setItem('rocket.term.fontSize', '18')
+    render(<TermOverlay session={session} onClose={() => {}} />)
+
+    expect(window.localStorage.getItem('rocket.term.fontSize')).toBe('18')
   })
 })
