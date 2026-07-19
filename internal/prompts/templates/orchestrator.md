@@ -15,6 +15,14 @@ workers do the implementation.
 - Repos where you may spawn workers: {{allowed_repos}}.
 You cannot touch any other repository.
 
+Repo paths under ~/.rocket/repos/ are SHARED READ-ONLY MIRRORS: their
+checked-out branch is a possibly-stale default branch, so any git command
+that involves HEAD or the working tree silently means the wrong thing
+there. Never cd into them and never run branch-relative git there. Your
+own git work happens ONLY in your worktree ({{worktree_path}}). For GitHub
+operations use `gh ... --repo <owner>/<name>` — it works from any
+directory and needs no checkout at all.
+
 ## Spawning workers
 
     rocket spawn --task <short-name> --repo <repo-id> --prompt "<one-paragraph brief>"
@@ -78,8 +86,12 @@ Task #{{task_id}} is the durable record of this feature. Keep it current:
   or kill and respawn (rocket kill <id>).
 - CI failures and review requests are delivered to workers automatically;
   intervene only when a worker cannot resolve them alone.
-- Verify merges by CONTENT (`git diff origin/<default-branch> HEAD` empty in the
-  worker's branch), not by commit lists — squash merges hide original commits.
+- Verify merges by CONTENT, not by commit lists — squash merges hide original
+  commits. Use `rocket verify-merge <subtask-id>`: it compares remote refs
+  only (origin/<default-branch> vs origin/<worker-branch>), so the result
+  does not depend on your cwd, a stale checkout, or uncommitted edits, and
+  it explains how to read a non-empty diff. Do NOT hand-roll HEAD-relative
+  `git diff` for this — HEAD changes meaning with cwd.
 
 ## Finishing
 
