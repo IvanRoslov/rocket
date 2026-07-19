@@ -105,6 +105,32 @@ func (t *tmuxRuntime) Create(ctx context.Context, spec CreateSpec) (Handle, erro
 		return Handle{}, fmt.Errorf("create session %q: %w", spec.Name, err)
 	}
 
+	// Multiple clients (e.g. the web dashboard's term WS attach and a
+	// local `tmux attach`/`rocket attach`) can be attached to the same
+	// session simultaneously — docs/03-daemon-api.md promises that works.
+	// tmux's session-level window-size option controls which single size
+	// the shared window is rendered at when clients disagree; the tmux
+	// default, "latest", snaps the window to whichever client most
+	// recently became active, including a *smaller* one. When that
+	// happens, the window (and everything drawing into it, e.g. a
+	// full-screen TUI) redraws at the smaller size while any other,
+	// larger client's terminal emulator still believes it has the old
+	// (bigger) dimensions — the client never receives escape codes for
+	// the columns/rows outside the new smaller size, so stale content
+	// from the previous, bigger frame is left behind uncleared. That
+	// reads as corrupted, overlapping output. "largest" instead sizes
+	// the window to the biggest attached client, so a smaller client
+	// attaching only crops its own view (standard, harmless tmux
+	// behavior) rather than shrinking everyone else's.
+	// set-option's -t resolves an exact-match "=name" target at the
+	// pane/window level (per tmux's target syntax), which fails here with
+	// "no such window" since window-size is a session-scoped option;
+	// unlike sessionTarget's other callers (send-keys, paste-buffer,
+	// has-session, kill-session), this needs the bare session name.
+	if _, _, err := runTmux(ctx, "set-option", "-t", spec.Name, "window-size", "largest"); err != nil {
+		return Handle{}, fmt.Errorf("set window-size for session %q: %w", spec.Name, err)
+	}
+
 	return Handle{Name: spec.Name}, nil
 }
 

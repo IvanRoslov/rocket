@@ -165,6 +165,35 @@ func TestTmux_ListContainsCreated(t *testing.T) {
 	}
 }
 
+// TestTmux_CreateSetsWindowSizeLargest guards against a regression of the
+// multi-client rendering corruption bug: tmux's default window-size option
+// ("latest") snaps the shared window to whichever attached client most
+// recently became active, even if that client is smaller — shrinking the
+// window out from under any other, larger client without it ever being
+// told, which leaves stale content behind and reads as corrupted,
+// overlapping output. Create must set window-size to "largest" so the
+// window always matches the biggest attached client instead.
+func TestTmux_CreateSetsWindowSizeLargest(t *testing.T) {
+	requireTmux(t)
+	ctx := context.Background()
+	rt := NewTmux()
+
+	name := uniqueName(t, "")
+	h, err := rt.Create(ctx, CreateSpec{Name: name, Dir: t.TempDir(), Command: "cat"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer rt.Destroy(ctx, h)
+
+	out, _, err := runTmux(ctx, "show-options", "-t", name, "window-size")
+	if err != nil {
+		t.Fatalf("show-options window-size: %v", err)
+	}
+	if got := strings.TrimSpace(out); got != "window-size largest" {
+		t.Fatalf("expected window-size largest, got %q", got)
+	}
+}
+
 func TestTmux_DestroyIdempotent(t *testing.T) {
 	requireTmux(t)
 	ctx := context.Background()
