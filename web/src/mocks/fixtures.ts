@@ -9,6 +9,7 @@ import type {
   ChatEntry,
   GithubRepo,
   Message,
+  PendingQuiz,
   Project,
   Question,
   Repo,
@@ -160,7 +161,46 @@ export const sessions: Session[] = [
     created_at: NOW - 2 * DAY,
     updated_at: NOW - 90 * MIN,
   },
+  {
+    id: 's-quiz-demo-orch',
+    kind: 'orchestrator',
+    project_id: 'billing',
+    repo_id: 'api',
+    feature_slug: 'quiz-demo',
+    agent: 'claude',
+    branch: 'feature/quiz-demo',
+    worktree_path: '/home/dev/.rocket/worktrees/quiz-demo-orch',
+    tmux_name: 'quiz-demo-orch',
+    state: 'running',
+    activity: 'blocked',
+    activity_ts: NOW - MIN,
+    created_at: NOW - DAY,
+    updated_at: NOW - MIN,
+    pending_quiz: {
+      questions: [
+        {
+          question: 'Какую стратегию мержа выбрать?',
+          header: 'Мерж',
+          multi_select: false,
+          options: [
+            { label: 'Merge commit', description: 'история сохраняется' },
+            { label: 'Squash', description: 'одним коммитом' },
+          ],
+        },
+        {
+          question: 'Что включить в релиз? (можно несколько)',
+          header: 'Релиз',
+          multi_select: true,
+          options: [{ label: 'Доки' }, { label: 'Миграции' }, { label: 'CLI' }],
+        },
+      ],
+      asked_at: NOW - MIN,
+    },
+  },
 ]
+
+/** Standalone export for tests that want to POST a live-quiz answer without cloning the whole session fixture. */
+export const quizDemoPendingQuiz: PendingQuiz = sessions.find((s) => s.id === 's-quiz-demo-orch')!.pending_quiz!
 
 export const tasks: Task[] = [
   {
@@ -449,6 +489,41 @@ export const chatEntries: Record<string, ChatEntry[]> = {
   ],
   's-billing-v2-w3': [
     { role: 'assistant', text: 'миграция упала на шаге 3, воркер завершён', ts: NOW - 90 * MIN },
+  ],
+  // A closed AskUserQuestion round (docs/13-chat.md «Квиз-раунды в ленте»):
+  // the asking tool entry (`quiz`: raw camelCase tool input) immediately
+  // followed by its `quiz_answer` close (`quiz`: raw answers echo, keyed by
+  // question text).
+  's-quiz-demo-orch': [
+    { role: 'user', text: 'что делаем с релизом?', ts: NOW - 2 * HOUR },
+    {
+      role: 'tool',
+      tool_name: 'AskUserQuestion',
+      text: '{"questions":[{"question":"Какой линтер подключить?","header":"Линтер"...',
+      ts: NOW - 2 * HOUR + 1,
+      quiz: {
+        questions: [
+          {
+            question: 'Какой линтер подключить?',
+            header: 'Линтер',
+            multiSelect: false,
+            options: [
+              { label: 'ESLint', description: 'уже используется в web' },
+              { label: 'Biome', description: 'быстрее' },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      role: 'quiz_answer',
+      text: 'Какой линтер подключить? → ESLint',
+      ts: NOW - 2 * HOUR + 30,
+      quiz: {
+        questions: [{ question: 'Какой линтер подключить?' }],
+        answers: { 'Какой линтер подключить?': 'ESLint' },
+      },
+    },
   ],
 }
 

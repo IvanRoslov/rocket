@@ -14,13 +14,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Markdown } from '../../components/Markdown'
-import { ApiError } from '../../lib/api'
+import { api, ApiError } from '../../lib/api'
 import { classifyUserEntry, fromEntryParts, systemEntryTitle } from '../../lib/classifyUserEntry'
 import { timeAgo } from '../../lib/format'
 import { useMessages, useSendMessage, useSession } from '../../lib/queries'
 import { groupChatEntries, summarizeToolEntry, type GroupableEntry, type ToolGroup } from '../../lib/toolDigest'
 import { useSessionChat } from '../../lib/useSessionChat'
-import type { ChatEntry, ChatSessionRef, MessageStatus } from '../../lib/types'
+import type {
+  ChatEntry,
+  ChatSessionRef,
+  MessageStatus,
+  PendingQuiz,
+  QuizAnswerEcho,
+  QuizToolInput,
+} from '../../lib/types'
 import { Dot, type DotState } from '../../components/Dot'
 import { TermChatSwitch } from '../../components/TermChatSwitch'
 import './ChatScreen.css'
@@ -78,7 +85,13 @@ interface OptimisticMessage {
 
 type FeedItem =
   | { kind: 'entry'; key: string; entry: ChatEntry }
+  | { kind: 'quiz-round'; key: string; tool: ChatEntry; answer: ChatEntry }
   | { kind: 'optimistic'; key: string; msg: OptimisticMessage }
+
+/** True for a `role:"tool"` entry that's the asking half of an AskUserQuestion round (docs/13-chat.md). */
+function isQuizAskEntry(e: ChatEntry): boolean {
+  return e.role === 'tool' && e.tool_name === 'AskUserQuestion' && e.quiz !== undefined
+}
 
 function buildFeed(entries: ChatEntry[], optimistic: OptimisticMessage[]): FeedItem[] {
   // Once the real send round-trips into the transcript as an ordinary user
@@ -107,13 +120,26 @@ function buildFeed(entries: ChatEntry[], optimistic: OptimisticMessage[]): FeedI
     )
     if (idx !== -1) consumed.add(idx)
   }
-  const items: FeedItem[] = entries
-    .map((e, i) => ({ kind: 'entry' as const, key: `e-${i}-${e.ts}`, entry: e, idx: i }))
-    .filter((item) => !consumed.has(item.idx))
-    .map(({ idx, ...rest }) => {
-      void idx
-      return rest
-    })
+  // Merge a closed AskUserQuestion round — a `role:"tool"` ask entry
+  // immediately followed by its `role:"quiz_answer"` close — into a single
+  // `quiz-round` item (docs/13-chat.md «Квиз-раунды в ленте»). An
+  // AskUserQuestion tool entry with `quiz` set always renders via this path
+  // (single, degraded, if its pair is broken) rather than the plain
+  // ToolDigestLine/tool-group path.
+  const items: FeedItem[] = []
+  for (let i = 0; i < entries.length; i++) {
+    if (consumed.has(i)) continue
+    const e = entries[i]
+    if (isQuizAskEntry(e)) {
+      const next = entries[i + 1]
+      if (next && !consumed.has(i + 1) && next.role === 'quiz_answer') {
+        items.push({ kind: 'quiz-round', key: `qr-${i}-${e.ts}`, tool: e, answer: next })
+        i++ // consume the paired quiz_answer too
+        continue
+      }
+    }
+    items.push({ kind: 'entry', key: `e-${i}-${e.ts}`, entry: e })
+  }
   for (const o of pending) items.push({ kind: 'optimistic', key: `o-${o.localId}`, msg: o })
   return items
 }
@@ -301,11 +327,239 @@ function OptimisticBubble({ msg }: { msg: OptimisticMessage }) {
   )
 }
 
+/**
+ * A closed AskUserQuestion round (docs/13-chat.md «Квиз-раунды в ленте»):
+ * the pair of `tool` (asking, `quiz: QuizToolInput`) + `answer` (closing,
+ * `role:"quiz_answer"`, `quiz: QuizAnswerEcho` when answered, or `text:
+ * "квиз отменён"` with no `quiz` when cancelled) collapse into one
+ * left-aligned bubble — questions with their options, the chosen one(s)
+ * highlighted by matching `answer.quiz.answers[question]` against each
+ * option's label (multi-select answers are a joined, unsplit string, so
+ * the match is a substring test, not exact equality).
+ */
+function QuizRoundBubble({ tool, answer }: { tool: ChatEntry; answer: ChatEntry }) {
+  const input = tool.quiz as QuizToolInput | undefined
+  const echo = answer.quiz as QuizAnswerEcho | undefined
+  const cancelled = echo === undefined
+  const questions = input?.questions ?? []
+
+  return (
+    <div className="chat-screen__row">
+      <div
+        className={
+          cancelled
+            ? 'chat-screen__bubble chat-screen__bubble--quiz chat-screen__bubble--quiz-cancelled'
+            : 'chat-screen__bubble chat-screen__bubble--quiz'
+        }
+      >
+        <div className="chat-screen__quiz-badge">quiz</div>
+        {cancelled ? (
+          <div className="chat-screen__quiz-cancelled-text">квиз отменён</div>
+        ) : (
+          questions.map((q, qi) => {
+            const answerText = echo.answers[q.question]
+            return (
+              <div className="chat-screen__quiz-question" key={qi}>
+                <div className="chat-screen__quiz-header">{q.header}</div>
+                <div className="chat-screen__quiz-question-text">{q.question}</div>
+                <div className="chat-screen__quiz-options">
+                  {q.options.map((o, oi) => {
+                    const selected = answerText !== undefined && answerText.includes(o.label)
+                    return (
+                      <div
+                        key={oi}
+                        className={
+                          selected
+                            ? 'chat-screen__quiz-option chat-screen__quiz-option--selected'
+                            : 'chat-screen__quiz-option'
+                        }
+                      >
+                        {o.label}
+                      </div>
+                    )
+                  })}
+                </div>
+                {answerText !== undefined && (
+                  <div className="chat-screen__quiz-answer-text">→ {answerText}</div>
+                )}
+              </div>
+            )
+          })
+        )}
+        {answer.ts > 0 && <div className="chat-screen__when">{timeAgo(answer.ts)}</div>}
+      </div>
+    </div>
+  )
+}
+
+interface QuizDraft {
+  /** Exactly one of `optionIndices`/`text` is meaningful per the API contract; `mode` says which. */
+  mode: 'options' | 'text'
+  optionIndices: number[]
+  text: string
+}
+
+function emptyDrafts(quiz: PendingQuiz): QuizDraft[] {
+  return quiz.questions.map(() => ({ mode: 'options', optionIndices: [], text: '' }))
+}
+
+function draftAnswered(d: QuizDraft): boolean {
+  return d.mode === 'options' ? d.optionIndices.length > 0 : d.text.trim() !== ''
+}
+
+type QuizSendState = 'idle' | 'answering'
+
+/**
+ * The "live" quiz bubble (docs/13-chat.md «Pending-квиз»): rendered while
+ * `session.pending_quiz` is non-empty. Every question needs either an
+ * option pick (radio for single-select, checkboxes for multi-select) or a
+ * free "Другое…" text answer — the two are mutually exclusive per question,
+ * per the API contract (`option_indices` XOR `text`).
+ */
+function LiveQuizBubble({
+  sessionId,
+  quiz,
+  onRefetch,
+}: {
+  sessionId: string
+  quiz: PendingQuiz
+  onRefetch: () => void
+}) {
+  const [drafts, setDrafts] = useState<QuizDraft[]>(() => emptyDrafts(quiz))
+  const [sendState, setSendState] = useState<QuizSendState>('idle')
+  const [error, setError] = useState<string | undefined>(undefined)
+
+  // A brand-new quiz (different asked_at) resets the draft/send state —
+  // covers both a fresh AskUserQuestion round and the (rare) case of one
+  // quiz replacing another before the first was answered.
+  useEffect(() => {
+    setDrafts(emptyDrafts(quiz))
+    setSendState('idle')
+    setError(undefined)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quiz.asked_at])
+
+  const allAnswered = drafts.every(draftAnswered)
+
+  function setOptionSingle(qi: number, oi: number) {
+    setDrafts((prev) =>
+      prev.map((d, i) => (i === qi ? { mode: 'options', optionIndices: [oi], text: '' } : d)),
+    )
+  }
+  function toggleOptionMulti(qi: number, oi: number) {
+    setDrafts((prev) =>
+      prev.map((d, i) => {
+        if (i !== qi) return d
+        const has = d.optionIndices.includes(oi)
+        return {
+          mode: 'options',
+          optionIndices: has ? d.optionIndices.filter((x) => x !== oi) : [...d.optionIndices, oi],
+          text: '',
+        }
+      }),
+    )
+  }
+  function setText(qi: number, text: string) {
+    setDrafts((prev) => prev.map((d, i) => (i === qi ? { mode: 'text', optionIndices: [], text } : d)))
+  }
+
+  async function handleSubmit() {
+    if (!allAnswered || sendState === 'answering') return
+    setError(undefined)
+    setSendState('answering')
+    const answers = drafts.map((d, i) =>
+      d.mode === 'text'
+        ? { question_index: i, text: d.text.trim() }
+        : { question_index: i, option_indices: d.optionIndices },
+    )
+    try {
+      await api.post(`/v1/sessions/${encodeURIComponent(sessionId)}/quiz/answer`, { answers })
+      // Stay in 'answering' — the bubble disappears once pending_quiz
+      // clears (session.quiz_resolved -> refetch), not on this 202 alone.
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409 && err.code === 'no_pending_quiz') {
+        // Answered elsewhere (e.g. terminal) — routine; refetch and let
+        // pending_quiz clearing take the bubble away.
+        onRefetch()
+        return
+      }
+      if (err instanceof ApiError && err.status === 409 && err.code === 'quiz_answer_in_flight') {
+        // A previous answer is still being injected — keep waiting, don't retry.
+        return
+      }
+      if (err instanceof ApiError && err.status === 400) {
+        setError(err.message)
+        setSendState('idle')
+        return
+      }
+      setError(err instanceof Error ? err.message : String(err))
+      setSendState('idle')
+    }
+  }
+
+  const disabled = sendState === 'answering'
+
+  return (
+    <div className="chat-screen__row">
+      <div className="chat-screen__bubble chat-screen__bubble--quiz chat-screen__bubble--quiz-live">
+        <div className="chat-screen__quiz-badge">quiz</div>
+        {quiz.questions.map((q, qi) => {
+          const draft = drafts[qi]
+          return (
+            <div className="chat-screen__quiz-question" key={qi}>
+              <div className="chat-screen__quiz-header">{q.header}</div>
+              <div className="chat-screen__quiz-question-text">{q.question}</div>
+              <div className="chat-screen__quiz-options" role="group" aria-label={q.question}>
+                {q.options.map((o, oi) => {
+                  const checked = draft.mode === 'options' && draft.optionIndices.includes(oi)
+                  return (
+                    <label key={oi} className="chat-screen__quiz-option-input">
+                      <input
+                        type={q.multi_select ? 'checkbox' : 'radio'}
+                        name={`quiz-q${qi}`}
+                        checked={checked}
+                        disabled={disabled}
+                        onChange={() => (q.multi_select ? toggleOptionMulti(qi, oi) : setOptionSingle(qi, oi))}
+                      />
+                      <span>{o.label}</span>
+                      {o.description && <span className="chat-screen__quiz-option-desc"> — {o.description}</span>}
+                    </label>
+                  )
+                })}
+              </div>
+              <label className="chat-screen__quiz-other">
+                <span>Другое…</span>
+                <textarea
+                  rows={1}
+                  value={draft.mode === 'text' ? draft.text : ''}
+                  disabled={disabled}
+                  onChange={(e) => setText(qi, e.target.value)}
+                  placeholder="свой вариант"
+                />
+              </label>
+            </div>
+          )
+        })}
+        {error && <div className="chat-screen__quiz-error">{error}</div>}
+        <div className="chat-screen__quiz-actions">
+          {disabled ? (
+            <span className="chat-screen__quiz-sending">отправляется…</span>
+          ) : (
+            <button type="button" onClick={handleSubmit} disabled={!allAnswered}>
+              Ответить
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function ChatScreen() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const navigate = useNavigate()
   const { data: fullSession } = useSession(sessionId)
-  const { entries, session, loading } = useSessionChat(sessionId)
+  const { entries, session, loading, quizUnconfirmed, clearQuizUnconfirmed, refetch } = useSessionChat(sessionId)
   const { data: messages } = useMessages(session?.id)
   const send = useSendMessage()
 
@@ -377,7 +631,10 @@ export function ChatScreen() {
   const groupable: GroupableEntry<FeedItem>[] = feed.map((item) => ({
     kind: 'item' as const,
     key: item.key,
-    isTool: item.kind === 'entry' && item.entry.role === 'tool',
+    // AskUserQuestion tool entries never join a "⚒" tool-group, whether
+    // they made it into a quiz-round (a different item kind entirely) or
+    // stayed a lone unpaired 'entry' (degraded rendering, still its own row).
+    isTool: item.kind === 'entry' && item.entry.role === 'tool' && !isQuizAskEntry(item.entry),
     value: item,
   }))
   const grouped = groupChatEntries(groupable)
@@ -418,8 +675,12 @@ export function ChatScreen() {
     }
   }
 
+  const pendingQuiz = session?.pending_quiz
   const readonly = readonlyReason(session)
-  const canCompose = session !== undefined && readonly === undefined
+  // Message delivery is paused daemon-side while a quiz is pending (docs/
+  // 13-chat.md «Очередь сообщений во время квиза»), so the composer is
+  // blocked too, distinctly from the worker/dead-session readonly note.
+  const canCompose = session !== undefined && readonly === undefined && pendingQuiz === undefined
 
   function handleSend() {
     if (!session || !canCompose) return
@@ -473,6 +734,11 @@ export function ChatScreen() {
       {copied && fullSession && (
         <div className="chat-screen__copied">copied: rocket attach {fullSession.tmux_name}</div>
       )}
+      {quizUnconfirmed && (
+        <div className="chat-screen__quiz-unconfirmed" onClick={clearQuizUnconfirmed}>
+          не удалось подтвердить ответ — проверьте терминал
+        </div>
+      )}
 
       <div className="chat-screen__feed" ref={feedRef} onScroll={handleScroll}>
         {loading && feed.length === 0 && <p className="chat-screen__empty">Loading…</p>}
@@ -485,6 +751,9 @@ export function ChatScreen() {
           if (item.kind === 'optimistic') {
             return <OptimisticBubble key={item.key} msg={item.msg} />
           }
+          if (item.kind === 'quiz-round') {
+            return <QuizRoundBubble key={item.key} tool={item.tool} answer={item.answer} />
+          }
           const { entry } = item
           if (entry.role === 'tool') {
             return <ToolDigestLine key={item.key} entry={entry} />
@@ -496,6 +765,9 @@ export function ChatScreen() {
           }
           return <EntryBubble key={item.key} entry={entry} />
         })}
+        {sessionId && pendingQuiz && (
+          <LiveQuizBubble sessionId={sessionId} quiz={pendingQuiz} onRefetch={refetch} />
+        )}
       </div>
 
       <div className="chat-screen__composer">
@@ -519,7 +791,9 @@ export function ChatScreen() {
             </button>
           </>
         ) : (
-          <div className="chat-screen__readonly">{readonly ?? 'read-only'}</div>
+          <div className="chat-screen__readonly">
+            {pendingQuiz ? 'агент ждёт ответа на квиз' : (readonly ?? 'read-only')}
+          </div>
         )}
       </div>
     </div>

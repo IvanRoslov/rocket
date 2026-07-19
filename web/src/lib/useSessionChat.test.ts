@@ -135,3 +135,67 @@ describe('useSessionChat', () => {
     expect(result.current.entries.at(-1)).toEqual(originalLast)
   })
 })
+
+describe('useSessionChat quiz events', () => {
+  const QUIZ_SESSION_ID = 's-quiz-demo-orch'
+
+  it('refetches (surfacing pending_quiz) on a session.quiz_asked ping', async () => {
+    const { result } = renderHook(() => useSessionChat(QUIZ_SESSION_ID))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.session?.pending_quiz).toBeDefined()
+
+    // A quiz_asked ping for a DIFFERENT session must not touch this hook.
+    const es = MockEventSource.instances[0]
+    es.emit('session.quiz_asked', { id: 1, ts: 1, type: 'session.quiz_asked', session_id: 's-billing-v2-orch' })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(result.current.session?.pending_quiz).toBeDefined()
+  })
+
+  it('clears pending_quiz once the fixture session no longer carries one, on a quiz_resolved ping', async () => {
+    server.use(
+      http.get('/v1/sessions/:id/chat', ({ params }) =>
+        HttpResponse.json({
+          entries: chatEntries[QUIZ_SESSION_ID] ?? [],
+          next_cursor: '999',
+          session: { id: params.id as string, kind: 'orchestrator', state: 'running', activity: 'blocked' },
+        }),
+      ),
+    )
+    const { result } = renderHook(() => useSessionChat(QUIZ_SESSION_ID))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.session?.pending_quiz).toBeUndefined()
+
+    const es = MockEventSource.instances[0]
+    es.emit('session.quiz_resolved', { id: 2, ts: 2, type: 'session.quiz_resolved', session_id: QUIZ_SESSION_ID })
+    await waitFor(() => expect(result.current.session?.activity).toBe('blocked'))
+    expect(result.current.session?.pending_quiz).toBeUndefined()
+  })
+
+  it('sets quizUnconfirmed on session.quiz_answer_unconfirmed and clears it once pending_quiz changes', async () => {
+    const { result } = renderHook(() => useSessionChat(QUIZ_SESSION_ID))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.quizUnconfirmed).toBe(false)
+
+    const es = MockEventSource.instances[0]
+    es.emit('session.quiz_answer_unconfirmed', {
+      id: 3,
+      ts: 3,
+      type: 'session.quiz_answer_unconfirmed',
+      session_id: QUIZ_SESSION_ID,
+    })
+    await waitFor(() => expect(result.current.quizUnconfirmed).toBe(true))
+
+    // pending_quiz clearing (quiz eventually resolved) clears the flag too.
+    server.use(
+      http.get('/v1/sessions/:id/chat', ({ params }) =>
+        HttpResponse.json({
+          entries: [],
+          next_cursor: '999',
+          session: { id: params.id as string, kind: 'orchestrator', state: 'running' },
+        }),
+      ),
+    )
+    es.emit('session.quiz_resolved', { id: 4, ts: 4, type: 'session.quiz_resolved', session_id: QUIZ_SESSION_ID })
+    await waitFor(() => expect(result.current.quizUnconfirmed).toBe(false))
+  })
+})

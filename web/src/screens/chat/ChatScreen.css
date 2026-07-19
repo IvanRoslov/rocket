@@ -258,6 +258,151 @@
   color: var(--text-3);
 }
 
+/* ---------- Quiz (AskUserQuestion) — docs/13-chat.md «Квизы» ---------- */
+
+.chat-screen__quiz-unconfirmed {
+  flex: none;
+  margin: 0 14px;
+  padding: 8px 12px;
+  background: var(--warn-bg-2, #fffbeb);
+  border: 1px solid var(--warn-border-2, #fde68a);
+  border-radius: var(--radius-btn-sm);
+  color: var(--warn-text);
+  font: 12px var(--font-ui);
+  cursor: pointer;
+}
+
+.chat-screen__bubble--quiz {
+  max-width: 88%;
+  background: var(--surface);
+  border: 1.5px solid var(--accent-selected-border, var(--accent-text));
+}
+.chat-screen__bubble--quiz-live {
+  background: var(--accent-selected-bg);
+}
+.chat-screen__bubble--quiz-cancelled {
+  opacity: 0.6;
+  border-style: dashed;
+}
+.chat-screen__quiz-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  margin-bottom: 6px;
+  border-radius: var(--radius-badge-sm);
+  background: var(--accent-text);
+  color: var(--surface);
+  font: 700 10px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.chat-screen__quiz-question {
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.chat-screen__quiz-question:first-of-type {
+  border-top: none;
+  padding-top: 2px;
+}
+.chat-screen__quiz-header {
+  font: 700 11px var(--font-mono);
+  color: var(--text-3);
+  text-transform: uppercase;
+}
+.chat-screen__quiz-question-text {
+  margin: 2px 0 6px;
+  font: 13.5px/1.4 var(--font-ui);
+  color: var(--text);
+}
+.chat-screen__quiz-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.chat-screen__quiz-option {
+  padding: 4px 8px;
+  border-radius: var(--radius-btn-sm);
+  border: 1px solid var(--border);
+  font: 12.5px var(--font-ui);
+  color: var(--text-3);
+}
+.chat-screen__quiz-option--selected {
+  background: var(--accent-selected-bg);
+  border-color: var(--accent-selected-border);
+  color: var(--text);
+  font-weight: 600;
+}
+.chat-screen__quiz-option-input {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font: 12.5px var(--font-ui);
+  color: var(--text);
+  cursor: pointer;
+}
+.chat-screen__quiz-option-desc {
+  color: var(--text-4);
+}
+.chat-screen__quiz-other {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font: 11.5px var(--font-ui);
+  color: var(--text-4);
+}
+.chat-screen__quiz-other textarea {
+  flex: 1;
+  min-height: 26px;
+  resize: vertical;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn-sm);
+  font: 12.5px var(--font-ui);
+  background: var(--surface-3);
+}
+.chat-screen__quiz-answer-text {
+  margin-top: 4px;
+  font: 12px var(--font-ui);
+  color: var(--text-3);
+}
+.chat-screen__quiz-cancelled-text {
+  font: 13px var(--font-ui);
+  color: var(--text-4);
+  font-style: italic;
+}
+.chat-screen__quiz-error {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-btn-sm);
+  background: var(--err-bg, #fef2f2);
+  border: 1px solid var(--err-border, #fecaca);
+  color: var(--err-text);
+  font: 12px var(--font-ui);
+}
+.chat-screen__quiz-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+.chat-screen__quiz-actions button {
+  height: 32px;
+  padding: 0 14px;
+  background: var(--text);
+  color: var(--surface);
+  border: none;
+  border-radius: var(--radius-btn-sm);
+  font: 600 12.5px var(--font-ui);
+  cursor: pointer;
+}
+.chat-screen__quiz-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.chat-screen__quiz-sending {
+  font: 12px var(--font-ui);
+  color: var(--text-4);
+}
+
 .chat-screen__composer {
   display: flex;
   gap: 8px;

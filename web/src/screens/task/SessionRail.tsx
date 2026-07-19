@@ -106,6 +106,7 @@ export function SessionRail({ orchestrator, workers }: SessionRailProps) {
             <Dot state={dotState(orchestrator)} />
             <span className="session-rail__orch-label">Orchestrator</span>
             <div className="session-rail__spacer" />
+            {orchestrator.pending_quiz && <Badge tone="indigo">quiz</Badge>}
             <Badge tone={badgeTone(orchestrator)}>{orchestrator.activity ?? orchestrator.state}</Badge>
           </div>
           <div className="session-rail__orch-name">{orchestrator.tmux_name}</div>
@@ -153,6 +154,7 @@ export function SessionRail({ orchestrator, workers }: SessionRailProps) {
                 <span className="session-rail__worker-repo">{w.repo_id}</span>
               </div>
               <div className="session-rail__worker-status">
+                {w.pending_quiz && <Badge tone="indigo">quiz</Badge>}
                 <Badge tone={badgeTone(w)}>{w.activity ?? w.state}</Badge>
                 <span className={`session-rail__pr ${pr.tone}`}>{pr.text}</span>
               </div>

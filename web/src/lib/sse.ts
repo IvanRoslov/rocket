@@ -20,6 +20,13 @@ export const EVENT_TYPES = [
   // Pure ping — carries no `data` (docs/13-chat.md); consumers must re-fetch
   // the chat feed by cursor rather than expect a payload here.
   'session.chat_updated',
+  // Quiz (AskUserQuestion) lifecycle pings — also content-less, no `data`
+  // (docs/13-chat.md «Квизы»): re-fetch the session/chat to see
+  // `pending_quiz` appear/disappear. `quiz_answer_unconfirmed` doesn't
+  // clear `pending_quiz` — it just means the 60s injection ack timed out.
+  'session.quiz_asked',
+  'session.quiz_resolved',
+  'session.quiz_answer_unconfirmed',
   'message.queued',
   'message.delivered',
   'message.failed',

@@ -67,6 +67,16 @@ export function resetSessions(): void {
   sessionsState = sessions.map((s) => ({ ...s }))
 }
 
+/**
+ * Spy for `POST /v1/sessions/:id/quiz/answer` bodies — tests assert against
+ * this after triggering a submit rather than intercepting fetch directly.
+ */
+export let lastQuizAnswerBody: unknown = undefined
+
+export function resetQuizAnswerSpy(): void {
+  lastQuizAnswerBody = undefined
+}
+
 // Mutable copy of per-session chat transcripts (internal/api/chat.go). Tests
 // simulating new agent/transcript activity should call `appendChatEntry` and
 // reset via `resetChatEntries()` in `afterEach`.
@@ -207,8 +217,70 @@ export const handlers = [
         kind: session.kind,
         state: session.state,
         activity: session.activity,
+        pending_quiz: session.pending_quiz,
       },
     })
+  }),
+
+  // POST /v1/sessions/:id/quiz/answer — internal/api/quiz.go, docs/13-chat.md
+  // «Квизы (AskUserQuestion)»: records the posted body (see
+  // `lastQuizAnswerBody`/`resetQuizAnswerSpy`) and, against the session's
+  // `pending_quiz` fixture, returns 404/409 no_pending_quiz/400
+  // quiz_answer_invalid/202 exactly like the real handler's contract.
+  // `quiz_answer_in_flight` has no fixture-driven trigger — tests needing
+  // it should `server.use()` an override.
+  http.post('/v1/sessions/:id/quiz/answer', async ({ params, request }) => {
+    const id = params.id as string
+    const session = sessionsState.find((s) => s.id === id)
+    if (!session) {
+      return HttpResponse.json(
+        { error: { code: 'session_not_found', message: `session ${id} not found` } },
+        { status: 404 },
+      )
+    }
+    const body = (await request.json()) as {
+      answers?: { question_index: number; option_indices?: number[]; text?: string }[]
+    }
+    lastQuizAnswerBody = body
+
+    if (!session.pending_quiz) {
+      return HttpResponse.json(
+        { error: { code: 'no_pending_quiz', message: 'session has no pending quiz' } },
+        { status: 409 },
+      )
+    }
+    const quiz = session.pending_quiz
+    const answers = body.answers ?? []
+    if (answers.length !== quiz.questions.length) {
+      return HttpResponse.json(
+        { error: { code: 'quiz_answer_invalid', message: 'all questions must be answered' } },
+        { status: 400 },
+      )
+    }
+    for (const a of answers) {
+      const q = quiz.questions[a.question_index]
+      if (!q) {
+        return HttpResponse.json(
+          { error: { code: 'quiz_answer_invalid', message: `question_index ${a.question_index} out of range` } },
+          { status: 400 },
+        )
+      }
+      const hasOptions = a.option_indices !== undefined
+      const hasText = a.text !== undefined && a.text !== ''
+      if (hasOptions === hasText) {
+        return HttpResponse.json(
+          { error: { code: 'quiz_answer_invalid', message: 'exactly one of option_indices/text required' } },
+          { status: 400 },
+        )
+      }
+      if (hasOptions && !q.multi_select && a.option_indices?.length !== 1) {
+        return HttpResponse.json(
+          { error: { code: 'quiz_answer_invalid', message: 'single-select requires exactly one option_index' } },
+          { status: 400 },
+        )
+      }
+    }
+    return HttpResponse.json({ status: 'answering' }, { status: 202 })
   }),
 
   http.get('/v1/repos', () => HttpResponse.json(reposState)),

@@ -10,7 +10,14 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { appendChatEntry, handlers, resetChatEntries } from '../../mocks/handlers'
+import {
+  appendChatEntry,
+  handlers,
+  lastQuizAnswerBody,
+  resetChatEntries,
+  resetQuizAnswerSpy,
+  resetSessions,
+} from '../../mocks/handlers'
 import { ChatScreen, chatPagePath } from './ChatScreen'
 
 class MockEventSource {
@@ -43,6 +50,8 @@ beforeEach(() => {
 afterEach(() => {
   server.resetHandlers()
   resetChatEntries()
+  resetSessions()
+  resetQuizAnswerSpy()
   vi.unstubAllGlobals()
 })
 afterAll(() => server.close())
@@ -312,5 +321,189 @@ describe('ChatScreen cursor increment', () => {
     })
 
     expect(await screen.findByText('фикс закоммичен')).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Quizzes (AskUserQuestion) — docs/13-chat.md «Квизы».
+// s-quiz-demo-orch fixture: a live `pending_quiz` (single-select "Мерж" +
+// multi-select "Релиз") plus a closed round in its chat history ("Линтер",
+// tool+quiz_answer pair, single-select answered "ESLint").
+// ---------------------------------------------------------------------------
+
+describe('ChatScreen live quiz', () => {
+  it('renders the pending quiz questions and options', async () => {
+    renderPage('s-quiz-demo-orch')
+    expect(await screen.findByText('Какую стратегию мержа выбрать?')).toBeInTheDocument()
+    expect(screen.getByText('Merge commit')).toBeInTheDocument()
+    expect(screen.getByText('Squash')).toBeInTheDocument()
+    expect(screen.getByText('Что включить в релиз? (можно несколько)')).toBeInTheDocument()
+    expect(screen.getByText('Доки')).toBeInTheDocument()
+  })
+
+  it('single-select lets exactly one option be picked at a time', async () => {
+    const user = userEvent.setup()
+    renderPage('s-quiz-demo-orch')
+    await screen.findByText('Какую стратегию мержа выбрать?')
+
+    const mergeCommit = screen.getByRole('radio', { name: /Merge commit/ })
+    const squash = screen.getByRole('radio', { name: /Squash/ })
+    await user.click(mergeCommit)
+    expect(mergeCommit).toBeChecked()
+    await user.click(squash)
+    expect(squash).toBeChecked()
+    expect(mergeCommit).not.toBeChecked()
+  })
+
+  it('multi-select allows several checkboxes checked at once', async () => {
+    const user = userEvent.setup()
+    renderPage('s-quiz-demo-orch')
+    await screen.findByText('Что включить в релиз? (можно несколько)')
+
+    const docs = screen.getByRole('checkbox', { name: /Доки/ })
+    const migrations = screen.getByRole('checkbox', { name: /Миграции/ })
+    await user.click(docs)
+    await user.click(migrations)
+    expect(docs).toBeChecked()
+    expect(migrations).toBeChecked()
+  })
+
+  it('disables "Ответить" until every question is answered, then enables it', async () => {
+    const user = userEvent.setup()
+    renderPage('s-quiz-demo-orch')
+    await screen.findByText('Какую стратегию мержа выбрать?')
+
+    const submit = screen.getByRole('button', { name: 'Ответить' })
+    expect(submit).toBeDisabled()
+
+    await user.click(screen.getByRole('radio', { name: /Squash/ }))
+    expect(submit).toBeDisabled() // second question still unanswered
+
+    await user.click(screen.getByRole('checkbox', { name: /Доки/ }))
+    expect(submit).toBeEnabled()
+  })
+
+  it('POSTs the exact {answers} shape and shows "отправляется…" until resolved', async () => {
+    const user = userEvent.setup()
+    renderPage('s-quiz-demo-orch')
+    await screen.findByText('Какую стратегию мержа выбрать?')
+
+    await user.click(screen.getByRole('radio', { name: /Squash/ }))
+    await user.click(screen.getByRole('checkbox', { name: /Доки/ }))
+    await user.click(screen.getByRole('checkbox', { name: /CLI/ }))
+    await user.click(screen.getByRole('button', { name: 'Ответить' }))
+
+    await waitFor(() =>
+      expect(lastQuizAnswerBody).toEqual({
+        answers: [
+          { question_index: 0, option_indices: [1] },
+          { question_index: 1, option_indices: [0, 2] },
+        ],
+      }),
+    )
+    expect(await screen.findByText('отправляется…')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Ответить' })).not.toBeInTheDocument()
+  })
+
+  it('a free-text "Другое…" answer posts {question_index, text}', async () => {
+    const user = userEvent.setup()
+    renderPage('s-quiz-demo-orch')
+    await screen.findByText('Какую стратегию мержа выбрать?')
+
+    const textareas = screen.getAllByPlaceholderText('свой вариант')
+    await user.type(textareas[0], 'rebase, пожалуйста')
+    await user.click(screen.getByRole('checkbox', { name: /CLI/ }))
+    await user.click(screen.getByRole('button', { name: 'Ответить' }))
+
+    await waitFor(() =>
+      expect(lastQuizAnswerBody).toEqual({
+        answers: [
+          { question_index: 0, text: 'rebase, пожалуйста' },
+          { question_index: 1, option_indices: [2] },
+        ],
+      }),
+    )
+  })
+
+  it('shows the 400 quiz_answer_invalid message inline and keeps the quiz editable', async () => {
+    server.use(
+      http.post('/v1/sessions/:id/quiz/answer', () =>
+        HttpResponse.json(
+          { error: { code: 'quiz_answer_invalid', message: 'опций больше 9' } },
+          { status: 400 },
+        ),
+      ),
+    )
+    const user = userEvent.setup()
+    renderPage('s-quiz-demo-orch')
+    await screen.findByText('Какую стратегию мержа выбрать?')
+
+    await user.click(screen.getByRole('radio', { name: /Squash/ }))
+    await user.click(screen.getByRole('checkbox', { name: /Доки/ }))
+    await user.click(screen.getByRole('button', { name: 'Ответить' }))
+
+    expect(await screen.findByText('опций больше 9')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Ответить' })).toBeEnabled()
+  })
+
+  it('blocks the composer with "агент ждёт ответа на квиз" while pending_quiz is set', async () => {
+    renderPage('s-quiz-demo-orch')
+    await screen.findByText('Какую стратегию мержа выбрать?')
+    expect(screen.queryByLabelText('Message the orchestrator')).not.toBeInTheDocument()
+    expect(screen.getByText('агент ждёт ответа на квиз')).toBeInTheDocument()
+  })
+})
+
+describe('ChatScreen closed quiz rounds', () => {
+  it('renders a tool+quiz_answer pair as one bubble with the chosen option highlighted', async () => {
+    renderPage('s-quiz-demo-orch')
+    const question = await screen.findByText('Какой линтер подключить?')
+    expect(question).toBeInTheDocument()
+
+    const bubble = question.closest('.chat-screen__bubble--quiz')
+    expect(bubble).not.toBeNull()
+    const selected = within(bubble as HTMLElement).getByText('ESLint')
+    expect(selected).toHaveClass('chat-screen__quiz-option--selected')
+    expect(within(bubble as HTMLElement).getByText('Biome')).not.toHaveClass(
+      'chat-screen__quiz-option--selected',
+    )
+    // AskUserQuestion never joins a "⚒" tool-group.
+    expect(screen.queryByText(/⚒/)).not.toBeInTheDocument()
+  })
+
+  it('renders a cancelled round as a muted "квиз отменён" bubble', async () => {
+    appendChatEntry('s-quiz-demo-orch', {
+      role: 'tool',
+      tool_name: 'AskUserQuestion',
+      text: '{"questions":[{"question":"Деплоить сейчас?"...',
+      ts: 1_800_010_000,
+      quiz: {
+        questions: [
+          { question: 'Деплоить сейчас?', header: 'Деплой', multiSelect: false, options: [{ label: 'Да' }, { label: 'Нет' }] },
+        ],
+      },
+    })
+    appendChatEntry('s-quiz-demo-orch', { role: 'quiz_answer', text: 'квиз отменён', ts: 1_800_010_001 })
+
+    renderPage('s-quiz-demo-orch')
+    const cancelled = await screen.findByText('квиз отменён')
+    expect(cancelled.closest('.chat-screen__bubble')).toHaveClass('chat-screen__bubble--quiz-cancelled')
+  })
+
+  it('degrades a lone unpaired AskUserQuestion tool entry to a plain tool row', async () => {
+    appendChatEntry('s-quiz-demo-orch', {
+      role: 'tool',
+      tool_name: 'AskUserQuestion',
+      text: '{"questions":[{"question":"Незакрытый квиз?"...',
+      ts: 1_800_020_000,
+      quiz: {
+        questions: [{ question: 'Незакрытый квиз?', header: 'Открыт', multiSelect: false, options: [{ label: 'Да' }] }],
+      },
+    })
+
+    renderPage('s-quiz-demo-orch')
+    const badge = await screen.findAllByText('AskUserQuestion')
+    expect(badge.length).toBeGreaterThan(0)
+    expect(badge[badge.length - 1].closest('.chat-screen__tool-row')).toBeInTheDocument()
   })
 })

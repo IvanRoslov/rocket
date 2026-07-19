@@ -31,6 +31,18 @@ export interface UseSessionChatResult {
   session?: ChatSessionRef
   /** True until the first tail fetch resolves. */
   loading: boolean
+  /**
+   * True once a `session.quiz_answer_unconfirmed` ping has landed for the
+   * current `pending_quiz` (docs/13-chat.md: the 60s answer-injection ack
+   * timed out — `pending_quiz` itself is NOT cleared). Cleared as soon as
+   * `pending_quiz` itself changes/clears, so it never survives past the
+   * quiz it was raised for.
+   */
+  quizUnconfirmed: boolean
+  /** Clears the `quizUnconfirmed` flag without waiting for pending_quiz to change (e.g. once the client-side UI has shown/acknowledged it). */
+  clearQuizUnconfirmed: () => void
+  /** Forces an incremental refetch (session ref + any new entries) outside the SSE/poll cadence — e.g. after a quiz POST resolves 409 `no_pending_quiz`. */
+  refetch: () => void
 }
 
 function sameEntry(a: ChatEntry, b: ChatEntry): boolean {
@@ -41,36 +53,59 @@ export function useSessionChat(sessionId: string | undefined): UseSessionChatRes
   const [entries, setEntries] = useState<ChatEntry[]>([])
   const [session, setSession] = useState<ChatSessionRef | undefined>(undefined)
   const [loading, setLoading] = useState(true)
+  const [quizUnconfirmed, setQuizUnconfirmed] = useState(false)
   const entriesRef = useRef<ChatEntry[]>([])
   const cursorRef = useRef('')
+  const quizAskedAtRef = useRef<number | undefined>(undefined)
 
-  const fetchTail = useCallback(async (id: string) => {
-    const res = await api.get<ChatResponse>(`/v1/sessions/${encodeURIComponent(id)}/chat`)
-    entriesRef.current = res.entries
-    cursorRef.current = res.next_cursor
-    setEntries(res.entries)
-    setSession(res.session)
-    setLoading(false)
+  // Clears quizUnconfirmed whenever the incoming session's pending_quiz
+  // identity (by asked_at) differs from what we last saw — i.e. the quiz
+  // that timed out its ack was resolved (pending_quiz gone) or superseded
+  // by a new one.
+  const applySession = useCallback((next: ChatSessionRef) => {
+    const nextAskedAt = next.pending_quiz?.asked_at
+    if (nextAskedAt !== quizAskedAtRef.current) {
+      quizAskedAtRef.current = nextAskedAt
+      setQuizUnconfirmed(false)
+    }
+    setSession(next)
   }, [])
 
-  const fetchIncremental = useCallback(async (id: string) => {
-    const cursor = cursorRef.current
-    const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
-    const res = await api.get<ChatResponse>(`/v1/sessions/${encodeURIComponent(id)}/chat${qs}`)
-    setSession(res.session)
-    if (res.next_cursor) cursorRef.current = res.next_cursor
-    if (res.entries.length === 0) return
-    const rolledBack = entriesRef.current.some((e) => sameEntry(e, res.entries[0]))
-    entriesRef.current = rolledBack ? res.entries : [...entriesRef.current, ...res.entries]
-    setEntries(entriesRef.current)
-  }, [])
+  const fetchTail = useCallback(
+    async (id: string) => {
+      const res = await api.get<ChatResponse>(`/v1/sessions/${encodeURIComponent(id)}/chat`)
+      entriesRef.current = res.entries
+      cursorRef.current = res.next_cursor
+      setEntries(res.entries)
+      applySession(res.session)
+      setLoading(false)
+    },
+    [applySession],
+  )
+
+  const fetchIncremental = useCallback(
+    async (id: string) => {
+      const cursor = cursorRef.current
+      const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
+      const res = await api.get<ChatResponse>(`/v1/sessions/${encodeURIComponent(id)}/chat${qs}`)
+      applySession(res.session)
+      if (res.next_cursor) cursorRef.current = res.next_cursor
+      if (res.entries.length === 0) return
+      const rolledBack = entriesRef.current.some((e) => sameEntry(e, res.entries[0]))
+      entriesRef.current = rolledBack ? res.entries : [...entriesRef.current, ...res.entries]
+      setEntries(entriesRef.current)
+    },
+    [applySession],
+  )
 
   // (Re)load from scratch whenever the target session changes.
   useEffect(() => {
     entriesRef.current = []
     cursorRef.current = ''
+    quizAskedAtRef.current = undefined
     setEntries([])
     setSession(undefined)
+    setQuizUnconfirmed(false)
     if (!sessionId) {
       setLoading(false)
       return
@@ -82,8 +117,11 @@ export function useSessionChat(sessionId: string | undefined): UseSessionChatRes
   useEventStream(
     useCallback(
       (event) => {
-        if (sessionId && event.type === 'session.chat_updated' && event.session_id === sessionId) {
+        if (!sessionId || event.session_id !== sessionId) return
+        if (event.type === 'session.chat_updated' || event.type === 'session.quiz_asked' || event.type === 'session.quiz_resolved') {
           fetchIncremental(sessionId)
+        } else if (event.type === 'session.quiz_answer_unconfirmed') {
+          setQuizUnconfirmed(true)
         }
       },
       [sessionId, fetchIncremental],
@@ -96,5 +134,11 @@ export function useSessionChat(sessionId: string | undefined): UseSessionChatRes
     return () => clearInterval(timer)
   }, [sessionId, fetchIncremental])
 
-  return { entries, session, loading }
+  const refetch = useCallback(() => {
+    if (sessionId) fetchIncremental(sessionId)
+  }, [sessionId, fetchIncremental])
+
+  const clearQuizUnconfirmed = useCallback(() => setQuizUnconfirmed(false), [])
+
+  return { entries, session, loading, quizUnconfirmed, clearQuizUnconfirmed, refetch }
 }

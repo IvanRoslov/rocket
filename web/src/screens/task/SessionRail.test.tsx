@@ -3,7 +3,7 @@
 // not the in-page TermOverlay.
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { sessions } from '../../mocks/fixtures'
 import { SessionRail } from './SessionRail'
@@ -59,5 +59,26 @@ describe('SessionRail chat links', () => {
     for (const w of workers) {
       expect(links.some((l) => l.getAttribute('href') === `/chat/${w.id}`)).toBe(true)
     }
+  })
+})
+
+describe('SessionRail quiz badge', () => {
+  it('shows a "quiz" badge for an orchestrator with a pending_quiz', () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const orchestrator = sessions.find((s) => s.id === 's-quiz-demo-orch')!
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionRail orchestrator={orchestrator} workers={[]} />
+      </QueryClientProvider>,
+    )
+    const head = screen.getByText('Orchestrator').closest('.session-rail__orch-head')
+    expect(within(head as HTMLElement).getByText('quiz')).toBeInTheDocument()
+  })
+
+  it('shows no "quiz" badge for an orchestrator with no pending_quiz', () => {
+    const { orchestrator } = renderRail()
+    expect(orchestrator.pending_quiz).toBeUndefined()
+    const head = screen.getByText('Orchestrator').closest('.session-rail__orch-head')
+    expect(within(head as HTMLElement).queryByText('quiz')).not.toBeInTheDocument()
   })
 })

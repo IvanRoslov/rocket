@@ -523,6 +523,13 @@ export function useDeleteProject(): UseMutationResult<void, Error, string> {
  * Maps SSE event types onto the query keys they invalidate. Prefix-matched:
  * `session.*` -> sessions + projects (live_sessions counters), `message.*`
  * -> messages, `task.*` -> tasks, `repo.clone_*` -> repos.
+ *
+ * `session.quiz_asked` / `session.quiz_resolved` / `session.quiz_answer_
+ * unconfirmed` (docs/13-chat.md «Квизы») fall under the `session.*` prefix
+ * above, so a react-query-backed session list (e.g. the SessionRail "quiz"
+ * badge) refreshes automatically. The chat feed itself is NOT react-query
+ * backed (see useSessionChat.ts) — it listens to these same three types
+ * directly to refetch `pending_quiz` promptly.
  */
 export function wireInvalidation(queryClient: QueryClient) {
   return (event: RocketEvent) => {

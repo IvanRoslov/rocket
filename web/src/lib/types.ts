@@ -39,6 +39,78 @@ export interface Session {
   pr_number?: number
   pr_state?: 'open' | 'closed' | 'merged'
   ci_state?: 'passing' | 'pending' | 'failing'
+  /**
+   * The session's currently pending AskUserQuestion quiz (internal/api's
+   * internal_quiz.go / quiz.go, docs/13-chat.md «Квизы»), omitted when
+   * there is none. Present on `GET /v1/sessions`, `GET /v1/sessions/{id}`
+   * and the `session` ref of `GET /v1/sessions/{id}/chat` alike.
+   */
+  pending_quiz?: PendingQuiz
+}
+
+// ---------------------------------------------------------------------------
+// Quizzes (AskUserQuestion) — internal/api/quiz.go, internal/api/
+// internal_quiz.go, docs/13-chat.md «Квизы (AskUserQuestion)».
+// ---------------------------------------------------------------------------
+
+/** Public-API (snake_case) shape of a pending quiz option — `quizOptionResponse`. */
+export interface PendingQuizOption {
+  label: string
+  description?: string
+}
+
+/** Public-API (snake_case) shape of a pending quiz question — `quizQuestionResponse`. */
+export interface PendingQuizQuestion {
+  question: string
+  header: string
+  multi_select: boolean
+  options: PendingQuizOption[]
+}
+
+/**
+ * `pending_quiz` — the session's live, unanswered AskUserQuestion quiz
+ * (`quizResponse` in internal/api/quiz.go). Present only while the quiz is
+ * showing in the agent's terminal; disappears (via `session.quiz_resolved`)
+ * once it's answered, cancelled, or its 60s answer-injection times out.
+ */
+export interface PendingQuiz {
+  questions: PendingQuizQuestion[]
+  asked_at: number
+}
+
+/**
+ * Raw shape of a chat entry's `quiz` field on the ASKING side: `role:"tool"`,
+ * `tool_name:"AskUserQuestion"` entries carry this verbatim from the tool's
+ * input (camelCase `multiSelect` — Claude Code's own shape, NOT the
+ * snake_case `PendingQuiz` above). See internal/agent/claudecode/chat.go.
+ */
+export interface QuizToolInputOption {
+  label: string
+  description?: string
+}
+
+export interface QuizToolInputQuestion {
+  question: string
+  header: string
+  multiSelect: boolean
+  options: QuizToolInputOption[]
+}
+
+export interface QuizToolInput {
+  questions: QuizToolInputQuestion[]
+}
+
+/**
+ * Raw shape of a chat entry's `quiz` field on the ANSWERING side: `role:
+ * "quiz_answer"` entries carry this echo of the closed round — `answers` is
+ * keyed by question text, valued by the chosen label(s) (multi-select
+ * values are a joined string with an unstable delimiter across CLI
+ * versions — display as-is, never split). Absent (only `text: "квиз
+ * отменён"`) when the round was cancelled instead of answered.
+ */
+export interface QuizAnswerEcho {
+  questions: { question: string }[]
+  answers: Record<string, string>
 }
 
 // ---------------------------------------------------------------------------
@@ -91,7 +163,7 @@ export interface Message {
 // Chat — internal/api/chat.go, docs/13-chat.md
 // ---------------------------------------------------------------------------
 
-export type ChatRole = 'user' | 'assistant' | 'tool'
+export type ChatRole = 'user' | 'assistant' | 'tool' | 'quiz_answer'
 
 /**
  * One entry in a session's chat feed (`GET /v1/sessions/{id}/chat`) — a
@@ -101,12 +173,20 @@ export type ChatRole = 'user' | 'assistant' | 'tool'
  * not its output. `ts` is unix-seconds, `0` when the transcript line had no
  * timestamp — clients should hide the time in that case rather than render
  * "1970".
+ *
+ * `quiz` (omitempty) is present only on the two entry shapes that make up a
+ * closed AskUserQuestion round (docs/13-chat.md «Квиз-раунды в ленте»): the
+ * asking `role:"tool"`/`tool_name:"AskUserQuestion"` entry (raw tool input,
+ * `QuizToolInput`) and the closing `role:"quiz_answer"` entry (raw answers
+ * echo, `QuizAnswerEcho` — absent for a cancelled round, where `text` is
+ * the literal "квиз отменён").
  */
 export interface ChatEntry {
   role: ChatRole
   text: string
   tool_name?: string
   ts: number
+  quiz?: QuizToolInput | QuizAnswerEcho
 }
 
 /**
@@ -119,6 +199,8 @@ export interface ChatSessionRef {
   kind: string
   state: SessionState
   activity?: SessionActivity
+  /** Mirrors `Session.pending_quiz` — see its doc comment. */
+  pending_quiz?: PendingQuiz
 }
 
 export interface ChatResponse {
