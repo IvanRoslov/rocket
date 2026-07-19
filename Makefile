@@ -36,7 +36,10 @@ start: build
 stop:
 	$(BIN) daemon stop 2>/dev/null || { [ -x $(BIN) ] || go build -o $(BIN) ./cmd/rocket; $(BIN) daemon stop; }
 
-restart: stop start
+# пауза: сразу после stop сокет ещё зачищается и start может увидеть «daemon unavailable»
+restart: stop
+	sleep 2
+	$(MAKE) start
 
 status:
 	$(BIN) daemon status
