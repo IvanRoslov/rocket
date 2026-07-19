@@ -21,6 +21,7 @@
 
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
@@ -161,6 +162,37 @@ export function configureUnicode11(term: Terminal): void {
   term.unicode.activeVersion = '11'
 }
 
+/**
+ * Loads the WebGL renderer addon, falling back silently to xterm's default
+ * DOM renderer if WebGL is unavailable (headless test envs, blocklisted
+ * GPUs) or the context is later lost.
+ *
+ * Root cause this fixes: the DOM renderer draws each row as a separate DOM
+ * line, so it can't tile box-drawing/block glyphs (or generally keep frames
+ * pixel-aligned) cleanly across rows under fast, continuous writes — this is
+ * exactly the "obryvki pervyh bukv strok, nalozheniya" (stray first-letter
+ * fragments, overlapping text) symptom seen under heavy Claude Code TUI
+ * output, which self-heals once output pauses and xterm catches up on a
+ * clean repaint. The WebGL renderer custom-draws glyphs into a texture atlas
+ * per cell instead, so frames stay connected under load. Returns the addon
+ * (or null if it couldn't be loaded) so the caller can dispose it on
+ * teardown.
+ */
+export function loadWebglAddon(term: Terminal): WebglAddon | null {
+  try {
+    const addon = new WebglAddon()
+    addon.onContextLoss(() => {
+      addon.dispose()
+    })
+    term.loadAddon(addon)
+    return addon
+  } catch {
+    // WebGL unavailable (e.g. jsdom in tests, no GPU) — xterm keeps using
+    // the DOM renderer.
+    return null
+  }
+}
+
 export function TermPanel({ sessionId, readonly, onResize, fontSize }: TermPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [banner, setBanner] = useState<Banner>(null)
@@ -212,6 +244,11 @@ export function TermPanel({ sessionId, readonly, onResize, fontSize }: TermPanel
       // Unicode 11 width tables here brings xterm's width table much
       // closer to tmux's, eliminating the mismatch for ordinary emoji.
       allowProposedApi: true,
+      // JetBrains-Mono-class monospace fonts don't cover every glyph agent
+      // TUIs emit (powerline separators, some emoji); a fallback-font glyph
+      // wider than the cell bleeds into the next cell and overlaps
+      // following text. Shrinks any overlapping glyph back to fit its cell.
+      rescaleOverlappingGlyphs: true,
     })
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
@@ -221,6 +258,17 @@ export function TermPanel({ sessionId, readonly, onResize, fontSize }: TermPanel
     onResizeRef.current?.(term.cols, term.rows)
     termRef.current = term
     fitAddonRef.current = fitAddon
+
+    // WebGL renderer — deferred one frame past term.open() (matches the
+    // reference implementation) so the initial viewport/atlas sizing has
+    // settled before the addon measures it. See loadWebglAddon() for why
+    // this specifically targets the mid-stream corruption symptom.
+    let webglAddon: WebglAddon | null = null
+    let webglMounted = true
+    const webglRaf = requestAnimationFrame(() => {
+      if (!webglMounted) return
+      webglAddon = loadWebglAddon(term)
+    })
 
     let ws: WebSocket | null = null
     let pingTimer: ReturnType<typeof setInterval> | null = null
@@ -339,6 +387,13 @@ export function TermPanel({ sessionId, readonly, onResize, fontSize }: TermPanel
 
     return () => {
       cancelled = true
+      webglMounted = false
+      cancelAnimationFrame(webglRaf)
+      try {
+        webglAddon?.dispose()
+      } catch {
+        // addon may already be disposed via the context-loss handler
+      }
       clearTimers()
       resizeObserver.disconnect()
       ws?.close()

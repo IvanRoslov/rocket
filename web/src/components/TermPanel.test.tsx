@@ -13,6 +13,7 @@ import {
   configureUnicode11,
   decideOnClose,
   encodeResize,
+  loadWebglAddon,
   nextReconnectDelay,
   termUrl,
 } from './TermPanel'
@@ -103,6 +104,41 @@ describe('configureUnicode11', () => {
     configureUnicode11(term)
     await new Promise<void>((resolve) => term.write('X\u{1F680}|', () => resolve()))
     expect(term.buffer.active.cursorX).toBe(4) // 'X' + 2-col emoji + '|'
+
+    term.dispose()
+    div.remove()
+    window.matchMedia = originalMatchMedia
+  })
+})
+
+describe('loadWebglAddon', () => {
+  // jsdom's `canvas` shim (used so the DOM renderer's WidthCache can call
+  // getContext('2d') in tests) implements no WebGL context, so
+  // canvas.getContext('webgl2') returns null and @xterm/addon-webgl throws
+  // from its constructor. This is exactly the "WebGL unavailable" path a
+  // real browser hits on a headless/blocklisted GPU — asserts the addon
+  // fails closed (falls back to the DOM renderer) instead of crashing the
+  // terminal mount.
+  it('returns null and does not throw when WebGL is unavailable (e.g. jsdom)', () => {
+    // xterm.js queries matchMedia for DPR change tracking; jsdom has none.
+    const originalMatchMedia = window.matchMedia
+    window.matchMedia = vi.fn().mockReturnValue({
+      matches: false,
+      media: '',
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }) as unknown as typeof window.matchMedia
+
+    const term = new Terminal({ allowProposedApi: true })
+    const div = document.createElement('div')
+    document.body.appendChild(div)
+    term.open(div)
+
+    expect(() => loadWebglAddon(term)).not.toThrow()
+    expect(loadWebglAddon(term)).toBeNull()
 
     term.dispose()
     div.remove()

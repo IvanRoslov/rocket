@@ -12,9 +12,10 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.2",
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/addon-unicode11": "^0.9.0",
-    "@xterm/xterm": "^6.0.0",
+    "@xterm/addon-fit": "0.12.0-beta.256",
+    "@xterm/addon-unicode11": "0.10.0-beta.256",
+    "@xterm/addon-webgl": "0.20.0-beta.255",
+    "@xterm/xterm": "6.1.0-beta.256",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",
@@ -28,10 +29,14 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "canvas": "^3.2.3",
     "jsdom": "^29.1.1",
     "msw": "^2.15.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
     "vitest": "^4.1.10"
+  },
+  "allowScripts": {
+    "canvas@3.2.3": true
   }
 }
