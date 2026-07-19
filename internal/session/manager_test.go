@@ -177,6 +177,14 @@ func (a *fakeAgent) Activity(ctx context.Context, ref agent.ActivityRef) (activi
 	return "", time.Time{}, agent.ErrNoSignal
 }
 
+func (a *fakeAgent) TranscriptTail(ctx context.Context, ref agent.ActivityRef, cursor string) ([]agent.ChatEntry, string, error) {
+	return nil, "", agent.ErrNoSignal
+}
+
+func (a *fakeAgent) TranscriptStat(ctx context.Context, ref agent.ActivityRef) (int64, int64, error) {
+	return 0, 0, agent.ErrNoSignal
+}
+
 // testFakeAgent is the instance returned by the "fake" agent builder
 // registered below. Tests reassign it before calling Manager methods to
 // control/inspect its behavior; tests in this package run sequentially so

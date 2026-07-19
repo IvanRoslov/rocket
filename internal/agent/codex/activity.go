@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/activity"
@@ -37,6 +38,18 @@ const tailReadSize = 64 * 1024
 // per-poll directory scan bounded and cheap.
 const sessionScanDays = 14
 
+// sessionsRoot returns $CODEX_HOME/sessions/, the single root all codex
+// session JSONL files live under. Shared by sessionsDirs (day-sharded scan)
+// and resolveTailCursor (chat.go, containment check for client-supplied
+// cursor paths) so there is exactly one place that computes it.
+func sessionsRoot() string {
+	base := codexHome()
+	if base == "" {
+		return ""
+	}
+	return filepath.Join(base, "sessions")
+}
+
 // sessionsDirs returns the sessionScanDays trailing date-sharded directories
 // under $CODEX_HOME/sessions/ (today back through sessionScanDays-1 days
 // ago) that could contain a still-active session, since codex shards a
@@ -44,14 +57,14 @@ const sessionScanDays = 14
 // session's lifetime (per recon). Nonexistent directories are skipped by
 // the caller (os.ReadDir on a missing dir just errs and is ignored).
 func sessionsDirs(now time.Time) []string {
-	base := codexHome()
-	if base == "" {
+	root := sessionsRoot()
+	if root == "" {
 		return nil
 	}
 	dirs := make([]string, 0, sessionScanDays)
 	for i := 0; i < sessionScanDays; i++ {
 		day := now.Add(-time.Duration(i) * 24 * time.Hour)
-		dirs = append(dirs, filepath.Join(base, "sessions", day.Format("2006"), day.Format("01"), day.Format("02")))
+		dirs = append(dirs, filepath.Join(root, day.Format("2006"), day.Format("01"), day.Format("02")))
 	}
 	return dirs
 }
@@ -65,10 +78,47 @@ type sessionMetaRecord struct {
 	} `json:"payload"`
 }
 
-// sessionCwd reads the first line of the session file at path and returns
-// its session_meta payload.cwd, if the first line is in fact a session_meta
-// record.
+// sessionCwdCache memoizes path -> session_meta payload.cwd across calls,
+// since a session file's first line is written once and never changes
+// (immutable) once it has been successfully read: findMatchingSession scans
+// up to 14 day-dirs and opens every .jsonl to read its first line, and it
+// runs on every Activity/TranscriptStat/TranscriptTail poll tick (5s), so
+// without this cache the same already-inspected files get reopened and
+// re-parsed every tick for the lifetime of the daemon. No eviction: bounded
+// by the number of distinct session files ever seen, and entries for
+// deleted files are harmless (just unused memory, never look wrong).
+var (
+	sessionCwdMu    sync.Mutex
+	sessionCwdCache = make(map[string]string)
+)
+
+// sessionCwd returns the session_meta payload.cwd recorded in the first
+// line of the session file at path, if the first line is in fact a
+// session_meta record. Memoized via sessionCwdCache; only successful reads
+// are cached (a file whose first line isn't a valid session_meta yet — e.g.
+// still being written — must be retried on the next call, not stuck as a
+// permanent miss).
 func sessionCwd(path string) (string, bool) {
+	sessionCwdMu.Lock()
+	if cwd, ok := sessionCwdCache[path]; ok {
+		sessionCwdMu.Unlock()
+		return cwd, true
+	}
+	sessionCwdMu.Unlock()
+
+	cwd, ok := readSessionCwd(path)
+	if !ok {
+		return "", false
+	}
+
+	sessionCwdMu.Lock()
+	sessionCwdCache[path] = cwd
+	sessionCwdMu.Unlock()
+	return cwd, true
+}
+
+// readSessionCwd does the actual file read behind sessionCwd (unmemoized).
+func readSessionCwd(path string) (string, bool) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", false

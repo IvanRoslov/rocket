@@ -59,11 +59,24 @@ func (f *fakeProber) onlyShellRunning(ctx context.Context, tmuxName string) (boo
 }
 
 // fakeAgent implements agent.Agent, exposing only Activity behavior needed
-// by the monitor.
+// by the monitor. statSequence, if set, scripts successive TranscriptStat
+// calls (one entry consumed per call; the last entry repeats once
+// exhausted). statErr, if set, is returned by every TranscriptStat call
+// instead.
 type fakeAgent struct {
 	state activity.State
 	ts    time.Time
 	err   error
+
+	statSequence []statResult
+	statErr      error
+	statCalls    int
+}
+
+// statResult is one scripted (mtime, size) pair for fakeAgent.TranscriptStat.
+type statResult struct {
+	mtime int64
+	size  int64
 }
 
 func (f *fakeAgent) Name() string                                 { return "fake-mon" }
@@ -76,6 +89,26 @@ func (f *fakeAgent) Activity(ctx context.Context, ref agent.ActivityRef) (activi
 		return "", time.Time{}, f.err
 	}
 	return f.state, f.ts, nil
+}
+
+func (f *fakeAgent) TranscriptTail(ctx context.Context, ref agent.ActivityRef, cursor string) ([]agent.ChatEntry, string, error) {
+	return nil, "", agent.ErrNoSignal
+}
+
+func (f *fakeAgent) TranscriptStat(ctx context.Context, ref agent.ActivityRef) (int64, int64, error) {
+	if f.statErr != nil {
+		return 0, 0, f.statErr
+	}
+	if len(f.statSequence) == 0 {
+		return 0, 0, agent.ErrNoSignal
+	}
+	i := f.statCalls
+	if i >= len(f.statSequence) {
+		i = len(f.statSequence) - 1
+	}
+	f.statCalls++
+	r := f.statSequence[i]
+	return r.mtime, r.size, nil
 }
 
 // testMonitor builds a Monitor wired to a real (temp-dir) store+bus, a
@@ -114,6 +147,7 @@ func testMonitor(t *testing.T, rt *fakeRuntime, prober *fakeProber, agents map[s
 		prober:       prober,
 		push:         make(map[string]pushEntry),
 		cache:        make(map[string]activity.State),
+		chat:         make(map[string]chatStat),
 	}
 	return m, st, b
 }
@@ -618,5 +652,153 @@ func TestSweepPrunesStaleCacheEntries(t *testing.T) {
 	}
 	if inPush2 {
 		t.Errorf("sess2 should be pruned from push map")
+	}
+}
+
+// countChatUpdated counts session.chat_updated events for sessionID among
+// events.
+func countChatUpdated(events []store.Event, sessionID string) int {
+	n := 0
+	for _, e := range events {
+		if e.Type == "session.chat_updated" && e.SessionID == sessionID {
+			n++
+		}
+	}
+	return n
+}
+
+// TestChatWatcherFirstObservationSeedsSilently verifies that the very first
+// sweep observing a session's transcript stat does not publish
+// session.chat_updated, even though there was no prior cached value to
+// compare against — this avoids a ping storm for every already-running
+// session on daemon start.
+func TestChatWatcherFirstObservationSeedsSilently(t *testing.T) {
+	rt := &fakeRuntime{names: []string{"sess1"}}
+	prober := &fakeProber{onlyShell: map[string]bool{}}
+	agents := map[string]*fakeAgent{"fake": {
+		state:        activity.Ready,
+		ts:           time.Now(),
+		statSequence: []statResult{{mtime: 100, size: 10}},
+	}}
+	m, st, b := testMonitor(t, rt, prober, agents)
+
+	seedSession(t, st, store.Session{ID: "sess1", Agent: "fake", TmuxName: "sess1"})
+
+	ch, cancel := b.Subscribe()
+	defer cancel()
+
+	m.sweep(context.Background())
+
+	events := drainEvents(ch)
+	if n := countChatUpdated(events, "sess1"); n != 0 {
+		t.Errorf("chat_updated events on first observation = %d, want 0", n)
+	}
+}
+
+// TestChatWatcherChangeEmitsOneEvent verifies that a transcript
+// (mtime,size) change between two sweeps produces exactly one
+// session.chat_updated event.
+func TestChatWatcherChangeEmitsOneEvent(t *testing.T) {
+	rt := &fakeRuntime{names: []string{"sess1"}}
+	prober := &fakeProber{onlyShell: map[string]bool{}}
+	agents := map[string]*fakeAgent{"fake": {
+		state: activity.Ready,
+		ts:    time.Now(),
+		statSequence: []statResult{
+			{mtime: 100, size: 10},
+			{mtime: 200, size: 20},
+		},
+	}}
+	m, st, b := testMonitor(t, rt, prober, agents)
+
+	seedSession(t, st, store.Session{ID: "sess1", Agent: "fake", TmuxName: "sess1"})
+
+	ch, cancel := b.Subscribe()
+	defer cancel()
+
+	// First sweep: seeds silently.
+	m.sweep(context.Background())
+	_ = drainEvents(ch)
+
+	// Second sweep: (mtime,size) changed -> exactly one event.
+	m.sweep(context.Background())
+	events := drainEvents(ch)
+	if n := countChatUpdated(events, "sess1"); n != 1 {
+		t.Errorf("chat_updated events after change = %d, want 1", n)
+	}
+}
+
+// TestChatWatcherNoChangeNoEvent verifies that an unchanged (mtime,size)
+// between sweeps produces no session.chat_updated event.
+func TestChatWatcherNoChangeNoEvent(t *testing.T) {
+	rt := &fakeRuntime{names: []string{"sess1"}}
+	prober := &fakeProber{onlyShell: map[string]bool{}}
+	agents := map[string]*fakeAgent{"fake": {
+		state: activity.Ready,
+		ts:    time.Now(),
+		statSequence: []statResult{
+			{mtime: 100, size: 10},
+			{mtime: 100, size: 10},
+		},
+	}}
+	m, st, b := testMonitor(t, rt, prober, agents)
+
+	seedSession(t, st, store.Session{ID: "sess1", Agent: "fake", TmuxName: "sess1"})
+
+	ch, cancel := b.Subscribe()
+	defer cancel()
+
+	m.sweep(context.Background())
+	_ = drainEvents(ch)
+
+	m.sweep(context.Background())
+	events := drainEvents(ch)
+	if n := countChatUpdated(events, "sess1"); n != 0 {
+		t.Errorf("chat_updated events with no change = %d, want 0", n)
+	}
+}
+
+// TestChatWatcherKilledSessionNotWatched verifies that once a session is no
+// longer live (excluded from ListSessions' default live-only filter), the
+// chat watcher no longer polls or emits for it, and its cache entry is
+// pruned.
+func TestChatWatcherKilledSessionNotWatched(t *testing.T) {
+	rt := &fakeRuntime{names: []string{"sess1"}}
+	prober := &fakeProber{onlyShell: map[string]bool{}}
+	agents := map[string]*fakeAgent{"fake": {
+		state: activity.Ready,
+		ts:    time.Now(),
+		statSequence: []statResult{
+			{mtime: 100, size: 10},
+			{mtime: 200, size: 20},
+		},
+	}}
+	m, st, b := testMonitor(t, rt, prober, agents)
+
+	seedSession(t, st, store.Session{ID: "sess1", Agent: "fake", TmuxName: "sess1"})
+
+	ch, cancel := b.Subscribe()
+	defer cancel()
+
+	// First sweep: seeds silently.
+	m.sweep(context.Background())
+	_ = drainEvents(ch)
+
+	// Kill the session so it drops out of the live-sessions listing.
+	if err := st.UpdateSessionState("sess1", "exited"); err != nil {
+		t.Fatalf("UpdateSessionState: %v", err)
+	}
+
+	m.sweep(context.Background())
+	events := drainEvents(ch)
+	if n := countChatUpdated(events, "sess1"); n != 0 {
+		t.Errorf("chat_updated events for killed session = %d, want 0", n)
+	}
+
+	m.mu.Lock()
+	_, inChat := m.chat["sess1"]
+	m.mu.Unlock()
+	if inChat {
+		t.Errorf("sess1 should be pruned from chat map after going terminal")
 	}
 }
