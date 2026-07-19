@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
+	"net/http"
 	"testing"
 )
 
@@ -47,5 +49,48 @@ func TestPrintDoctorResults_AnyFail(t *testing.T) {
 	results = append(results, checkResult{statusFail, "c", "bad"})
 	if !printDoctorResults(&buf, results) {
 		t.Fatal("expected anyFail = true")
+	}
+}
+
+// TestCheckGitHub tests the GitHub token check.
+func TestCheckGitHub(t *testing.T) {
+	cases := []struct {
+		name           string
+		tokenResponse  map[string]string
+		expectedStatus checkStatus
+		expectedDetail string
+	}{
+		{
+			name:           "token set",
+			tokenResponse:  map[string]string{"github_token": "ghp_abcd"},
+			expectedStatus: statusOK,
+			expectedDetail: "token set (PR tracking active)",
+		},
+		{
+			name:           "no token",
+			tokenResponse:  map[string]string{"github_token": ""},
+			expectedStatus: statusWarn,
+			expectedDetail: "no token — PR/CI tracking inactive (rocket github auth <token>)",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/v1/settings", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(tc.tokenResponse)
+			})
+
+			c := newUnixSocketTestServer(t, mux)
+
+			result := checkGitHub(c)
+			if result.Status != tc.expectedStatus {
+				t.Errorf("status = %v, want %v", result.Status, tc.expectedStatus)
+			}
+			if result.Detail != tc.expectedDetail {
+				t.Errorf("detail = %q, want %q", result.Detail, tc.expectedDetail)
+			}
+		})
 	}
 }
