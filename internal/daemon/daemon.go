@@ -72,8 +72,9 @@ func Run(cfg *config.Config) error {
 	mon := monitor.New(st, b, rt, cfg, agent.Get)
 	q := queue.New(st, b, rt, cfg, mon.Activity)
 	hb := heartbeat.New(st, b, cfg, mon.Activity, q.Wake)
-	// NopNotifier is a placeholder until Task 6 wires up real PR reactions.
-	ghp := ghpoller.New(st, b, githubClientFactory(st, cfg), cfg, ghpoller.NopNotifier{})
+	reactions := ghpoller.NewReactions(st, b, q.Wake, mgr, mon.Activity, cfg)
+	defer reactions.Stop()
+	ghp := ghpoller.New(st, b, githubClientFactory(st, cfg), cfg, reactions)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()

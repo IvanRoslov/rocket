@@ -545,7 +545,31 @@ func allowedReposDesc(st *store.Store, project store.Project) (string, error) {
 func (m *Manager) Kill(ctx context.Context, id string, cleanup bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.terminate(ctx, id, "killed", "session.killed", nil, cleanup)
+}
 
+// Complete transitions a live session to its final "done" state: destroys
+// the runtime handle (best-effort) and the workspace, marks the session
+// done, and publishes session.state_changed{to:"done", reason:"pr_merged"}
+// followed by workspace.cleanup. It is the terminal path used by the
+// auto-cleanup flow after a worker's PR merges (see ghpoller.Reactions),
+// distinct from Kill in that the session ends up "done" rather than
+// "killed" and cleanup is unconditional. Completing a session already in a
+// terminal state is idempotent for the state/runtime-destroy step (mirrors
+// Kill), but workspace cleanup still runs.
+func (m *Manager) Complete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.terminate(ctx, id, "done", "session.state_changed",
+		map[string]any{"to": "done", "reason": "pr_merged"}, true)
+}
+
+// terminate is the shared implementation behind Kill and Complete: it
+// best-effort destroys the runtime handle, transitions the session to
+// finalState (skipped if the session is already terminal), publishes
+// event/eventData for that transition, and — if cleanup is true — destroys
+// the workspace and publishes workspace.cleanup. Callers must hold m.mu.
+func (m *Manager) terminate(ctx context.Context, id, finalState, event string, eventData map[string]any, cleanup bool) error {
 	sess, err := m.st.GetSession(id)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -556,10 +580,10 @@ func (m *Manager) Kill(ctx context.Context, id string, cleanup bool) error {
 
 	if !isTerminal(sess.State) {
 		_ = m.rt.Destroy(ctx, runtime.Handle{Name: sess.TmuxName})
-		if err := m.st.UpdateSessionState(id, "killed"); err != nil {
+		if err := m.st.UpdateSessionState(id, finalState); err != nil {
 			return err
 		}
-		m.bus.Publish("session.killed", id, nil)
+		m.bus.Publish(event, id, eventData)
 	}
 
 	if cleanup {

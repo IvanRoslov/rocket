@@ -1324,3 +1324,69 @@ func TestRestoreInjectsGHToken(t *testing.T) {
 		t.Errorf("GH_TOKEN = %q, want ghp_restore_token_789", env["GH_TOKEN"])
 	}
 }
+
+// --- Complete ----------------------------------------------------------
+
+func TestComplete_TransitionsToDoneAndDestroysWorkspace(t *testing.T) {
+	m, st, b, rt, ws := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	seedRunningSession(t, st, "sess1")
+
+	ch, cancel := b.Subscribe()
+	defer cancel()
+
+	if err := m.Complete(context.Background(), "sess1"); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	stored, err := st.GetSession("sess1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if stored.State != "done" {
+		t.Errorf("State = %q, want done", stored.State)
+	}
+	if len(rt.destroyed) != 1 || rt.destroyed[0] != "sess1" {
+		t.Errorf("runtime.Destroy calls = %v", rt.destroyed)
+	}
+	if len(ws.destroyed) != 1 || ws.destroyed[0] != "sess1" {
+		t.Errorf("workspace.Destroy calls = %v", ws.destroyed)
+	}
+
+	events := drainEvents(ch)
+	if len(events) != 2 {
+		t.Fatalf("events = %d, want 2: %v", len(events), events)
+	}
+	if events[0].Type != "session.state_changed" || events[1].Type != "workspace.cleanup" {
+		t.Errorf("unexpected event types: %v, %v", events[0].Type, events[1].Type)
+	}
+}
+
+func TestComplete_IdempotentOnAlreadyDone(t *testing.T) {
+	m, st, _, rt, ws := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	seedRunningSession(t, st, "sess1")
+
+	if err := m.Complete(context.Background(), "sess1"); err != nil {
+		t.Fatalf("first Complete: %v", err)
+	}
+	destroyedBefore := len(rt.destroyed)
+
+	if err := m.Complete(context.Background(), "sess1"); err != nil {
+		t.Fatalf("second Complete: %v", err)
+	}
+
+	stored, err := st.GetSession("sess1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if stored.State != "done" {
+		t.Errorf("State = %q, want done (unchanged)", stored.State)
+	}
+	if len(rt.destroyed) != destroyedBefore {
+		t.Errorf("runtime.Destroy should not be called again: %v", rt.destroyed)
+	}
+	if len(ws.destroyed) != 2 || ws.destroyed[0] != "sess1" || ws.destroyed[1] != "sess1" {
+		t.Errorf("workspace.Destroy should still run on idempotent Complete: %v", ws.destroyed)
+	}
+}
