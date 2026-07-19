@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -305,9 +306,9 @@ func TestSetupWorkspacePreservesForeignSettingsAndAppendsHooks(t *testing.T) {
     ]
   }
 }`
-	settingsPath := filepath.Join(claudeDir, "settings.json")
+	settingsPath := filepath.Join(claudeDir, "settings.local.json")
 	if err := os.WriteFile(settingsPath, []byte(existing), 0o644); err != nil {
-		t.Fatalf("write existing settings.json: %v", err)
+		t.Fatalf("write existing settings.local.json: %v", err)
 	}
 
 	cc := New()
@@ -394,16 +395,17 @@ func TestSetupWorkspaceHooksIdempotent(t *testing.T) {
 	}
 }
 
-// readSettings reads and JSON-decodes <worktreePath>/.claude/settings.json.
+// readSettings reads and JSON-decodes
+// <worktreePath>/.claude/settings.local.json.
 func readSettings(t *testing.T, worktreePath string) map[string]any {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(worktreePath, ".claude", "settings.json"))
+	data, err := os.ReadFile(filepath.Join(worktreePath, ".claude", "settings.local.json"))
 	if err != nil {
-		t.Fatalf("read settings.json: %v", err)
+		t.Fatalf("read settings.local.json: %v", err)
 	}
 	var settings map[string]any
 	if err := json.Unmarshal(data, &settings); err != nil {
-		t.Fatalf("decode settings.json: %v", err)
+		t.Fatalf("decode settings.local.json: %v", err)
 	}
 	return settings
 }
@@ -435,6 +437,161 @@ func findHookCommand(t *testing.T, hooks map[string]any, event string) string {
 	}
 	cmd, _ := h["command"].(string)
 	return cmd
+}
+
+// TestSetupWorkspaceDoesNotCreateSettingsJSON asserts that a fresh
+// SetupWorkspace call never creates .claude/settings.json — rocket only
+// ever writes hooks into settings.local.json, so a worker's PR never gets
+// a settings.json diff.
+func TestSetupWorkspaceDoesNotCreateSettingsJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cc := New()
+	spec := agent.LaunchSpec{WorktreePath: tmpDir}
+	if err := cc.SetupWorkspace(spec); err != nil {
+		t.Fatalf("SetupWorkspace failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(tmpDir, ".claude", "settings.json")); !os.IsNotExist(err) {
+		t.Errorf(".claude/settings.json should not exist after SetupWorkspace (err=%v)", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, ".claude", "settings.local.json")); err != nil {
+		t.Errorf(".claude/settings.local.json should exist after SetupWorkspace: %v", err)
+	}
+}
+
+// initGitRepo runs `git init` in dir so it behaves like a real worktree for
+// git-plumbing-based tests.
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %v\n%s", err, out)
+	}
+}
+
+// excludeLines reads <worktreePath>/.git/info/exclude and returns its
+// trimmed, non-empty lines.
+func excludeLines(t *testing.T, worktreePath string) []string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(worktreePath, ".git", "info", "exclude"))
+	if err != nil {
+		t.Fatalf("read info/exclude: %v", err)
+	}
+	var lines []string
+	for _, l := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, strings.TrimSpace(l))
+		}
+	}
+	return lines
+}
+
+func containsLine(lines []string, want string) bool {
+	for _, l := range lines {
+		if l == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestSetupWorkspaceExcludesRocketPlumbingFromGit runs SetupWorkspace
+// against a real git repo (via `git init`) and checks that all four rocket
+// plumbing paths land in .git/info/exclude exactly once, including after a
+// second, idempotent run.
+func TestSetupWorkspaceExcludesRocketPlumbingFromGit(t *testing.T) {
+	tmpDir := t.TempDir()
+	initGitRepo(t, tmpDir)
+
+	cc := New()
+	spec := agent.LaunchSpec{WorktreePath: tmpDir, SystemPrompt: "hello"}
+	if err := cc.SetupWorkspace(spec); err != nil {
+		t.Fatalf("first SetupWorkspace failed: %v", err)
+	}
+
+	want := []string{".claude/settings.local.json", ".rocket/", ".rocket-prompt.md", ".rocket-launch.sh"}
+	lines := excludeLines(t, tmpDir)
+	for _, w := range want {
+		count := 0
+		for _, l := range lines {
+			if l == w {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("expected exactly one %q entry in info/exclude, got %d: %v", w, count, lines)
+		}
+	}
+
+	// Second run: idempotent, no duplicate entries.
+	if err := cc.SetupWorkspace(spec); err != nil {
+		t.Fatalf("second SetupWorkspace failed: %v", err)
+	}
+	lines2 := excludeLines(t, tmpDir)
+	for _, w := range want {
+		count := 0
+		for _, l := range lines2 {
+			if l == w {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("expected exactly one %q entry after second run, got %d: %v", w, count, lines2)
+		}
+	}
+}
+
+// TestSetupWorkspaceGitExcludeSkipsTrackedPath seeds a tracked
+// .rocket-launch.sh (an unrealistic setup, but it exercises the
+// tracked-path skip path of agent.ExcludeFromGit) and verifies it is not
+// added to info/exclude, while the other rocket plumbing paths still are.
+func TestSetupWorkspaceGitExcludeSkipsTrackedPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	initGitRepo(t, tmpDir)
+
+	trackedPath := filepath.Join(tmpDir, ".rocket-launch.sh")
+	if err := os.WriteFile(trackedPath, []byte("#!/bin/sh\necho tracked\n"), 0o755); err != nil {
+		t.Fatalf("seed .rocket-launch.sh: %v", err)
+	}
+	addCmd := exec.Command("git", "add", ".rocket-launch.sh")
+	addCmd.Dir = tmpDir
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add failed: %v\n%s", err, out)
+	}
+
+	cc := New()
+	spec := agent.LaunchSpec{WorktreePath: tmpDir, SystemPrompt: "hello"}
+	if err := cc.SetupWorkspace(spec); err != nil {
+		t.Fatalf("SetupWorkspace failed: %v", err)
+	}
+
+	lines := excludeLines(t, tmpDir)
+	if containsLine(lines, ".rocket-launch.sh") {
+		t.Errorf("tracked .rocket-launch.sh should not be added to info/exclude: %v", lines)
+	}
+	for _, w := range []string{".claude/settings.local.json", ".rocket/", ".rocket-prompt.md"} {
+		if !containsLine(lines, w) {
+			t.Errorf("expected %q in info/exclude: %v", w, lines)
+		}
+	}
+}
+
+// TestSetupWorkspaceNonGitDirNoError asserts that SetupWorkspace still
+// succeeds (git-exclude plumbing is best-effort and silently skipped) when
+// the worktree isn't a git repository at all.
+func TestSetupWorkspaceNonGitDirNoError(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cc := New()
+	spec := agent.LaunchSpec{WorktreePath: tmpDir, SystemPrompt: "hello"}
+	if err := cc.SetupWorkspace(spec); err != nil {
+		t.Fatalf("SetupWorkspace should succeed in a non-git dir, got: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, ".git")); !os.IsNotExist(err) {
+		t.Errorf("no .git directory should have been created (err=%v)", err)
+	}
 }
 
 func TestName(t *testing.T) {
