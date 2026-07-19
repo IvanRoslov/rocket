@@ -1,0 +1,178 @@
+/*
+ * Shared styling for the <Markdown> component. This is rendered content
+ * nested inside cards/bubbles, not a page — headings use a moderate scale
+ * rather than document-level h1/h2 sizing.
+ */
+
+.markdown {
+  font: inherit;
+  color: inherit;
+  word-wrap: break-word;
+}
+
+.markdown > *:first-child {
+  margin-top: 0;
+}
+.markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.markdown p {
+  margin: 0 0 10px;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text);
+  margin: 18px 0 8px;
+}
+.markdown h1 {
+  font-size: 1.3em;
+}
+.markdown h2 {
+  font-size: 1.18em;
+}
+.markdown h3 {
+  font-size: 1.08em;
+}
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-size: 1em;
+}
+
+.markdown ul,
+.markdown ol {
+  margin: 0 0 10px;
+  padding-left: 22px;
+}
+.markdown li {
+  margin: 3px 0;
+}
+.markdown li > ul,
+.markdown li > ol {
+  margin: 3px 0;
+}
+
+.markdown li.task-list-item {
+  list-style: none;
+  margin-left: -22px;
+}
+.markdown input[type='checkbox'] {
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.markdown a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.markdown a:hover {
+  text-decoration: underline;
+}
+
+.markdown blockquote {
+  margin: 0 0 10px;
+  padding: 2px 12px;
+  border-left: 3px solid var(--border-hover);
+  color: var(--text-2);
+}
+.markdown blockquote > *:last-child {
+  margin-bottom: 0;
+}
+
+.markdown hr {
+  border: none;
+  border-top: 1px solid var(--divider);
+  margin: 16px 0;
+}
+
+.markdown del {
+  color: var(--text-3);
+}
+
+.markdown code {
+  font: 0.9em var(--font-mono);
+  background: var(--surface-2);
+  border-radius: var(--radius-pill);
+  padding: 1px 6px;
+}
+
+.markdown pre {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: var(--radius-panel-sm);
+  overflow-x: auto;
+}
+.markdown pre code {
+  background: none;
+  border-radius: 0;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.markdown__table-wrap {
+  overflow-x: auto;
+  margin: 0 0 10px;
+}
+
+.markdown table {
+  border-collapse: collapse;
+  width: max-content;
+  min-width: 100%;
+  font-size: 0.95em;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  text-align: left;
+}
+
+.markdown th {
+  background: var(--surface-2);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.markdown td code,
+.markdown th code {
+  font-family: var(--font-mono);
+}
+
+/* Compact variant — chat bubbles / message list, where the default rhythm
+   above (tuned for Docs/Overview tabs) is too roomy. */
+.markdown--compact p {
+  margin: 0 0 6px;
+}
+.markdown--compact h1,
+.markdown--compact h2,
+.markdown--compact h3,
+.markdown--compact h4,
+.markdown--compact h5,
+.markdown--compact h6 {
+  margin: 10px 0 5px;
+}
+.markdown--compact ul,
+.markdown--compact ol {
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+.markdown--compact pre,
+.markdown--compact blockquote,
+.markdown--compact .markdown__table-wrap {
+  margin: 0 0 6px;
+}
+.markdown--compact hr {
+  margin: 10px 0;
+}

@@ -13,6 +13,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { Markdown } from '../../components/Markdown'
 import { ApiError } from '../../lib/api'
 import { timeAgo } from '../../lib/format'
 import { useMessages, useSendMessage, useSession } from '../../lib/queries'
@@ -110,7 +111,9 @@ function EntryBubble({ entry }: { entry: ChatEntry }) {
   return (
     <div className={own ? 'chat-screen__row chat-screen__row--own' : 'chat-screen__row'}>
       <div className={own ? 'chat-screen__bubble chat-screen__bubble--own' : 'chat-screen__bubble'}>
-        <div className="chat-screen__body">{entry.text}</div>
+        <div className="chat-screen__body">
+          <Markdown compact>{entry.text}</Markdown>
+        </div>
         {entry.ts > 0 && <div className="chat-screen__when">{timeAgo(entry.ts)}</div>}
       </div>
     </div>
@@ -121,7 +124,9 @@ function OptimisticBubble({ msg }: { msg: OptimisticMessage }) {
   return (
     <div className="chat-screen__row chat-screen__row--own">
       <div className="chat-screen__bubble chat-screen__bubble--own">
-        <div className="chat-screen__body">{msg.body}</div>
+        <div className="chat-screen__body">
+          <Markdown compact>{msg.body}</Markdown>
+        </div>
         <div className={`chat-screen__status chat-screen__status--${msg.status}`}>
           {msg.largeFile
             ? 'доставлено файлом'

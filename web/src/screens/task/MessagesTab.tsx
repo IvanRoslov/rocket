@@ -7,6 +7,7 @@
 // `from === session.id` and render on the left in white.
 
 import { useState } from 'react'
+import { Markdown } from '../../components/Markdown'
 import { timeAgo } from '../../lib/format'
 import { useSendMessage } from '../../lib/queries'
 import type { Message } from '../../lib/types'
@@ -50,7 +51,9 @@ export function MessagesTab({ session, messages }: MessagesTabProps) {
                   <span className="messages-tab__author">{own ? 'you' : session.tmux_name}</span>
                   <span className="messages-tab__when">{timeAgo(m.created_at)}</span>
                 </div>
-                <div className="messages-tab__body">{m.body}</div>
+                <div className="messages-tab__body">
+                  <Markdown compact>{m.body}</Markdown>
+                </div>
                 {own && (
                   <div className={`messages-tab__status messages-tab__status--${m.status}`}>
                     {m.status === 'delivered' ? '✓ ' : ''}

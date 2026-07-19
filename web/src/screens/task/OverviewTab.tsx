@@ -3,7 +3,7 @@
 // worker session), and the final report doc if the orchestrator has written
 // one (`kind: "report"`).
 
-import ReactMarkdown from 'react-markdown'
+import { Markdown } from '../../components/Markdown'
 import { Link } from 'react-router-dom'
 import type { Session, Task, TaskDoc, TaskStatus } from '../../lib/types'
 import './OverviewTab.css'
@@ -62,7 +62,7 @@ export function OverviewTab({ projectId, task, subtasks, sessions, docs }: Overv
     <div className="overview-tab">
       {task.description ? (
         <div className="overview-tab__description">
-          <ReactMarkdown>{task.description}</ReactMarkdown>
+          <Markdown>{task.description}</Markdown>
         </div>
       ) : (
         <p className="overview-tab__description-empty">No description.</p>
@@ -99,7 +99,7 @@ export function OverviewTab({ projectId, task, subtasks, sessions, docs }: Overv
         <div className="overview-tab__report-label">Final report</div>
         {report ? (
           <div className="overview-tab__report-body">
-            <ReactMarkdown>{report.body}</ReactMarkdown>
+            <Markdown>{report.body}</Markdown>
           </div>
         ) : (
           <div className="overview-tab__report-empty">

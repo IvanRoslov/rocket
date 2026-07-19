@@ -3,6 +3,7 @@
 // form) plus a collapsed list of resolved threads below.
 
 import { useState } from 'react'
+import { Markdown } from '../../components/Markdown'
 import { timeAgo } from '../../lib/format'
 import { useAnswerQuestion, useReplyQuestion } from '../../lib/queries'
 import type { Question } from '../../lib/types'
@@ -84,7 +85,9 @@ function ThreadCard({ taskId, question, orchestratorName }: ThreadCardProps) {
         <span className="question-thread__asker">{orchestratorName ?? question.asked_by}</span>
       </div>
       <div className="question-thread__body">
-        <p className="question-thread__question">{question.body}</p>
+        <div className="question-thread__question">
+          <Markdown>{question.body}</Markdown>
+        </div>
 
         {question.context &&
           (ctxOpen ? (
@@ -95,7 +98,9 @@ function ThreadCard({ taskId, question, orchestratorName }: ThreadCardProps) {
                   Hide ▴
                 </button>
               </div>
-              <div className="question-thread__context-body">{question.context}</div>
+              <div className="question-thread__context-body">
+                <Markdown compact>{question.context}</Markdown>
+              </div>
             </div>
           ) : (
             <button type="button" className="question-thread__context-toggle" onClick={() => setCtxOpen(true)}>
@@ -124,7 +129,9 @@ function ThreadCard({ taskId, question, orchestratorName }: ThreadCardProps) {
                   </span>
                   <span className="question-thread__message-meta">{timeAgo(m.created_at)}</span>
                 </div>
-                <div className="question-thread__message-body">{m.body}</div>
+                <div className="question-thread__message-body">
+                  <Markdown compact>{m.body}</Markdown>
+                </div>
               </div>
             )
           })}
@@ -183,14 +190,18 @@ function ResolvedThreadRow({ question, orchestratorName }: ResolvedThreadRowProp
 
       {open && (
         <div className="questions-tab__resolved-detail">
-          <p className="questions-tab__resolved-question">{question.body}</p>
+          <div className="questions-tab__resolved-question">
+            <Markdown>{question.body}</Markdown>
+          </div>
 
           {question.context && (
             <div className="question-thread__context">
               <div className="question-thread__context-header">
                 <span>Context</span>
               </div>
-              <div className="question-thread__context-body">{question.context}</div>
+              <div className="question-thread__context-body">
+                <Markdown compact>{question.context}</Markdown>
+              </div>
             </div>
           )}
 
@@ -215,7 +226,9 @@ function ResolvedThreadRow({ question, orchestratorName }: ResolvedThreadRowProp
                       </span>
                       <span className="question-thread__message-meta">{timeAgo(m.created_at)}</span>
                     </div>
-                    <div className="question-thread__message-body">{m.body}</div>
+                    <div className="question-thread__message-body">
+                  <Markdown compact>{m.body}</Markdown>
+                </div>
                   </div>
                 )
               })}

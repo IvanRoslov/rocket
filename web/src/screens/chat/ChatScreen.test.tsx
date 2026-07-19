@@ -137,6 +137,22 @@ describe('ChatScreen sending', () => {
   })
 })
 
+describe('ChatScreen GFM rendering', () => {
+  it('renders a markdown table in an assistant bubble', async () => {
+    appendChatEntry('s-billing-v2-orch', {
+      role: 'assistant',
+      text: '| Option | Cost |\n| --- | --- |\n| A | $1 |\n| B | $2 |\n',
+      ts: 1_800_000_600,
+    })
+    renderPage('s-billing-v2-orch')
+
+    const table = await screen.findByRole('table')
+    expect(table).toBeInTheDocument()
+    expect(screen.getByText('Option')).toBeInTheDocument()
+    expect(screen.getByText('$2')).toBeInTheDocument()
+  })
+})
+
 describe('ChatScreen cursor increment', () => {
   it('appends new entries on a session.chat_updated ping', async () => {
     renderPage('s-billing-v2-orch')

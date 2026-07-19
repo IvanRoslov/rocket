@@ -2,7 +2,7 @@
 // excerpt; clicking a card expands it into the full markdown body.
 
 import { useState } from 'react'
-import ReactMarkdown from 'react-markdown'
+import { Markdown } from '../../components/Markdown'
 import { timeAgo } from '../../lib/format'
 import type { TaskDoc, TaskDocKind } from '../../lib/types'
 import './DocsTab.css'
@@ -50,7 +50,7 @@ export function DocsTab({ docs }: DocsTabProps) {
             </button>
             {expanded ? (
               <div className="docs-tab__markdown">
-                <ReactMarkdown>{d.body}</ReactMarkdown>
+                <Markdown>{d.body}</Markdown>
               </div>
             ) : (
               <p className="docs-tab__excerpt">{excerpt(d.body)}</p>

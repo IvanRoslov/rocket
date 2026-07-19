@@ -101,7 +101,6 @@
 .chat-screen__body {
   font: 13.5px/1.5 var(--font-ui);
   color: var(--text);
-  white-space: pre-wrap;
   word-break: break-word;
 }
 .chat-screen__when {
