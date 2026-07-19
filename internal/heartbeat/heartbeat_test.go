@@ -106,8 +106,55 @@ func TestTick_StalledIdleWorker_QueuesSummaryWithWorkerLine(t *testing.T) {
 	if !strings.Contains(msgs[0].Body, "[rocket heartbeat]") {
 		t.Errorf("expected body to have heartbeat prefix, got %q", msgs[0].Body)
 	}
+	if !strings.Contains(msgs[0].Body, "no PR") {
+		t.Errorf("expected body to mention 'no PR', got %q", msgs[0].Body)
+	}
 	if len(woke) != 1 || woke[0] != "orch1" {
 		t.Errorf("expected wake(orch1), got %v", woke)
+	}
+}
+
+func TestTick_StalledWorkerWithPR_QueuesSummaryWithPRLine(t *testing.T) {
+	st := openTestStore(t)
+	b := bus.New(st)
+	cfg := testConfig()
+
+	seedOrchAndTask(t, st, "orch1", "in_progress")
+	staleTS := time.Now().Add(-20 * time.Minute).Unix()
+
+	// Add worker with PR info
+	if err := st.AddSession(store.Session{
+		ID: "worker1", Kind: "worker", ProjectID: "proj", RepoID: "repo", FeatureSlug: "feat",
+		ParentID: "orch1", Agent: "claude-code", Branch: "b-worker1", WorktreePath: "/wt/worker1",
+		TmuxName: "t-worker1", State: "running", Activity: "idle", ActivityTS: staleTS,
+		PRNumber: 42, PRState: "open", CIState: "failing",
+	}); err != nil {
+		t.Fatalf("AddSession(worker): %v", err)
+	}
+
+	hb := New(st, b, cfg, unknownActivity, func(string) {})
+
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	msgs, err := st.ListMessages("orch1", 0)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+
+	// Should mention PR #42 and CI state
+	if !strings.Contains(msgs[0].Body, "PR #42") {
+		t.Errorf("expected body to mention PR #42, got %q", msgs[0].Body)
+	}
+	if !strings.Contains(msgs[0].Body, "failing") {
+		t.Errorf("expected body to mention CI state failing, got %q", msgs[0].Body)
+	}
+	if strings.Contains(msgs[0].Body, "no PR") {
+		t.Errorf("should not mention 'no PR' when PR is set, got %q", msgs[0].Body)
 	}
 }
 

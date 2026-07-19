@@ -470,6 +470,101 @@ func TestGetTaskDetailWithSubtasksAndSession(t *testing.T) {
 	}
 }
 
+func TestGetTaskDetailSubtasksIncludePRAndCI(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+
+	rootID, err := d.Store.AddTask(store.Task{Title: "Root", ProjectID: "proj1"})
+	if err != nil {
+		t.Fatalf("AddTask root: %v", err)
+	}
+
+	// Create subtask without session
+	subNoSessionID, err := d.Store.AddTask(store.Task{Title: "Sub No Session", ProjectID: "proj1", ParentID: rootID})
+	if err != nil {
+		t.Fatalf("AddTask sub no session: %v", err)
+	}
+
+	// Create subtask with session and PR/CI info
+	sess := store.Session{
+		ID:        "worker-1",
+		Kind:      "worker",
+		ProjectID: "proj1",
+		RepoID:    "proj1-repo",
+		Agent:     "fake",
+		Branch:    "feature/x",
+		TmuxName:  "worker-1",
+		State:     "running",
+		PRNumber:  42,
+		PRState:   "open",
+		CIState:   "passing",
+	}
+	if err := d.Store.AddSession(sess); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+
+	subWithSessionID, err := d.Store.AddTask(store.Task{
+		Title:     "Sub With Session",
+		ProjectID: "proj1",
+		ParentID:  rootID,
+		SessionID: sess.ID,
+	})
+	if err != nil {
+		t.Fatalf("AddTask sub with session: %v", err)
+	}
+
+	resp := getJSON(t, srv.URL+"/v1/tasks/"+itoa(rootID))
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	body := decodeRepo(t, resp)
+	subtasks := body["subtasks"].([]any)
+	if len(subtasks) != 2 {
+		t.Fatalf("len(subtasks) = %d, want 2", len(subtasks))
+	}
+
+	// Find the subtasks by ID
+	var subNoSession, subWithSession map[string]any
+	for _, st := range subtasks {
+		stMap := st.(map[string]any)
+		id := int64(stMap["id"].(float64))
+		if id == subNoSessionID {
+			subNoSession = stMap
+		} else if id == subWithSessionID {
+			subWithSession = stMap
+		}
+	}
+
+	if subNoSession == nil {
+		t.Fatalf("subtask without session not found")
+	}
+	if subWithSession == nil {
+		t.Fatalf("subtask with session not found")
+	}
+
+	// Subtask without session should have zero PR/CI fields
+	if pr, ok := subNoSession["pr_number"]; ok && pr != float64(0) {
+		t.Errorf("subtask without session pr_number = %v, want 0 or omitted", pr)
+	}
+	if ci, ok := subNoSession["ci_state"]; ok && ci != "" {
+		t.Errorf("subtask without session ci_state = %v, want empty or omitted", ci)
+	}
+
+	// Subtask with session should have PR/CI fields from the session
+	if subWithSession["pr_number"] != float64(42) {
+		t.Errorf("subtask pr_number = %v, want 42", subWithSession["pr_number"])
+	}
+	if subWithSession["pr_state"] != "open" {
+		t.Errorf("subtask pr_state = %v, want open", subWithSession["pr_state"])
+	}
+	if subWithSession["ci_state"] != "passing" {
+		t.Errorf("subtask ci_state = %v, want passing", subWithSession["ci_state"])
+	}
+}
+
 // --- PATCH /v1/tasks/{id} -----------------------------------------------
 
 func TestPatchTaskStatusChangeEmitsEventAndLog(t *testing.T) {

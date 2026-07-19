@@ -53,7 +53,7 @@ func newStatusCmd() *cobra.Command {
 // renderStatus writes a feature status view to w: a header line naming the
 // slug, then the orchestrator's own line ("orchestrator: <id> [state]
 // <activity> (<age> ago)", or "orchestrator: -" if none is live), followed
-// by a worker table (SESSION, ACTIVITY, AGE) when any workers are present.
+// by a worker table (SESSION, ACTIVITY, PR, CI, AGE) when any workers are present.
 func renderStatus(slug string, sessions []sessionRow, w io.Writer, now time.Time) {
 	var orch *sessionRow
 	var workers []sessionRow
@@ -81,13 +81,21 @@ func renderStatus(slug string, sessions []sessionRow, w io.Writer, now time.Time
 	if len(workers) > 0 {
 		fmt.Fprintf(w, "\n")
 		tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-		_, _ = tw.Write([]byte("SESSION\tACTIVITY\tAGE\n"))
+		_, _ = tw.Write([]byte("SESSION\tACTIVITY\tPR\tCI\tAGE\n"))
 		for _, wk := range workers {
 			activity := wk.Activity
 			if activity == "" {
 				activity = "-"
 			}
-			_, _ = tw.Write([]byte(fmt.Sprintf("%s\t%s\t%s\n", wk.ID, activity, humanAge(wk.CreatedAt, now))))
+			pr := "-"
+			if wk.PRNumber > 0 {
+				pr = fmt.Sprintf("#%d", wk.PRNumber)
+			}
+			ci := wk.CIState
+			if ci == "" {
+				ci = "-"
+			}
+			_, _ = tw.Write([]byte(fmt.Sprintf("%s\t%s\t%s\t%s\t%s\n", wk.ID, activity, pr, ci, humanAge(wk.CreatedAt, now))))
 		}
 		_ = tw.Flush()
 	}

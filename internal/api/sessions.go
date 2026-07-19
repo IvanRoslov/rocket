@@ -27,6 +27,9 @@ type sessionResponse struct {
 	Activity     string `json:"activity,omitempty"`
 	Prompt       string `json:"prompt,omitempty"`
 	ActivityTS   int64  `json:"activity_ts,omitempty"`
+	PRNumber     int    `json:"pr_number,omitempty"`
+	PRState      string `json:"pr_state,omitempty"`
+	CIState      string `json:"ci_state,omitempty"`
 	CreatedAt    int64  `json:"created_at"`
 	UpdatedAt    int64  `json:"updated_at"`
 }
@@ -47,6 +50,9 @@ func toSessionResponse(s store.Session) sessionResponse {
 		Activity:     s.Activity,
 		Prompt:       s.Prompt,
 		ActivityTS:   s.ActivityTS,
+		PRNumber:     s.PRNumber,
+		PRState:      s.PRState,
+		CIState:      s.CIState,
 		CreatedAt:    s.CreatedAt,
 		UpdatedAt:    s.UpdatedAt,
 	}

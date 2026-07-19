@@ -72,6 +72,14 @@ type taskSessionResponse struct {
 	Attach   []string `json:"attach"`
 }
 
+// subtaskResponse extends taskResponse with PR/CI fields from the session.
+type subtaskResponse struct {
+	taskResponse
+	PRNumber int    `json:"pr_number,omitempty"`
+	PRState  string `json:"pr_state,omitempty"`
+	CIState  string `json:"ci_state,omitempty"`
+}
+
 // toTaskSessionResponse builds the session summary for a task's session_id.
 // Returns (nil, nil) if the session no longer exists (e.g. cleaned up).
 func toTaskSessionResponse(d Deps, sessionID string) (*taskSessionResponse, error) {
@@ -95,7 +103,7 @@ func toTaskSessionResponse(d Deps, sessionID string) (*taskSessionResponse, erro
 // taskDetailResponse is the JSON shape of GET /v1/tasks/{id}.
 type taskDetailResponse struct {
 	taskResponse
-	Subtasks      []taskResponse       `json:"subtasks"`
+	Subtasks      []subtaskResponse    `json:"subtasks"`
 	Session       *taskSessionResponse `json:"session,omitempty"`
 	OpenQuestions int                  `json:"open_questions"`
 }
@@ -360,9 +368,18 @@ func handleGetTask(w http.ResponseWriter, r *http.Request, d Deps) {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	subOut := make([]taskResponse, len(subtasks))
+	subOut := make([]subtaskResponse, len(subtasks))
 	for i, s := range subtasks {
-		subOut[i] = toTaskResponse(s)
+		subOut[i] = subtaskResponse{taskResponse: toTaskResponse(s)}
+		// Fetch session info to get PR/CI state if session_id is set
+		if s.SessionID != "" {
+			sess, err := d.Store.GetSession(s.SessionID)
+			if err == nil {
+				subOut[i].PRNumber = sess.PRNumber
+				subOut[i].PRState = sess.PRState
+				subOut[i].CIState = sess.CIState
+			}
+		}
 	}
 
 	var sessResp *taskSessionResponse

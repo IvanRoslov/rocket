@@ -22,6 +22,9 @@ type sessionRow struct {
 	RepoID    string `json:"repo_id"`
 	State     string `json:"state"`
 	Activity  string `json:"activity,omitempty"`
+	PRNumber  int    `json:"pr_number,omitempty"`
+	PRState   string `json:"pr_state,omitempty"`
+	CIState   string `json:"ci_state,omitempty"`
 	CreatedAt int64  `json:"created_at"`
 }
 
@@ -79,19 +82,26 @@ func newLsCmd() *cobra.Command {
 }
 
 // renderSessions writes the ls table to w: SESSION, KIND, PROJECT, REPO,
-// STATE, ACTIVITY, AGE. PR/CI columns are omitted until phase 4. Empty
-// activity renders as "-".
+// STATE, ACTIVITY, PR, CI, AGE. Empty activity/PR/CI render as "-".
 func renderSessions(sessions []sessionRow, w io.Writer, now time.Time) {
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	_, _ = tw.Write([]byte("SESSION\tKIND\tPROJECT\tREPO\tSTATE\tACTIVITY\tAGE\n"))
+	_, _ = tw.Write([]byte("SESSION\tKIND\tPROJECT\tREPO\tSTATE\tACTIVITY\tPR\tCI\tAGE\n"))
 	for _, s := range sessions {
 		activity := s.Activity
 		if activity == "" {
 			activity = "-"
 		}
+		pr := "-"
+		if s.PRNumber > 0 {
+			pr = fmt.Sprintf("#%d", s.PRNumber)
+		}
+		ci := s.CIState
+		if ci == "" {
+			ci = "-"
+		}
 		_, _ = tw.Write([]byte(fmt.Sprintf(
-			"%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			s.ID, s.Kind, s.ProjectID, s.RepoID, s.State, activity, humanAge(s.CreatedAt, now),
+			"%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			s.ID, s.Kind, s.ProjectID, s.RepoID, s.State, activity, pr, ci, humanAge(s.CreatedAt, now),
 		)))
 	}
 	_ = tw.Flush()
