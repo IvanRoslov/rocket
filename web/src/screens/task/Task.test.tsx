@@ -97,6 +97,30 @@ describe('TaskScreen', () => {
     expect(screen.getByText(/prorated refunds for mid-cycle downgrades/)).toBeInTheDocument()
   })
 
+  it('clicking a resolved thread expands it to show the full thread messages', async () => {
+    renderTask()
+    await screen.findByText('Billing v2')
+    await userEvent.click(screen.getByRole('tab', { name: /^Questions/ }))
+
+    const row = await screen.findByRole('button', {
+      name: /Should the v2 flag default on for internal test accounts\?/,
+    })
+    expect(row).toHaveAttribute('aria-expanded', 'false')
+
+    // Collapsed: the thread's reply/answer messages are not rendered yet.
+    expect(screen.queryByText(/flip it on for @acme-internal accounts only/)).not.toBeInTheDocument()
+
+    await userEvent.click(row)
+
+    expect(row).toHaveAttribute('aria-expanded', 'true')
+    expect(await screen.findByText(/flip it on for @acme-internal accounts only/)).toBeInTheDocument()
+
+    // Clicking again collapses it back.
+    await userEvent.click(row)
+    expect(row).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText(/flip it on for @acme-internal accounts only/)).not.toBeInTheDocument()
+  })
+
   it('sending a message posts /v1/messages with {to, body} and no from', async () => {
     let capturedBody: unknown
     server.use(

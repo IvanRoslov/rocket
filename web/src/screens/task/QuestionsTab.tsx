@@ -25,6 +25,11 @@ function authorLabel(author: string | undefined, orchestratorName?: string): str
   return orchestratorName ?? author
 }
 
+function resolutionLabel(question: Question): string {
+  if (question.resolution === 'dismissed') return 'dismissed'
+  return 'resolved'
+}
+
 interface ThreadCardProps {
   taskId: number
   question: Question
@@ -151,6 +156,77 @@ function ThreadCard({ taskId, question, orchestratorName }: ThreadCardProps) {
   )
 }
 
+interface ResolvedThreadRowProps {
+  question: Question
+  orchestratorName?: string
+}
+
+function ResolvedThreadRow({ question, orchestratorName }: ResolvedThreadRowProps) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div className="questions-tab__resolved">
+      <button
+        type="button"
+        className="questions-tab__resolved-row"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="questions-tab__resolved-tag">Q{question.ordinal}</span>
+        <span className="questions-tab__resolved-badge">{resolutionLabel(question)}</span>
+        <span className="questions-tab__resolved-text">{question.body}</span>
+        <span className="questions-tab__resolved-when">
+          {question.resolved_at ? timeAgo(question.resolved_at) : ''}
+        </span>
+        <span className="questions-tab__resolved-chevron">{open ? '▴' : '▾'}</span>
+      </button>
+
+      {open && (
+        <div className="questions-tab__resolved-detail">
+          <p className="questions-tab__resolved-question">{question.body}</p>
+
+          {question.context && (
+            <div className="question-thread__context">
+              <div className="question-thread__context-header">
+                <span>Context</span>
+              </div>
+              <div className="question-thread__context-body">{question.context}</div>
+            </div>
+          )}
+
+          {question.messages.length > 0 && (
+            <div className="question-thread__messages">
+              {question.messages.map((m) => {
+                const isOrchestrator = !!m.author
+                return (
+                  <div key={m.id} className="question-thread__message">
+                    <div className="question-thread__message-head">
+                      <span
+                        className={
+                          isOrchestrator
+                            ? 'question-thread__avatar question-thread__avatar--orch'
+                            : 'question-thread__avatar question-thread__avatar--you'
+                        }
+                      >
+                        {isOrchestrator ? 'O' : 'Y'}
+                      </span>
+                      <span className="question-thread__message-author">
+                        {authorLabel(m.author, orchestratorName)}
+                      </span>
+                      <span className="question-thread__message-meta">{timeAgo(m.created_at)}</span>
+                    </div>
+                    <div className="question-thread__message-body">{m.body}</div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function QuestionsTab({ taskId, questions, orchestratorName }: QuestionsTabProps) {
   const open = questions.filter((q) => q.status === 'open').sort((a, b) => a.ordinal - b.ordinal)
   const resolved = questions
@@ -167,14 +243,7 @@ export function QuestionsTab({ taskId, questions, orchestratorName }: QuestionsT
         <>
           <div className="questions-tab__resolved-label">Resolved</div>
           {resolved.map((q) => (
-            <div key={q.id} className="questions-tab__resolved-row">
-              <span className="questions-tab__resolved-tag">Q{q.ordinal}</span>
-              <span className="questions-tab__resolved-badge">resolved</span>
-              <span className="questions-tab__resolved-text">{q.body}</span>
-              <span className="questions-tab__resolved-when">
-                {q.resolved_at ? timeAgo(q.resolved_at) : ''}
-              </span>
-            </div>
+            <ResolvedThreadRow key={q.id} question={q} orchestratorName={orchestratorName} />
           ))}
         </>
       )}
