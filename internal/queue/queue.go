@@ -159,7 +159,7 @@ func (q *Queue) Run(ctx context.Context) {
 }
 
 // expireTimedOut fails every queued message older than cfg.QueueTimeout,
-// publishing message.failed{reason:"timeout"} for each.
+// publishing message.failed{reason:"timeout"} for each and notifying senders.
 func (q *Queue) expireTimedOut() {
 	cutoff := time.Now().Add(-q.cfg.QueueTimeout).Unix()
 	expired, err := q.st.ExpireQueuedBefore(cutoff)
@@ -173,6 +173,10 @@ func (q *Queue) expireTimedOut() {
 			"to":     m.ToSession,
 			"reason": "timeout",
 		})
+		// Notify sender on timeout (same as delivery failure).
+		if m.FromSession != "" {
+			q.notifySenderOfFailure(m, "timeout")
+		}
 	}
 }
 
@@ -445,6 +449,8 @@ func (q *Queue) deliverSuccess(msg store.Message) {
 }
 
 // fail marks a message failed and publishes message.failed with reason.
+// If the sender (msg.FromSession) is a live session, it also enqueues a failure
+// notification to the sender (as a system message with from="").
 func (q *Queue) fail(msg store.Message, reason string) {
 	if err := q.st.UpdateMessageStatus(msg.ID, "failed", msg.Attempts, 0, reason); err != nil {
 		slog.Error("queue: update message failed", "id", msg.ID, "error", err)
@@ -454,6 +460,50 @@ func (q *Queue) fail(msg store.Message, reason string) {
 		"to":     msg.ToSession,
 		"reason": reason,
 	})
+
+	// Notify sender if the failed message has one and the sender is live.
+	if msg.FromSession != "" {
+		q.notifySenderOfFailure(msg, reason)
+	}
+}
+
+// notifySenderOfFailure enqueues a failure notice to the sender if their session
+// is live (spawning or running). Errors are logged as warnings and do not fail
+// the original fail() operation.
+func (q *Queue) notifySenderOfFailure(msg store.Message, reason string) {
+	senderSess, err := q.getSession(msg.FromSession)
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			// Transient error (not gone) — log warning but don't fail the fail().
+			slog.Warn("queue: get sender session for failure notice", "from", msg.FromSession, "error", err)
+		}
+		return
+	}
+
+	// Only notify if the sender's session is live.
+	if senderSess.State != "spawning" && senderSess.State != "running" {
+		return
+	}
+
+	// Enqueue a system message (from="") to notify the sender about the failure.
+	notice := store.Message{
+		FromSession: "", // system message — this prevents recursive notifications
+		ToSession:   msg.FromSession,
+		Body: fmt.Sprintf(
+			"[rocket] delivery FAILED: message #%d to %s (%s). Body preserved in queue history (rocket send --wait next time for critical messages).",
+			msg.ID, msg.ToSession, reason,
+		),
+	}
+
+	_, err = q.st.AddMessage(notice)
+	if err != nil {
+		slog.Warn("queue: add failure notice to sender", "from", msg.FromSession, "error", err)
+		return
+	}
+
+	// Wake the sender's queue worker if needed.
+	q.bus.Publish("message.queued", msg.FromSession, map[string]any{})
+	q.Wake(msg.FromSession)
 }
 
 // formatBody prefixes the message body with the sender when known.
