@@ -50,6 +50,7 @@ HTTP+JSON, префикс `/v1`. Листенеры: Unix-сокет `~/.rocket/
 | POST | `/v1/sessions/{id}/restore` | Восстановить упавшую сессию (worktree restore + перезапуск агента) |
 | GET | `/v1/sessions/{id}/output?lines=N` | capture-pane (одноразовый снимок) |
 | GET | `/v1/sessions/{id}/chat?cursor=&limit=` | Лента чата — зеркало нативного транскрипта агента, см. [13-chat.md](13-chat.md) |
+| POST | `/v1/sessions/{id}/quiz/answer` | Удалённый ответ на pending-квиз AskUserQuestion: `{answers:[{question_index, option_indices?[], text?}]}` → `202 {status:"answering"}`; `409 no_pending_quiz|quiz_answer_in_flight`, `400 quiz_answer_invalid`. См. [13-chat.md](13-chat.md), раздел «Квизы» |
 | GET | `/v1/sessions/{id}/attach` | `{command: ["tmux","attach","-t","=..."]}` |
 | WS | `/v1/sessions/{id}/term` | Живой терминал сессии (см. ниже) |
 
@@ -110,7 +111,7 @@ tmux рендерит окно ровно в **одном** размере; пр
 | GET | `/v1/events?since=<id>&limit=N&session=` | Журнал |
 | GET | `/v1/events/stream` | SSE; `?session=` — фильтр |
 
-Формат события: `{id, ts, type, session_id?, data{}}`. Типы: `session.spawned|state_changed|activity_changed|killed|restored|chat_updated`, `message.queued|delivered|failed`, `pr.opened|ci_changed|merged`, `orchestrator.heartbeat_sent`, `workspace.branch_collision|cleanup`, `repo.clone_started|clone_done|clone_failed`, `task.question_asked|question_replied|question_resolved` и т.д. `session.chat_updated` — пинг о том, что транскрипт сессии изменился; поле `data` у этого события отсутствует целиком, см. [13-chat.md](13-chat.md).
+Формат события: `{id, ts, type, session_id?, data{}}`. Типы: `session.spawned|state_changed|activity_changed|killed|restored|chat_updated`, `message.queued|delivered|failed`, `pr.opened|ci_changed|merged`, `orchestrator.heartbeat_sent`, `workspace.branch_collision|cleanup`, `repo.clone_started|clone_done|clone_failed`, `task.question_asked|question_replied|question_resolved` и т.д. `session.chat_updated` — пинг о том, что транскрипт сессии изменился; поле `data` у этого события отсутствует целиком, см. [13-chat.md](13-chat.md). `session.quiz_asked|quiz_resolved|quiz_answer_unconfirmed` — квиз-пинги того же формата (без `data`): показан pending-квиз AskUserQuestion / квиз закрыт (отвечен или отменён, в т.ч. в терминале) / удалённый ответ напечатан, но закрытие не подтвердилось за таймаут — см. [13-chat.md](13-chat.md), раздел «Квизы».
 
 ## Система
 
@@ -133,3 +134,4 @@ tmux рендерит окно ровно в **одном** размере; пр
 | Метод | Путь | Описание |
 |---|---|---|
 | POST | `/v1/internal/activity` | `{session, state, ts}` — hook агента репортит активность (push-канал, дополняющий поллинг) |
+| POST | `/v1/internal/quiz` | `{session, phase: "pending"\|"resolved", payload}` — PreToolUse/PostToolUse-хуки AskUserQuestion репортят показ/закрытие квиза; payload — сырой stdin хука. Пишет/чистит `pending_quiz` сессии и публикует `session.quiz_asked`/`quiz_resolved` |
