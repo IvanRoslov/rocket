@@ -19,6 +19,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Port != 4477 {
 		t.Errorf("expected Port 4477, got %d", cfg.Port)
 	}
+	if cfg.Host != "127.0.0.1" {
+		t.Errorf("expected Host 127.0.0.1, got %q", cfg.Host)
+	}
 	if cfg.HeartbeatInterval != 5*time.Minute {
 		t.Errorf("expected HeartbeatInterval 5m, got %v", cfg.HeartbeatInterval)
 	}
@@ -63,6 +66,7 @@ func TestLoadWithConfig(t *testing.T) {
 
 	// Create config.yaml
 	configContent := `port: 9999
+host: 0.0.0.0
 heartbeat_interval: 10m
 github_poll_interval: 3m
 default_agent: custom-agent
@@ -86,6 +90,9 @@ merge_grace: 10m
 
 	if cfg.Port != 9999 {
 		t.Errorf("expected Port 9999, got %d", cfg.Port)
+	}
+	if cfg.Host != "0.0.0.0" {
+		t.Errorf("expected Host 0.0.0.0, got %q", cfg.Host)
 	}
 	if cfg.HeartbeatInterval != 10*time.Minute {
 		t.Errorf("expected HeartbeatInterval 10m, got %v", cfg.HeartbeatInterval)

@@ -12,6 +12,7 @@ import (
 // Config represents the rocket daemon configuration.
 type Config struct {
 	Port                      int           `yaml:"port"`
+	Host                      string        `yaml:"host"`
 	HeartbeatInterval         time.Duration `yaml:"heartbeat_interval"`
 	GithubPollInterval        time.Duration `yaml:"github_poll_interval"`
 	DefaultAgent              string        `yaml:"default_agent"`
@@ -63,6 +64,7 @@ func Load(home string) (*Config, error) {
 	// Set defaults
 	cfg := &Config{
 		Port:                      4477,
+		Host:                      "127.0.0.1",
 		HeartbeatInterval:         5 * time.Minute,
 		GithubPollInterval:        2 * time.Minute,
 		DefaultAgent:              "claude-code",
@@ -107,6 +109,11 @@ func Load(home string) (*Config, error) {
 		cfg.WorktreesDir = expandTilde(cfg.WorktreesDir, home)
 	} else {
 		cfg.WorktreesDir = filepath.Join(home, "worktrees")
+	}
+
+	// An explicit empty host would bind all interfaces; keep the safe default.
+	if cfg.Host == "" {
+		cfg.Host = "127.0.0.1"
 	}
 
 	// Restore home since YAML unmarshaling doesn't set it

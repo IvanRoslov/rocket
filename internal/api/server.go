@@ -95,7 +95,9 @@ func NewHandler(d Deps) http.Handler {
 }
 
 // Serve listens on both d.Cfg.SocketPath() (a unix socket, mode 0600) and
-// 127.0.0.1:<d.Cfg.Port>, serving the same handler on both. It blocks until
+// <d.Cfg.Host>:<d.Cfg.Port> (127.0.0.1 by default; set host in config.yaml
+// to expose the API on the LAN, e.g. for the mobile app), serving the same
+// handler on both. It blocks until
 // ctx is cancelled, at which point it gracefully shuts down both servers,
 // removes the socket file, and returns nil. If either listener fails to
 // start, or either server exits with a fatal error before ctx is cancelled,
@@ -119,7 +121,7 @@ func Serve(ctx context.Context, d Deps) error {
 		return fmt.Errorf("chmod socket: %w", err)
 	}
 
-	tcpAddr := fmt.Sprintf("127.0.0.1:%d", d.Cfg.Port)
+	tcpAddr := fmt.Sprintf("%s:%d", d.Cfg.Host, d.Cfg.Port)
 	tcpLn, err := net.Listen("tcp", tcpAddr)
 	if err != nil {
 		unixLn.Close()
