@@ -60,6 +60,8 @@ func (f *reactFakeWorkspace) Destroy(ctx context.Context, repo store.Repo, sessi
 	return nil
 }
 
+func (f *reactFakeWorkspace) List() ([]workspace.Entry, error) { return nil, nil }
+
 func (f *reactFakeWorkspace) destroyedCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -91,6 +91,8 @@ type fakeWorkspace struct {
 	restoreErr  error
 
 	destroyed []string
+
+	listEntries []workspace.Entry
 }
 
 func (f *fakeWorkspace) Create(ctx context.Context, repo store.Repo, sessionID, branch string) (workspace.CreateResult, error) {
@@ -127,6 +129,10 @@ func (f *fakeWorkspace) Restore(ctx context.Context, repo store.Repo, sessionID,
 func (f *fakeWorkspace) Destroy(ctx context.Context, repo store.Repo, sessionID string) error {
 	f.destroyed = append(f.destroyed, sessionID)
 	return nil
+}
+
+func (f *fakeWorkspace) List() ([]workspace.Entry, error) {
+	return f.listEntries, nil
 }
 
 type fakeAgent struct {

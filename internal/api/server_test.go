@@ -71,9 +71,11 @@ func TestUnknownPathReturns404WithErrorShape(t *testing.T) {
 	srv := httptest.NewServer(NewHandler(d))
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/nope")
+	// Paths under /v1 that don't match a registered route stay JSON 404s.
+	// Paths outside /v1 now fall back to the SPA index (see static_test.go).
+	resp, err := http.Get(srv.URL + "/v1/nope")
 	if err != nil {
-		t.Fatalf("GET /nope: %v", err)
+		t.Fatalf("GET /v1/nope: %v", err)
 	}
 	defer resp.Body.Close()
 

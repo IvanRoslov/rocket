@@ -140,6 +140,11 @@ func (c *Config) LogPath() string {
 	return filepath.Join(c.Home, "logs", "rocketd.log")
 }
 
+// ConfigPath returns the path to the config.yaml file.
+func (c *Config) ConfigPath() string {
+	return filepath.Join(c.Home, "config.yaml")
+}
+
 // expandTilde expands ~ in a path to the home directory.
 func expandTilde(path, home string) string {
 	if len(path) > 0 && path[0] == '~' {

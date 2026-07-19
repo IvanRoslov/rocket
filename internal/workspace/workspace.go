@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -48,6 +49,28 @@ type Workspace interface {
 	// deletes the underlying branch. Destroying a session whose worktree
 	// is already gone is not an error (idempotent).
 	Destroy(ctx context.Context, repo store.Repo, sessionID string) error
+	// List returns every worktree directory found on disk under
+	// <worktreesDir>/<repo-id>/<session-id>/, with its on-disk size. It
+	// does not consult the store: callers cross-reference RepoID/
+	// SessionID against store sessions themselves to determine
+	// liveness/orphan status. A missing worktrees dir is not an error
+	// (returns an empty slice).
+	List() ([]Entry, error)
+}
+
+// Entry describes one worktree directory found on disk by List.
+type Entry struct {
+	// Path is the absolute path to the worktree directory.
+	Path string
+	// RepoID is the worktree's parent directory name (the repo it was
+	// created from).
+	RepoID string
+	// SessionID is the worktree's directory name (the session it was
+	// created for).
+	SessionID string
+	// SizeBytes is the total size of all regular files under Path,
+	// computed via filepath.WalkDir.
+	SizeBytes int64
 }
 
 // New returns a Workspace that creates worktrees under
@@ -264,4 +287,80 @@ func (w *gitWorkspace) Restore(ctx context.Context, repo store.Repo, sessionID, 
 	}
 
 	return path, nil
+}
+
+func (w *gitWorkspace) List() ([]Entry, error) {
+	repoDirs, err := os.ReadDir(w.worktreesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read worktrees dir: %w", err)
+	}
+
+	var out []Entry
+	for _, rd := range repoDirs {
+		if !rd.IsDir() {
+			continue
+		}
+		repoID := rd.Name()
+		repoDir := filepath.Join(w.worktreesDir, repoID)
+
+		sessDirs, err := os.ReadDir(repoDir)
+		if err != nil {
+			return nil, fmt.Errorf("read repo worktrees dir %q: %w", repoID, err)
+		}
+		for _, sd := range sessDirs {
+			if !sd.IsDir() {
+				continue
+			}
+			sessionID := sd.Name()
+			path := filepath.Join(repoDir, sessionID)
+
+			size, err := dirSize(path)
+			if err != nil {
+				return nil, fmt.Errorf("size worktree %q: %w", path, err)
+			}
+
+			out = append(out, Entry{
+				Path:      path,
+				RepoID:    repoID,
+				SessionID: sessionID,
+				SizeBytes: size,
+			})
+		}
+	}
+	return out, nil
+}
+
+// dirSize returns the sum of the sizes of all regular files under path.
+// A per-entry error (permission denied, a broken symlink, a directory that
+// vanishes mid-walk, ...) is skipped rather than aborting the whole walk,
+// so one bad entry doesn't stop us from reporting the size of everything
+// else that's readable.
+func dirSize(path string) (int64, error) {
+	var size int64
+	err := filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if d != nil && d.IsDir() {
+				// Can't descend into this directory (e.g. permission
+				// denied): skip it and keep walking the rest of the tree.
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		size += info.Size()
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return size, nil
 }

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:#f6f6f4;color:#1a1a1c;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:#4f46e5;text-decoration:none}
+  a:hover{color:#4338ca}
+  ::selection{background:#e0e7ff}
+  .kcol::-webkit-scrollbar{width:8px}
+  .kcol::-webkit-scrollbar-thumb{background:#e0e0dc;border-radius:8px}
+</style>
+</helmet>
+<div style="height:100vh;display:flex;flex-direction:column;overflow:hidden">
+  <header style="display:flex;align-items:center;gap:18px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #e7e7e4;flex:none;z-index:30">
+    <a href="Projects.dc.html" style="display:flex;align-items:center;gap:9px">
+      <div style="width:22px;height:22px;border-radius:6px;background:#1a1a1c;display:flex;align-items:center;justify-content:center;color:#fff;font:700 12px ui-monospace,monospace">R</div>
+      <span style="font:600 14px/1 ui-monospace,monospace;letter-spacing:-.02em">rocket</span>
+    </a>
+    <div style="width:1px;height:20px;background:#e7e7e4"></div>
+    <button style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;background:#fff;border:1px solid #e7e7e4;border-radius:8px;cursor:pointer;font:500 13px system-ui">
+      <span style="width:7px;height:7px;border-radius:50%;background:#16a34a"></span>
+      <span>Billing</span><span style="font:500 11px ui-monospace,monospace;color:#a1a1aa">billing</span><span style="color:#a1a1aa;font-size:10px">▾</span>
+    </button>
+    <div style="flex:1"></div>
+    <nav style="display:flex;align-items:center;gap:2px">
+      <a href="Projects.dc.html" style="padding:7px 11px;border-radius:7px;font:500 13px system-ui;color:#71717a" style-hover="background:#f0f0ee;color:#1a1a1c">Projects</a>
+      <a href="Kanban.dc.html" style="padding:7px 11px;border-radius:7px;font:500 13px system-ui;color:#1a1a1c;background:#f0f0ee">Kanban</a>
+      <a href="System.dc.html" style="padding:7px 11px;border-radius:7px;font:500 13px system-ui;color:#71717a" style-hover="background:#f0f0ee;color:#1a1a1c">System</a>
+      <a href="Settings.dc.html" style="padding:7px 11px;border-radius:7px;font:500 13px system-ui;color:#71717a" style-hover="background:#f0f0ee;color:#1a1a1c">Settings</a>
+    </nav>
+  </header>
+
+  <div style="display:flex;align-items:center;gap:14px;padding:14px 20px;background:#fff;border-bottom:1px solid #e7e7e4;flex:none">
+    <h1 style="margin:0;font:650 17px system-ui;letter-spacing:-.01em">Billing</h1>
+    <div style="position:relative;flex:1;max-width:320px">
+      <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);color:#a1a1aa;font-size:13px">⌕</span>
+      <input placeholder="Search tasks…" style="width:100%;height:34px;padding:0 12px 0 30px;border:1px solid #e7e7e4;border-radius:9px;font:13px system-ui;outline:none;background:#fafafa"/>
+    </div>
+    <div style="flex:1"></div>
+    <label style="display:flex;align-items:center;gap:7px;font:500 13px system-ui;color:#71717a;cursor:pointer">
+      <input type="checkbox" onChange="{{ toggleCancelled }}"/> Show cancelled
+    </label>
+    <a href="Settings.dc.html" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid #e7e7e4;border-radius:9px;color:#52525b" style-hover="background:#f6f6f4">⚙</a>
+  </div>
+
+  <div style="flex:1;overflow-x:auto;overflow-y:hidden;padding:16px 20px 20px">
+    <div style="display:flex;gap:14px;height:100%;min-width:min-content">
+      <sc-for list="{{ columns }}" as="col" hint-placeholder-count="4">
+        <div class="kcol" onDragOver="{{ onDragOver }}" onDrop="{{ col.onDrop }}"
+             style="width:296px;flex:none;display:flex;flex-direction:column;background:#f0f0ee;border-radius:12px;max-height:100%;border:1.5px solid {{ col.borderColor }}">
+          <div style="display:flex;align-items:center;gap:8px;padding:12px 14px 8px;flex:none">
+            <span style="width:8px;height:8px;border-radius:50%;background:{{ col.dot }}"></span>
+            <span style="font:600 13px system-ui;letter-spacing:.01em">{{ col.title }}</span>
+            <span style="font:600 12px ui-monospace,monospace;color:#a1a1aa;background:#fff;padding:1px 7px;border-radius:20px">{{ col.count }}</span>
+            <div style="flex:1"></div>
+            <sc-if value="{{ col.isBacklog }}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{ addTask }}" style="width:24px;height:24px;border:none;background:#fff;border-radius:6px;cursor:pointer;color:#52525b;font-size:15px;line-height:1">＋</button>
+            </sc-if>
+          </div>
+          <div class="kcol" style="flex:1;overflow-y:auto;padding:4px 8px 10px;display:flex;flex-direction:column;gap:8px">
+            <sc-for list="{{ col.tasks }}" as="t" hint-placeholder-count="2">
+              <div draggable="true" onDragStart="{{ t.onDragStart }}" onDragEnd="{{ onDragEnd }}"
+                   style="background:#fff;border:1px solid #e7e7e4;border-radius:10px;padding:12px;cursor:grab;opacity:{{ t.opacity }};box-shadow:0 1px 2px rgba(0,0,0,.03)" style-hover="border-color:#d4d4d1">
+                <a href="Task.dc.html" style="display:flex;align-items:baseline;gap:7px;color:#1a1a1c;margin-bottom:8px">
+                  <span style="font:600 12px ui-monospace,monospace;color:#a1a1aa">#{{ t.id }}</span>
+                  <span style="font:600 14px/1.25 system-ui;letter-spacing:-.01em;flex:1">{{ t.title }}</span>
+                </a>
+                <div style="display:flex;align-items:center;gap:6px;font:11.5px ui-monospace,monospace;color:#71717a;margin-bottom:9px">
+                  <span>{{ t.mainRepo }}</span>
+                  <sc-if value="{{ t.hasWorkerRepos }}" hint-placeholder-val="{{ true }}">
+                    <span style="color:#c4c4c4">→</span><span>{{ t.workerRepos }}</span>
+                  </sc-if>
+                </div>
+                <sc-if value="{{ t.hasOrch }}" hint-placeholder-val="{{ true }}">
+                  <div style="display:flex;align-items:center;gap:6px;font:12px system-ui;color:#52525b;margin-bottom:8px">
+                    <span style="width:7px;height:7px;border-radius:50%;background:{{ t.orchDot }}"></span>
+                    <span>orch: {{ t.orchState }}</span>
+                    <span style="color:#c4c4c4">·</span>
+                    <span>{{ t.workers }} workers</span>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ t.hasPr }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px">
+                    <sc-for list="{{ t.prBadges }}" as="b" hint-placeholder-count="2">
+                      <span style="font:500 11px system-ui;color:{{ b.fg }};background:{{ b.bg }};padding:3px 7px;border-radius:6px">{{ b.label }}</span>
+                    </sc-for>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ t.hasSignal }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex;flex-wrap:wrap;gap:6px;border-top:1px solid #f0f0ee;padding-top:8px">
+                    <sc-if value="{{ t.awaiting }}" hint-placeholder-val="{{ false }}">
+                      <span style="font:600 11.5px system-ui;color:#b45309;background:#fef3c7;padding:3px 8px;border-radius:6px">? awaiting you</span>
+                    </sc-if>
+                    <sc-if value="{{ t.problem }}" hint-placeholder-val="{{ false }}">
+                      <span style="font:500 11.5px system-ui;color:#b91c1c">⚠ 1 problem</span>
+                    </sc-if>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ t.isBacklog }}" hint-placeholder-val="{{ false }}">
+                  <button onClick="{{ startOrch }}" style="width:100%;margin-top:2px;height:30px;background:#1a1a1c;color:#fff;border:none;border-radius:7px;font:600 12px system-ui;cursor:pointer">Start ▸</button>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { dragId: null, moved: {} };
+  base() {
+    const pr = (fg,bg,label)=>({fg,bg,label});
+    return [
+      { id:12, title:'Billing v2', status:'in_progress', mainRepo:'api', workerRepos:'web, infra', hasOrch:true, orchState:'active', orchDot:'#16a34a', workers:3, prBadges:[pr('#3730a3','#eef2ff','2 PR open'), pr('#166534','#dcfce7','1 merged'), pr('#166534','#dcfce7','CI ✔')], awaiting:true, problem:true },
+      { id:14, title:'Fix auth token refresh', status:'in_progress', mainRepo:'api', workerRepos:'', hasOrch:true, orchState:'active', orchDot:'#16a34a', workers:1, prBadges:[pr('#3730a3','#eef2ff','1 PR open'), pr('#b45309','#fef3c7','CI running')], awaiting:false, problem:false },
+      { id:9, title:'Webhook delivery retries', status:'review', mainRepo:'api', workerRepos:'', hasOrch:true, orchState:'idle', orchDot:'#64748b', workers:1, prBadges:[pr('#166534','#dcfce7','2 merged'), pr('#166534','#dcfce7','CI ✔')], awaiting:false, problem:false },
+      { id:18, title:'Refund flow', status:'backlog', mainRepo:'api', workerRepos:'web', hasOrch:false, orchState:'', orchDot:'', workers:0, prBadges:[], awaiting:false, problem:false },
+      { id:21, title:'Invoice PDF export', status:'backlog', mainRepo:'api', workerRepos:'', hasOrch:false, orchState:'', orchDot:'', workers:0, prBadges:[], awaiting:false, problem:false },
+      { id:7, title:'Rate limiting middleware', status:'done', mainRepo:'api', workerRepos:'', hasOrch:false, orchState:'', orchDot:'', workers:2, prBadges:[pr('#166534','#dcfce7','2 merged')], awaiting:false, problem:false },
+      { id:5, title:'Idempotency keys', status:'done', mainRepo:'api', workerRepos:'', hasOrch:false, orchState:'', orchDot:'', workers:1, prBadges:[pr('#166534','#dcfce7','1 merged')], awaiting:false, problem:false },
+    ];
+  }
+  move(status){ if(this.state.dragId!=null) this.setState(s=>({moved:{...s.moved,[s.dragId]:status}, dragId:null})); }
+  renderVals(){
+    const cols = [
+      { key:'backlog', title:'Backlog', dot:'#a1a1aa' },
+      { key:'in_progress', title:'In Progress', dot:'#4f46e5' },
+      { key:'review', title:'Review', dot:'#7c3aed' },
+      { key:'done', title:'Done', dot:'#16a34a' },
+    ];
+    const tasks = this.base().map(t => {
+      const status = this.state.moved[t.id] || t.status;
+      return { ...t, status,
+        opacity: this.state.dragId===t.id ? 0.4 : 1,
+        hasWorkerRepos: !!t.workerRepos,
+        hasPr: t.prBadges.length>0,
+        hasSignal: t.awaiting || t.problem,
+        isBacklog: status==='backlog',
+        onDragStart: () => this.setState({dragId:t.id}),
+      };
+    });
+    const columns = cols.map(c => {
+      const list = tasks.filter(t => t.status===c.key);
+      return { ...c, title:c.title, count:list.length, tasks:list,
+        isBacklog: c.key==='backlog',
+        borderColor: this.state.dragId!=null ? '#c7d2fe' : 'transparent',
+        onDrop: (e)=>{ e.preventDefault(); this.move(c.key); },
+      };
+    });
+    return {
+      columns,
+      onDragOver: (e)=>e.preventDefault(),
+      onDragEnd: ()=>this.setState({dragId:null}),
+      toggleCancelled: ()=>{},
+      addTask: ()=>{},
+      startOrch: ()=>{},
+    };
+  }
+}
+</script>
+</body>
+</html>

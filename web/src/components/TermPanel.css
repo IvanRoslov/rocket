@@ -1,0 +1,36 @@
+/* ---------- TermPanel ---------- */
+.term-panel {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  background: var(--dark-surface, #161618);
+}
+.term-panel__xterm {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 18px 22px;
+}
+.term-panel__banner {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: var(--radius-badge-lg);
+  background: var(--warn-bg, #fef3c7);
+  color: var(--warn-text-2, #92400e);
+  font: 600 11.5px var(--font-mono, monospace);
+}
+.term-panel__retry {
+  border: none;
+  border-radius: var(--radius-badge, 4px);
+  padding: 2px 8px;
+  background: var(--warn-text-2, #92400e);
+  color: var(--warn-bg, #fef3c7);
+  font: 600 11.5px var(--font-mono, monospace);
+  cursor: pointer;
+}

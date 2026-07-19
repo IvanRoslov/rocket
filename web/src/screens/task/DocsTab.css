@@ -1,0 +1,78 @@
+.docs-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.docs-tab__empty {
+  font: 13.5px var(--font-ui);
+  color: var(--text-4);
+}
+
+.docs-tab__card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.docs-tab__card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.docs-tab__kind {
+  font: 600 11px var(--font-mono);
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+.docs-tab__kind--indigo {
+  color: var(--accent-text);
+  background: var(--accent-selected-bg);
+}
+.docs-tab__kind--review {
+  color: var(--review-text);
+  background: var(--review-bg);
+}
+.docs-tab__kind--ok {
+  color: var(--ok-text);
+  background: var(--ok-bg);
+}
+.docs-tab__kind--neutral {
+  color: var(--neutral-text);
+  background: var(--neutral-bg);
+}
+
+.docs-tab__title {
+  font: 600 14px var(--font-ui);
+  flex: 1;
+}
+
+.docs-tab__meta {
+  font: 11.5px var(--font-ui);
+  color: var(--text-4);
+  white-space: nowrap;
+}
+
+.docs-tab__excerpt {
+  margin: 9px 0 0;
+  font: 13.5px/1.55 var(--font-ui);
+  color: var(--text-2);
+}
+
+.docs-tab__markdown {
+  margin-top: 12px;
+  font: 13.5px/1.6 var(--font-ui);
+  color: var(--text-2);
+  border-top: 1px solid var(--divider);
+  padding-top: 12px;
+}

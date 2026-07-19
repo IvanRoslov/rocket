@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:#f6f6f4;color:#1a1a1c;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:#4f46e5;text-decoration:none}
+  a:hover{color:#4338ca}
+  ::selection{background:#e0e7ff}
+</style>
+</helmet>
+<div style="min-height:100vh">
+  <header style="display:flex;align-items:center;gap:18px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #e7e7e4;position:sticky;top:0;z-index:30">
+    <a href="Projects.dc.html" style="display:flex;align-items:center;gap:9px">
+      <div style="width:22px;height:22px;border-radius:6px;background:#1a1a1c;display:flex;align-items:center;justify-content:center;color:#fff;font:700 12px ui-monospace,monospace">R</div>
+      <span style="font:600 14px/1 ui-monospace,monospace;color:#1a1a1c;letter-spacing:-.02em">rocket</span>
+    </a>
+    <div style="width:1px;height:20px;background:#e7e7e4"></div>
+    <div style="position:relative">
+      <button onClick="{{ toggleSwitcher }}" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;background:{{ switcherBg }};border:1px solid #e7e7e4;border-radius:8px;cursor:pointer;font:500 13px system-ui">
+        <span style="width:7px;height:7px;border-radius:50%;background:#16a34a"></span>
+        <span>Billing</span>
+        <span style="font:500 11px ui-monospace,monospace;color:#a1a1aa">billing</span>
+        <span style="color:#a1a1aa;font-size:10px">▾</span>
+      </button>
+      <sc-if value="{{ switcherOpen }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;top:38px;left:0;width:280px;background:#fff;border:1px solid #e7e7e4;border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.12);padding:6px;z-index:40">
+          <input placeholder="Search projects…" style="width:100%;height:32px;padding:0 10px;margin-bottom:4px;border:1px solid #eee;border-radius:7px;font:13px system-ui;outline:none"/>
+          <sc-for list="{{ projects }}" as="p" hint-placeholder-count="3">
+            <a href="Kanban.dc.html" style="display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:7px;color:#1a1a1c" style-hover="background:#f6f6f4">
+              <span style="width:7px;height:7px;border-radius:50%;background:{{ p.dot }}"></span>
+              <span style="font:500 13px system-ui;flex:1">{{ p.name }}</span>
+              <span style="font:11px ui-monospace,monospace;color:#a1a1aa">{{ p.id }}</span>
+            </a>
+          </sc-for>
+        </div>
+      </sc-if>
+    </div>
+    <div style="flex:1"></div>
+    <nav style="display:flex;align-items:center;gap:2px">
+      <a href="Projects.dc.html" style="padding:7px 11px;border-radius:7px;font:500 13px system-ui;color:#1a1a1c;background:#f0f0ee">Projects</a>
+      <a href="Kanban.dc.html" style="padding:7px 11px;border-radius:7px;font:500 13px system-ui;color:#71717a" style-hover="background:#f0f0ee;color:#1a1a1c">Kanban</a>
+      <a href="System.dc.html" style="padding:7px 11px;border-radius:7px;font:500 13px system-ui;color:#71717a" style-hover="background:#f0f0ee;color:#1a1a1c">System</a>
+      <a href="Settings.dc.html" style="padding:7px 11px;border-radius:7px;font:500 13px system-ui;color:#71717a" style-hover="background:#f0f0ee;color:#1a1a1c">Settings</a>
+    </nav>
+  </header>
+
+  <main style="max-width:1180px;margin:0 auto;padding:36px 24px 64px">
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:24px">
+      <div>
+        <h1 style="margin:0 0 4px;font:650 24px/1.1 system-ui;letter-spacing:-.02em">Projects</h1>
+        <p style="margin:0;font:14px system-ui;color:#71717a">Each project is a product: a main repo plus linked repos where workers run.</p>
+      </div>
+      <a href="NewProject.dc.html" style="display:flex;align-items:center;gap:7px;height:38px;padding:0 15px;background:#1a1a1c;color:#fff;border-radius:9px;font:600 13px system-ui" style-hover="background:#000">
+        <span style="font-size:16px;line-height:1">＋</span> New project
+      </a>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px">
+      <sc-for list="{{ projects }}" as="p" hint-placeholder-count="4">
+        <a href="Kanban.dc.html" style="display:block;background:#fff;border:1px solid #e7e7e4;border-radius:12px;padding:18px;color:#1a1a1c;transition:box-shadow .12s,border-color .12s" style-hover="border-color:#d4d4d1;box-shadow:0 4px 18px rgba(0,0,0,.06)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div style="display:flex;align-items:center;gap:9px">
+              <span style="width:9px;height:9px;border-radius:50%;background:{{ p.dot }}"></span>
+              <span style="font:650 16px system-ui;letter-spacing:-.01em">{{ p.name }}</span>
+            </div>
+            <span style="font:11px ui-monospace,monospace;color:#a1a1aa;background:#f6f6f4;padding:3px 7px;border-radius:6px">{{ p.id }}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:7px;font:12.5px system-ui;color:#52525b;margin-bottom:14px">
+            <span style="font-family:ui-monospace,monospace">⌂ {{ p.main }}</span>
+            <sc-if value="{{ p.hasLinked }}" hint-placeholder-val="{{ true }}">
+              <span style="color:#a1a1aa">+</span>
+              <span style="font-family:ui-monospace,monospace;color:#71717a">{{ p.linkedStr }}</span>
+            </sc-if>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">
+            <sc-for list="{{ p.stats }}" as="s" hint-placeholder-count="3">
+              <span style="display:inline-flex;align-items:center;gap:5px;font:500 12px system-ui;color:{{ s.fg }};background:{{ s.bg }};padding:4px 9px;border-radius:7px">{{ s.label }}</span>
+            </sc-for>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid #f0f0ee;padding-top:12px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <sc-if value="{{ p.awaiting }}" hint-placeholder-val="{{ false }}">
+                <span style="display:inline-flex;align-items:center;gap:5px;font:600 12px system-ui;color:#b45309;background:#fef3c7;padding:4px 9px;border-radius:7px">? awaiting you</span>
+              </sc-if>
+              <sc-if value="{{ p.hasProblem }}" hint-placeholder-val="{{ false }}">
+                <span style="display:inline-flex;align-items:center;gap:5px;font:500 12px system-ui;color:#b91c1c">⚠ {{ p.problemStr }}</span>
+              </sc-if>
+            </div>
+            <span style="font:11.5px system-ui;color:#a1a1aa">updated {{ p.updated }}</span>
+          </div>
+        </a>
+      </sc-for>
+      <a href="NewProject.dc.html" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:160px;background:transparent;border:1.5px dashed #d4d4d1;border-radius:12px;color:#71717a" style-hover="border-color:#4f46e5;color:#4f46e5">
+        <span style="font-size:26px;line-height:1">＋</span>
+        <span style="font:600 13px system-ui">Create project</span>
+      </a>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { switcherOpen: false };
+  toggle = () => this.setState(s => ({ switcherOpen: !s.switcherOpen }));
+  renderVals() {
+    const mk = (fg,bg,label)=>({fg,bg,label});
+    const projects = [
+      { id:'billing', name:'Billing', dot:'#16a34a', main:'api', linked:['web','infra'],
+        stats:[mk('#3730a3','#eef2ff','2 in progress'), mk('#6b21a8','#f3e8ff','1 review'), mk('#166534','#dcfce7','● 5 live')],
+        awaiting:true, hasProblem:true, problemStr:'1 problem', updated:'12m ago' },
+      { id:'payments', name:'Payments Gateway', dot:'#16a34a', main:'gateway', linked:['sdk'],
+        stats:[mk('#3730a3','#eef2ff','1 in progress'), mk('#166534','#dcfce7','● 2 live')],
+        awaiting:false, hasProblem:false, problemStr:'', updated:'1h ago' },
+      { id:'analytics', name:'Analytics', dot:'#d97706', main:'etl', linked:['web','warehouse'],
+        stats:[mk('#6b21a8','#f3e8ff','2 review'), mk('#166534','#dcfce7','● 1 live')],
+        awaiting:false, hasProblem:false, problemStr:'', updated:'3h ago' },
+      { id:'platform', name:'Infra Platform', dot:'#64748b', main:'infra', linked:[],
+        stats:[mk('#52525b','#f1f5f9','idle')],
+        awaiting:false, hasProblem:false, problemStr:'', updated:'2d ago' },
+    ].map(p => ({ ...p, hasLinked:p.linked.length>0, linkedStr:p.linked.join(', ') }));
+    return {
+      projects,
+      switcherOpen: this.state.switcherOpen,
+      switcherBg: this.state.switcherOpen ? '#f0f0ee' : '#fff',
+      toggleSwitcher: this.toggle,
+    };
+  }
+}
+</script>
+</body>
+</html>

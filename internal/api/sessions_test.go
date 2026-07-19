@@ -52,6 +52,7 @@ func (sessFakeWorkspace) Restore(ctx context.Context, repo store.Repo, sessionID
 func (sessFakeWorkspace) Destroy(ctx context.Context, repo store.Repo, sessionID string) error {
 	return nil
 }
+func (sessFakeWorkspace) List() ([]workspace.Entry, error) { return nil, nil }
 
 // sessFakeRuntimeErrorOnCreate returns error from Create, used to test spawn
 // failure scenarios.
@@ -86,6 +87,7 @@ func (sessFakeWorkspaceErrorOnCreate) Restore(ctx context.Context, repo store.Re
 func (sessFakeWorkspaceErrorOnCreate) Destroy(ctx context.Context, repo store.Repo, sessionID string) error {
 	return nil
 }
+func (sessFakeWorkspaceErrorOnCreate) List() ([]workspace.Entry, error) { return nil, nil }
 
 type sessFakeAgent struct{}
 

@@ -1,0 +1,187 @@
+// Questions tab (docs/design/Task.dc.html "QUESTIONS"): one thread card per
+// open question (yellow header, collapsible context, reply thread, reply
+// form) plus a collapsed list of resolved threads below.
+
+import { useState } from 'react'
+import { timeAgo } from '../../lib/format'
+import { useAnswerQuestion, useReplyQuestion } from '../../lib/queries'
+import type { Question } from '../../lib/types'
+import './QuestionsTab.css'
+
+export interface QuestionsTabProps {
+  taskId: number
+  questions: Question[]
+  orchestratorName?: string
+}
+
+function whoseTurnLabel(question: Question): string {
+  if (question.whose_turn === 'user') return 'awaiting you'
+  if (question.whose_turn === 'orchestrator') return 'awaiting orchestrator'
+  return ''
+}
+
+function authorLabel(author: string | undefined, orchestratorName?: string): string {
+  if (!author) return 'you'
+  return orchestratorName ?? author
+}
+
+interface ThreadCardProps {
+  taskId: number
+  question: Question
+  orchestratorName?: string
+}
+
+function ThreadCard({ taskId, question, orchestratorName }: ThreadCardProps) {
+  const [ctxOpen, setCtxOpen] = useState(true)
+  const [body, setBody] = useState('')
+  const reply = useReplyQuestion()
+  const answer = useAnswerQuestion()
+
+  const busy = reply.isPending || answer.isPending
+  const turnLabel = whoseTurnLabel(question)
+
+  function handleClarify() {
+    if (!body.trim()) return
+    reply.mutate(
+      { id: question.id, body, taskId },
+      { onSuccess: () => setBody('') },
+    )
+  }
+
+  function handleAnswer() {
+    if (!body.trim()) return
+    answer.mutate(
+      { id: question.id, body, taskId },
+      { onSuccess: () => setBody('') },
+    )
+  }
+
+  function handleDismiss() {
+    answer.mutate({ id: question.id, dismiss: true, taskId })
+  }
+
+  return (
+    <div className="question-thread">
+      <div className="question-thread__header">
+        <span className="question-thread__tag">Q{question.ordinal}</span>
+        {turnLabel && (
+          <span
+            className={
+              question.whose_turn === 'user'
+                ? 'question-thread__turn question-thread__turn--warn'
+                : 'question-thread__turn question-thread__turn--neutral'
+            }
+          >
+            {turnLabel}
+          </span>
+        )}
+        <div className="question-thread__spacer" />
+        <span className="question-thread__asker">{orchestratorName ?? question.asked_by}</span>
+      </div>
+      <div className="question-thread__body">
+        <p className="question-thread__question">{question.body}</p>
+
+        {question.context &&
+          (ctxOpen ? (
+            <div className="question-thread__context">
+              <div className="question-thread__context-header">
+                <span>Context</span>
+                <button type="button" onClick={() => setCtxOpen(false)}>
+                  Hide ▴
+                </button>
+              </div>
+              <div className="question-thread__context-body">{question.context}</div>
+            </div>
+          ) : (
+            <button type="button" className="question-thread__context-toggle" onClick={() => setCtxOpen(true)}>
+              ＋ Show context
+            </button>
+          ))}
+
+        <div className="question-thread__discussion-label">Discussion · {question.messages.length} replies</div>
+        <div className="question-thread__messages">
+          {question.messages.map((m) => {
+            const isOrchestrator = !!m.author
+            return (
+              <div key={m.id} className="question-thread__message">
+                <div className="question-thread__message-head">
+                  <span
+                    className={
+                      isOrchestrator
+                        ? 'question-thread__avatar question-thread__avatar--orch'
+                        : 'question-thread__avatar question-thread__avatar--you'
+                    }
+                  >
+                    {isOrchestrator ? 'O' : 'Y'}
+                  </span>
+                  <span className="question-thread__message-author">
+                    {authorLabel(m.author, orchestratorName)}
+                  </span>
+                  <span className="question-thread__message-meta">{timeAgo(m.created_at)}</span>
+                </div>
+                <div className="question-thread__message-body">{m.body}</div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="question-thread__form">
+          <textarea
+            aria-label={`Reply to Q${question.ordinal}`}
+            placeholder="Write a reply, ask the orchestrator to rephrase, or give your final answer…"
+            rows={4}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+          />
+          <div className="question-thread__actions">
+            <button type="button" className="question-thread__clarify" onClick={handleClarify} disabled={busy || !body.trim()}>
+              Clarify — keep open
+            </button>
+            <button type="button" className="question-thread__answer" onClick={handleAnswer} disabled={busy || !body.trim()}>
+              Answer &amp; close
+            </button>
+            <div className="question-thread__spacer" />
+            <button type="button" className="question-thread__dismiss" onClick={handleDismiss} disabled={busy}>
+              Dismiss as not relevant
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function QuestionsTab({ taskId, questions, orchestratorName }: QuestionsTabProps) {
+  const open = questions.filter((q) => q.status === 'open').sort((a, b) => a.ordinal - b.ordinal)
+  const resolved = questions
+    .filter((q) => q.status === 'resolved')
+    .sort((a, b) => b.ordinal - a.ordinal)
+
+  return (
+    <div className="questions-tab">
+      {open.map((q) => (
+        <ThreadCard key={q.id} taskId={taskId} question={q} orchestratorName={orchestratorName} />
+      ))}
+
+      {resolved.length > 0 && (
+        <>
+          <div className="questions-tab__resolved-label">Resolved</div>
+          {resolved.map((q) => (
+            <div key={q.id} className="questions-tab__resolved-row">
+              <span className="questions-tab__resolved-tag">Q{q.ordinal}</span>
+              <span className="questions-tab__resolved-badge">resolved</span>
+              <span className="questions-tab__resolved-text">{q.body}</span>
+              <span className="questions-tab__resolved-when">
+                {q.resolved_at ? timeAgo(q.resolved_at) : ''}
+              </span>
+            </div>
+          ))}
+        </>
+      )}
+
+      {open.length === 0 && resolved.length === 0 && (
+        <div className="questions-tab__empty">No questions yet.</div>
+      )}
+    </div>
+  )
+}
