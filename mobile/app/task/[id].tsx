@@ -32,6 +32,7 @@ import {
 } from '../../src/api/queries'
 import { ActionSheet } from '../../src/components/ActionSheet'
 import { BottomSheet } from '../../src/components/BottomSheet'
+import { Markdown } from '../../src/components/Markdown'
 import { useToast } from '../../src/components/Toast'
 import type { Question, Session, TaskLogKind, TaskStatus } from '../../src/api/types'
 import { BackButton, Badge, Card, ChipTabs, Dot, EmptyState, GhostButton, MonoText, PrimaryButton } from '../../src/components/ui'
@@ -501,9 +502,7 @@ export default function TaskScreen() {
                     <Text style={{ fontSize: 11, color: colors.textFaint, marginBottom: 6 }}>
                       v{d.version} · {ago(d.created_at)}
                     </Text>
-                    <Text style={{ fontSize: 13, lineHeight: 20, color: colors.textMid }} numberOfLines={6}>
-                      {d.body}
-                    </Text>
+                    <Markdown>{d.body}</Markdown>
                   </Card>
                 ))}
                 {docs.isSuccess && docs.data.length === 0 ? <EmptyState text="No documents yet." /> : null}

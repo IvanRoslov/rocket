@@ -4,6 +4,7 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
   TextInput,
@@ -13,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useChatFeed } from '../../src/api/chat'
 import { useMessages, useSendMessage } from '../../src/api/queries'
 import type { ChatEntry } from '../../src/api/types'
+import { Markdown } from '../../src/components/Markdown'
 import { useToast } from '../../src/components/Toast'
 import { BackButton, Badge, Dot, MonoText, PrimaryButton } from '../../src/components/ui'
 import { ago, sessionBadge, sessionDot } from '../../src/lib/format'
@@ -48,10 +50,10 @@ function EntryBubble({ entry }: { entry: ChatEntry }) {
           styles.bubble,
           isUser
             ? { backgroundColor: colors.indigoBg, borderColor: colors.indigoBorder }
-            : { backgroundColor: colors.card, borderColor: colors.border },
+            : { backgroundColor: colors.card, borderColor: colors.border, maxWidth: '94%' },
         ]}
       >
-        <Text style={styles.bubbleText}>{entry.text}</Text>
+        {isUser ? <Text style={styles.bubbleText}>{entry.text}</Text> : <Markdown>{entry.text}</Markdown>}
         {entry.ts > 0 ? <Text style={styles.bubbleMeta}>{ago(entry.ts)}</Text> : null}
       </View>
     </View>
@@ -66,9 +68,11 @@ export default function ChatScreen() {
   const { data: queueMessages } = useMessages(id)
   const [text, setText] = useState('')
   const [outgoing, setOutgoing] = useState<OutgoingMsg[]>([])
+  const [showTools, setShowTools] = useState(false)
   const listRef = useRef<FlatList<Row>>(null)
 
   const canWrite = session?.kind === 'orchestrator' && session.state === 'running'
+  const toolCount = useMemo(() => entries.filter((e) => e.role === 'tool').length, [entries])
 
   const rows = useMemo<Row[]>(() => {
     const transcriptUserTexts = new Set(
@@ -78,7 +82,10 @@ export default function ChatScreen() {
       // The daemon injects a "[large message] …" pointer instead of a big
       // body; our optimistic bubble keeps the real text, so hide pointers.
       .filter((e) => !(e.role === 'user' && e.text.startsWith(LARGE_POINTER)))
-      .map((e, i) => ({ kind: 'entry', key: `e${i}`, entry: e }))
+      // Tool calls are noise for the phone view; hidden unless toggled on.
+      .map((e, i) => ({ e, i }))
+      .filter(({ e }) => showTools || e.role !== 'tool')
+      .map(({ e, i }) => ({ kind: 'entry' as const, key: `e${i}`, entry: e }))
     for (const o of outgoing) {
       // Once the reply shows up in the transcript, the optimistic bubble is
       // redundant — unless it was delivered as a file (pointer hidden above).
@@ -93,7 +100,7 @@ export default function ChatScreen() {
       })
     }
     return items.reverse() // FlatList is inverted
-  }, [entries, outgoing, queueMessages])
+  }, [entries, outgoing, queueMessages, showTools])
 
   const submit = () => {
     const body = text.trim()
@@ -119,6 +126,15 @@ export default function ChatScreen() {
           {session?.id ?? id}
         </MonoText>
         {session ? <Badge {...sessionBadge(session.state, session.activity)} /> : null}
+        <Pressable
+          hitSlop={8}
+          onPress={() => setShowTools((v) => !v)}
+          style={[styles.toolsToggle, showTools && { backgroundColor: colors.slateBg, borderColor: colors.border }]}
+        >
+          <Text style={{ fontSize: 11, fontWeight: '600', color: showTools ? colors.textMid : colors.textFaint }}>
+            ⚙ {toolCount}
+          </Text>
+        </Pressable>
       </View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -204,6 +220,13 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   title: { fontSize: 14, fontWeight: '600', color: colors.text, flex: 1 },
+  toolsToggle: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
   toolRow: { marginVertical: 2, paddingHorizontal: 4 },
   toolText: { fontFamily: mono, fontSize: 11, color: colors.textFaint },
   bubble: {
