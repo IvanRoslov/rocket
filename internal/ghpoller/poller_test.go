@@ -1,8 +1,10 @@
 package ghpoller
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -152,6 +154,14 @@ type mockGitHubServer struct {
 
 	checkConclusion string // "" (no runs => passing), "success", "failure"
 	reviews         []reviewStub
+
+	// forbidChecks/forbidReviews make the corresponding endpoint respond 403
+	// WITHOUT a rate-limit header (i.e. a permission error, not a backoff),
+	// simulating a fine-grained PAT missing Checks:read / reviews access.
+	forbidChecks  bool
+	forbidReviews bool
+
+	checkRunHits int // counts requests to the check-runs endpoint
 }
 
 type reviewStub struct {
@@ -175,8 +185,17 @@ func (m *mockGitHubServer) handler() http.HandlerFunc {
 		case r.URL.Path == "/repos/o/r/pulls/5":
 			w.Write([]byte(`{"number":` + itoa(m.prNumber) + `,"state":"` + m.prState + `","merged":` + boolStr(m.merged) + `,"head":{"sha":"` + m.headSHA + `"}}`))
 		case r.URL.Path == "/repos/o/r/pulls/5/reviews":
+			if m.forbidReviews {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
 			w.Write([]byte(m.reviewsJSON()))
 		case r.URL.Path == "/repos/o/r/commits/"+m.headSHA+"/check-runs":
+			m.checkRunHits++
+			if m.forbidChecks {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
 			w.Write([]byte(m.checkRunsJSON()))
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -890,4 +909,263 @@ tick3:
 
 	// Only verify that the reopened PR is being tracked now; CI notification logic
 	// is already covered by other tests.
+}
+
+// syncBuffer is a mutex-guarded bytes.Buffer: swapSlogDefault installs the
+// default slog logger for the whole process for the duration of the test,
+// and other packages (e.g. Reactions' background grace timers) may log
+// concurrently with the test goroutine reading the buffer, so plain
+// bytes.Buffer would race.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
+// swapSlogDefault installs a slog.Logger writing to a buffer as the default
+// for the duration of the test, restoring the previous default on cleanup.
+func swapSlogDefault(t *testing.T) *syncBuffer {
+	t.Helper()
+	buf := &syncBuffer{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return buf
+}
+
+// TestTick_ChecksForbidden_DegradesGracefully is the field-failure
+// regression test: a fine-grained PAT without Checks:read makes
+// /commits/{sha}/check-runs return 403 (no rate-limit header). Before this
+// fix, tickSession aborted before UpdateSessionPR ever ran, so pr_number,
+// pr_state, subtask transitions and merge cleanup were all dead. This test
+// verifies discovery still writes pr_number/pr_state with ci_state "",
+// pr.opened still fires, the WARN is logged (and the permission_warning
+// event published) exactly once across three ticks, and the merge flow
+// (including the subtask -> done transition, i.e. the cleanup chain) still
+// works end-to-end with checks permanently forbidden.
+func TestTick_ChecksForbidden_DegradesGracefully(t *testing.T) {
+	buf := swapSlogDefault(t)
+
+	st, b := setupEnv(t)
+	sess := addWorker(t, st, "w1", "feature-branch")
+	taskID, err := st.AddTask(store.Task{
+		Title: "subtask", ProjectID: "billing", RepoID: "api",
+		Status: "in_progress", SessionID: sess.ID,
+	})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	m := newMockGitHubServer()
+	m.forbidChecks = true
+	srv := httptest.NewServer(m.handler())
+	defer srv.Close()
+
+	cfg := testConfig()
+	rt := &reactFakeRuntime{}
+	ws := &reactFakeWorkspace{}
+	mgr := session.NewManager(st, b, rt, ws, cfg)
+	reactions := NewReactions(st, b, func(string) {}, mgr, alwaysUnknownActivity, cfg)
+	defer reactions.Stop()
+
+	p := New(st, b, ghFactory(srv.URL), cfg, reactions)
+
+	sub, cancel := b.Subscribe()
+	defer cancel()
+
+	// Tick 1: discovery. pr_number/pr_state must be written even though
+	// check-runs 403s; ci_state must be "" (unknown), not blocking the write.
+	if err := p.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick 1 (discovery): %v", err)
+	}
+
+	got, err := st.GetSession("w1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if got.PRNumber != 5 || got.PRState != "open" {
+		t.Fatalf("expected pr_number/pr_state persisted despite forbidden checks, got %+v", got)
+	}
+	if got.CIState != "" {
+		t.Fatalf("expected ci_state unknown (\"\") when checks are forbidden, got %q", got.CIState)
+	}
+
+	// Note: the permission_warning event fires as part of this same tick's
+	// CheckRollup call (right after pr.opened), so it must be counted from
+	// this same drain rather than a later one, or it would be silently
+	// consumed here and never observed.
+	var sawPROpened bool
+	var warningEvents int
+	for {
+		select {
+		case e := <-sub:
+			if e.Type == "pr.opened" {
+				sawPROpened = true
+			}
+			if e.Type == "github.permission_warning" {
+				warningEvents++
+			}
+		default:
+			goto afterTick1
+		}
+	}
+afterTick1:
+	if !sawPROpened {
+		t.Fatal("expected pr.opened event on bus despite forbidden checks")
+	}
+
+	// Ticks 2 and 3: the WARN and the permission_warning event must fire
+	// only once across the whole process, not once per tick forever.
+	if err := p.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick 2: %v", err)
+	}
+	if err := p.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick 3: %v", err)
+	}
+
+	logged := buf.String()
+	if got := strings.Count(logged, "missing permission"); got != 1 {
+		t.Fatalf("expected exactly 1 permission WARN log line across 3 ticks, got %d:\n%s", got, logged)
+	}
+	if !strings.Contains(logged, "level=WARN") {
+		t.Fatalf("expected the permission log line at WARN level, got:\n%s", logged)
+	}
+	if !strings.Contains(logged, "Checks: Read") {
+		t.Fatalf("expected the log hint to mention Checks: Read, got:\n%s", logged)
+	}
+
+	for {
+		select {
+		case e := <-sub:
+			if e.Type == "github.permission_warning" {
+				warningEvents++
+			}
+		default:
+			goto afterWarnCheck
+		}
+	}
+afterWarnCheck:
+	if warningEvents != 1 {
+		t.Fatalf("expected exactly 1 github.permission_warning event across 3 ticks, got %d", warningEvents)
+	}
+
+	// Merge flow: with checks still forbidden, merging the PR must still
+	// fire Merged and drive the subtask to "done" (the cleanup chain).
+	m.mu.Lock()
+	m.prState = "closed"
+	m.merged = true
+	m.mu.Unlock()
+
+	if err := p.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick 4 (merge): %v", err)
+	}
+
+	got, err = st.GetSession("w1")
+	if err != nil {
+		t.Fatalf("GetSession after merge: %v", err)
+	}
+	if got.PRState != "merged" {
+		t.Fatalf("expected PRState=merged despite forbidden checks, got %q", got.PRState)
+	}
+
+	task, err := st.GetTask(taskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.Status != "done" {
+		t.Fatalf("expected subtask status done after merge (cleanup chain reachable), got %q", task.Status)
+	}
+
+	// No additional WARN/event fired on the 4th tick either.
+	logged = buf.String()
+	if got := strings.Count(logged, "missing permission"); got != 1 {
+		t.Fatalf("expected still exactly 1 permission WARN log line after merge tick, got %d:\n%s", got, logged)
+	}
+}
+
+// TestTick_ReviewsForbidden_ToleratedInsideGetPR verifies that a 403 on the
+// PR reviews sub-endpoint (used internally by client.GetPR) does not fail
+// discovery: ReviewDecision degrades to "" and pr_number/pr_state are still
+// persisted normally.
+func TestTick_ReviewsForbidden_ToleratedInsideGetPR(t *testing.T) {
+	st, b := setupEnv(t)
+	addWorker(t, st, "w1", "feature-branch")
+
+	m := newMockGitHubServer()
+	m.forbidReviews = true
+	srv := httptest.NewServer(m.handler())
+	defer srv.Close()
+
+	notify := &fakeNotifier{}
+	p := New(st, b, ghFactory(srv.URL), testConfig(), notify)
+
+	if err := p.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	got, err := st.GetSession("w1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if got.PRNumber != 5 || got.PRState != "open" || got.CIState != "passing" {
+		t.Fatalf("expected PR fields persisted despite forbidden reviews, got %+v", got)
+	}
+
+	if opened, _, changesRequested, _ := notify.counts(); opened != 1 || changesRequested != 0 {
+		t.Fatalf("expected PROpened=1, ChangesRequested=0, got opened=%d changesRequested=%d", opened, changesRequested)
+	}
+}
+
+// TestTick_RateLimited403_StillAbortsTickEarly verifies that a genuine
+// rate-limit 403 (with X-RateLimit-Remaining: 0) on check-runs is NOT
+// swallowed as a permission error: it must still surface as ErrBackoff and
+// abort the tick early, leaving subsequent sessions untouched, exactly as
+// before this fix.
+func TestTick_RateLimited403_StillAbortsTickEarly(t *testing.T) {
+	st, b := setupEnv(t)
+	addWorker(t, st, "w1", "feature-branch")
+	addWorker(t, st, "w2", "other-branch")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/o/r/pulls":
+			w.Write([]byte(`[{"number":5,"state":"open","merged":false,"head":{"sha":"sha1"}}]`))
+		case r.URL.Path == "/repos/o/r/pulls/5":
+			w.Write([]byte(`{"number":5,"state":"open","merged":false,"head":{"sha":"sha1"}}`))
+		case r.URL.Path == "/repos/o/r/pulls/5/reviews":
+			w.Write([]byte(`[]`))
+		case r.URL.Path == "/repos/o/r/commits/sha1/check-runs":
+			w.Header().Set("X-RateLimit-Remaining", "0")
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	notify := &fakeNotifier{}
+	p := New(st, b, ghFactory(srv.URL), testConfig(), notify)
+
+	if err := p.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick should not return an error on backoff, got: %v", err)
+	}
+
+	got2, err := st.GetSession("w2")
+	if err != nil {
+		t.Fatalf("GetSession w2: %v", err)
+	}
+	if got2.PRNumber != 0 {
+		t.Fatalf("expected w2 untouched (tick aborted early on rate limit), got %+v", got2)
+	}
 }

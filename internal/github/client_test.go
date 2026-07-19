@@ -350,6 +350,24 @@ func Test403RateLimit_ReturnsErrBackoff(t *testing.T) {
 	}
 }
 
+func Test403NoRateLimitHeader_ReturnsErrForbidden(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// No X-RateLimit-Remaining header set: this is a permission 403, not
+		// a rate-limit 403.
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "tok")
+	_, err := c.GetUser(context.Background())
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+	if errors.Is(err, ErrBackoff) {
+		t.Fatalf("permission 403 must not be classified as ErrBackoff")
+	}
+}
+
 func Test5xx_ReturnsErrBackoff(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
@@ -434,6 +452,45 @@ func TestGetPR_ReviewDecision(t *testing.T) {
 				t.Fatalf("expected %q, got %q", tc.expected, pr.ReviewDecision)
 			}
 		})
+	}
+}
+
+func TestCheckRollup_403NoRateLimitHeader_ReturnsErrForbidden(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "tok")
+	_, err := c.CheckRollup(context.Background(), "o", "r", "sha1")
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+}
+
+func TestGetPR_Reviews403_ToleratedAsEmptyReviewDecision(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/o/r/pulls/1":
+			w.Write([]byte(`{"number":1,"state":"open","merged":false,"head":{"sha":"sha1"}}`))
+		case r.URL.Path == "/repos/o/r/pulls/1/reviews":
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "tok")
+	pr, err := c.GetPR(context.Background(), "o", "r", 1)
+	if err != nil {
+		t.Fatalf("expected GetPR to tolerate reviews 403, got error: %v", err)
+	}
+	if pr.Number != 1 || pr.State != "open" {
+		t.Fatalf("expected PR core fields still populated, got %+v", pr)
+	}
+	if pr.ReviewDecision != "" {
+		t.Fatalf("expected empty ReviewDecision, got %q", pr.ReviewDecision)
 	}
 }
 

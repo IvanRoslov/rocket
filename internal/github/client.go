@@ -24,6 +24,14 @@ var ErrNoToken = errors.New("github: no token")
 // should back off and retry later.
 var ErrBackoff = errors.New("github: backoff")
 
+// ErrForbidden is returned when GitHub responds 403 WITHOUT the rate-limit
+// header, which in practice means the token lacks a required permission
+// scope (e.g. a fine-grained PAT missing Checks:read) rather than being
+// rate limited. Callers that can degrade gracefully without the affected
+// data should check for this with errors.Is instead of treating it as a
+// fatal error.
+var ErrForbidden = errors.New("github: forbidden")
+
 // Client is a minimal GitHub REST API client with an in-memory ETag cache.
 type Client struct {
 	baseURL string
@@ -166,6 +174,9 @@ func (c *Client) doGet(ctx context.Context, url string) (status int, body []byte
 	if resp.StatusCode == http.StatusForbidden && resp.Header.Get("X-RateLimit-Remaining") == "0" {
 		return 0, nil, "", fmt.Errorf("%w: rate limited", ErrBackoff)
 	}
+	if resp.StatusCode == http.StatusForbidden {
+		return 0, nil, "", fmt.Errorf("%w: %s", ErrForbidden, url)
+	}
 	if resp.StatusCode >= 500 {
 		return 0, nil, "", fmt.Errorf("%w: server error %d", ErrBackoff, resp.StatusCode)
 	}
@@ -306,7 +317,12 @@ func (c *Client) GetPR(ctx context.Context, owner, repo string, number int) (*PR
 		reviews = append(reviews, page...)
 		return nil
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrForbidden) {
+		// A 403 here typically means the token lacks the "Pull requests"
+		// read scope on reviews specifically (rare, but seen in the wild
+		// alongside missing Checks:read); tolerate it by treating the PR as
+		// having no aggregated review decision rather than failing the
+		// whole PR fetch, since callers need pr_number/pr_state regardless.
 		return nil, fmt.Errorf("github: GetPR: reviews for PR #%d: %w", number, err)
 	}
 

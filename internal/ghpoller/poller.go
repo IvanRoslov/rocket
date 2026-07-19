@@ -53,6 +53,9 @@ type Poller struct {
 
 	mu              sync.Mutex
 	lastReviewState map[string]string // sessionID -> last observed ReviewDecision
+
+	warnMu sync.Mutex
+	warned map[string]bool // (repo, endpoint-kind) -> already logged/notified once this process
 }
 
 // New builds a Poller.
@@ -65,7 +68,53 @@ func New(st *store.Store, b *bus.Bus, gh func() (*github.Client, error), cfg *co
 		notify:          notify,
 		runGit:          runGitRemoteOrigin,
 		lastReviewState: make(map[string]string),
+		warned:          make(map[string]bool),
 	}
+}
+
+// warnPermissionOnce logs a WARN and publishes a github.permission_warning
+// event the first time a given (repo, endpoint) permission failure is
+// observed in this process; subsequent occurrences are silent to avoid
+// spamming the log every poll interval forever.
+func (p *Poller) warnPermissionOnce(repo, endpoint string) {
+	key := repo + "|" + endpoint
+	p.warnMu.Lock()
+	already := p.warned[key]
+	if !already {
+		p.warned[key] = true
+	}
+	p.warnMu.Unlock()
+	if already {
+		return
+	}
+
+	slog.Warn("ghpoller: missing permission, degrading gracefully",
+		"repo", repo, "endpoint", endpoint,
+		"hint", "grant the token Checks: Read (fine-grained) or repo scope (classic)")
+	p.bus.Publish("github.permission_warning", "", map[string]any{
+		"repo":     repo,
+		"endpoint": endpoint,
+	})
+}
+
+// checkRollupTolerant calls CheckRollup, degrading to "" (unknown CI state)
+// when the token lacks permission (e.g. Checks:read) rather than failing the
+// whole tick: PR linkage, subtask transitions and merge cleanup must keep
+// working even when checks are invisible to us. A rate-limit backoff error
+// is propagated unchanged so the caller still aborts the tick early.
+func (p *Poller) checkRollupTolerant(ctx context.Context, client *github.Client, owner, repo, sha string) (string, error) {
+	ci, err := client.CheckRollup(ctx, owner, repo, sha)
+	if err == nil {
+		return ci, nil
+	}
+	if errors.Is(err, github.ErrBackoff) {
+		return "", err
+	}
+	if errors.Is(err, github.ErrForbidden) {
+		p.warnPermissionOnce(owner+"/"+repo, "check-runs")
+		return "", nil
+	}
+	return "", err
 }
 
 func runGitRemoteOrigin(ctx context.Context, dir string) (string, error) {
@@ -216,12 +265,13 @@ func (p *Poller) discoverPR(ctx context.Context, client *github.Client, sess sto
 		return nil
 	}
 
-	ci, err := client.CheckRollup(ctx, owner, repo, pr.HeadSHA)
-	if err != nil {
-		return err
-	}
-
-	if err := p.st.UpdateSessionPR(sess.ID, pr.Number, prState, ci); err != nil {
+	// Persist the PR core (number, state) BEFORE touching checks, with
+	// ci_state initially unknown (""). This guarantees pr_number/pr_state —
+	// and therefore subtask transitions and merge cleanup — get written even
+	// if the token lacks permission to read check-runs below (a live field
+	// failure: a fine-grained PAT missing Checks:read used to make the
+	// CheckRollup call abort this entire function before any of this ran).
+	if err := p.st.UpdateSessionPR(sess.ID, pr.Number, prState, ""); err != nil {
 		return err
 	}
 
@@ -232,6 +282,18 @@ func (p *Poller) discoverPR(ctx context.Context, client *github.Client, sess sto
 		// Stale discovery: the PR was already merged by the time we found it.
 		p.bus.Publish("pr.merged", sess.ID, map[string]any{"number": pr.Number})
 		p.notify.Merged(sess, pr)
+	}
+
+	// Fetch checks separately and tolerantly: a permission error degrades to
+	// ci="" (left unpersisted below) rather than failing discovery.
+	ci, err := p.checkRollupTolerant(ctx, client, owner, repo, pr.HeadSHA)
+	if err != nil {
+		return err
+	}
+	if ci != "" {
+		if err := p.st.UpdateSessionPR(sess.ID, pr.Number, prState, ci); err != nil {
+			return err
+		}
 	}
 
 	// Fire notifications for alert states at discovery time.
@@ -252,11 +314,6 @@ func (p *Poller) updatePR(ctx context.Context, client *github.Client, sess store
 		return err
 	}
 
-	ci, err := client.CheckRollup(ctx, owner, repo, pr.HeadSHA)
-	if err != nil {
-		return err
-	}
-
 	newPRState := mapPRState(pr)
 
 	// Capture the previously-stored state BEFORE persisting: the once-only
@@ -266,17 +323,21 @@ func (p *Poller) updatePR(ctx context.Context, client *github.Client, sess store
 	prevPRState := sess.PRState
 	prevCIState := sess.CIState
 
-	// Persist before notifying: if the store write fails, return the error
-	// and skip all events/notifications rather than risk notifying about a
-	// state change that never made it to disk (which would desync from a
-	// future tick's dedup logic keyed on stored state).
+	// Persist the PR core (number, state) BEFORE touching checks, and before
+	// notifying: if the store write fails, return the error and skip all
+	// events/notifications rather than risk notifying about a state change
+	// that never made it to disk. Crucially, this write does not depend on
+	// CheckRollup succeeding — PR linkage, subtask transitions and merge
+	// cleanup must keep working even when the token lacks permission to read
+	// checks (a live field failure fixed here: CheckRollup 403 used to abort
+	// this whole function before this write ever ran).
 	//
 	// Note: there is a narrow crash window between this persist and the
 	// notifications below. A crash there loses the subtask→done transition
 	// permanently (RearmPending only re-arms cleanup, not the forward
 	// transition). This is an accepted risk documented in PR review.
-	if newPRState != prevPRState || ci != prevCIState {
-		if err := p.st.UpdateSessionPR(sess.ID, pr.Number, newPRState, ci); err != nil {
+	if newPRState != prevPRState {
+		if err := p.st.UpdateSessionPR(sess.ID, pr.Number, newPRState, prevCIState); err != nil {
 			return err
 		}
 	}
@@ -286,7 +347,19 @@ func (p *Poller) updatePR(ctx context.Context, client *github.Client, sess store
 		p.notify.Merged(sess, pr)
 	}
 
-	if ci != prevCIState {
+	// Fetch checks separately and tolerantly: a permission error degrades to
+	// ci="" (left unpersisted below, so a previously-known ci_state is not
+	// clobbered by "unknown") rather than failing the update.
+	ci, err := p.checkRollupTolerant(ctx, client, owner, repo, pr.HeadSHA)
+	if err != nil {
+		return err
+	}
+
+	if ci != "" && ci != prevCIState {
+		if err := p.st.UpdateSessionPR(sess.ID, pr.Number, newPRState, ci); err != nil {
+			return err
+		}
+
 		p.bus.Publish("pr.ci_changed", sess.ID, map[string]any{
 			"number": pr.Number,
 			"from":   prevCIState,
