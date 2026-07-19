@@ -107,6 +107,35 @@ describe('SettingsScreen', () => {
     expect(within(sdkRow).getByText(/unused/i)).toBeInTheDocument()
   })
 
+  it('Repositories: shows a "rocket" origin badge for a repo cloned under .rocket/repos/, "user" otherwise', async () => {
+    server.use(
+      http.get('/v1/repos', () =>
+        HttpResponse.json([
+          { id: 'api', path: '/home/dev/repos/api', default_branch: 'main', auto_cleanup: true, env: {}, symlinks: [], post_create: [], created_at: 0 },
+          {
+            id: 'billing-sdk',
+            path: '/home/dev/.rocket/repos/billing-sdk',
+            default_branch: 'main',
+            auto_cleanup: true,
+            env: {},
+            symlinks: [],
+            post_create: [],
+            created_at: 0,
+          },
+        ]),
+      ),
+    )
+    const user = userEvent.setup()
+    renderScreen()
+    await gotoSection(user, 'Repositories')
+
+    const apiRow = (await screen.findByText('api')).closest('[data-testid="repo-row"]') as HTMLElement
+    expect(within(apiRow).getByText('user')).toBeInTheDocument()
+
+    const clonedRow = screen.getByText('billing-sdk').closest('[data-testid="repo-row"]') as HTMLElement
+    expect(within(clonedRow).getByText('rocket')).toBeInTheDocument()
+  })
+
   it('Project: renaming and saving PATCHes /v1/projects/{id} with the right body', async () => {
     let received: unknown
     server.use(
@@ -118,7 +147,6 @@ describe('SettingsScreen', () => {
           main: 'api',
           linked: ['web', 'infra'],
           live_sessions: 3,
-          tasks: { backlog: 1, in_progress: 1, review: 1, done: 1 },
           created_at: 0,
         })
       }),
@@ -154,7 +182,6 @@ describe('SettingsScreen', () => {
           main: 'api',
           linked: ['infra'],
           live_sessions: 3,
-          tasks: { backlog: 1, in_progress: 1, review: 1, done: 1 },
           created_at: 0,
         })
       }),
@@ -176,7 +203,7 @@ describe('SettingsScreen', () => {
     )
   })
 
-  it('Project: Delete is disabled while the project has open tasks or live sessions', async () => {
+  it('Project: Delete is disabled while the project has live sessions', async () => {
     const user = userEvent.setup()
     renderScreen()
     await gotoSection(user, 'Project')

@@ -1,6 +1,6 @@
 // Settings > Project (docs/design/Settings.dc.html): rename a project,
-// manage its main/linked repos, and delete it once every task is
-// done/cancelled and no sessions are live.
+// manage its main/linked repos, and delete it once no sessions are live
+// (the real DELETE /v1/projects only checks live_sessions, not tasks).
 
 import { useEffect, useState } from 'react'
 import { Button } from '../../components/Button'
@@ -25,8 +25,10 @@ function ProjectForm({ project }: ProjectFormProps) {
     setName(project.name)
   }, [project.id, project.name])
 
-  const openTasks = project.tasks.backlog + project.tasks.in_progress + project.tasks.review
-  const canDelete = openTasks === 0 && project.live_sessions === 0
+  // задачи демон пока не проверяет при удалении проекта — гейтим только по
+  // live_sessions, как реальный API (DELETE /v1/projects блокирует только
+  // live_sessions>0 -> 409 project_busy).
+  const canDelete = project.live_sessions === 0
 
   function handleSaveName() {
     if (!name.trim() || name === project.name) return
@@ -105,7 +107,7 @@ function ProjectForm({ project }: ProjectFormProps) {
         <div className="settings-danger__body">
           <div className="settings-danger__title">Delete project</div>
           <div className="settings-danger__hint">
-            Available only when all tasks are done/cancelled and no sessions are live.
+            Available only when no sessions are live.
           </div>
           {deleteError && <p className="settings-error">{deleteError}</p>}
         </div>

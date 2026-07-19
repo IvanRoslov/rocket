@@ -26,6 +26,7 @@ import type {
   TaskDetail,
   TaskDoc,
   TaskLogEntry,
+  TaskStatus,
 } from './types'
 
 export interface SessionFilter {
@@ -84,41 +85,71 @@ export function useMessages(sessionId: string | undefined): UseQueryResult<Messa
   })
 }
 
-/** Contract type (phase 3): task board grouped for the kanban screen. */
+/** Task board grouped for the kanban screen: `GET /v1/tasks?board=true`. */
 export interface TaskBoard {
   backlog: Task[]
   in_progress: Task[]
   review: Task[]
   done: Task[]
+  cancelled: Task[]
 }
 
-/**
- * Contract type (phase 3): the raw `{columns:{...}}` shape returned by
- * `GET /v1/tasks?project=&board=true` (docs/03-daemon-api.md). This is the
- * ONE adapter over that response — reconcile it here at phase-3 integration
- * if the real shape differs.
- */
 interface TaskBoardResponse {
-  columns: {
-    backlog: Task[]
-    in_progress: Task[]
-    review: Task[]
-    done: Task[]
-    cancelled: Task[]
-  }
+  board: TaskBoard
 }
 
 export function useTasksBoard(projectId: string | undefined): UseQueryResult<TaskBoard> {
   return useQuery({
-    queryKey: ['tasks', projectId],
+    queryKey: ['tasks', projectId, 'board'],
     queryFn: async () => {
       const res = await api.get<TaskBoardResponse>(
         `/v1/tasks?project=${encodeURIComponent(projectId ?? '')}&board=true`,
       )
-      const { backlog, in_progress, review, done } = res.columns
-      return { backlog, in_progress, review, done }
+      return res.board
     },
     enabled: projectId !== undefined,
+  })
+}
+
+export interface TaskFilter {
+  project?: string
+  status?: TaskStatus
+  /** Omit for root-only, 'all' for every task, or a parent task id for its children. */
+  parent?: number | 'all'
+}
+
+function tasksQueryString(filter?: TaskFilter): string {
+  if (!filter) return ''
+  const params = new URLSearchParams()
+  if (filter.project) params.set('project', filter.project)
+  if (filter.status) params.set('status', filter.status)
+  if (filter.parent !== undefined) params.set('parent', String(filter.parent))
+  const qs = params.toString()
+  return qs ? `?${qs}` : ''
+}
+
+export function useTasks(filter?: TaskFilter): UseQueryResult<Task[]> {
+  return useQuery({
+    queryKey: ['tasks', filter ?? {}],
+    queryFn: async () => {
+      const res = await api.get<{ tasks: Task[] }>(`/v1/tasks${tasksQueryString(filter)}`)
+      return res.tasks
+    },
+  })
+}
+
+/**
+ * Per-project task list, used by ProjectsScreen to derive status counts
+ * client-side (the real `GET /v1/projects` has no task counters — see
+ * .superpowers/sdd/phase3-contract.md). Root tasks only (default `parent`).
+ */
+export function useProjectTasks(projectId: string): UseQueryResult<Task[]> {
+  return useQuery({
+    queryKey: ['tasks', projectId, 'list'],
+    queryFn: async () => {
+      const res = await api.get<{ tasks: Task[] }>(`/v1/tasks?project=${encodeURIComponent(projectId)}`)
+      return res.tasks
+    },
   })
 }
 
@@ -133,7 +164,10 @@ export function useTask(id: number | undefined): UseQueryResult<TaskDetail> {
 export function useTaskDocs(id: number | undefined): UseQueryResult<TaskDoc[]> {
   return useQuery({
     queryKey: ['task', id, 'docs'],
-    queryFn: () => api.get<TaskDoc[]>(`/v1/tasks/${id}/docs`),
+    queryFn: async () => {
+      const res = await api.get<{ docs: TaskDoc[] }>(`/v1/tasks/${id}/docs`)
+      return res.docs
+    },
     enabled: id !== undefined,
   })
 }
@@ -141,7 +175,10 @@ export function useTaskDocs(id: number | undefined): UseQueryResult<TaskDoc[]> {
 export function useTaskLog(id: number | undefined): UseQueryResult<TaskLogEntry[]> {
   return useQuery({
     queryKey: ['task', id, 'log'],
-    queryFn: () => api.get<TaskLogEntry[]>(`/v1/tasks/${id}/log`),
+    queryFn: async () => {
+      const res = await api.get<{ log: TaskLogEntry[] }>(`/v1/tasks/${id}/log`)
+      return res.log
+    },
     enabled: id !== undefined,
   })
 }
@@ -149,7 +186,10 @@ export function useTaskLog(id: number | undefined): UseQueryResult<TaskLogEntry[
 export function useTaskQuestions(id: number | undefined): UseQueryResult<Question[]> {
   return useQuery({
     queryKey: ['task', id, 'questions'],
-    queryFn: () => api.get<Question[]>(`/v1/tasks/${id}/questions`),
+    queryFn: async () => {
+      const res = await api.get<{ questions: Question[] }>(`/v1/tasks/${id}/questions`)
+      return res.questions
+    },
     enabled: id !== undefined,
   })
 }
@@ -226,13 +266,109 @@ export function useSystemCleanup(): UseMutationResult<SystemCleanupResult, Error
   })
 }
 
-export function useUpdateTaskStatus(): UseMutationResult<
+/** `POST /v1/tasks`: `{title, description?, project, parent_id?}` -> bare taskResponse (201). */
+export function useCreateTask(): UseMutationResult<
   Task,
   Error,
-  { id: number; status: Task['status'] }
+  { title: string; description?: string; project: string; parent_id?: number }
 > {
+  const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, status }) => api.patch<Task>(`/v1/tasks/${id}`, { status }),
+    mutationFn: (payload) => api.post<Task>('/v1/tasks', payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    },
+  })
+}
+
+/**
+ * `PATCH /v1/tasks/{id}` `{status}` -> bare taskResponse (200). Moving a
+ * task to `cancelled` via PATCH is rejected by the daemon (400 `use_cancel`)
+ * — redirect that case to `POST /v1/tasks/{id}/cancel` instead.
+ */
+export function useMoveTask(): UseMutationResult<Task, Error, { id: number; status: TaskStatus }> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, status }) => {
+      if (status === 'cancelled') {
+        return api.post<Task>(`/v1/tasks/${id}/cancel`)
+      }
+      return api.patch<Task>(`/v1/tasks/${id}`, { status })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task'] })
+    },
+  })
+}
+
+/** `POST /v1/tasks/{id}/cancel` (no body) -> bare taskResponse (200); cascades to kill sessions. */
+export function useCancelTask(): UseMutationResult<Task, Error, number> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.post<Task>(`/v1/tasks/${id}/cancel`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task'] })
+      queryClient.invalidateQueries({ queryKey: ['sessions'] })
+    },
+  })
+}
+
+/** `POST /v1/tasks/{id}/start` `{agent?}` -> `{task_id,feature_slug,session_id}` (201). Root tasks only. */
+export function useStartTask(): UseMutationResult<
+  { task_id: number; feature_slug: string; session_id: string },
+  Error,
+  { id: number; agent?: string }
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, agent }) =>
+      api.post<{ task_id: number; feature_slug: string; session_id: string }>(
+        `/v1/tasks/${id}/start`,
+        agent ? { agent } : undefined,
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task'] })
+      queryClient.invalidateQueries({ queryKey: ['sessions'] })
+    },
+  })
+}
+
+/** `POST /v1/questions/{id}/reply` `{body}` -> bare questionResponse (201). Open questions only. */
+export function useReplyQuestion(): UseMutationResult<
+  Question,
+  Error,
+  { id: number; body: string; taskId: number }
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }) => api.post<Question>(`/v1/questions/${id}/reply`, { body }),
+    onSuccess: (_data, { taskId }) => {
+      queryClient.invalidateQueries({ queryKey: ['task', taskId, 'questions'] })
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+  })
+}
+
+/**
+ * `POST /v1/questions/{id}/answer` `{body}` | `{dismiss:true}` -> bare
+ * questionResponse (200). User only.
+ */
+export function useAnswerQuestion(): UseMutationResult<
+  Question,
+  Error,
+  { id: number; taskId: number } & ({ body: string; dismiss?: never } | { dismiss: true; body?: never })
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body, dismiss }) =>
+      api.post<Question>(`/v1/questions/${id}/answer`, dismiss ? { dismiss: true } : { body }),
+    onSuccess: (_data, { taskId }) => {
+      queryClient.invalidateQueries({ queryKey: ['task', taskId, 'questions'] })
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+    },
   })
 }
 
@@ -324,9 +460,8 @@ export function useUpdateProject(): UseMutationResult<
 }
 
 /**
- * `DELETE /v1/projects/{id}`. The daemon rejects this unless every task is
- * done/cancelled and no sessions are live — callers should also disable the
- * Delete button client-side using `project.tasks`/`project.live_sessions`.
+ * `DELETE /v1/projects/{id}`. The daemon blocks this only when
+ * `live_sessions>0` (409 `project_busy`) — it does not check tasks.
  */
 export function useDeleteProject(): UseMutationResult<void, Error, string> {
   const queryClient = useQueryClient()
@@ -356,6 +491,10 @@ export function wireInvalidation(queryClient: QueryClient) {
       queryClient.invalidateQueries({ queryKey: ['messages'] })
     } else if (event.type.startsWith('task.')) {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task'] })
+    } else if (event.type === 'orchestrator.heartbeat_sent') {
+      // High-frequency event; keep invalidation minimal — only the task
+      // detail view (which shows session/heartbeat state) needs to refresh.
       queryClient.invalidateQueries({ queryKey: ['task'] })
     } else if (event.type.startsWith('repo.clone_')) {
       queryClient.invalidateQueries({ queryKey: ['repos'] })

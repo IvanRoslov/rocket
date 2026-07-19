@@ -1,8 +1,21 @@
 // Small display-formatting helpers shared across screens.
 
-/** Renders a unix-seconds timestamp as a short relative string, e.g. "12m ago". */
-export function timeAgo(ts: number, now: number = Date.now() / 1000): string {
-  const diff = Math.max(0, Math.floor(now - ts))
+/**
+ * Renders a timestamp as a short relative string, e.g. "12m ago". Accepts
+ * either a unix-seconds number (as returned by the tasks/docs/log/questions
+ * APIs) or an ISO date string. Numbers larger than ~1e12 are treated as
+ * unix-milliseconds rather than seconds.
+ */
+export function timeAgo(ts: number | string, now: number = Date.now() / 1000): string {
+  let seconds: number
+  if (typeof ts === 'string') {
+    seconds = Date.parse(ts) / 1000
+  } else if (ts > 1e12) {
+    seconds = ts / 1000
+  } else {
+    seconds = ts
+  }
+  const diff = Math.max(0, Math.floor(now - seconds))
 
   if (diff < 60) return 'just now'
 

@@ -37,23 +37,13 @@ export interface Session {
 // Projects — internal/api/projects.go
 // ---------------------------------------------------------------------------
 
-export interface TaskCounters {
-  backlog: number
-  in_progress: number
-  review: number
-  done: number
-}
-
 export interface Project {
   id: string
   name: string
   main: string
   linked: string[]
   live_sessions: number
-  tasks: TaskCounters
   created_at: number
-  /** Contract field (phase 3): open questions awaiting a user reply. Optional until phase 3 lands. */
-  awaiting_questions?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -150,16 +140,15 @@ export interface SystemCleanupResult {
 }
 
 // ---------------------------------------------------------------------------
-// Contract types — phase 3/4, not yet implemented by the daemon.
-// Shape follows docs/12-tasks.md «Поля» and docs/03-daemon-api.md
-// «Задачи» / «Настройки и GitHub».
+// Tasks / Questions — internal/api/tasks.go, internal/api/questions.go
+// (phase 3, merged). Verified against .superpowers/sdd/phase3-contract.md.
 // ---------------------------------------------------------------------------
 
 export type TaskStatus = 'backlog' | 'in_progress' | 'review' | 'done' | 'cancelled'
 
 export type TaskCreatedBy = 'user' | 'orchestrator'
 
-/** Contract type (phase 3): docs/12-tasks.md «Поля». */
+/** `taskResponse` — internal/api/tasks.go. `parent_id` is omitted for root tasks. */
 export interface Task {
   id: number
   parent_id?: number
@@ -177,23 +166,24 @@ export interface Task {
 }
 
 /**
- * Contract type (phase 3): `GET /v1/tasks/{id}` per docs/03-daemon-api.md
- * returns the task's fields plus its subtasks and the session it's bound to
- * (with `tmux_name` and the attach command). To be reconciled with the real
- * response shape at phase-3 integration.
+ * `taskDetailResponse` — `GET /v1/tasks/{id}`: `taskResponse` plus its
+ * subtasks (always present, possibly empty) and the session it's bound to
+ * (with `tmux_name` and the attach command as argv), and a count of open
+ * questions.
  */
 export interface TaskDetail extends Task {
   subtasks: Task[]
   session?: {
     id: string
     tmux_name: string
-    attach: string[]
+    attach: string[] | null
   }
+  open_questions: number
 }
 
 export type TaskDocKind = 'spec' | 'plan' | 'report' | 'doc'
 
-/** Contract type (phase 3): docs/12-tasks.md «Документы и журнал задачи». */
+/** `GET /v1/tasks/{id}/docs` entry. `author` is "" (omitted) for the user. */
 export interface TaskDoc {
   id: number
   task_id: number
@@ -201,44 +191,55 @@ export interface TaskDoc {
   title: string
   body: string
   version: number
+  author?: string
   created_at: number
 }
 
 export type TaskLogKind = 'decision' | 'problem' | 'note' | 'status'
 
-/** Contract type (phase 3): docs/12-tasks.md «Документы и журнал задачи». */
+/** `GET /v1/tasks/{id}/log` entry. `author` is "" (omitted) for the user. */
 export interface TaskLogEntry {
   id: number
   task_id: number
   kind: TaskLogKind
   body: string
-  author: string
+  author?: string
   created_at: number
 }
 
 export type QuestionStatus = 'open' | 'resolved'
+export type QuestionResolution = 'answered' | 'dismissed'
+export type QuestionWhoseTurn = 'user' | 'orchestrator' | ''
 
-/** Contract type (phase 3): docs/12-tasks.md «Вопросы и ответы через задачу». */
+/** `questionResponse` — internal/api/questions.go. */
 export interface Question {
   id: number
   task_id: number
-  seq: number
+  /** 1-based, displayed as "Q<ordinal>". */
+  ordinal: number
+  /** Session id of the orchestrator that asked the question. */
+  asked_by: string
   body: string
   context?: string
   status: QuestionStatus
-  created_at: number
+  resolution?: QuestionResolution
+  whose_turn?: QuestionWhoseTurn
+  asked_at: number
   resolved_at?: number
   messages: QuestionMessage[]
 }
 
-export type QuestionMessageAuthor = 'orchestrator' | 'user'
-export type QuestionMessageKind = 'reply' | 'answer' | 'dismiss'
+export type QuestionMessageKind = 'reply' | 'answer'
 
-/** Contract type (phase 3): docs/12-tasks.md «Вопросы и ответы через задачу». */
+/**
+ * A single entry in a question's thread. `author` is "" (omitted) for the
+ * human user, otherwise the orchestrator session id that posted it — there
+ * is no `dismiss` message kind; dismissing a question resolves it without
+ * adding a thread message.
+ */
 export interface QuestionMessage {
   id: number
-  question_id: number
-  author: QuestionMessageAuthor
+  author?: string
   kind: QuestionMessageKind
   body: string
   created_at: number

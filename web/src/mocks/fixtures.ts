@@ -76,7 +76,6 @@ export const projects: Project[] = [
     main: 'api',
     linked: ['web', 'infra'],
     live_sessions: 3,
-    tasks: { backlog: 1, in_progress: 1, review: 1, done: 1 },
     created_at: NOW - 150 * DAY,
   },
   {
@@ -85,7 +84,6 @@ export const projects: Project[] = [
     main: 'data',
     linked: [],
     live_sessions: 0,
-    tasks: { backlog: 0, in_progress: 0, review: 0, done: 0 },
     created_at: NOW - 100 * DAY,
   },
 ]
@@ -276,22 +274,29 @@ export const taskLog: TaskLogEntry[] = [
   },
 ]
 
+// Question #3 on task #12: asked by the billing-v2 orchestrator, one
+// orchestrator-authored reply already in the thread (author = session id,
+// kind "reply") and no user message yet, so whose_turn stays "user" per the
+// same rule the daemon uses (whoseTurn in internal/api/questions.go): no
+// messages -> "user"; that still holds once at least one orchestrator
+// message is appended without a user response after it.
 export const questions: Question[] = [
   {
     id: 3,
     task_id: 12,
-    seq: 3,
+    ordinal: 3,
+    asked_by: 's-billing-v2-orch',
     body: 'Should we support prorated refunds for mid-cycle downgrades?',
     context:
       'Current plan only prorates upgrades. Downgrades take effect at the ' +
       'next billing cycle. Finance wants to know if v2 should change that.',
     status: 'open',
-    created_at: NOW - 30 * MIN,
+    whose_turn: 'user',
+    asked_at: NOW - 30 * MIN,
     messages: [
       {
         id: 1,
-        question_id: 3,
-        author: 'orchestrator',
+        author: 's-billing-v2-orch',
         kind: 'reply',
         body: 'Opened this to unblock the schema migration — refunds table shape depends on the answer.',
         created_at: NOW - 30 * MIN,

@@ -1,5 +1,5 @@
-// Covers the msw-mocked board response shape (`{columns:{...}}`) and its
-// single adapter in `useTasksBoard`, plus `useTask`/`TaskDetail` returning
+// Covers the msw-mocked board response shape (`{board:{...}}`) and its
+// adapter in `useTasksBoard`, plus `useTask`/`TaskDetail` returning
 // subtasks + the bound session.
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -24,18 +24,18 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 describe('useTasksBoard', () => {
-  it('adapts the {columns:{...}} board response into per-status arrays', async () => {
+  it('adapts the {board:{...}} board response into per-status arrays', async () => {
     const { result } = renderHook(() => useTasksBoard('billing'), { wrapper })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
 
     const board = result.current.data!
+    // Board is root-only: subtasks #13/#14 are not included.
     expect(board.backlog.map((t) => t.id)).toEqual([10])
-    expect(board.in_progress.map((t) => t.id).sort()).toEqual([12, 13])
-    expect(board.review.map((t) => t.id).sort()).toEqual([11, 14])
+    expect(board.in_progress.map((t) => t.id)).toEqual([12])
+    expect(board.review.map((t) => t.id)).toEqual([11])
     expect(board.done.map((t) => t.id)).toEqual([9])
-    // Not exposed on TaskBoard, but shouldn't leak in as an extra key either.
-    expect(board).not.toHaveProperty('cancelled')
+    expect(board.cancelled).toEqual([])
   })
 })
 
@@ -48,6 +48,7 @@ describe('useTask', () => {
     const task = result.current.data!
     expect(task.id).toBe(12)
     expect(task.subtasks.map((t) => t.id).sort()).toEqual([13, 14])
+    expect(task.open_questions).toBe(1)
     expect(task.session).toEqual({
       id: 's-billing-v2-orch',
       tmux_name: 'billing-v2-orch',

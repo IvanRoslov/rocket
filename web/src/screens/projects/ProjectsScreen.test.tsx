@@ -1,8 +1,8 @@
 // Covers the Projects grid against the msw fixtures (docs/design/Projects.dc.html):
-// card contents (mono id badge, main+linked repo line, stat badges from
-// tasks{}/live_sessions), the dashed "create project" card, the "New project"
-// button routing to /projects/new, and the empty-state fallback when the
-// project list is empty.
+// card contents (mono id badge, main+linked repo line, stat badges derived
+// client-side from GET /v1/tasks?project=<id> + live_sessions), the dashed
+// "create project" card, the "New project" button routing to /projects/new,
+// and the empty-state fallback when the project list is empty.
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
@@ -42,8 +42,10 @@ describe('ProjectsScreen', () => {
     expect(screen.getByText('⌂ api')).toBeInTheDocument()
     expect(screen.getByText('web, infra')).toBeInTheDocument()
 
-    expect(screen.getByText('1 in progress')).toBeInTheDocument()
-    expect(screen.getByText('1 review')).toBeInTheDocument()
+    // Stat badges depend on a second query (GET /v1/tasks?project=billing),
+    // so wait for them rather than asserting synchronously.
+    expect(await screen.findByText('1 in progress')).toBeInTheDocument()
+    expect(await screen.findByText('1 review')).toBeInTheDocument()
     expect(screen.getByText('● 3 live')).toBeInTheDocument()
   })
 
@@ -69,45 +71,21 @@ describe('ProjectsScreen', () => {
             main: 'infra',
             linked: [],
             live_sessions: 0,
-            tasks: { backlog: 0, in_progress: 0, review: 0, done: 0 },
             created_at: 1_800_000_000 - 2 * 24 * 60 * 60,
           },
         ]),
       ),
       http.get('/v1/sessions', () => HttpResponse.json([])),
+      http.get('/v1/tasks', () => HttpResponse.json({ tasks: [] })),
     )
 
     renderScreen()
 
     await screen.findByText('Infra Platform')
-    expect(screen.getByText('idle')).toBeInTheDocument()
+    expect(await screen.findByText('idle')).toBeInTheDocument()
     expect(screen.getByText('⌂ infra')).toBeInTheDocument()
     // No linked repos: no "+" separator line rendered.
     expect(screen.queryByText('web, infra')).not.toBeInTheDocument()
-  })
-
-  it('shows the "awaiting you" signal only when awaiting_questions is set', async () => {
-    server.use(
-      http.get('/v1/projects', () =>
-        HttpResponse.json([
-          {
-            id: 'billing',
-            name: 'Billing',
-            main: 'api',
-            linked: ['web', 'infra'],
-            live_sessions: 3,
-            tasks: { backlog: 1, in_progress: 1, review: 1, done: 1 },
-            created_at: 1_800_000_000 - 150 * 24 * 60 * 60,
-            awaiting_questions: 1,
-          },
-        ]),
-      ),
-    )
-
-    renderScreen()
-
-    await screen.findByText('Billing')
-    expect(screen.getByText('? awaiting you')).toBeInTheDocument()
   })
 
   it('renders an empty state with a "Create project" action when there are no projects', async () => {
