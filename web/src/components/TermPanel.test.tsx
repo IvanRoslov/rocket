@@ -3,12 +3,14 @@
 // WebSocket exercising the reconnect state machine (Task 9 review fix:
 // bounded reconnect loop that respects close codes).
 
+import { Terminal } from '@xterm/xterm'
 import { act, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   MAX_HANDSHAKE_FAILURES,
   NORMAL_CLOSURE_CODE,
   TermPanel,
+  configureUnicode11,
   decideOnClose,
   encodeResize,
   nextReconnectDelay,
@@ -62,6 +64,49 @@ describe('encodeResize', () => {
   it('round-trips through JSON.parse', () => {
     const parsed = JSON.parse(encodeResize(120, 40))
     expect(parsed).toEqual({ type: 'resize', cols: 120, rows: 40 })
+  })
+})
+
+describe('configureUnicode11', () => {
+  // Regression test for character-overlap corruption: tmux (via utf8proc)
+  // renders pictographic emoji like 🚀 (U+1F680) as 2 columns wide, but
+  // xterm.js's default Unicode 6 width table renders the same glyph as 1
+  // column — the mismatch that made a following space column collide
+  // with the emoji's second cell, gluing status icons to the text after
+  // them (reproduced live via tmux + a real browser; see the debug
+  // session for screenshots). Asserts the fix directly: after
+  // configureUnicode11 runs, xterm's own width computation for 🚀 matches
+  // tmux's (2 columns), not the stale 1-column default.
+  it('makes xterm treat wide emoji (e.g. 🚀 U+1F680) as 2 columns, matching tmux/utf8proc', async () => {
+    // xterm.js queries matchMedia for DPR change tracking; jsdom has none.
+    const originalMatchMedia = window.matchMedia
+    window.matchMedia = vi.fn().mockReturnValue({
+      matches: false,
+      media: '',
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }) as unknown as typeof window.matchMedia
+
+    const term = new Terminal({ allowProposedApi: true })
+    const div = document.createElement('div')
+    document.body.appendChild(div)
+    term.open(div)
+
+    // Before the fix: default table gives this emoji 1 column.
+    await new Promise<void>((resolve) => term.write('X\u{1F680}|', () => resolve()))
+    expect(term.buffer.active.cursorX).toBe(3) // 'X' + 1-col emoji + '|'
+
+    term.reset()
+    configureUnicode11(term)
+    await new Promise<void>((resolve) => term.write('X\u{1F680}|', () => resolve()))
+    expect(term.buffer.active.cursorX).toBe(4) // 'X' + 2-col emoji + '|'
+
+    term.dispose()
+    div.remove()
+    window.matchMedia = originalMatchMedia
   })
 })
 

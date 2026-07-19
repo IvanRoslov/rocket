@@ -20,6 +20,7 @@
 //     backoff/failure counters reset on the next successful open.
 
 import { FitAddon } from '@xterm/addon-fit'
+import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
@@ -134,6 +135,32 @@ export function encodeResize(cols: number, rows: number): string {
   return JSON.stringify({ type: 'resize', cols, rows })
 }
 
+/**
+ * Loads the Unicode 11 width tables into `term` and activates them.
+ *
+ * Root cause this fixes: tmux computes character cell widths via utf8proc
+ * (Unicode-aware), so it treats most pictographic emoji (e.g. 🚀 U+1F680)
+ * as occupying 2 columns. xterm.js's *default* width table implements only
+ * the much older Unicode 6 rules and treats the same characters as 1
+ * column wide. That single-column disagreement is enough to corrupt
+ * rendering: tmux advances its cursor model 2 columns past such a glyph
+ * before emitting the next one (typically a plain space), but xterm only
+ * reserves 1 column for it, so xterm draws that next cell one column
+ * early — landing on top of / merging into the emoji's cell instead of
+ * the blank column tmux left — and the drift compounds across a line
+ * (visible as glyphs glued to following text, shifted content, and
+ * leftover fragments once a scroll-region redraw runs on top of it).
+ * Loading Unicode 11's tables brings xterm's width computation much
+ * closer to tmux's for ordinary emoji, eliminating that class of drift.
+ *
+ * Requires `allowProposedApi: true` on the Terminal (activeVersion is a
+ * proposed API); the caller's Terminal options set that.
+ */
+export function configureUnicode11(term: Terminal): void {
+  term.loadAddon(new Unicode11Addon())
+  term.unicode.activeVersion = '11'
+}
+
 export function TermPanel({ sessionId, readonly, onResize, fontSize }: TermPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [banner, setBanner] = useState<Banner>(null)
@@ -170,9 +197,25 @@ export function TermPanel({ sessionId, readonly, onResize, fontSize }: TermPanel
       fontWeight: 'normal',
       fontWeightBold: '600',
       theme: TERMINAL_THEME,
+      // Required to reach term.unicode below (activeVersion is a proposed
+      // API). See the Unicode11Addon load just after: without it, xterm's
+      // default (Unicode 6) character-width table disagrees with tmux's
+      // utf8proc-based width table for glyphs introduced since — notably
+      // pictographic emoji (e.g. 🚀 U+1F680) that tmux renders 2 columns
+      // wide but xterm renders 1. That single-column disagreement makes
+      // xterm draw the next cell (typically the space after an emoji
+      // status icon) one column early, so it lands on/merges into the
+      // glyph tmux already placed there instead of the blank column tmux
+      // left for it — visible as glyphs glued to the following text and,
+      // as the drift compounds across a scroll region redraw, stale
+      // fragments and horizontal shift elsewhere on the line. Loading the
+      // Unicode 11 width tables here brings xterm's width table much
+      // closer to tmux's, eliminating the mismatch for ordinary emoji.
+      allowProposedApi: true,
     })
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
+    configureUnicode11(term)
     term.open(container)
     fitAddon.fit()
     onResizeRef.current?.(term.cols, term.rows)
