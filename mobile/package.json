@@ -17,16 +17,13 @@
     "react": "19.2.3",
     "react-native": "0.86.0",
     "react-native-safe-area-context": "~5.7.0",
-    "react-native-screens": "4.25.2",
-    "react-native-webview": "13.16.1"
+    "react-native-screens": "4.25.2"
   },
   "devDependencies": {
     "@react-native/jest-preset": "^0.86.0",
     "@testing-library/react-native": "^14.0.1",
     "@types/jest": "^30.0.0",
     "@types/react": "~19.2.2",
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^6.0.0",
     "react-test-renderer": "^19.2.3",
     "test-renderer": "^1.2.0",
     "typescript": "~6.0.3"
@@ -36,8 +33,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "test": "jest",
-    "gen:terminal": "node scripts/gen-terminal-html.js"
+    "test": "jest"
   },
   "private": true,
   "jest": {

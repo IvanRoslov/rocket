@@ -14,6 +14,9 @@ describe('parseEventType', () => {
   it('pr events touch tasks and sessions', () => {
     expect(parseEventType('pr.merged')).toEqual(['tasks', 'task', 'sessions'])
   })
+  it('chat pings do not invalidate anything', () => {
+    expect(parseEventType('session.chat_updated')).toEqual([])
+  })
   it('unknown events map to nothing', () => {
     expect(parseEventType('weird.thing')).toEqual([])
     expect(parseEventType('')).toEqual([])

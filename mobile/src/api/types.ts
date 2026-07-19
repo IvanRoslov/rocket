@@ -191,6 +191,33 @@ export interface Settings {
   login?: string
 }
 
+// Chat — docs/13-chat.md. A read-only mirror of the agent's native
+// transcript; sending goes through the regular message queue.
+
+export type ChatRole = 'user' | 'assistant' | 'tool'
+
+export interface ChatEntry {
+  role: ChatRole
+  text: string
+  /** Present only for role="tool" (e.g. "Bash", "Edit"). */
+  tool_name?: string
+  /** Unix seconds; 0 when the transcript record has no timestamp. */
+  ts: number
+}
+
+export interface ChatSessionInfo {
+  id: string
+  kind: string
+  state: SessionState
+  activity?: SessionActivity
+}
+
+export interface ChatResponse {
+  entries: ChatEntry[]
+  next_cursor: string
+  session?: ChatSessionInfo
+}
+
 export interface Health {
   status: string
   version: string

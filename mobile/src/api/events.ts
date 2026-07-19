@@ -8,6 +8,9 @@ import { connectSse } from './sse'
  * segments (after the baseUrl segment) that must be refetched.
  */
 export function parseEventType(type: string): string[] {
+  // chat_updated fires every activity tick while an agent is talking; the
+  // chat screen polls its own cursor, so it must not invalidate anything.
+  if (type === 'session.chat_updated') return []
   const domain = type.split('.')[0]
   switch (domain) {
     case 'session':

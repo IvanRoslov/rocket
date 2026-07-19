@@ -200,9 +200,9 @@ function SessionsSheet({
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
-  const openTerm = (id: string) => {
+  const openChat = (id: string) => {
     onClose()
-    router.navigate(`/term/${id}`)
+    router.navigate(`/chat/${id}`)
   }
 
   return (
@@ -232,8 +232,8 @@ function SessionsSheet({
                 </MonoText>
                 <View style={{ flexDirection: 'row', gap: 7 }}>
                   <PrimaryButton
-                    label="▣ Open terminal"
-                    onPress={() => openTerm(orch.id)}
+                    label="💬 Open chat"
+                    onPress={() => openChat(orch.id)}
                     style={{ flex: 1, height: 38, borderRadius: radius.md }}
                   />
                   <GhostButton
@@ -274,8 +274,8 @@ function SessionsSheet({
                       </Text>
                     ) : null}
                   </View>
-                  <Pressable style={styles.workerTermBtn} onPress={() => openTerm(w.id)}>
-                    <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }}>▣ Open terminal</Text>
+                  <Pressable style={styles.workerTermBtn} onPress={() => openChat(w.id)}>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }}>💬 Open chat</Text>
                   </Pressable>
                 </Card>
               ))}
