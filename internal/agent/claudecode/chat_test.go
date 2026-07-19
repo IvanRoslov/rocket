@@ -428,3 +428,124 @@ func appendLine(t *testing.T, path, line string) {
 		t.Fatalf("append: %v", err)
 	}
 }
+
+// quizToolUseLine is an assistant record with an AskUserQuestion tool_use,
+// shaped per docs/superpowers/recon/2026-07-19-quiz-recon.md §1.
+const quizToolUseLine = `{"type":"assistant","timestamp":"2026-07-19T18:14:16.000Z","message":{"role":"assistant","content":[` +
+	`{"type":"tool_use","id":"toolu_q1","name":"AskUserQuestion","input":{"questions":[{"question":"Pick a color","header":"Color","multiSelect":false,"options":[{"label":"Red","description":"r"},{"label":"Green","description":"g"}]}]}}` +
+	`]}}`
+
+func TestTranscriptTailQuizToolUseCarriesFullInput(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", base)
+	wt := "/tmp/some/worktree"
+
+	writeTranscript(t, base, wt, "sess.jsonl", []string{quizToolUseLine}, time.Now())
+
+	cc := New()
+	entries, _, err := cc.TranscriptTail(context.Background(), agent.ActivityRef{WorktreePath: wt}, "")
+	if err != nil {
+		t.Fatalf("TranscriptTail() error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1: %+v", len(entries), entries)
+	}
+	e := entries[0]
+	if e.Role != "tool" || e.ToolName != "AskUserQuestion" {
+		t.Errorf("entry = %+v, want tool/AskUserQuestion", e)
+	}
+	if len(e.Quiz) == 0 {
+		t.Fatalf("Quiz is empty, want full tool_use input")
+	}
+	if !strings.Contains(string(e.Quiz), `"Pick a color"`) || !strings.Contains(string(e.Quiz), `"Green"`) {
+		t.Errorf("Quiz = %s, want full questions/options JSON", e.Quiz)
+	}
+	// The regular digest rules still apply to Text.
+	if got := []rune(e.Text); len(got) > 120 {
+		t.Errorf("Text len = %d, want <=120", len(got))
+	}
+}
+
+func TestTranscriptTailQuizAnswerEntry(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", base)
+	wt := "/tmp/some/worktree"
+
+	answerLine := `{"type":"user","timestamp":"2026-07-19T18:15:28.000Z","message":{"role":"user","content":[` +
+		`{"type":"tool_result","tool_use_id":"toolu_q1","content":"Your questions have been answered"}]},` +
+		`"toolUseResult":{"questions":[{"question":"Pick a color","header":"Color","multiSelect":false,"options":[{"label":"Red","description":"r"},{"label":"Green","description":"g"}]}],"answers":{"Pick a color":"Green"},"annotations":{}}}`
+	writeTranscript(t, base, wt, "sess.jsonl", []string{quizToolUseLine, answerLine}, time.Now())
+
+	cc := New()
+	entries, _, err := cc.TranscriptTail(context.Background(), agent.ActivityRef{WorktreePath: wt}, "")
+	if err != nil {
+		t.Fatalf("TranscriptTail() error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("len(entries) = %d, want 2: %+v", len(entries), entries)
+	}
+	e := entries[1]
+	if e.Role != "quiz_answer" {
+		t.Fatalf("entries[1] = %+v, want Role quiz_answer", e)
+	}
+	if e.Text != "Pick a color → Green" {
+		t.Errorf("Text = %q, want %q", e.Text, "Pick a color → Green")
+	}
+	if !strings.Contains(string(e.Quiz), `"answers"`) {
+		t.Errorf("Quiz = %s, want raw toolUseResult with answers", e.Quiz)
+	}
+	if e.TS == 0 {
+		t.Errorf("TS should not be zero")
+	}
+}
+
+func TestTranscriptTailQuizCancelledEntry(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", base)
+	wt := "/tmp/some/worktree"
+
+	cancelLine := `{"type":"user","message":{"role":"user","content":[` +
+		`{"type":"tool_result","tool_use_id":"toolu_q1","is_error":true,"content":"The user doesn't want to proceed with this tool use."}]},` +
+		`"toolUseResult":"The user doesn't want to proceed with this tool use."}`
+	writeTranscript(t, base, wt, "sess.jsonl", []string{quizToolUseLine, cancelLine}, time.Now())
+
+	cc := New()
+	entries, _, err := cc.TranscriptTail(context.Background(), agent.ActivityRef{WorktreePath: wt}, "")
+	if err != nil {
+		t.Fatalf("TranscriptTail() error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("len(entries) = %d, want 2: %+v", len(entries), entries)
+	}
+	if entries[1].Role != "quiz_answer" || entries[1].Text != "квиз отменён" {
+		t.Errorf("entries[1] = %+v, want quiz_answer/квиз отменён", entries[1])
+	}
+}
+
+func TestTranscriptTailNonQuizToolResultWithStructStillSkipped(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", base)
+	wt := "/tmp/some/worktree"
+
+	// A tool_result-only user record whose toolUseResult is a struct but NOT
+	// a quiz answers echo (e.g. a file edit result) must keep being skipped,
+	// even when an unrelated error tool_result follows a non-quiz tool_use.
+	lines := []string{
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_b1","name":"Bash","input":{"command":"ls"}}]}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_b1","content":"ok"}]},"toolUseResult":{"stdout":"ok","stderr":""}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_b1","is_error":true,"content":"boom"}]},"toolUseResult":"boom"}`,
+	}
+	writeTranscript(t, base, wt, "sess.jsonl", lines, time.Now())
+
+	cc := New()
+	entries, _, err := cc.TranscriptTail(context.Background(), agent.ActivityRef{WorktreePath: wt}, "")
+	if err != nil {
+		t.Fatalf("TranscriptTail() error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1 (only the Bash tool entry): %+v", len(entries), entries)
+	}
+	if entries[0].ToolName != "Bash" || len(entries[0].Quiz) != 0 {
+		t.Errorf("entries[0] = %+v, want plain Bash tool entry without Quiz", entries[0])
+	}
+}

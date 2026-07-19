@@ -37,6 +37,9 @@ func (c *ClaudeCode) SetupWorkspace(spec agent.LaunchSpec) error {
 	if err := writeActivityHookScript(spec.WorktreePath); err != nil {
 		return fmt.Errorf("write activity hook script: %w", err)
 	}
+	if err := writeQuizHookScript(spec.WorktreePath); err != nil {
+		return fmt.Errorf("write quiz hook script: %w", err)
+	}
 	if err := upsertClaudeSettings(spec.WorktreePath); err != nil {
 		return fmt.Errorf("upsert claude settings: %w", err)
 	}
@@ -104,6 +107,77 @@ func writeActivityHookScript(worktreePath string) error {
 	return os.WriteFile(path, []byte(activityHookScript), 0o700)
 }
 
+// quizHookRelPath is the quiz hook script's path relative to the worktree
+// root, mirroring activityHookRelPath.
+const quizHookRelPath = ".rocket/quiz-hook.sh"
+
+// quizHookScript is a POSIX shell script that reports the raw stdin payload
+// of an AskUserQuestion PreToolUse/PostToolUse hook invocation to rocket's
+// internal quiz endpoint over the unix socket. The transcript stays silent
+// until a TUI quiz is answered, so this push channel is how the daemon sees
+// a pending quiz in real time. Like activity-hook.sh, it never fails the
+// invoking hook: it always exits 0, regardless of whether the env vars are
+// set or the daemon is reachable.
+const quizHookScript = `#!/bin/sh
+# rocket quiz push hook. Invoked by Claude Code as:
+#   ` + quizHookRelPath + ` <phase>
+# <phase> is "pending" for PreToolUse (quiz about to be shown) or
+# "resolved" for PostToolUse (quiz answered). Reports this session's
+# AskUserQuestion hook stdin payload to the rocket daemon over its unix
+# socket. Never blocks or fails the agent: if the env vars needed to reach
+# the daemon aren't set, or the daemon is unreachable, this exits 0.
+payload=$(cat)
+
+if [ -z "$ROCKET_SOCKET" ] || [ -z "$ROCKET_SESSION_ID" ]; then
+  exit 0
+fi
+
+curl -s --max-time 3 --connect-timeout 1 --unix-socket "$ROCKET_SOCKET" \
+  -X POST -H 'Content-Type: application/json' \
+  -d "{\"session\":\"$ROCKET_SESSION_ID\",\"phase\":\"$1\",\"payload\":$payload}" \
+  http://rocket/v1/internal/quiz >/dev/null 2>&1
+
+exit 0
+`
+
+// writeQuizHookScript writes the quiz push-channel hook script to
+// <worktreePath>/.rocket/quiz-hook.sh, creating the .rocket directory
+// (0755) if needed. The script is written 0700 (owner rwx only).
+func writeQuizHookScript(worktreePath string) error {
+	dir := filepath.Join(worktreePath, ".rocket")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, "quiz-hook.sh")
+	return os.WriteFile(path, []byte(quizHookScript), 0o700)
+}
+
+// quizHookEvents maps the Claude Code hook events rocket wires up for the
+// quiz channel to the phase value quiz-hook.sh should report for that
+// event: PreToolUse fires as the quiz is about to be shown ("pending"),
+// PostToolUse fires once it's been answered ("resolved"), and Stop is the
+// cancellation backstop — PostToolUse does NOT fire for a REJECTED tool
+// call (Esc / declined quiz, verified live 2026-07-19), but rejecting the
+// quiz ends the agent's turn, which fires Stop. A Stop while a quiz is
+// pending therefore means the widget is gone either way; with no pending
+// quiz the resolved report is a cheap no-op (no event published).
+var quizHookEvents = map[string]string{
+	"PreToolUse":  "pending",
+	"PostToolUse": "resolved",
+	"Stop":        "resolved",
+}
+
+// quizHookMatcher is the hook matcher rocket wires the quiz hook to: it
+// only fires for the AskUserQuestion tool, unlike the activity hook's "*"
+// (every tool).
+const quizHookMatcher = "AskUserQuestion"
+
+// quizHookCommand builds the shell command rocket wires into
+// settings.local.json hooks for the given phase.
+func quizHookCommand(phase string) string {
+	return "sh " + quizHookRelPath + " " + phase
+}
+
 // activityHookEvents maps the Claude Code hook events rocket wires up to the
 // activity.State the hook script should report when that event fires.
 var activityHookEvents = map[string]string{
@@ -148,6 +222,43 @@ type hookMatcherGroup struct {
 	Hooks   []hookCommand `json:"hooks"`
 }
 
+// mergeHookEntry idempotently merges a single hook command into hooks[event]
+// under the given matcher: if a matcher group for event already exists it
+// appends cmd to it (unless cmd is already present, in which case this is a
+// no-op), otherwise it creates a new matcher group. Shared by the activity
+// hook and quiz hook wiring in upsertClaudeSettings, since both idempotently
+// upsert a {event, matcher, command} triple into the same hooks map.
+func mergeHookEntry(hooks map[string][]hookMatcherGroup, event, matcher, cmd string) {
+	groups := hooks[event]
+
+	alreadyPresent := false
+	groupIdx := -1
+	for i, g := range groups {
+		if g.Matcher != matcher {
+			continue
+		}
+		groupIdx = i
+		for _, h := range g.Hooks {
+			if h.Type == "command" && h.Command == cmd {
+				alreadyPresent = true
+				break
+			}
+		}
+		break
+	}
+	if alreadyPresent {
+		return
+	}
+
+	entry := hookCommand{Type: "command", Command: cmd}
+	if groupIdx >= 0 {
+		groups[groupIdx].Hooks = append(groups[groupIdx].Hooks, entry)
+	} else {
+		groups = append(groups, hookMatcherGroup{Matcher: matcher, Hooks: []hookCommand{entry}})
+	}
+	hooks[event] = groups
+}
+
 // upsertClaudeSettings idempotently merges rocket's activity-hook wiring
 // into <worktreePath>/.claude/settings.local.json. settings.local.json (not
 // settings.json) is used deliberately: it is Claude Code's per-user/local
@@ -184,37 +295,17 @@ func upsertClaudeSettings(worktreePath string) error {
 	}
 
 	for event, state := range activityHookEvents {
-		matcher := hookMatcherFor(event)
-		cmd := activityHookCommand(state)
-
-		groups := hooks[event]
-
-		alreadyPresent := false
-		groupIdx := -1
-		for i, g := range groups {
-			if g.Matcher != matcher {
-				continue
-			}
-			groupIdx = i
-			for _, h := range g.Hooks {
-				if h.Type == "command" && h.Command == cmd {
-					alreadyPresent = true
-					break
-				}
-			}
-			break
+		mergeHookEntry(hooks, event, hookMatcherFor(event), activityHookCommand(state))
+	}
+	for event, phase := range quizHookEvents {
+		// Tool-use events are scoped to AskUserQuestion; Stop is a
+		// lifecycle event with no matcher concept (same rule as
+		// hookMatcherFor).
+		matcher := quizHookMatcher
+		if event == "Stop" {
+			matcher = ""
 		}
-		if alreadyPresent {
-			continue
-		}
-
-		entry := hookCommand{Type: "command", Command: cmd}
-		if groupIdx >= 0 {
-			groups[groupIdx].Hooks = append(groups[groupIdx].Hooks, entry)
-		} else {
-			groups = append(groups, hookMatcherGroup{Matcher: matcher, Hooks: []hookCommand{entry}})
-		}
-		hooks[event] = groups
+		mergeHookEntry(hooks, event, matcher, quizHookCommand(phase))
 	}
 
 	hooksRaw, err := json.Marshal(hooks)

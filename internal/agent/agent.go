@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -22,10 +23,17 @@ type ActivityRef struct {
 // ChatEntry is one entry in a session's chat transcript, as returned by
 // Agent.TranscriptTail.
 type ChatEntry struct {
-	Role     string // "user" | "assistant" | "tool"
+	Role     string // "user" | "assistant" | "tool" | "quiz_answer"
 	Text     string // message text; for Role=="tool", a short digest of the tool call
 	ToolName string // set only when Role=="tool" (e.g. "Bash", "Edit")
 	TS       int64  // unix seconds from the transcript record; 0 if absent
+	// Quiz carries the untruncated interactive-quiz payload for whitelisted
+	// tools (AskUserQuestion): the full tool_use input (questions/options)
+	// on the Role=="tool" entry that asked, and the raw toolUseResult
+	// (questions echo + answers map) on the Role=="quiz_answer" entry that
+	// answered. Nil for everything else — the 120-rune Text digest limit
+	// stays global, this field is the additive escape hatch for quizzes.
+	Quiz json.RawMessage
 }
 
 // LaunchSpec contains all configuration needed to launch an agent.

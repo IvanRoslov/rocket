@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -24,6 +25,10 @@ type chatEntryResponse struct {
 	Text     string `json:"text"`
 	ToolName string `json:"tool_name,omitempty"`
 	TS       int64  `json:"ts"`
+	// Quiz is present only on AskUserQuestion entries: the full questions
+	// payload on the asking tool entry, the raw answers echo on the
+	// quiz_answer entry. See docs/13-chat.md «Квизы».
+	Quiz json.RawMessage `json:"quiz,omitempty"`
 }
 
 func toChatEntryResponse(e agent.ChatEntry) chatEntryResponse {
@@ -32,6 +37,7 @@ func toChatEntryResponse(e agent.ChatEntry) chatEntryResponse {
 		Text:     e.Text,
 		ToolName: e.ToolName,
 		TS:       e.TS,
+		Quiz:     e.Quiz,
 	}
 }
 
@@ -133,13 +139,17 @@ type sessionRef struct {
 	Kind     string `json:"kind"`
 	State    string `json:"state"`
 	Activity string `json:"activity,omitempty"`
+
+	// PendingQuiz mirrors sessionResponse.PendingQuiz — see its doc comment.
+	PendingQuiz *quizResponse `json:"pending_quiz,omitempty"`
 }
 
 func toSessionRef(s store.Session) sessionRef {
 	return sessionRef{
-		ID:       s.ID,
-		Kind:     s.Kind,
-		State:    s.State,
-		Activity: s.Activity,
+		ID:          s.ID,
+		Kind:        s.Kind,
+		State:       s.State,
+		Activity:    s.Activity,
+		PendingQuiz: parseQuizResponse(s.PendingQuiz),
 	}
 }

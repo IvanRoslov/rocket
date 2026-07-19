@@ -32,6 +32,10 @@ type sessionResponse struct {
 	CIState      string `json:"ci_state,omitempty"`
 	CreatedAt    int64  `json:"created_at"`
 	UpdatedAt    int64  `json:"updated_at"`
+
+	// PendingQuiz is the session's currently pending AskUserQuestion quiz
+	// (see internal/api's internal_quiz.go), nil when there is none.
+	PendingQuiz *quizResponse `json:"pending_quiz,omitempty"`
 }
 
 func toSessionResponse(s store.Session) sessionResponse {
@@ -55,6 +59,7 @@ func toSessionResponse(s store.Session) sessionResponse {
 		CIState:      s.CIState,
 		CreatedAt:    s.CreatedAt,
 		UpdatedAt:    s.UpdatedAt,
+		PendingQuiz:  parseQuizResponse(s.PendingQuiz),
 	}
 }
 
@@ -454,7 +459,7 @@ func writeManagerErr(w http.ResponseWriter, err error) {
 		switch verr.Code {
 		case "session_not_found":
 			status = http.StatusNotFound
-		case "restore_not_allowed":
+		case "restore_not_allowed", "no_pending_quiz", "quiz_answer_in_flight":
 			status = http.StatusConflict
 		}
 		writeErr(w, status, verr.Code, verr.Message)

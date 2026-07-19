@@ -284,6 +284,18 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 	}
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			// Re-capture right before a RETRY Enter: if the agent has
+			// meanwhile replaced its composer with an interactive quiz
+			// widget, the draft was necessarily submitted (the widget only
+			// renders mid-turn) and another Enter would press a quiz
+			// button instead — see LooksLikeQuizWidget.
+			if out, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name)); err == nil {
+				if LooksLikeQuizWidget(tailLines(trimTrailingBlank(out), confirmWindow)) {
+					return nil
+				}
+			}
+		}
 		if _, _, err := runTmux(ctx, "send-keys", "-t", paneTarget(h.Name), "Enter"); err != nil {
 			return fmt.Errorf("send Enter: %w", err)
 		}
@@ -309,6 +321,18 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 			if markerAbsent || countGrowth {
 				return nil
 			}
+			// Quiz-widget guard: Claude Code's AskUserQuestion widget
+			// replacing the composer proves the draft was submitted (the
+			// widget only renders while the agent is processing a turn),
+			// even when neither marker-absent nor count-growth fired —
+			// e.g. the submitted message's echo keeps the marker line in
+			// the tail while the agent thinks. Confirm WITHOUT pressing
+			// Enter again: a further Enter would land on the widget and
+			// select a quiz option (live incident, 2026-07-19). Exported: the monitor reuses it
+			// as the cancelled-quiz backstop (see monitor.pollQuiz).
+			if LooksLikeQuizWidget(out) {
+				return nil
+			}
 			if time.Now().After(deadline) {
 				break
 			}
@@ -317,6 +341,50 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 	}
 
 	return fmt.Errorf("%w: after %d attempts", ErrSubmitUnconfirmed, maxAttempts)
+}
+
+// SendKeys sends one logical key to the pane: a tmux key name (e.g.
+// "Enter", "Tab", "Down", "Space", or a bare digit character) when literal
+// is false, or raw literal text via send-keys -l when literal is true. See
+// the Runtime.SendKeys doc comment for the contract.
+func (t *tmuxRuntime) SendKeys(ctx context.Context, h Handle, key string, literal bool) error {
+	if err := validateName(h.Name); err != nil {
+		return err
+	}
+	args := []string{"send-keys", "-t", paneTarget(h.Name)}
+	if literal {
+		// "--" ends flag parsing so literal text starting with "-" (e.g.
+		// "-foo") is never mistaken for a send-keys flag, and
+		// escapeTrailingSemicolon neutralizes tmux's command-sequence
+		// separator, which it special-cases only for a trailing,
+		// unescaped ";" argument (see escapeTrailingSemicolon's doc
+		// comment and TestSendKeys_LiteralSafety).
+		args = append(args, "-l", "--", escapeTrailingSemicolon(key))
+	} else {
+		args = append(args, key)
+	}
+	if _, _, err := runTmux(ctx, args...); err != nil {
+		return fmt.Errorf("send-keys %q (literal=%v) to %q: %w", key, literal, h.Name, err)
+	}
+	return nil
+}
+
+// escapeTrailingSemicolon escapes s's trailing ";" as "\;" if present and
+// not already escaped. tmux treats a bare trailing semicolon in a
+// send-keys argument as its command-sequence separator (letting multiple
+// tmux commands be chained on one command line) even under "-l" literal
+// mode and even behind "--"; verified empirically (tmux 3.6a) that
+// `send-keys -l -- 'bar;'` sends only "bar" while
+// `send-keys -l -- 'bar\;'` sends the literal "bar;". A semicolon anywhere
+// but the last character is unaffected and needs no escaping.
+func escapeTrailingSemicolon(s string) string {
+	if len(s) == 0 || s[len(s)-1] != ';' {
+		return s
+	}
+	if len(s) >= 2 && s[len(s)-2] == '\\' {
+		return s // already escaped
+	}
+	return s[:len(s)-1] + `\;`
 }
 
 // lastLine returns the final non-blank line of s, or "" if s has no
@@ -510,4 +578,19 @@ func (t *tmuxRuntime) List(ctx context.Context) ([]string, error) {
 func isNoServerError(stderr string) bool {
 	s := strings.ToLower(stderr)
 	return strings.Contains(s, "no server running") || strings.Contains(s, "error connecting")
+}
+
+// LooksLikeQuizWidget reports whether a pane tail is showing Claude Code's
+// interactive AskUserQuestion widget. Matched against the two stable
+// markers observed live (docs/superpowers/recon/2026-07-19-quiz-recon.md
+// §2 + live acceptance, CLI v2.1.215): the footer hint line («Enter to select · …», present
+// on every widget screen) and the tab row's «✔ Submit» caption (present on
+// multi-question quizzes and the review screen). This is deliberately
+// narrow, Claude-specific TUI coupling: generic "pane changed" heuristics
+// cannot be used to stop Enter retries because Claude Code's spinner
+// animates the tail even while a draft is still unsubmitted.
+func LooksLikeQuizWidget(tail string) bool {
+	return strings.Contains(tail, "Enter to select · ") ||
+		strings.Contains(tail, "✔ Submit") ||
+		strings.Contains(tail, "Ready to submit your answers?")
 }

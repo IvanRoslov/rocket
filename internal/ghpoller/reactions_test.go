@@ -29,6 +29,9 @@ func (f *reactFakeRuntime) Create(ctx context.Context, spec runtime.CreateSpec) 
 func (f *reactFakeRuntime) Inject(ctx context.Context, h runtime.Handle, text string) error {
 	return nil
 }
+func (f *reactFakeRuntime) SendKeys(ctx context.Context, h runtime.Handle, key string, literal bool) error {
+	return nil
+}
 func (f *reactFakeRuntime) Capture(ctx context.Context, h runtime.Handle, lines int) (string, error) {
 	return "", nil
 }

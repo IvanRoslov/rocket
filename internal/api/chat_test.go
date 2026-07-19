@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -311,3 +312,51 @@ func chatSlugify(worktreePath string) string {
 }
 
 var _ = claudecode.New // keep the import (and its init() registration) live
+
+func TestChatQuizEntriesSerialization(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", base)
+	wt := "/tmp/some/worktree"
+
+	writeChatFile(t, base, wt, "sess.jsonl", []string{
+		`{"type":"user","message":{"role":"user","content":"plain msg"}}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_q1","name":"AskUserQuestion","input":{"questions":[{"question":"Pick","header":"P","multiSelect":false,"options":[{"label":"A","description":"a"}]}]}}]}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_q1","content":"answered"}]},"toolUseResult":{"questions":[{"question":"Pick"}],"answers":{"Pick":"A"},"annotations":{}}}`,
+	})
+
+	d := chatTestDeps(t)
+	seedChatSession(t, d.Store, "sess1", wt)
+	srv := newTestServer(t, d)
+
+	resp := getJSON(t, srv.URL+"/v1/sessions/sess1/chat")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+
+	var body struct {
+		Entries []chatEntryResponse `json:"entries"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Entries) != 3 {
+		t.Fatalf("len(entries) = %d, want 3: %+v", len(body.Entries), body.Entries)
+	}
+	if body.Entries[1].Role != "tool" || len(body.Entries[1].Quiz) == 0 {
+		t.Errorf("entries[1] = %+v, want tool entry with quiz payload", body.Entries[1])
+	}
+	if body.Entries[2].Role != "quiz_answer" || len(body.Entries[2].Quiz) == 0 {
+		t.Errorf("entries[2] = %+v, want quiz_answer with quiz payload", body.Entries[2])
+	}
+
+	// Raw-bytes check: the plain user entry must not carry a "quiz" key at
+	// all (omitempty), while the quiz entries must.
+	if n := strings.Count(string(raw), `"quiz"`); n != 2 {
+		t.Errorf(`raw body has %d "quiz" keys, want exactly 2; body: %s`, n, raw)
+	}
+}

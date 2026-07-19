@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/bus"
@@ -85,11 +86,33 @@ type Manager struct {
 	// injected into session environments. If nil or returns empty string, no
 	// token is injected.
 	getToken func() string
+
+	// quizSleepFn is called between each keystroke AnswerQuiz sends (see
+	// quiz.go's sendQuizKeys); defaults to time.Sleep, overridable via
+	// SetQuizTiming so tests don't pay quizKeySettle in wall-clock time.
+	quizSleepFn func(time.Duration)
+	// quizUnconfirmedTimeout bounds how long waitQuizResolved waits for a
+	// session.quiz_resolved event before publishing
+	// session.quiz_answer_unconfirmed; defaults to 60s, overridable via
+	// SetQuizTiming.
+	quizUnconfirmedTimeout time.Duration
+
+	// quizInFlight tracks session IDs with an in-progress quiz-answer
+	// injection (see AnswerQuiz's tryStartQuizInFlight/clearQuizInFlight in
+	// quiz.go), guarded by mu. A second POST /v1/sessions/{id}/quiz/answer
+	// for a session already present in this set is rejected with
+	// "quiz_answer_in_flight" rather than interleaving a second keystroke
+	// sequence into the same tmux pane.
+	quizInFlight map[string]bool
 }
 
 // NewManager builds a Manager wired to the given dependencies.
 func NewManager(st *store.Store, b *bus.Bus, rt runtime.Runtime, ws workspace.Workspace, cfg *config.Config) *Manager {
-	return &Manager{st: st, bus: b, rt: rt, ws: ws, cfg: cfg}
+	return &Manager{
+		st: st, bus: b, rt: rt, ws: ws, cfg: cfg,
+		quizSleepFn:            time.Sleep,
+		quizUnconfirmedTimeout: 60 * time.Second,
+	}
 }
 
 // SetTokenSource sets the function used to retrieve the GitHub token for
@@ -585,6 +608,11 @@ func (m *Manager) terminate(ctx context.Context, id, finalState, event string, e
 		if err := m.st.UpdateSessionState(id, finalState); err != nil {
 			return err
 		}
+		// Terminal sessions can't answer a pending quiz, so clear it along
+		// with the state transition (best-effort: the transition already
+		// happened, and a leftover pending_quiz is harmless clutter, not a
+		// correctness issue worth failing the whole call over).
+		_ = m.st.ClearPendingQuiz(id)
 		m.bus.Publish(event, id, eventData)
 	}
 
@@ -1035,6 +1063,7 @@ func (m *Manager) Cleanup(ctx context.Context) (killedTmux, removedWorktrees []s
 // more relevant error to return.
 func (m *Manager) markErrored(id string, cause error) {
 	_ = m.st.UpdateSessionState(id, "errored")
+	_ = m.st.ClearPendingQuiz(id)
 	m.bus.Publish("session.state_changed", id, map[string]any{
 		"from": "spawning", "to": "errored", "reason": cause.Error(),
 	})

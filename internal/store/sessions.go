@@ -27,6 +27,7 @@ type Session struct {
 	PRNumber     int
 	PRState      string
 	CIState      string
+	PendingQuiz  string
 	CreatedAt    int64
 	UpdatedAt    int64
 }
@@ -56,13 +57,13 @@ func (s *Store) AddSession(sess Session) error {
 		`INSERT INTO sessions (
 			id, kind, project_id, repo_id, feature_slug, parent_id, agent, branch,
 			worktree_path, tmux_name, state, activity, activity_ts, pr_number, pr_state,
-			ci_state, prompt, created_at, updated_at
-		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			ci_state, prompt, pending_quiz, created_at, updated_at
+		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sess.ID, sess.Kind, sess.ProjectID, sess.RepoID, sess.FeatureSlug,
 		nullIfEmpty(sess.ParentID), sess.Agent, sess.Branch, sess.WorktreePath,
 		sess.TmuxName, sess.State, nullIfEmpty(sess.Activity), nullIfZero(sess.ActivityTS),
 		nullIfZero(int64(sess.PRNumber)), nullIfEmpty(sess.PRState), nullIfEmpty(sess.CIState),
-		nullIfEmpty(sess.Prompt), sess.CreatedAt, sess.UpdatedAt,
+		nullIfEmpty(sess.Prompt), nullIfEmpty(sess.PendingQuiz), sess.CreatedAt, sess.UpdatedAt,
 	)
 	if isUniqueViolation(err) {
 		return ErrExists
@@ -78,7 +79,7 @@ func (s *Store) GetSession(id string) (Session, error) {
 	row := s.db.QueryRow(
 		`SELECT id, kind, project_id, repo_id, feature_slug, parent_id, agent, branch,
 		        worktree_path, tmux_name, state, activity, activity_ts, pr_number, pr_state,
-		        ci_state, prompt, created_at, updated_at
+		        ci_state, prompt, pending_quiz, created_at, updated_at
 		 FROM sessions WHERE id = ?`, id,
 	)
 	return scanSession(row)
@@ -88,7 +89,7 @@ func (s *Store) GetSession(id string) (Session, error) {
 func (s *Store) ListSessions(f SessionFilter) ([]Session, error) {
 	query := `SELECT id, kind, project_id, repo_id, feature_slug, parent_id, agent, branch,
 	                  worktree_path, tmux_name, state, activity, activity_ts, pr_number, pr_state,
-	                  ci_state, prompt, created_at, updated_at
+	                  ci_state, prompt, pending_quiz, created_at, updated_at
 	          FROM sessions`
 
 	var conds []string
@@ -160,13 +161,13 @@ func (s *Store) UpdateSession(sess Session) error {
 			kind = ?, project_id = ?, repo_id = ?, feature_slug = ?, parent_id = ?,
 			agent = ?, branch = ?, worktree_path = ?, tmux_name = ?, state = ?,
 			activity = ?, activity_ts = ?, pr_number = ?, pr_state = ?, ci_state = ?,
-			prompt = ?, updated_at = ?
+			prompt = ?, pending_quiz = ?, updated_at = ?
 		 WHERE id = ?`,
 		sess.Kind, sess.ProjectID, sess.RepoID, sess.FeatureSlug, nullIfEmpty(sess.ParentID),
 		sess.Agent, sess.Branch, sess.WorktreePath, sess.TmuxName, sess.State,
 		nullIfEmpty(sess.Activity), nullIfZero(sess.ActivityTS),
 		nullIfZero(int64(sess.PRNumber)), nullIfEmpty(sess.PRState), nullIfEmpty(sess.CIState),
-		nullIfEmpty(sess.Prompt), time.Now().Unix(), sess.ID,
+		nullIfEmpty(sess.Prompt), nullIfEmpty(sess.PendingQuiz), time.Now().Unix(), sess.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update session: %w", err)
@@ -200,16 +201,44 @@ func (s *Store) UpdateSessionActivity(id, state string, ts int64) error {
 	return checkRowsAffected(res)
 }
 
+// SetPendingQuiz stores the JSON-encoded pending AskUserQuestion quiz for a
+// session and refreshes updated_at. Returns ErrNotFound if the session
+// doesn't exist.
+func (s *Store) SetPendingQuiz(id string, quizJSON string) error {
+	res, err := s.db.Exec(
+		`UPDATE sessions SET pending_quiz = ?, updated_at = ? WHERE id = ?`,
+		nullIfEmpty(quizJSON), time.Now().Unix(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("set pending quiz: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
+// ClearPendingQuiz removes any pending quiz for a session and refreshes
+// updated_at. Returns ErrNotFound if the session doesn't exist. Clearing a
+// session that has no pending quiz is a no-op (idempotent).
+func (s *Store) ClearPendingQuiz(id string) error {
+	res, err := s.db.Exec(
+		`UPDATE sessions SET pending_quiz = NULL, updated_at = ? WHERE id = ?`,
+		time.Now().Unix(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("clear pending quiz: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
 func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 	var sess Session
-	var parentID, activity, prState, ciState, prompt sql.NullString
+	var parentID, activity, prState, ciState, prompt, pendingQuiz sql.NullString
 	var activityTS, prNumber sql.NullInt64
 
 	err := row.Scan(
 		&sess.ID, &sess.Kind, &sess.ProjectID, &sess.RepoID, &sess.FeatureSlug,
 		&parentID, &sess.Agent, &sess.Branch, &sess.WorktreePath, &sess.TmuxName,
 		&sess.State, &activity, &activityTS, &prNumber, &prState, &ciState, &prompt,
-		&sess.CreatedAt, &sess.UpdatedAt,
+		&pendingQuiz, &sess.CreatedAt, &sess.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, ErrNotFound
@@ -225,6 +254,7 @@ func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 	sess.PRNumber = int(prNumber.Int64)
 	sess.PRState = prState.String
 	sess.CIState = ciState.String
+	sess.PendingQuiz = pendingQuiz.String
 
 	return sess, nil
 }

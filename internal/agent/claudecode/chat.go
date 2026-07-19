@@ -34,6 +34,12 @@ type transcriptRecord struct {
 	Type      string       `json:"type"`
 	Timestamp string       `json:"timestamp"`
 	Message   *chatMessage `json:"message"`
+	// ToolUseResult is the structured sibling of "message" on user records
+	// that carry a tool_result. For AskUserQuestion answers it is an object
+	// holding the questions echo and the answers map (see
+	// docs/superpowers/recon/2026-07-19-quiz-recon.md §1); for other tools
+	// it is tool-specific (often a string) and is ignored.
+	ToolUseResult json.RawMessage `json:"toolUseResult"`
 }
 
 // chatMessage is the "message" object of a user/assistant transcript
@@ -46,11 +52,18 @@ type chatMessage struct {
 
 // contentBlock is one element of a message's content block array.
 type contentBlock struct {
-	Type  string          `json:"type"`
-	Text  string          `json:"text"`
-	Name  string          `json:"name"`  // tool_use only
-	Input json.RawMessage `json:"input"` // tool_use only
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`
+	Name      string          `json:"name"`        // tool_use only
+	Input     json.RawMessage `json:"input"`       // tool_use only
+	ID        string          `json:"id"`          // tool_use only
+	ToolUseID string          `json:"tool_use_id"` // tool_result only
+	IsError   bool            `json:"is_error"`    // tool_result only
 }
+
+// quizToolName is the one tool whose interactive round trip is surfaced in
+// the chat feed with its full payload instead of only a truncated digest.
+const quizToolName = "AskUserQuestion"
 
 // parseChatTimestamp converts a transcript record's RFC3339 "timestamp"
 // field to unix seconds, returning 0 if absent or unparsable.
@@ -122,7 +135,7 @@ func extractUserText(raw json.RawMessage) (string, bool) {
 // becomes its own {Role: "tool"} entry with a truncated input digest.
 // thinking blocks and any other block type are ignored. Returns ok=false
 // (no entries) for a thinking-only (or otherwise entry-less) message.
-func extractAssistantEntries(raw json.RawMessage, ts int64) ([]agent.ChatEntry, bool) {
+func extractAssistantEntries(raw json.RawMessage, ts int64, quizIDs map[string]bool) ([]agent.ChatEntry, bool) {
 	var blocks []contentBlock
 	if err := json.Unmarshal(raw, &blocks); err != nil {
 		return nil, false
@@ -143,12 +156,22 @@ func extractAssistantEntries(raw json.RawMessage, ts int64) ([]agent.ChatEntry, 
 	}
 	for _, b := range blocks {
 		if b.Type == "tool_use" {
-			entries = append(entries, agent.ChatEntry{
+			e := agent.ChatEntry{
 				Role:     "tool",
 				ToolName: b.Name,
 				Text:     digestInput(b.Input),
 				TS:       ts,
-			})
+			}
+			if b.Name == quizToolName {
+				// Whitelisted interactive tool: carry the full input so
+				// clients can render the quiz options (the Text digest
+				// truncates at 120 runes).
+				e.Quiz = b.Input
+				if b.ID != "" {
+					quizIDs[b.ID] = true
+				}
+			}
+			entries = append(entries, e)
 		}
 	}
 	if len(entries) == 0 {
@@ -157,12 +180,72 @@ func extractAssistantEntries(raw json.RawMessage, ts int64) ([]agent.ChatEntry, 
 	return entries, true
 }
 
+// quizAnswerResult is the shape of a toolUseResult that echoes a completed
+// AskUserQuestion round: the questions asked plus the answers map keyed by
+// question text (values are chosen labels; multi-select values are joined
+// label strings whose delimiter varies across CLI versions — displayed
+// as-is, never split).
+type quizAnswerResult struct {
+	Questions []struct {
+		Question string `json:"question"`
+	} `json:"questions"`
+	Answers map[string]string `json:"answers"`
+}
+
+// quizAnswerEntry turns a tool_result-only user record into a
+// {Role:"quiz_answer"} entry when it closes an AskUserQuestion round.
+// Detection is two-pronged: an answered quiz is recognized statelessly by
+// its toolUseResult carrying both questions and a non-empty answers map; a
+// cancelled quiz (is_error tool_result, generic text shared by all tool
+// rejections) is recognized only via quizIDs — the AskUserQuestion tool_use
+// ids seen earlier in the same read, which is reliable because Claude Code
+// flushes the quiz tool_use and its tool_result to disk in one batch (see
+// docs/superpowers/recon/2026-07-19-quiz-recon.md §3). All other
+// tool_result-only records keep being skipped.
+func quizAnswerEntry(rec transcriptRecord, ts int64, quizIDs map[string]bool) (agent.ChatEntry, bool) {
+	if len(rec.ToolUseResult) != 0 {
+		var res quizAnswerResult
+		if err := json.Unmarshal(rec.ToolUseResult, &res); err == nil &&
+			len(res.Questions) > 0 && len(res.Answers) > 0 {
+			var lines []string
+			for _, q := range res.Questions {
+				if ans, ok := res.Answers[q.Question]; ok {
+					lines = append(lines, q.Question+" → "+ans)
+				}
+			}
+			if len(lines) > 0 {
+				return agent.ChatEntry{
+					Role: "quiz_answer",
+					Text: strings.Join(lines, "\n"),
+					TS:   ts,
+					Quiz: rec.ToolUseResult,
+				}, true
+			}
+		}
+	}
+
+	// Cancellation: an is_error tool_result whose tool_use_id matches an
+	// AskUserQuestion tool_use from this read.
+	var blocks []contentBlock
+	if err := json.Unmarshal(rec.Message.Content, &blocks); err == nil {
+		for _, b := range blocks {
+			if b.Type == "tool_result" && b.IsError && quizIDs[b.ToolUseID] {
+				return agent.ChatEntry{Role: "quiz_answer", Text: "квиз отменён", TS: ts}, true
+			}
+		}
+	}
+	return agent.ChatEntry{}, false
+}
+
 // parseChatLine parses one complete (already newline-stripped) JSONL
 // transcript line into zero or more ChatEntry values. Returns ok=false for
 // blank lines, lines that fail to parse as JSON, record types other than
 // "user"/"assistant", and messages that yield no chat-worthy content
-// (thinking-only assistant turns, tool_result-only user turns).
-func parseChatLine(line string) ([]agent.ChatEntry, bool) {
+// (thinking-only assistant turns, tool_result-only user turns — except
+// AskUserQuestion results, which become quiz_answer entries). quizIDs
+// accumulates AskUserQuestion tool_use ids across the lines of one read so
+// quiz cancellations can be attributed (see quizAnswerEntry).
+func parseChatLine(line string, quizIDs map[string]bool) ([]agent.ChatEntry, bool) {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return nil, false
@@ -181,11 +264,14 @@ func parseChatLine(line string) ([]agent.ChatEntry, bool) {
 	case "user":
 		text, ok := extractUserText(rec.Message.Content)
 		if !ok {
+			if e, isQuiz := quizAnswerEntry(rec, ts, quizIDs); isQuiz {
+				return []agent.ChatEntry{e}, true
+			}
 			return nil, false
 		}
 		return []agent.ChatEntry{{Role: "user", Text: text, TS: ts}}, true
 	case "assistant":
-		return extractAssistantEntries(rec.Message.Content, ts)
+		return extractAssistantEntries(rec.Message.Content, ts, quizIDs)
 	default:
 		return nil, false
 	}
@@ -210,6 +296,11 @@ func readChatEntriesFrom(path string, offset int64) ([]agent.ChatEntry, int64, e
 
 	reader := bufio.NewReaderSize(f, 64*1024)
 	var entries []agent.ChatEntry
+	// quizIDs is scoped to this read: quiz tool_use and tool_result land in
+	// the same flush (recon §3), so a cancellation and its tool_use are
+	// practically always read together. Best-effort by design — a cursor
+	// that happens to split them only hides the cancellation entry.
+	quizIDs := make(map[string]bool)
 	pos := offset
 	for {
 		line, err := reader.ReadString('\n')
@@ -222,7 +313,7 @@ func readChatEntriesFrom(path string, offset int64) ([]agent.ChatEntry, int64, e
 			return entries, pos, err
 		}
 		pos += int64(len(line))
-		if es, ok := parseChatLine(line); ok {
+		if es, ok := parseChatLine(line, quizIDs); ok {
 			entries = append(entries, es...)
 		}
 	}
