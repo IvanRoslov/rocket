@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
+import { useConnection } from './events'
 import { useServers } from '../servers/ServerContext'
 import type {
   Health,
@@ -22,6 +23,15 @@ export function useBaseUrl(): string {
   return baseUrl ?? 'http://127.0.0.1:4477'
 }
 
+/**
+ * Polling interval: `fast` while the SSE stream is down, slow safety-net
+ * when events already drive invalidation.
+ */
+function usePoll(fast: number, slow = 30000): number {
+  const { sse } = useConnection()
+  return sse ? Math.max(fast, slow) : fast
+}
+
 export function useHealth(baseUrl: string, enabled = true) {
   return useQuery({
     queryKey: [baseUrl, 'health'],
@@ -34,98 +44,108 @@ export function useHealth(baseUrl: string, enabled = true) {
 
 export function useProjects() {
   const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(5000)
   return useQuery({
     queryKey: [baseUrl, 'projects'],
     queryFn: () => api.get<Project[]>(baseUrl, '/v1/projects'),
-    refetchInterval: 5000,
+    refetchInterval,
   })
 }
 
 export function useRepos() {
   const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(15000, 60000)
   return useQuery({
     queryKey: [baseUrl, 'repos'],
     queryFn: () => api.get<Repo[]>(baseUrl, '/v1/repos'),
-    refetchInterval: 15000,
+    refetchInterval,
   })
 }
 
 export function useSessions(project?: string) {
   const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(5000)
   const qs = project ? `?project=${encodeURIComponent(project)}` : ''
   return useQuery({
     queryKey: [baseUrl, 'sessions', project ?? 'all'],
     queryFn: () => api.get<Session[]>(baseUrl, `/v1/sessions${qs}`),
-    refetchInterval: 5000,
+    refetchInterval,
   })
 }
 
 export function useTasks(project?: string) {
   const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(5000)
   const qs = project ? `?project=${encodeURIComponent(project)}` : ''
   return useQuery({
     queryKey: [baseUrl, 'tasks', project ?? 'all'],
     queryFn: async () => (await api.get<{ tasks: Task[] }>(baseUrl, `/v1/tasks${qs}`)).tasks ?? [],
-    refetchInterval: 5000,
+    refetchInterval,
   })
 }
 
 export function useTaskDetail(id: number) {
   const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(3000)
   return useQuery({
     queryKey: [baseUrl, 'task', id],
     queryFn: () => api.get<TaskDetail>(baseUrl, `/v1/tasks/${id}`),
-    refetchInterval: 3000,
+    refetchInterval,
   })
 }
 
 export function useTaskDocs(id: number, enabled: boolean) {
   const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(10000, 60000)
   return useQuery({
     queryKey: [baseUrl, 'task', id, 'docs'],
     queryFn: async () => (await api.get<{ docs: TaskDoc[] }>(baseUrl, `/v1/tasks/${id}/docs`)).docs ?? [],
     enabled,
-    refetchInterval: 10000,
+    refetchInterval,
   })
 }
 
 export function useTaskLog(id: number, enabled: boolean) {
   const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(5000)
   return useQuery({
     queryKey: [baseUrl, 'task', id, 'log'],
     queryFn: async () => (await api.get<{ log: TaskLogEntry[] }>(baseUrl, `/v1/tasks/${id}/log`)).log ?? [],
     enabled,
-    refetchInterval: 5000,
+    refetchInterval,
   })
 }
 
 export function useTaskQuestions(id: number) {
   const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(3000)
   return useQuery({
     queryKey: [baseUrl, 'task', id, 'questions'],
     queryFn: async () =>
       (await api.get<{ questions: Question[] }>(baseUrl, `/v1/tasks/${id}/questions`)).questions ?? [],
-    refetchInterval: 3000,
+    refetchInterval,
   })
 }
 
 export function useMessages(sessionId: string | undefined) {
   const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(4000)
   return useQuery({
     queryKey: [baseUrl, 'messages', sessionId],
     queryFn: async () =>
       (await api.get<{ messages: Message[] }>(baseUrl, `/v1/messages?session=${sessionId}&limit=50`)).messages ?? [],
     enabled: !!sessionId,
-    refetchInterval: 4000,
+    refetchInterval,
   })
 }
 
 export function useSystem() {
   const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(5000)
   return useQuery({
     queryKey: [baseUrl, 'system'],
     queryFn: () => api.get<SystemInfo>(baseUrl, '/v1/system'),
-    refetchInterval: 5000,
+    refetchInterval,
   })
 }
 

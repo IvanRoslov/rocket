@@ -1,9 +1,15 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
+import { ConnectionContext, useEventStream } from '../src/api/events'
 import { ServerProvider } from '../src/servers/ServerContext'
 import { colors } from '../src/theme'
+
+function EventBridge({ children }: { children: ReactNode }) {
+  const { connected } = useEventStream()
+  return <ConnectionContext.Provider value={{ sse: connected }}>{children}</ConnectionContext.Provider>
+}
 
 export default function RootLayout() {
   const [client] = useState(
@@ -18,13 +24,15 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={client}>
       <ServerProvider>
-        <StatusBar style="dark" />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: colors.page },
-          }}
-        />
+        <EventBridge>
+          <StatusBar style="dark" />
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: colors.page },
+            }}
+          />
+        </EventBridge>
       </ServerProvider>
     </QueryClientProvider>
   )
