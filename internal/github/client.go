@@ -292,7 +292,11 @@ func (c *Client) FindPRByBranch(ctx context.Context, owner, repo, branch string)
 }
 
 // GetPR fetches a pull request by number, along with its aggregated
-// review decision.
+// review decision. A 403 (permission denied) on the reviews sub-endpoint does
+// not fail the whole fetch: ReviewDecision degrades to "" (unknown) instead,
+// since callers need pr_number/pr_state regardless of review permissions. This
+// graceful degradation is by design; see Task 8 documentation for token
+// permission requirements.
 func (c *Client) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d", c.baseURL, owner, repo, number)
 	status, body, _, err := c.doGet(ctx, url)

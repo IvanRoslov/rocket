@@ -1127,6 +1127,121 @@ func TestTick_ReviewsForbidden_ToleratedInsideGetPR(t *testing.T) {
 	}
 }
 
+// TestTick_CIDegradation_ForbiddenAfterPassing verifies the critical fix for
+// stale CI state: when a session has prevCIState="passing" and a later
+// check-runs endpoint returns 403 (forbidden), the CI state is degraded to
+// "" (unknown) in the store WITHOUT firing pr.ci_changed events or
+// CIFailing notifications. A second tick verifies the state is stable (no
+// additional writes/events). This prevents the CLI from showing frozen
+// stale CI forever when permissions change or a token loses scopes.
+func TestTick_CIDegradation_ForbiddenAfterPassing(t *testing.T) {
+	st, b := setupEnv(t)
+	addWorker(t, st, "w1", "feature-branch")
+
+	m := newMockGitHubServer()
+	srv := httptest.NewServer(m.handler())
+	defer srv.Close()
+
+	notify := &fakeNotifier{}
+	p := New(st, b, ghFactory(srv.URL), testConfig(), notify)
+
+	sub, cancel := b.Subscribe()
+	defer cancel()
+
+	// Tick 1: discovery with passing checks.
+	if err := p.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick 1 (discovery): %v", err)
+	}
+
+	got, err := st.GetSession("w1")
+	if err != nil {
+		t.Fatalf("GetSession after tick 1: %v", err)
+	}
+	if got.PRNumber != 5 || got.CIState != "passing" {
+		t.Fatalf("tick 1: expected pr_number=5 ci_state=passing, got pr_number=%d ci_state=%q", got.PRNumber, got.CIState)
+	}
+
+	// Drain bus events from tick 1 (pr.opened).
+	for {
+		select {
+		case <-sub:
+		default:
+			goto tick2
+		}
+	}
+tick2:
+	// Tick 2: check-runs endpoint now returns 403 (forbidden).
+	// Expected: ci_state degrades to "" WITHOUT pr.ci_changed event or CIFailing.
+	m.mu.Lock()
+	m.forbidChecks = true
+	m.mu.Unlock()
+
+	if err := p.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick 2 (degradation): %v", err)
+	}
+
+	got, err = st.GetSession("w1")
+	if err != nil {
+		t.Fatalf("GetSession after tick 2: %v", err)
+	}
+	if got.CIState != "" {
+		t.Fatalf("tick 2: expected ci_state degraded to \"\", got %q", got.CIState)
+	}
+
+	// Verify NO pr.ci_changed event or CIFailing notification fired.
+	var sawCIChanged bool
+	for {
+		select {
+		case e := <-sub:
+			if e.Type == "pr.ci_changed" {
+				sawCIChanged = true
+			}
+		default:
+			goto afterTick2
+		}
+	}
+afterTick2:
+	if sawCIChanged {
+		t.Fatal("tick 2: expected NO pr.ci_changed event during degradation")
+	}
+	if _, ciFailing, _, _ := notify.counts(); ciFailing != 0 {
+		t.Fatalf("tick 2: expected NO CIFailing notification during degradation, got %d", ciFailing)
+	}
+
+	// Tick 3: still forbidden. Expected: stable, no additional writes or events.
+	initialOpened, initialCIFailing, initialChangesRequested, initialMerged := notify.counts()
+	if err := p.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick 3 (stable): %v", err)
+	}
+
+	got, err = st.GetSession("w1")
+	if err != nil {
+		t.Fatalf("GetSession after tick 3: %v", err)
+	}
+	if got.CIState != "" {
+		t.Fatalf("tick 3: expected ci_state still \"\", got %q", got.CIState)
+	}
+
+	// Verify no additional notifications in tick 3.
+	finalOpened, finalCIFailing, finalChangesRequested, finalMerged := notify.counts()
+	if finalOpened != initialOpened || finalCIFailing != initialCIFailing || finalChangesRequested != initialChangesRequested || finalMerged != initialMerged {
+		t.Fatalf("tick 3: expected no additional notifications, was (%d,%d,%d,%d) now (%d,%d,%d,%d)", initialOpened, initialCIFailing, initialChangesRequested, initialMerged, finalOpened, finalCIFailing, finalChangesRequested, finalMerged)
+	}
+
+	// Drain any events from tick 3 to verify no ci_changed or other unexpected events.
+	for {
+		select {
+		case e := <-sub:
+			if e.Type == "pr.ci_changed" {
+				t.Fatalf("tick 3: unexpected pr.ci_changed event during stable state")
+			}
+		default:
+			goto done
+		}
+	}
+done:
+}
+
 // TestTick_RateLimited403_StillAbortsTickEarly verifies that a genuine
 // rate-limit 403 (with X-RateLimit-Remaining: 0) on check-runs is NOT
 // swallowed as a permission error: it must still surface as ErrBackoff and

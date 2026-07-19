@@ -356,6 +356,7 @@ func (p *Poller) updatePR(ctx context.Context, client *github.Client, sess store
 	}
 
 	if ci != "" && ci != prevCIState {
+		// Normal CI state change: persist and notify.
 		if err := p.st.UpdateSessionPR(sess.ID, pr.Number, newPRState, ci); err != nil {
 			return err
 		}
@@ -368,7 +369,18 @@ func (p *Poller) updatePR(ctx context.Context, client *github.Client, sess store
 		if ci == "failing" {
 			p.notify.CIFailing(sess, pr, "checks failing")
 		}
+	} else if ci == "" && prevCIState != "" {
+		// Degradation: CI became unknown (e.g., permission error on check-runs
+		// endpoint). Write ci="" to the store to degrade gracefully, but do NOT
+		// fire pr.ci_changed events or CIFailing/ChangesRequested notifications
+		// to avoid log spam and false alerts. The PR is still tracked with
+		// unknown CI state, and the next tick when permission is restored (or on
+		// merge) will resume normal processing.
+		if err := p.st.UpdateSessionPR(sess.ID, pr.Number, newPRState, ""); err != nil {
+			return err
+		}
 	}
+	// If ci=="" and prevCIState=="", no-op: already unknown.
 
 	last := p.getLastReviewState(sess.ID)
 	if pr.ReviewDecision == "changes_requested" && last != "changes_requested" {
