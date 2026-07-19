@@ -103,6 +103,14 @@ function nowSeconds(): number {
   return Math.floor(Date.now() / 1000)
 }
 
+// Mirrors maskToken (internal/api/settings.go): >8 chars -> first4…last4;
+// non-empty but <=8 chars -> "set"; empty -> "".
+function maskToken(token: string): string {
+  if (token === '') return ''
+  if (token.length > 8) return `${token.slice(0, 4)}…${token.slice(-4)}`
+  return 'set'
+}
+
 function openQuestionsFor(taskId: number): number {
   return questionsState.filter((q) => q.task_id === taskId && q.status === 'open').length
 }
@@ -310,6 +318,12 @@ export const handlers = [
     if (task.parent_id !== undefined) {
       return HttpResponse.json({ error: { code: 'not_root_task', message: 'only root tasks can be started' } }, { status: 400 })
     }
+    if (task.session_id && task.status === 'in_progress') {
+      return HttpResponse.json(
+        { error: { code: 'already_started', message: 'task already has a running session' } },
+        { status: 409 },
+      )
+    }
     if (task.status !== 'backlog') {
       return HttpResponse.json(
         { error: { code: 'task_not_startable', message: `task is ${task.status}, not backlog` } },
@@ -439,32 +453,47 @@ export const handlers = [
   }),
 
   // --------------------------------------------------------------------
-  // Settings & GitHub — contract types (phase 4), docs/03-daemon-api.md
-  // «Настройки и GitHub».
+  // Settings & GitHub — internal/api/settings.go, internal/api/
+  // github_catalog.go. Verified against .superpowers/sdd/phase4-contract.md.
   // --------------------------------------------------------------------
 
-  http.get('/v1/settings', () => HttpResponse.json(settingsState)),
+  // GET always 200s; `login` is never present here (only on PUT).
+  http.get('/v1/settings', () => HttpResponse.json({ github_token: maskToken(settingsState.github_token) })),
 
   http.put('/v1/settings', async ({ request }) => {
     const body = (await request.json()) as { github_token?: string }
-    settingsState = {
-      github_token: body.github_token,
-      github_authorized_as: body.github_token ? 'acme-bot' : undefined,
+    const token = body.github_token ?? ''
+    if (token === '') {
+      settingsState = { github_token: '' }
+      return HttpResponse.json({ github_token: '' })
     }
-    return HttpResponse.json(settingsState)
+    // Fixture stand-ins for GitHub's /user validation: a token starting
+    // with "invalid" is rejected (400 invalid_token); "unreachable" fakes a
+    // network failure (502 github_unreachable); anything else is accepted.
+    if (token.toLowerCase().startsWith('invalid')) {
+      return HttpResponse.json(
+        { error: { code: 'invalid_token', message: 'GitHub rejected the token' } },
+        { status: 400 },
+      )
+    }
+    if (token === 'unreachable') {
+      return HttpResponse.json(
+        { error: { code: 'github_unreachable', message: 'could not reach GitHub to validate token' } },
+        { status: 502 },
+      )
+    }
+    settingsState = { github_token: token }
+    return HttpResponse.json({ github_token: maskToken(token), login: 'acme-bot' })
   }),
 
   http.get('/v1/github/repos', ({ request }) => {
     if (!settingsState.github_token) {
-      return HttpResponse.json(
-        { error: { code: 'github_token_missing', message: 'no GitHub token configured' } },
-        { status: 404 },
-      )
+      return HttpResponse.json({ error: { code: 'no_token', message: 'no GitHub token configured' } }, { status: 400 })
     }
     const url = new URL(request.url)
     const q = (url.searchParams.get('q') ?? '').toLowerCase()
     const result = q ? githubRepos.filter((r) => r.full_name.toLowerCase().includes(q)) : githubRepos
-    return HttpResponse.json(result)
+    return HttpResponse.json({ repos: result })
   }),
 
   // --------------------------------------------------------------------
@@ -476,8 +505,15 @@ export const handlers = [
     if (body.github) {
       const gh = githubRepos.find((r) => r.full_name === body.github)
       const name = body.github.split('/').pop() ?? body.github
-      return HttpResponse.json({
-        id: body.id ?? name,
+      const id = body.id ?? name
+      if (reposState.some((r) => r.id === id)) {
+        return HttpResponse.json(
+          { error: { code: 'repo_exists', message: `repo id ${id} already exists` } },
+          { status: 409 },
+        )
+      }
+      const created: Repo = {
+        id,
         path: `/home/dev/.rocket/repos/${name}`,
         default_branch: gh?.default_branch ?? 'main',
         auto_cleanup: true,
@@ -485,7 +521,9 @@ export const handlers = [
         symlinks: [],
         post_create: [],
         created_at: Math.floor(Date.now() / 1000),
-      })
+      }
+      reposState.push(created)
+      return HttpResponse.json(created, { status: 201 })
     }
     const path = body.path ?? ''
     const name = path.split('/').filter(Boolean).pop() ?? 'repo'

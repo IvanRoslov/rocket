@@ -50,7 +50,11 @@ function textToEnv(text: string): Record<string, string> {
   for (const line of linesToArray(text)) {
     const idx = line.indexOf('=')
     if (idx === -1) continue
-    env[line.slice(0, idx).trim()] = line.slice(idx + 1).trim()
+    const key = line.slice(0, idx).trim()
+    // Lines like "=value" have no key — ignore them rather than storing an
+    // empty-string env var name.
+    if (!key) continue
+    env[key] = line.slice(idx + 1).trim()
   }
   return env
 }

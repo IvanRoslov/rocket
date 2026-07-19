@@ -51,16 +51,16 @@ describe('SettingsScreen', () => {
     expect(screen.getByRole('button', { name: 'Daemon' })).toBeInTheDocument()
   })
 
-  it('GitHub section survives a 404 from GET /v1/settings with a yellow note instead of crashing', async () => {
+  it('GitHub section survives a failed GET /v1/settings with a yellow note instead of crashing', async () => {
     server.use(
       http.get('/v1/settings', () =>
-        HttpResponse.json({ error: { code: 'not_found', message: 'not implemented' } }, { status: 404 }),
+        HttpResponse.json({ error: { code: 'internal_error', message: 'boom' } }, { status: 500 }),
       ),
     )
     renderScreen()
 
     expect(await screen.findByRole('heading', { name: 'GitHub' })).toBeInTheDocument()
-    expect(await screen.findByText(/phase/i)).toBeInTheDocument()
+    expect(await screen.findByText(/could not load github settings/i)).toBeInTheDocument()
   })
 
   // The base fixtures reference every registered repo from some project
@@ -134,6 +134,38 @@ describe('SettingsScreen', () => {
 
     const clonedRow = screen.getByText('billing-sdk').closest('[data-testid="repo-row"]') as HTMLElement
     expect(within(clonedRow).getByText('rocket')).toBeInTheDocument()
+  })
+
+  it('Repositories: editing env ignores lines with an empty key ("=value")', async () => {
+    let received: unknown
+    server.use(
+      http.patch('/v1/repos/:id', async ({ params, request }) => {
+        received = { id: params.id, body: await request.json() }
+        return HttpResponse.json({
+          id: params.id, path: '/home/dev/repos/api', default_branch: 'main', auto_cleanup: true,
+          env: {}, symlinks: [], post_create: [], created_at: 0,
+        })
+      }),
+    )
+    const user = userEvent.setup()
+    renderScreen()
+    await gotoSection(user, 'Repositories')
+
+    const apiRow = (await screen.findByText('api')).closest('[data-testid="repo-row"]') as HTMLElement
+    await user.click(within(apiRow).getByRole('button', { name: /edit/i }))
+
+    const envField = await screen.findByLabelText(/Env/)
+    await user.clear(envField)
+    await user.type(envField, 'FOO=bar\n=orphan-value\nBAZ=qux')
+
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+
+    await waitFor(() =>
+      expect(received).toEqual({
+        id: 'api',
+        body: { env: { FOO: 'bar', BAZ: 'qux' }, symlinks: [], post_create: [] },
+      }),
+    )
   })
 
   it('Project: renaming and saving PATCHes /v1/projects/{id} with the right body', async () => {

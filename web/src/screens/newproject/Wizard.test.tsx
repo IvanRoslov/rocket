@@ -10,7 +10,7 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { handlers, resetSettings } from '../../mocks/handlers'
+import { handlers, resetRepos, resetSettings } from '../../mocks/handlers'
 import { WizardScreen } from './WizardScreen'
 
 const server = setupServer(...handlers)
@@ -19,6 +19,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(() => {
   server.resetHandlers()
   resetSettings()
+  resetRepos()
 })
 afterAll(() => server.close())
 
@@ -117,7 +118,7 @@ describe('WizardScreen — happy path via Registered repo', () => {
 })
 
 describe('WizardScreen — GitHub tab without a token', () => {
-  it('shows the "Connect GitHub" placeholder instead of a repo list', async () => {
+  it('shows the "Connect GitHub" placeholder instead of a repo list (400 no_token, not 404)', async () => {
     const user = userEvent.setup()
     renderWizard()
 
@@ -127,5 +128,74 @@ describe('WizardScreen — GitHub tab without a token', () => {
 
     // GitHub is the default active tab in Step 2.
     expect(await screen.findByText('Connect GitHub')).toBeInTheDocument()
+  })
+})
+
+describe('WizardScreen — GitHub tab with a token', () => {
+  async function gotoGithubTabWithToken(user: ReturnType<typeof userEvent.setup>) {
+    renderWizard()
+    const nameInput = await screen.findByLabelText('Name')
+    await user.type(nameInput, 'Some Project')
+    await user.click(screen.getByRole('button', { name: /Continue/ }))
+
+    expect(await screen.findByText('Connect GitHub')).toBeInTheDocument()
+    await user.type(screen.getByPlaceholderText('ghp_…'), 'ghp_1234567890abcdef')
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    // Once the token is saved, github-repos is invalidated and refetched.
+    await screen.findByText('acme/docs')
+  }
+
+  it('picking a repo registers it via POST /v1/repos {github} and selects it', async () => {
+    let capturedBody: unknown
+    server.use(
+      http.post('/v1/repos', async ({ request }) => {
+        capturedBody = await request.json()
+        return HttpResponse.json(
+          { id: 'docs', path: '/home/dev/.rocket/repos/docs', default_branch: 'main', auto_cleanup: true, env: {}, symlinks: [], post_create: [], created_at: 0 },
+          { status: 201 },
+        )
+      }),
+    )
+    const user = userEvent.setup()
+    await gotoGithubTabWithToken(user)
+
+    const docsItem = screen.getByText('acme/docs').closest('button')!
+    await user.click(docsItem)
+
+    await waitFor(() => expect(capturedBody).toEqual({ github: 'acme/docs' }))
+    // Selection is reflected once Step2Main re-renders with the new id checked.
+    await waitFor(() => expect(docsItem.className).toContain('repo-picker__item--picked'))
+  })
+
+  it('picking an already-registered repo (409 repo_exists) selects it instead of erroring', async () => {
+    server.use(
+      http.post('/v1/repos', () =>
+        HttpResponse.json({ error: { code: 'repo_exists', message: 'repo id api already exists' } }, { status: 409 }),
+      ),
+    )
+    const user = userEvent.setup()
+    await gotoGithubTabWithToken(user)
+
+    const apiItem = screen.getByText('acme/api').closest('button')!
+    await user.click(apiItem)
+
+    // No "Clone failed" error surfaces for repo_exists.
+    await waitFor(() => expect(screen.queryByText(/clone failed/i)).not.toBeInTheDocument())
+    await waitFor(() => expect(apiItem.className).toContain('repo-picker__item--picked'))
+  })
+
+  it('clone failure (502 clone_failed) shows a sanitized error with a retry control', async () => {
+    server.use(
+      http.post('/v1/repos', () =>
+        HttpResponse.json({ error: { code: 'clone_failed', message: 'fatal: could not read from remote' } }, { status: 502 }),
+      ),
+    )
+    const user = userEvent.setup()
+    await gotoGithubTabWithToken(user)
+
+    await user.click(screen.getByText('acme/billing-sdk').closest('button')!)
+
+    expect(await screen.findByText(/clone failed: fatal: could not read from remote/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
   })
 })

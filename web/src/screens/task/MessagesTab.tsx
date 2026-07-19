@@ -1,7 +1,10 @@
 // Messages tab (docs/design/Task.dc.html "MESSAGES"): a chat with the
-// task's orchestrator session. Own messages (`to === session.id`) render on
-// the right in indigo with a delivery status; orchestrator messages
-// (`from === session.id`) render on the left in white.
+// task's orchestrator session. A message is "own" (from the human user) iff
+// it has no `from` — the daemon never populates `from` for user-sent
+// messages (internal/api/messages.go), so that's the reliable check, not
+// `to === session.id` (which would also match e.g. a message from a
+// *different* session to this orchestrator). Orchestrator messages carry
+// `from === session.id` and render on the left in white.
 
 import { useState } from 'react'
 import { timeAgo } from '../../lib/format'
@@ -39,7 +42,7 @@ export function MessagesTab({ session, messages }: MessagesTabProps) {
     <div className="messages-tab">
       <div className="messages-tab__list">
         {ordered.map((m) => {
-          const own = m.to === session.id
+          const own = !m.from
           return (
             <div key={m.id} className={own ? 'messages-tab__row messages-tab__row--own' : 'messages-tab__row'}>
               <div className={own ? 'messages-tab__bubble messages-tab__bubble--own' : 'messages-tab__bubble'}>

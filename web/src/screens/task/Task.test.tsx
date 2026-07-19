@@ -119,6 +119,33 @@ describe('TaskScreen', () => {
     )
   })
 
+  it('own-message check is `!from`, not `to === session.id` — a relayed message with a `from` renders on the left', async () => {
+    server.use(
+      http.get('/v1/messages', () =>
+        HttpResponse.json({
+          messages: [
+            // No `from`: user-authored -> own, renders right.
+            { id: 1, to: 's-billing-v2-orch', body: 'from the user', status: 'delivered', attempts: 1, created_at: 1 },
+            // Has `from` (a *different* session) but happens to also target
+            // the orchestrator — must NOT be treated as "own" just because
+            // `to === session.id`.
+            { id: 2, from: 's-billing-v2-w1', to: 's-billing-v2-orch', body: 'relayed from a worker', status: 'delivered', attempts: 1, created_at: 2 },
+          ],
+        }),
+      ),
+    )
+
+    renderTask()
+    expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('tab', { name: /^Messages/ }))
+
+    const ownRow = (await screen.findByText('from the user')).closest('.messages-tab__row') as HTMLElement
+    expect(ownRow.className).toContain('messages-tab__row--own')
+
+    const relayedRow = screen.getByText('relayed from a worker').closest('.messages-tab__row') as HTMLElement
+    expect(relayedRow.className).not.toContain('messages-tab__row--own')
+  })
+
   it('attach copies the tmux attach command to the clipboard', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', {

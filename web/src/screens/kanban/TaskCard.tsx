@@ -1,5 +1,6 @@
 import type { DragEvent } from 'react'
 import { Link } from 'react-router-dom'
+import { Badge, type BadgeTone } from '../../components/Badge'
 import { Dot, type DotState } from '../../components/Dot'
 import type { Session, Task } from '../../lib/types'
 import './kanban.css'
@@ -37,6 +38,28 @@ function orchDotState(session: Session): DotState {
   }
 }
 
+type CiState = NonNullable<Session['ci_state']>
+
+const CI_SEVERITY: Record<CiState, number> = { passing: 0, pending: 1, failing: 2 }
+const CI_SYMBOL: Record<CiState, string> = { passing: '✔', pending: '⏳', failing: '✗' }
+const CI_TONE: Record<CiState, BadgeTone> = { passing: 'ok', pending: 'warn', failing: 'err' }
+
+/** worst-of a set of worker CI states: failing > pending > passing. */
+function worstCiState(states: CiState[]): CiState | undefined {
+  return states.reduce<CiState | undefined>((worst, s) => {
+    if (!worst || CI_SEVERITY[s] > CI_SEVERITY[worst]) return s
+    return worst
+  }, undefined)
+}
+
+/** PR summary across a task's worker sessions (docs/design/Kanban.dc.html PR badges). */
+function prSummary(workers: Session[]): { openCount: number; mergedCount: number; ci?: CiState } {
+  const openCount = workers.filter((w) => w.pr_state === 'open').length
+  const mergedCount = workers.filter((w) => w.pr_state === 'merged').length
+  const ciStates = workers.map((w) => w.ci_state).filter((c): c is CiState => c !== undefined)
+  return { openCount, mergedCount, ci: worstCiState(ciStates) }
+}
+
 export function TaskCard({
   task,
   projectId,
@@ -53,7 +76,9 @@ export function TaskCard({
   // repos here (docs/design/Kanban.dc.html's "api → web, infra" row) without
   // an N+1 fetch per card — skipped per task-12 brief.
   const orchestrator = task.session_id ? sessions?.find((s) => s.id === task.session_id) : undefined
-  const workers = orchestrator ? (sessions?.filter((s) => s.parent_id === orchestrator.id).length ?? 0) : 0
+  const workerSessions = orchestrator ? (sessions?.filter((s) => s.parent_id === orchestrator.id) ?? []) : []
+  const workers = workerSessions.length
+  const { openCount, mergedCount, ci } = prSummary(workerSessions)
   const draggable = task.status !== 'cancelled'
 
   return (
@@ -80,7 +105,22 @@ export function TaskCard({
         </div>
       )}
 
-      {/* PR badges: pr_* fields aren't on the API yet (phase 4) — skipped. */}
+      {(openCount > 0 || mergedCount > 0 || ci) && (
+        <div className="kanban-card__pr-badges">
+          {openCount > 0 && (
+            <Badge tone="indigo">
+              {openCount} PR open
+            </Badge>
+          )}
+          {mergedCount > 0 && (
+            <Badge tone="ok">
+              {mergedCount} merged
+            </Badge>
+          )}
+          {ci && <Badge tone={CI_TONE[ci]}>CI {CI_SYMBOL[ci]}</Badge>}
+        </div>
+      )}
+
       {/* Signals (open_questions): not on the list/board taskResponse, only
           per-task detail — skipping to avoid an N+1 fetch per card. Will
           show up once the task's own screen is open. */}

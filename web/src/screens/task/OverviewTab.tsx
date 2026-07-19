@@ -45,6 +45,10 @@ function prLabel(session: Session | undefined): { text: string; tone: string } {
     if (session.activity === 'blocked') return { text: 'PR — blocked', tone: 'overview-tab__pr--err' }
     return { text: 'PR —', tone: 'overview-tab__pr--neutral' }
   }
+  // pr_state 'closed'/'merged' aren't CI-relevant — show them directly
+  // instead of falling through to ci_state.
+  if (session.pr_state === 'closed') return { text: `PR #${session.pr_number} closed`, tone: 'overview-tab__pr--neutral' }
+  if (session.pr_state === 'merged') return { text: `PR #${session.pr_number} merged`, tone: 'overview-tab__pr--ok' }
   if (session.ci_state === 'passing') return { text: `PR #${session.pr_number} ✔`, tone: 'overview-tab__pr--ok' }
   if (session.ci_state === 'failing') return { text: `PR #${session.pr_number} ✗`, tone: 'overview-tab__pr--err' }
   if (session.ci_state === 'pending') return { text: `PR #${session.pr_number} running`, tone: 'overview-tab__pr--warn' }

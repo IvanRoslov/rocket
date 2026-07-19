@@ -47,6 +47,11 @@ function prText(session: Session): { text: string; tone: string } {
     if (session.activity === 'blocked') return { text: 'PR —', tone: 'session-rail__pr--err' }
     return { text: 'PR —', tone: 'session-rail__pr--neutral' }
   }
+  // pr_state 'closed' (declined without merging) and 'merged' aren't
+  // CI-relevant anymore — show them plainly instead of falling through to
+  // the (possibly stale) ci_state.
+  if (session.pr_state === 'closed') return { text: `PR #${session.pr_number} closed`, tone: 'session-rail__pr--neutral' }
+  if (session.pr_state === 'merged') return { text: `PR #${session.pr_number} merged`, tone: 'session-rail__pr--ok' }
   if (session.ci_state === 'passing') return { text: `PR #${session.pr_number} ✔`, tone: 'session-rail__pr--ok' }
   if (session.ci_state === 'failing') return { text: `PR #${session.pr_number} ✗`, tone: 'session-rail__pr--err' }
   if (session.ci_state === 'pending') return { text: `PR #${session.pr_number} ⏳`, tone: 'session-rail__pr--warn' }

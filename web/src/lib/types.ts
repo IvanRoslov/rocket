@@ -253,15 +253,23 @@ export interface QuestionMessage {
   created_at: number
 }
 
-/** Contract type (phase 4): docs/03-daemon-api.md «Настройки и GitHub». */
+/** `catalogRepoResponse` — internal/api/github_catalog.go. GET /v1/github/repos wraps these as `{"repos":[...]}`. */
 export interface GithubRepo {
   full_name: string
   private: boolean
   default_branch: string
 }
 
-/** Contract type (phase 4): docs/03-daemon-api.md «Настройки и GitHub». */
+/**
+ * internal/api/settings.go. `GET /v1/settings` returns `{github_token}`
+ * only — `github_token` is always present (masked, or "" when unset) and
+ * `login` is never included. `PUT /v1/settings` returns the same shape plus
+ * `login` (the authenticated GitHub login) when a non-empty token was
+ * accepted — it's the *only* response that carries `login`, so callers that
+ * want to display "Authorized as @login" must capture it from the PUT
+ * response and hold it in local state.
+ */
 export interface Settings {
-  github_token?: string
-  github_authorized_as?: string
+  github_token: string
+  login?: string
 }

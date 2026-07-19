@@ -75,6 +75,13 @@ export function KanbanScreen() {
     if (dragId == null) return
     const boardKey = ['tasks', projectId, 'board']
     const previous = queryClient.getQueryData<TaskBoard>(boardKey)
+    const draggedTask = previous && (Object.values(previous).flat() as Task[]).find((t) => t.id === dragId)
+    if (draggedTask?.status === status) {
+      // Dropped back into its own column — no-op, don't PATCH.
+      setDragId(null)
+      setDragOverStatus(null)
+      return
+    }
     if (previous) {
       queryClient.setQueryData(boardKey, moveTaskInBoard(previous, dragId, status))
     }

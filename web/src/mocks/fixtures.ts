@@ -415,7 +415,9 @@ export const messages: Message[] = [
   },
   {
     id: 812,
-    from: 'user',
+    // No `from`: user-authored messages never populate it (internal/api/
+    // messages.go) — the daemon only sets `from` when a session id was
+    // supplied via X-Rocket-Session.
     to: 's-billing-v2-w2',
     body: 'Ping — any update on the UI work?',
     status: 'failed',
@@ -490,7 +492,8 @@ export const githubRepos: GithubRepo[] = [
   { full_name: 'acme/notifications', private: true, default_branch: 'develop' },
 ]
 
-// Settings — contract type (phase 4). No GitHub token configured by default,
-// so the GitHub tab in the New Project wizard shows the "Connect GitHub"
-// placeholder unless a test explicitly sets one via PUT /v1/settings.
-export const settings: Settings = {}
+// Settings — internal/api/settings.go. No GitHub token configured by
+// default (`github_token: ""`), so the GitHub tab in the New Project wizard
+// shows the "Connect GitHub" placeholder (GET /v1/github/repos 400 no_token)
+// unless a test explicitly sets one via PUT /v1/settings.
+export const settings: Settings = { github_token: '' }

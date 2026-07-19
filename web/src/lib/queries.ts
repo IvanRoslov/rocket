@@ -208,9 +208,8 @@ export function useSystem(): UseQueryResult<SystemInfo> {
 }
 
 /**
- * `GET /v1/settings` (contract, phase 4): secrets masked. Used to decide
- * whether the GitHub tab shows the repo list or the "Connect GitHub"
- * placeholder.
+ * `GET /v1/settings` (internal/api/settings.go): `{github_token}`, masked
+ * (or "" when unset). Never carries `login` — see the `Settings` type doc.
  */
 export function useSettings(): UseQueryResult<Settings> {
   return useQuery({
@@ -221,15 +220,20 @@ export function useSettings(): UseQueryResult<Settings> {
 }
 
 /**
- * `GET /v1/github/repos?q=` (contract, phase 4). Only enabled when `enabled`
- * is true (i.e. the GitHub tab is active) — the daemon 404s / returns
- * `github_token_missing` when no token is configured, which callers should
- * treat as "show the Connect GitHub placeholder", not a hard error.
+ * `GET /v1/github/repos?q=` (internal/api/github_catalog.go), unwrapped from
+ * its `{"repos":[...]}` envelope. Only enabled when `enabled` is true (i.e.
+ * the GitHub tab is active). With no token configured the daemon responds
+ * `400 {code:"no_token"}` (NOT 404) — callers should branch on
+ * `error.code === 'no_token'` to show the "Connect GitHub" placeholder,
+ * treating any other error as a real failure.
  */
 export function useGithubRepos(q: string, enabled: boolean): UseQueryResult<GithubRepo[]> {
   return useQuery({
     queryKey: ['github-repos', q],
-    queryFn: () => api.get<GithubRepo[]>(`/v1/github/repos?q=${encodeURIComponent(q)}`),
+    queryFn: async () => {
+      const res = await api.get<{ repos: GithubRepo[] }>(`/v1/github/repos?q=${encodeURIComponent(q)}`)
+      return res.repos
+    },
     enabled,
     retry: false,
   })
@@ -422,7 +426,11 @@ export function useCreateProject(): UseMutationResult<
   })
 }
 
-/** `PUT /v1/settings` (contract, phase 4): `{github_token}`. */
+/**
+ * `PUT /v1/settings` (internal/api/settings.go): `{github_token}` -> the
+ * masked token plus `login` (present only when a non-empty token was
+ * accepted and validated against GitHub).
+ */
 export function useUpdateSettings(): UseMutationResult<Settings, Error, { github_token: string }> {
   const queryClient = useQueryClient()
   return useMutation({

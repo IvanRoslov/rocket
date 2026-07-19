@@ -46,6 +46,16 @@ test('renders columns with fixtures distributed by status', async () => {
   expect(screen.getByText(/3 workers/)).toBeInTheDocument()
 })
 
+test('PR badges aggregate worker sessions: 1 PR open + CI ✔ for #12 (s-billing-v2-w2)', async () => {
+  renderKanban()
+  await waitFor(() => expect(screen.getByText('Billing v2')).toBeInTheDocument())
+
+  const card = screen.getByText('Billing v2').closest('.kanban-card') as HTMLElement
+  expect(within(card).getByText('1 PR open')).toBeInTheDocument()
+  expect(within(card).getByText('CI ✔')).toBeInTheDocument()
+  expect(within(card).queryByText(/merged/)).not.toBeInTheDocument()
+})
+
 test('cancelled column hidden by default, shown via checkbox', async () => {
   renderKanban()
   await waitFor(() => expect(screen.getByText('Invoice PDF export')).toBeInTheDocument())
@@ -122,6 +132,53 @@ test('drop handler calls PATCH with the target column status', async () => {
   fireEvent.drop(doneColumn, { dataTransfer })
 
   await waitFor(() => expect(capturedStatus).toBe('done'))
+})
+
+test('dropping a card back into its own column does not PATCH', async () => {
+  let patchCalled = false
+  server.use(
+    http.patch('/v1/tasks/:id', async ({ request, params }) => {
+      patchCalled = true
+      const body = (await request.json()) as { status?: string }
+      return HttpResponse.json({
+        id: Number(params.id),
+        title: 'Webhook retry backoff',
+        project_id: 'billing',
+        status: body.status,
+        created_by: 'orchestrator',
+        created_at: 0,
+        updated_at: 0,
+      })
+    }),
+  )
+
+  renderKanban()
+  await waitFor(() => expect(screen.getByText('Webhook retry backoff')).toBeInTheDocument())
+
+  // #11 "Webhook retry backoff" is already in Review — dropping it back
+  // into Review should be a no-op.
+  const card = screen.getByText('Webhook retry backoff').closest('.kanban-card') as HTMLElement
+  const reviewColumn = screen.getByText('Review').closest('.kanban-col') as HTMLElement
+
+  const dataTransfer = { setData: () => {}, getData: () => '' }
+  fireEvent.dragStart(card, { dataTransfer })
+  fireEvent.dragOver(reviewColumn, { dataTransfer })
+  fireEvent.drop(reviewColumn, { dataTransfer })
+
+  // Give any (unwanted) async PATCH a chance to fire.
+  await new Promise((r) => setTimeout(r, 0))
+  expect(patchCalled).toBe(false)
+})
+
+test('POST /v1/tasks/{id}/start on an already-started task 409s with already_started (mirrors tasks.go)', async () => {
+  // Task #12 "Billing v2" (fixtures.ts) is already in_progress with a
+  // session_id — the Start button isn't rendered for it client-side, but
+  // the mock handler should still mirror the daemon's guard for direct
+  // API calls / future UI paths.
+  const res = await fetch('/v1/tasks/12/start', { method: 'POST' })
+  expect(res.status).toBe(409)
+  const body = await res.json()
+  expect(body.error.code).toBe('already_started')
 })
 
 test('creating a task posts title/description/project', async () => {

@@ -194,6 +194,14 @@
   color: var(--text-4);
 }
 
+.kanban-card__pr-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
 .kanban-card__start {
   width: 100%;
   margin-top: 2px;

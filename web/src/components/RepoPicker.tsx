@@ -53,15 +53,26 @@ export function RepoPicker({ mode, exclude = [], selectedIds, onSelect }: RepoPi
   const registerRepo = useRegisterRepo()
   const updateSettings = useUpdateSettings()
 
+  // No GitHub token configured: GET /v1/github/repos responds 400 {code:
+  // "no_token"} (not 404 — see .superpowers/sdd/phase4-contract.md).
   const githubUnavailable =
-    githubRepos.isError &&
-    githubRepos.error instanceof ApiError &&
-    (githubRepos.error.status === 404 || githubRepos.error.code === 'github_token_missing')
+    githubRepos.isError && githubRepos.error instanceof ApiError && githubRepos.error.code === 'no_token'
 
   function handleGithubPick(repo: GithubRepo) {
     registerRepo.mutate(
       { github: repo.full_name },
-      { onSuccess: (created) => onSelect(created.id) },
+      {
+        onSuccess: (created) => onSelect(created.id),
+        onError: (err) => {
+          // The repo is already registered under the id we'd have derived
+          // (409 repo_exists) — just select the existing registration
+          // instead of surfacing an error.
+          if (err instanceof ApiError && err.code === 'repo_exists') {
+            onSelect(githubRepoId(repo.full_name))
+            registerRepo.reset()
+          }
+        },
+      },
     )
   }
 
@@ -153,14 +164,15 @@ export function RepoPicker({ mode, exclude = [], selectedIds, onSelect }: RepoPi
                 })}
               </div>
               {registerRepo.isPending && <p className="repo-picker__hint">Cloning…</p>}
-              {registerRepo.isError && (
-                <p className="repo-picker__error">
-                  Clone failed: {registerRepo.error.message}{' '}
-                  <button type="button" className="repo-picker__retry" onClick={() => registerRepo.reset()}>
-                    retry
-                  </button>
-                </p>
-              )}
+              {registerRepo.isError &&
+                !(registerRepo.error instanceof ApiError && registerRepo.error.code === 'repo_exists') && (
+                  <p className="repo-picker__error">
+                    Clone failed: {registerRepo.error.message}{' '}
+                    <button type="button" className="repo-picker__retry" onClick={() => registerRepo.reset()}>
+                      retry
+                    </button>
+                  </p>
+                )}
             </>
           )}
         </div>

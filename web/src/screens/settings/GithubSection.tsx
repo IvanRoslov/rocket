@@ -1,8 +1,10 @@
 // Settings > GitHub (docs/design/Settings.dc.html): the personal access
-// token used to list/clone repos. `GET/PUT /v1/settings` are contract
-// endpoints (phase 4) — a real daemon that hasn't grown the GitHub phase yet
-// 404s `GET /v1/settings`, which we treat as "not available yet" rather than
-// a hard error.
+// token used to list/clone repos. `GET/PUT /v1/settings` (internal/api/
+// settings.go): GET always 200s with `{github_token}` (masked, or "" when
+// unset) — it never carries `login`. `login` comes back only on a
+// successful PUT, so we stash it in local state to render "Authorized as
+// @login" after a save; it's lost on reload (GET can't reproduce it), which
+// matches the daemon's actual contract.
 
 import { useEffect, useState } from 'react'
 import { Button } from '../../components/Button'
@@ -14,21 +16,33 @@ export function GithubSection() {
   const updateSettings = useUpdateSettings()
   const [tokenInput, setTokenInput] = useState('')
   const [dirty, setDirty] = useState(false)
+  const [login, setLogin] = useState<string | undefined>(undefined)
 
   useEffect(() => {
     if (!dirty && settings.data) setTokenInput(settings.data.github_token ?? '')
   }, [settings.data, dirty])
 
-  const unavailable =
-    settings.isError && settings.error instanceof ApiError && settings.error.status === 404
-
   function handleSave() {
     if (!tokenInput.trim()) return
     updateSettings.mutate(
       { github_token: tokenInput.trim() },
-      { onSuccess: () => setDirty(false) },
+      {
+        onSuccess: (data) => {
+          setDirty(false)
+          setLogin(data.login)
+        },
+      },
     )
   }
+
+  const saveErrorMessage = (() => {
+    if (!updateSettings.isError) return undefined
+    if (updateSettings.error instanceof ApiError) {
+      if (updateSettings.error.code === 'invalid_token') return 'GitHub rejected this token.'
+      if (updateSettings.error.code === 'github_unreachable') return 'Could not reach GitHub to validate the token.'
+    }
+    return updateSettings.error.message
+  })()
 
   return (
     <section>
@@ -37,17 +51,17 @@ export function GithubSection() {
         Token used to list and clone your repositories. Validated against GitHub on save.
       </p>
 
-      {unavailable ? (
+      {settings.isError ? (
         <div className="settings-note settings-note--warn">
-          GitHub settings aren't available from this daemon yet — this will appear with the GitHub phase.
+          Could not load GitHub settings from the daemon.
         </div>
       ) : (
         <div className="settings-card">
-          {settings.data?.github_authorized_as && (
+          {login && (
             <div className="settings-github-plate">
               <span className="settings-github-plate__dot" />
               <span className="settings-github-plate__label">Authorized as</span>
-              <span className="settings-github-plate__account">@{settings.data.github_authorized_as}</span>
+              <span className="settings-github-plate__account">@{login}</span>
             </div>
           )}
           <label className="settings-field__label" htmlFor="github-token">
@@ -72,7 +86,7 @@ export function GithubSection() {
           <p className="settings-field__hint">
             Needs <span className="settings-mono">repo</span> scope. Masked after saving.
           </p>
-          {updateSettings.isError && <p className="settings-error">{updateSettings.error.message}</p>}
+          {saveErrorMessage && <p className="settings-error">{saveErrorMessage}</p>}
         </div>
       )}
     </section>

@@ -110,11 +110,13 @@ describe('SystemScreen', () => {
     await waitFor(() => expect(called).toBe(true))
   })
 
-  it('kill button opens a confirm modal, and confirming posts to /v1/sessions/{id}/kill', async () => {
+  it('kill button opens a confirm modal, and confirming posts to /v1/sessions/{id}/kill with cleanup=false by default', async () => {
     let killedId: string | undefined
+    let killedUrl: string | undefined
     server.use(
-      http.post('/v1/sessions/:id/kill', ({ params }) => {
+      http.post('/v1/sessions/:id/kill', ({ params, request }) => {
         killedId = params.id as string
+        killedUrl = request.url
         return HttpResponse.json({ status: 'killed' })
       }),
     )
@@ -132,6 +134,34 @@ describe('SystemScreen', () => {
     await user.click(confirmBtn)
 
     await waitFor(() => expect(killedId).toBe('s-billing-v2-w1'))
+    expect(new URL(killedUrl!).searchParams.get('cleanup')).toBeNull()
+  })
+
+  it('checking "cleanup" before confirming posts /v1/sessions/{id}/kill?cleanup=true', async () => {
+    let killedUrl: string | undefined
+    server.use(
+      http.post('/v1/sessions/:id/kill', ({ request }) => {
+        killedUrl = request.url
+        return HttpResponse.json({ status: 'killed' })
+      }),
+    )
+
+    const user = userEvent.setup()
+    renderScreen()
+
+    await screen.findByText('billing-v2-w1')
+    const row = screen.getByText('billing-v2-w1').closest('[data-testid="session-row"]') as HTMLElement
+    const killBtn = within(row).getByRole('button', { name: /kill/i })
+    await user.click(killBtn)
+
+    const modal = await screen.findByRole('dialog')
+    const checkbox = within(modal).getByRole('checkbox')
+    await user.click(checkbox)
+    const confirmBtn = within(modal).getByRole('button', { name: /confirm/i })
+    await user.click(confirmBtn)
+
+    await waitFor(() => expect(killedUrl).toBeDefined())
+    expect(new URL(killedUrl!).searchParams.get('cleanup')).toBe('true')
   })
 
   it('cancel button in kill modal closes without calling the handler', async () => {
