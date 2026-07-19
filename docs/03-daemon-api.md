@@ -101,7 +101,7 @@ HTTP+JSON, префикс `/v1`. Листенеры: Unix-сокет `~/.rocket/
 | GET | `/v1/events?since=<id>&limit=N&session=` | Журнал |
 | GET | `/v1/events/stream` | SSE; `?session=` — фильтр |
 
-Формат события: `{id, ts, type, session_id?, data{}}`. Типы: `session.spawned|state_changed|activity_changed|killed|restored|chat_updated`, `message.queued|delivered|failed`, `pr.opened|ci_changed|merged`, `orchestrator.heartbeat_sent`, `workspace.branch_collision|cleanup`, `repo.clone_started|clone_done|clone_failed`, `task.question_asked|question_replied|question_resolved` и т.д. `session.chat_updated` — пинг без контента (`data:{}`) о том, что транскрипт сессии изменился, см. [13-chat.md](13-chat.md).
+Формат события: `{id, ts, type, session_id?, data{}}`. Типы: `session.spawned|state_changed|activity_changed|killed|restored|chat_updated`, `message.queued|delivered|failed`, `pr.opened|ci_changed|merged`, `orchestrator.heartbeat_sent`, `workspace.branch_collision|cleanup`, `repo.clone_started|clone_done|clone_failed`, `task.question_asked|question_replied|question_resolved` и т.д. `session.chat_updated` — пинг о том, что транскрипт сессии изменился; поле `data` у этого события отсутствует целиком, см. [13-chat.md](13-chat.md).
 
 ## Система
 
