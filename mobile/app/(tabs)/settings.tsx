@@ -1,9 +1,10 @@
 import { router } from 'expo-router'
 import { useState } from 'react'
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useRepos, useSaveSettings, useSettings } from '../../src/api/queries'
-import { Card, ChipTabs, Dot, EmptyState, MonoText, PrimaryButton } from '../../src/components/ui'
+import { useDeleteRepo, useProjects, useRepos, useSaveSettings, useSettings } from '../../src/api/queries'
+import { RepoPicker } from '../../src/components/RepoPicker'
+import { Card, ChipTabs, Dot, EmptyState, GhostButton, MonoText, PrimaryButton } from '../../src/components/ui'
 import { useServers } from '../../src/servers/ServerContext'
 import { colors, mono, radius } from '../../src/theme'
 
@@ -64,24 +65,66 @@ function GithubSection() {
 
 function ReposSection() {
   const repos = useRepos()
+  const projects = useProjects()
+  const deleteRepo = useDeleteRepo()
+  const [picker, setPicker] = useState(false)
+
+  const usedIn = (id: string) =>
+    (projects.data ?? []).filter((p) => p.main === id || p.linked.includes(id)).map((p) => p.name)
+
+  const confirmRemove = (id: string) =>
+    Alert.alert('Remove repo', `Remove “${id}” from the registry?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: () =>
+          deleteRepo.mutate(id, {
+            onError: (e) => Alert.alert('Cannot remove', (e as Error).message),
+          }),
+      },
+    ])
+
   return (
     <View>
       <Text style={styles.h2}>Repositories</Text>
-      <Text style={styles.lede}>Global registry. A repo can belong to several projects. Read-only here.</Text>
-      <View style={{ gap: 8 }}>
-        {(repos.data ?? []).map((r) => (
-          <Card key={r.id} style={{ padding: 13 }}>
-            <MonoText style={{ fontSize: 14.5, fontWeight: '600', color: colors.text, marginBottom: 5 }}>
-              {r.id}
-            </MonoText>
-            <MonoText style={{ fontSize: 11.5, color: colors.textFaint }}>{r.path}</MonoText>
-            <Text style={{ fontSize: 12, color: colors.textDim, marginTop: 4 }}>
-              default branch: {r.default_branch}
-            </Text>
-          </Card>
-        ))}
+      <Text style={styles.lede}>Global registry. A repo can belong to several projects.</Text>
+      <View style={{ gap: 8, marginBottom: 14 }}>
+        {(repos.data ?? []).map((r) => {
+          const used = usedIn(r.id)
+          return (
+            <Card key={r.id} style={{ padding: 13 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 5 }}>
+                <MonoText style={{ fontSize: 14.5, fontWeight: '600', color: colors.text, flex: 1 }}>
+                  {r.id}
+                </MonoText>
+                <Pressable
+                  disabled={used.length > 0}
+                  onPress={() => confirmRemove(r.id)}
+                  style={[styles.removeBtn, used.length > 0 && { opacity: 0.4 }]}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: used.length > 0 ? colors.textFaint : colors.redFg }}>
+                    Remove
+                  </Text>
+                </Pressable>
+              </View>
+              <MonoText style={{ fontSize: 11.5, color: colors.textFaint }}>{r.path}</MonoText>
+              <Text style={{ fontSize: 12, color: colors.textDim, marginTop: 4 }}>
+                {used.length > 0 ? `used in: ${used.join(', ')}` : '— unused'}
+              </Text>
+            </Card>
+          )
+        })}
         {repos.isSuccess && repos.data.length === 0 ? <EmptyState text="No repositories registered." /> : null}
       </View>
+      <GhostButton label="＋ Register repo" onPress={() => setPicker(true)} />
+      <RepoPicker
+        visible={picker}
+        title="Register repository"
+        exclude={(repos.data ?? []).map((r) => r.id)}
+        onClose={() => setPicker(false)}
+        onPick={() => {}}
+      />
     </View>
   )
 }
@@ -185,6 +228,16 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: 10,
     backgroundColor: colors.card,
+  },
+  removeBtn: {
+    height: 28,
+    paddingHorizontal: 11,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   okBanner: {
     flexDirection: 'row',

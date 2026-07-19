@@ -162,6 +162,12 @@ export default function KanbanScreen() {
             <Text style={{ fontSize: 10, color: colors.textFaint }}>▾</Text>
           ) : null}
         </Pressable>
+        <View style={{ flex: 1 }} />
+        {projectId ? (
+          <Pressable style={styles.gearBtn} onPress={() => router.navigate(`/project/${projectId}/settings`)}>
+            <Text style={{ fontSize: 16, color: colors.textMid }}>⚙</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <View style={{ paddingHorizontal: 16, paddingTop: 12, backgroundColor: colors.card }}>
@@ -238,6 +244,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+  },
+  gearBtn: {
+    width: 36,
+    height: 36,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   search: {
     height: 38,
