@@ -17,7 +17,6 @@ import { QuestionBanner } from './QuestionBanner'
 import { QuestionsTab } from './QuestionsTab'
 import { SessionRail } from './SessionRail'
 import './TaskScreen.css'
-import { TermOverlay } from './TermOverlay'
 
 type TabId = 'questions' | 'overview' | 'docs' | 'journal' | 'messages'
 
@@ -42,7 +41,6 @@ export function TaskScreen() {
   const taskId = taskIdParam ? Number(taskIdParam) : undefined
 
   const [tab, setTab] = useState<TabId>('overview')
-  const [termSession, setTermSession] = useState<{ id: string; tmux_name: string } | null>(null)
 
   const { data: projects } = useProjects()
   const { data: task } = useTask(taskId)
@@ -158,13 +156,7 @@ export function TaskScreen() {
         </div>
       </div>
 
-      <SessionRail
-        orchestrator={orchestrator}
-        workers={workers}
-        onOpenTerm={(session) => setTermSession(session)}
-      />
-
-      {termSession && <TermOverlay session={termSession} onClose={() => setTermSession(null)} />}
+      <SessionRail orchestrator={orchestrator} workers={workers} />
     </div>
   )
 }

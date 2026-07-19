@@ -58,6 +58,16 @@ export function useProjects(): UseQueryResult<Project[]> {
   })
 }
 
+/** Single session by id (`GET /v1/sessions/{id}`) — used by the dedicated
+ * full-window terminal page, which only has the session id in its URL. */
+export function useSession(id?: string): UseQueryResult<Session> {
+  return useQuery({
+    queryKey: ['session', id],
+    queryFn: () => api.get<Session>(`/v1/sessions/${id}`),
+    enabled: id !== undefined && id !== '',
+  })
+}
+
 export function useSessions(filter?: SessionFilter): UseQueryResult<Session[]> {
   return useQuery({
     queryKey: ['sessions', filter ?? {}],

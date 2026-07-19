@@ -138,6 +138,18 @@ export const handlers = [
     return HttpResponse.json(result)
   }),
 
+  http.get('/v1/sessions/:id', ({ params }) => {
+    const id = params.id as string
+    const session = sessionsState.find((s) => s.id === id)
+    if (!session) {
+      return HttpResponse.json(
+        { error: { code: 'not_found', message: `session ${id} not found` } },
+        { status: 404 },
+      )
+    }
+    return HttpResponse.json(session)
+  }),
+
   http.get('/v1/repos', () => HttpResponse.json(reposState)),
 
   http.get('/v1/system', () => HttpResponse.json(systemInfo)),

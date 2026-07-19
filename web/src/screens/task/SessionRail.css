@@ -50,6 +50,10 @@
 
 .session-rail__term-btn {
   flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
   height: 30px;
   background: var(--text);
   color: var(--surface);
@@ -153,6 +157,10 @@
 }
 .session-rail__worker-term {
   flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
   height: 28px;
   background: var(--surface-3);
   border: 1px solid var(--border);

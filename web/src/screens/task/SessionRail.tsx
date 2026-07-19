@@ -2,18 +2,23 @@
 // orchestrator session plus its worker sessions, each with term/attach/kill
 // actions. Errored workers get a "restore" action instead of relying on
 // kill alone (`POST /v1/sessions/{id}/restore`, phase 4).
+//
+// «▣ term» opens the dedicated full-window terminal page (/term/:id) in a
+// NEW TAB — a plain anchor with target="_blank" rather than the in-page
+// TermOverlay (which is kept around in TermOverlay.tsx but no longer
+// wired to these buttons).
 
 import { useEffect, useState } from 'react'
 import { Badge, type BadgeTone } from '../../components/Badge'
 import { Dot, type DotState } from '../../components/Dot'
 import { useKillSession, useRestoreSession } from '../../lib/queries'
 import type { Session } from '../../lib/types'
+import { termPagePath } from '../term/TermScreen'
 import './SessionRail.css'
 
 export interface SessionRailProps {
   orchestrator?: Session
   workers: Session[]
-  onOpenTerm: (session: { id: string; tmux_name: string }) => void
 }
 
 const COPY_FEEDBACK_MS = 2500
@@ -80,7 +85,7 @@ function useCopyAttach() {
   return { copiedId, copy }
 }
 
-export function SessionRail({ orchestrator, workers, onOpenTerm }: SessionRailProps) {
+export function SessionRail({ orchestrator, workers }: SessionRailProps) {
   const kill = useKillSession()
   const restore = useRestoreSession()
   const { copiedId, copy } = useCopyAttach()
@@ -104,13 +109,14 @@ export function SessionRail({ orchestrator, workers, onOpenTerm }: SessionRailPr
           </div>
           <div className="session-rail__orch-name">{orchestrator.tmux_name}</div>
           <div className="session-rail__orch-actions">
-            <button
-              type="button"
+            <a
               className="session-rail__term-btn"
-              onClick={() => onOpenTerm({ id: orchestrator.id, tmux_name: orchestrator.tmux_name })}
+              href={termPagePath(orchestrator.id)}
+              target="_blank"
+              rel="noopener noreferrer"
             >
               ▣ term
-            </button>
+            </a>
             <button type="button" className="session-rail__attach-btn" onClick={() => copy(orchestrator)}>
               attach ⧉
             </button>
@@ -142,13 +148,14 @@ export function SessionRail({ orchestrator, workers, onOpenTerm }: SessionRailPr
                 <span className={`session-rail__pr ${pr.tone}`}>{pr.text}</span>
               </div>
               <div className="session-rail__worker-actions">
-                <button
-                  type="button"
+                <a
                   className="session-rail__worker-term"
-                  onClick={() => onOpenTerm({ id: w.id, tmux_name: w.tmux_name })}
+                  href={termPagePath(w.id)}
+                  target="_blank"
+                  rel="noopener noreferrer"
                 >
                   ▣ term
-                </button>
+                </a>
                 <button type="button" className="session-rail__worker-attach" onClick={() => copy(w)}>
                   ⧉
                 </button>

@@ -1,0 +1,105 @@
+/* ---------- TermScreen (/term/:sessionId, full-window terminal page) ---------- */
+.term-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--dark-surface, #161618);
+  /* The terminal must never push the page into horizontal scroll; xterm's
+   * canvas is clipped by its own container (see .term-panel__xterm). */
+  overflow: hidden;
+}
+.term-screen__header {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 14px;
+  background: var(--dark-header, #1f1f22);
+  border-bottom: 1px solid #000;
+  flex: none;
+}
+.term-screen__back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: var(--radius-btn-sm, 6px);
+  background: none;
+  border: 1px solid #3a3a3f;
+  color: var(--text-4, #a1a1aa);
+  font: 600 11.5px var(--font-ui, sans-serif);
+  cursor: pointer;
+}
+.term-screen__back:hover {
+  color: var(--dark-text, #d4d4d8);
+  border-color: #4a4a50;
+}
+.term-screen__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ok, #16a34a);
+  flex: none;
+}
+.term-screen__name {
+  font: 600 13.5px var(--font-mono, monospace);
+  color: var(--dark-text-2, #e4e4e7);
+}
+.term-screen__meta {
+  font: 11.5px var(--font-mono, monospace);
+  color: var(--text-3, #71717a);
+}
+.term-screen__spacer {
+  flex: 1;
+}
+.term-screen__geometry {
+  font: 11.5px var(--font-mono, monospace);
+  color: var(--text-3, #71717a);
+}
+.term-screen__fontsize {
+  display: flex;
+  gap: 2px;
+}
+.term-screen__fontsize-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-btn-sm, 6px);
+  background: none;
+  border: 1px solid #3a3a3f;
+  color: var(--text-4, #a1a1aa);
+  font: 600 11px var(--font-mono, monospace);
+  cursor: pointer;
+}
+.term-screen__fontsize-btn:hover:not(:disabled) {
+  color: var(--dark-text, #d4d4d8);
+  border-color: #4a4a50;
+}
+.term-screen__fontsize-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.term-screen__attach {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: var(--radius-btn-sm, 6px);
+  background: #2a2a2e;
+  border: 1px solid #3a3a3f;
+  color: var(--dark-text, #d4d4d8);
+  font: 600 11.5px var(--font-ui, sans-serif);
+  cursor: pointer;
+}
+.term-screen__copied {
+  position: absolute;
+  top: 52px;
+  right: 18px;
+  font: 11px var(--font-mono, monospace);
+  color: var(--ok, #16a34a);
+  z-index: 1;
+}

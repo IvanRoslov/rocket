@@ -16,6 +16,7 @@ import { api } from '../../lib/api'
 import { formatBytes, formatUptime } from '../../lib/format'
 import { useKillSession, useSessions, useSystem, useSystemCleanup } from '../../lib/queries'
 import type { Message, Session, TmuxEntry } from '../../lib/types'
+import { termPagePath } from '../term/TermScreen'
 import './system.css'
 
 const stateTone: Record<string, BadgeTone> = {
@@ -240,6 +241,16 @@ export function SystemScreen() {
               <span className="session-row__agent">{row.agent}</span>
               <Badge tone={stateBadgeTone(row.state)}>{row.state}</Badge>
               <div className="session-row__actions">
+                {row.session && (
+                  <a
+                    className="session-row__term"
+                    href={termPagePath(row.session.id)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    ▣ term
+                  </a>
+                )}
                 {row.session && (row.state === 'running' || row.state === 'spawning') && (
                   <Button variant="danger" size="sm" onClick={() => setKillTarget(row.session)}>
                     kill
