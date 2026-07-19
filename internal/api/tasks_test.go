@@ -1062,6 +1062,36 @@ func TestPatchTaskReviewForceBypasses(t *testing.T) {
 	}
 }
 
+func TestPatchTaskReviewForceWithOne(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+	orchSess := addTestSession(t, d, "orch-1", "orchestrator", "proj1")
+	addTestWorkerSession(t, d, "worker-1", "proj1", orchSess.ID)
+
+	rootID, err := d.Store.AddTask(store.Task{Title: "Root", ProjectID: "proj1", SessionID: orchSess.ID})
+	if err != nil {
+		t.Fatalf("AddTask root: %v", err)
+	}
+	if _, err := d.Store.AddTask(store.Task{Title: "Sub", ProjectID: "proj1", ParentID: rootID}); err != nil {
+		t.Fatalf("AddTask sub: %v", err)
+	}
+
+	// Test that ParseBool accepts "1" as a valid true value
+	resp := patchJSON(t, srv.URL+"/v1/tasks/"+itoa(rootID)+"?force=1", map[string]any{"status": "review"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	root, err := d.Store.GetTask(rootID)
+	if err != nil {
+		t.Fatalf("GetTask root: %v", err)
+	}
+	if root.Status != "review" {
+		t.Errorf("root status = %q, want review", root.Status)
+	}
+}
+
 func TestPatchTaskReviewCleanStatePasses(t *testing.T) {
 	d := tasksTestDeps(t)
 	srv := newTestServer(t, d)

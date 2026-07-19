@@ -564,20 +564,28 @@ func handlePatchTask(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
-	if req.Status != nil && *req.Status == "review" && task.ParentID == 0 && r.URL.Query().Get("force") != "true" {
-		openSubtasks, err := openSubtaskIDs(d, task.ID)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
+	if req.Status != nil && *req.Status == "review" && task.ParentID == 0 {
+		force := false
+		if v := r.URL.Query().Get("force"); v != "" {
+			if b, err := strconv.ParseBool(v); err == nil {
+				force = b
+			}
 		}
-		liveWorkers, err := liveWorkerSessionIDs(d, task.SessionID)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
-		}
-		if len(openSubtasks) > 0 || len(liveWorkers) > 0 {
-			writeReviewBlocked(w, openSubtasks, liveWorkers)
-			return
+		if !force {
+			openSubtasks, err := openSubtaskIDs(d, task.ID)
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+				return
+			}
+			liveWorkers, err := liveWorkerSessionIDs(d, task.SessionID)
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+				return
+			}
+			if len(openSubtasks) > 0 || len(liveWorkers) > 0 {
+				writeReviewBlocked(w, openSubtasks, liveWorkers)
+				return
+			}
 		}
 	}
 
