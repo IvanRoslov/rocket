@@ -4,7 +4,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useDeleteProject, useProjects, useUpdateProject } from '../../../src/api/queries'
 import { RepoPicker } from '../../../src/components/RepoPicker'
-import { Card, MonoText } from '../../../src/components/ui'
+import { BackButton, Card, MonoText } from '../../../src/components/ui'
 import { useServers } from '../../../src/servers/ServerContext'
 import { colors, radius } from '../../../src/theme'
 
@@ -62,9 +62,7 @@ export default function ProjectSettingsScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.page }} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()}>
-          <Text style={{ fontSize: 20, color: colors.textDim }}>‹</Text>
-        </Pressable>
+        <BackButton onPress={() => router.back()} />
         <Text style={{ fontSize: 17, fontWeight: '700', letterSpacing: -0.2 }}>Project · {project.name}</Text>
       </View>
 

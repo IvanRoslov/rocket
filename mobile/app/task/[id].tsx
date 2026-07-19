@@ -13,7 +13,7 @@ import {
   TextInput,
   View,
 } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
   useCancelTask,
   useKillSession,
@@ -34,7 +34,7 @@ import { ActionSheet } from '../../src/components/ActionSheet'
 import { BottomSheet } from '../../src/components/BottomSheet'
 import { useToast } from '../../src/components/Toast'
 import type { Question, Session, TaskLogKind, TaskStatus } from '../../src/api/types'
-import { Badge, Card, ChipTabs, Dot, EmptyState, GhostButton, MonoText, PrimaryButton } from '../../src/components/ui'
+import { BackButton, Badge, Card, ChipTabs, Dot, EmptyState, GhostButton, MonoText, PrimaryButton } from '../../src/components/ui'
 import { ago, sessionBadge, sessionDot } from '../../src/lib/format'
 import { colors, mono, radius } from '../../src/theme'
 
@@ -328,6 +328,7 @@ export default function TaskScreen() {
   const [msgText, setMsgText] = useState('')
   const [sheetOpen, setSheetOpen] = useState(false)
   const [taskMenu, setTaskMenu] = useState(false)
+  const insets = useSafeAreaInsets()
   const move = useMoveTask()
   const cancel = useCancelTask()
   const toast = useToast()
@@ -362,9 +363,7 @@ export default function TaskScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.page }} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()}>
-          <Text style={{ fontSize: 20, color: colors.textDim }}>‹</Text>
-        </Pressable>
+        <BackButton onPress={() => router.back()} />
         <MonoText style={{ fontSize: 13, fontWeight: '600', color: colors.textFaint }}>#{t.id}</MonoText>
         <Text style={styles.headerTitle} numberOfLines={1}>
           {t.title}
@@ -401,7 +400,7 @@ export default function TaskScreen() {
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
-          contentContainerStyle={{ paddingBottom: hasSessions ? 90 : 24 }}
+          contentContainerStyle={{ paddingBottom: hasSessions ? 90 + insets.bottom : 24 }}
           refreshControl={
             <RefreshControl
               refreshing={false}
@@ -590,7 +589,10 @@ export default function TaskScreen() {
       </KeyboardAvoidingView>
 
       {hasSessions ? (
-        <Pressable style={styles.sessionsBar} onPress={() => setSheetOpen(true)}>
+        <Pressable
+          style={[styles.sessionsBar, { bottom: Math.max(20, insets.bottom + 12) }]}
+          onPress={() => setSheetOpen(true)}
+        >
           <Dot color={liveCount > 0 ? '#22c55e' : colors.slate} size={8} />
           <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>
             Sessions · {orch ? '1 orch' : '0 orch'}

@@ -1,6 +1,15 @@
 import { Pressable, ScrollView, StyleSheet, Text, View, type ViewStyle } from 'react-native'
 import { colors, mono, radius } from '../theme'
 
+/** Header back arrow with a finger-sized touch target. */
+export function BackButton({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} hitSlop={10} style={styles.backBtn}>
+      <Text style={{ fontSize: 24, lineHeight: 26, color: colors.textDim }}>‹</Text>
+    </Pressable>
+  )
+}
+
 export function Dot({ color, size = 8 }: { color: string; size?: number }) {
   return <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color }} />
 }
@@ -143,6 +152,13 @@ export function EmptyState({ text }: { text: string }) {
 }
 
 const styles = StyleSheet.create({
+  backBtn: {
+    width: 44,
+    height: 44,
+    marginLeft: -12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   card: {
     backgroundColor: colors.card,
     borderWidth: 1,

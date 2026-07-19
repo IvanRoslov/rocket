@@ -25,7 +25,7 @@ import { BottomSheet } from '../../src/components/BottomSheet'
 import { ConnectionBanner } from '../../src/components/ConnectionBanner'
 import { useToast } from '../../src/components/Toast'
 import type { Task, TaskStatus } from '../../src/api/types'
-import { Badge, Card, ChipTabs, Dot, EmptyState, GhostButton, MonoText, PrimaryButton } from '../../src/components/ui'
+import { BackButton, Badge, Card, ChipTabs, Dot, EmptyState, GhostButton, MonoText, PrimaryButton } from '../../src/components/ui'
 import { sessionDot } from '../../src/lib/format'
 import { useServers } from '../../src/servers/ServerContext'
 import { colors, mono, radius } from '../../src/theme'
@@ -174,9 +174,7 @@ export default function KanbanScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.page }} edges={['top']}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.navigate('/(tabs)')}>
-          <Text style={{ fontSize: 20, color: colors.textDim }}>‹</Text>
-        </Pressable>
+        <BackButton onPress={() => router.navigate('/(tabs)')} />
         <Pressable style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }} onPress={nextProject}>
           <Dot color={(project?.live_sessions ?? 0) > 0 ? colors.green : colors.slate} size={8} />
           <Text style={{ fontSize: 17, fontWeight: '700', letterSpacing: -0.2 }}>

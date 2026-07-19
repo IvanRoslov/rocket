@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useCreateProject } from '../../src/api/queries'
 import { RepoPicker } from '../../src/components/RepoPicker'
-import { Card, GhostButton, MonoText, PrimaryButton } from '../../src/components/ui'
+import { BackButton, Card, GhostButton, MonoText, PrimaryButton } from '../../src/components/ui'
 import { useServers } from '../../src/servers/ServerContext'
 import { colors, radius } from '../../src/theme'
 
@@ -40,9 +40,7 @@ export default function NewProjectScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.page }} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()}>
-          <Text style={{ fontSize: 20, color: colors.textDim }}>‹</Text>
-        </Pressable>
+        <BackButton onPress={() => router.back()} />
         <Text style={{ fontSize: 17, fontWeight: '700', letterSpacing: -0.2 }}>New project</Text>
         <View style={{ flex: 1 }} />
         <Text style={{ fontSize: 12, color: colors.textFaint }}>
