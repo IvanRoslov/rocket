@@ -157,6 +157,21 @@
 .session-row__term:hover {
   border-color: var(--border-hover);
 }
+.session-row__chat {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  background: var(--surface-3, var(--surface));
+  border: 1px solid var(--border);
+  font: 600 11.5px var(--font-ui);
+  color: var(--text);
+  text-decoration: none;
+}
+.session-row__chat:hover {
+  border-color: var(--border-hover);
+}
 
 /* ---------- Queue panel ---------- */
 .queue-tiles {

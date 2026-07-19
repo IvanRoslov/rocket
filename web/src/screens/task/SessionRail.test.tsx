@@ -41,3 +41,23 @@ describe('SessionRail term links', () => {
     }
   })
 })
+
+describe('SessionRail chat links', () => {
+  it('opens the orchestrator chat page in a new tab', () => {
+    const { orchestrator } = renderRail()
+    const links = screen.getAllByRole('link', { name: /chat/i })
+    const orchLink = links[0]
+    expect(orchLink).toHaveAttribute('href', `/chat/${orchestrator.id}`)
+    expect(orchLink).toHaveAttribute('target', '_blank')
+    expect(orchLink).toHaveAttribute('rel', expect.stringContaining('noopener'))
+  })
+
+  it('links every worker to its own chat page', () => {
+    const { workers } = renderRail()
+    const links = screen.getAllByRole('link', { name: /chat/i })
+    expect(links).toHaveLength(1 + workers.length)
+    for (const w of workers) {
+      expect(links.some((l) => l.getAttribute('href') === `/chat/${w.id}`)).toBe(true)
+    }
+  })
+})

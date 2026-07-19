@@ -17,6 +17,9 @@ export const EVENT_TYPES = [
   'session.activity_changed',
   'session.killed',
   'session.restored',
+  // Pure ping — carries no `data` (docs/13-chat.md); consumers must re-fetch
+  // the chat feed by cursor rather than expect a payload here.
+  'session.chat_updated',
   'message.queued',
   'message.delivered',
   'message.failed',

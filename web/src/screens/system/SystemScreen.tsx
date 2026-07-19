@@ -16,6 +16,7 @@ import { api } from '../../lib/api'
 import { formatBytes, formatUptime } from '../../lib/format'
 import { useKillSession, useSessions, useSystem, useSystemCleanup } from '../../lib/queries'
 import type { Message, Session, TmuxEntry } from '../../lib/types'
+import { chatPagePath } from '../chat/ChatScreen'
 import { termPagePath } from '../term/TermScreen'
 import './system.css'
 
@@ -249,6 +250,16 @@ export function SystemScreen() {
                     rel="noopener noreferrer"
                   >
                     ▣ term
+                  </a>
+                )}
+                {row.session && (
+                  <a
+                    className="session-row__chat"
+                    href={chatPagePath(row.session.id)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    💬 chat
                   </a>
                 )}
                 {row.session && (row.state === 'running' || row.state === 'spawning') && (

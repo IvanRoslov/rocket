@@ -1,0 +1,189 @@
+/* ---------- ChatScreen (/chat/:sessionId, full-window session chat) ---------- */
+/* Light dashboard theme (this is a chat, not a terminal) — reuses
+ * MessagesTab's bubble language, laid out full-window tuned for tablet. */
+
+.chat-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.chat-screen__header {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.chat-screen__back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: var(--radius-btn-sm);
+  background: none;
+  border: 1px solid var(--border-hover);
+  color: var(--text-3);
+  font: 600 11.5px var(--font-ui);
+  cursor: pointer;
+}
+.chat-screen__back:hover {
+  color: var(--text);
+  border-color: var(--text-4);
+}
+.chat-screen__name {
+  font: 600 13.5px var(--font-mono);
+  color: var(--text);
+}
+.chat-screen__spacer {
+  flex: 1;
+}
+.chat-screen__attach {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: var(--radius-btn-sm);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font: 600 11.5px var(--font-ui);
+  cursor: pointer;
+}
+.chat-screen__copied {
+  position: absolute;
+  top: 52px;
+  right: 18px;
+  font: 11px var(--font-mono);
+  color: var(--ok);
+  z-index: 1;
+}
+
+.chat-screen__feed {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.chat-screen__empty {
+  font: 13.5px var(--font-ui);
+  color: var(--text-4);
+  margin: auto;
+}
+
+.chat-screen__row {
+  display: flex;
+  justify-content: flex-start;
+}
+.chat-screen__row--own {
+  justify-content: flex-end;
+}
+.chat-screen__bubble {
+  max-width: 72%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 9px 12px;
+}
+.chat-screen__bubble--own {
+  background: var(--accent-selected-bg);
+  border-color: var(--accent-selected-border);
+}
+.chat-screen__body {
+  font: 13.5px/1.5 var(--font-ui);
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.chat-screen__when {
+  font: 10.5px var(--font-ui);
+  color: var(--text-4);
+  margin-top: 3px;
+}
+.chat-screen__status {
+  font: 10.5px var(--font-ui);
+  margin-top: 3px;
+}
+.chat-screen__status--delivered {
+  color: var(--ok);
+}
+.chat-screen__status--queued {
+  color: var(--warn-text);
+}
+.chat-screen__status--failed {
+  color: var(--err-text);
+}
+
+.chat-screen__tool-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 4px;
+  font: 12px var(--font-mono);
+  color: var(--text-4);
+}
+.chat-screen__tool-badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--radius-badge-sm);
+  background: var(--surface-3);
+  color: var(--text-3);
+  font: 600 10.5px var(--font-mono);
+}
+.chat-screen__tool-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-screen__composer {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  flex: none;
+  padding: 10px 14px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.chat-screen__composer textarea {
+  flex: 1;
+  resize: none;
+  min-height: 40px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font: 13.5px var(--font-ui);
+  outline: none;
+  background: var(--surface-3);
+}
+.chat-screen__composer button {
+  height: 40px;
+  padding: 0 16px;
+  background: var(--text);
+  color: var(--surface);
+  border: none;
+  border-radius: 10px;
+  font: 600 13px var(--font-ui);
+  cursor: pointer;
+}
+.chat-screen__composer button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.chat-screen__readonly {
+  flex: 1;
+  padding: 10px 4px;
+  font: 12.5px var(--font-ui);
+  color: var(--text-4);
+  text-align: center;
+}

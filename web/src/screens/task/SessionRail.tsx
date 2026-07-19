@@ -13,6 +13,7 @@ import { Badge, type BadgeTone } from '../../components/Badge'
 import { Dot, type DotState } from '../../components/Dot'
 import { useKillSession, useRestoreSession } from '../../lib/queries'
 import type { Session } from '../../lib/types'
+import { chatPagePath } from '../chat/ChatScreen'
 import { termPagePath } from '../term/TermScreen'
 import './SessionRail.css'
 
@@ -117,6 +118,14 @@ export function SessionRail({ orchestrator, workers }: SessionRailProps) {
             >
               ▣ term
             </a>
+            <a
+              className="session-rail__chat-btn"
+              href={chatPagePath(orchestrator.id)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              💬 chat
+            </a>
             <button type="button" className="session-rail__attach-btn" onClick={() => copy(orchestrator)}>
               attach ⧉
             </button>
@@ -155,6 +164,14 @@ export function SessionRail({ orchestrator, workers }: SessionRailProps) {
                   rel="noopener noreferrer"
                 >
                   ▣ term
+                </a>
+                <a
+                  className="session-rail__worker-chat"
+                  href={chatPagePath(w.id)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  💬 chat
                 </a>
                 <button type="button" className="session-rail__worker-attach" onClick={() => copy(w)}>
                   ⧉

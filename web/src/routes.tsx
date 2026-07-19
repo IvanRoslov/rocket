@@ -1,5 +1,6 @@
 import { createBrowserRouter } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
+import { ChatScreen } from './screens/chat/ChatScreen'
 import { KanbanScreen } from './screens/kanban/KanbanScreen'
 import { ProjectsScreen } from './screens/projects/ProjectsScreen'
 import { SettingsScreen } from './screens/settings/SettingsScreen'
@@ -13,6 +14,9 @@ export const router = createBrowserRouter([
   // (no sidebar/topbar chrome): it's opened in its own tab from the
   // «▣ term» buttons and the terminal fills the whole viewport.
   { path: '/term/:sessionId', element: <TermScreen /> },
+  // Dedicated full-window chat page — same "own tab, outside AppShell"
+  // convention as /term, opened from the «💬 chat» buttons.
+  { path: '/chat/:sessionId', element: <ChatScreen /> },
   {
     element: <AppShell />,
     children: [

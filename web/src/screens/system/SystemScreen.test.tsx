@@ -190,6 +190,17 @@ describe('SystemScreen', () => {
     expect(handlerCalled).toBe(false)
   })
 
+  it('renders a chat link per session row alongside term', async () => {
+    renderScreen()
+
+    await screen.findByText('billing-v2-w1')
+    const row = screen.getByText('billing-v2-w1').closest('[data-testid="session-row"]') as HTMLElement
+    const chatLink = within(row).getByRole('link', { name: /chat/i })
+    expect(chatLink).toHaveAttribute('href', '/chat/s-billing-v2-w1')
+    expect(chatLink).toHaveAttribute('target', '_blank')
+    expect(within(row).getByRole('link', { name: /term/i })).toHaveAttribute('href', '/term/s-billing-v2-w1')
+  })
+
   it('kill modal checkbox default is unchecked', async () => {
     const user = userEvent.setup()
     renderScreen()

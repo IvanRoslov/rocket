@@ -6,6 +6,7 @@
 // a journal, and a message thread.
 
 import type {
+  ChatEntry,
   GithubRepo,
   Message,
   Project,
@@ -426,6 +427,30 @@ export const messages: Message[] = [
     created_at: NOW - 5 * MIN,
   },
 ]
+
+// Chat — internal/api/chat.go, docs/13-chat.md. One transcript per session
+// id, all three roles represented, matching the example response in the
+// spec doc (billing test failure -> trace -> Bash tool call -> fix found).
+export const chatEntries: Record<string, ChatEntry[]> = {
+  's-billing-v2-orch': [
+    { role: 'user', text: 'почему упал тест biling_test.go?', ts: NOW - 3 * HOUR },
+    { role: 'assistant', text: 'смотрю на трейс', ts: NOW - 3 * HOUR + 2 },
+    {
+      role: 'tool',
+      tool_name: 'Bash',
+      text: '{"command":"go test ./internal/billing/...","description":"Run billing tests"}',
+      ts: NOW - 3 * HOUR + 3,
+    },
+    { role: 'assistant', text: 'нашёл: гонка в billing.Reconcile, фикс отправлю', ts: NOW - 3 * HOUR + 10 },
+  ],
+  's-billing-v2-w1': [
+    { role: 'user', text: 'начни со схемы billing_accounts', ts: NOW - 20 * MIN },
+    { role: 'assistant', text: 'ок, читаю текущую миграцию', ts: NOW - 19 * MIN },
+  ],
+  's-billing-v2-w3': [
+    { role: 'assistant', text: 'миграция упала на шаге 3, воркер завершён', ts: NOW - 90 * MIN },
+  ],
+}
 
 // System — internal/api/system.go. Mirrors docs/design/System.dc.html:
 // three live sessions reconciled with the store (orchestrator + 2 workers,

@@ -88,6 +88,47 @@ export interface Message {
 }
 
 // ---------------------------------------------------------------------------
+// Chat — internal/api/chat.go, docs/13-chat.md
+// ---------------------------------------------------------------------------
+
+export type ChatRole = 'user' | 'assistant' | 'tool'
+
+/**
+ * One entry in a session's chat feed (`GET /v1/sessions/{id}/chat`) — a
+ * mirror of the agent's native transcript, not a stored entity. `tool_name`
+ * is present only for `role: "tool"`; `text` for tool entries is a
+ * caller-truncated (<=120 rune) single-line digest of the tool's *input*,
+ * not its output. `ts` is unix-seconds, `0` when the transcript line had no
+ * timestamp — clients should hide the time in that case rather than render
+ * "1970".
+ */
+export interface ChatEntry {
+  role: ChatRole
+  text: string
+  tool_name?: string
+  ts: number
+}
+
+/**
+ * Minimal session card embedded in the chat response (`sessionRef` in
+ * internal/api/chat.go) so the chat screen doesn't need a separate
+ * `GET /v1/sessions/{id}` just for its header state/activity dot.
+ */
+export interface ChatSessionRef {
+  id: string
+  kind: string
+  state: SessionState
+  activity?: SessionActivity
+}
+
+export interface ChatResponse {
+  entries: ChatEntry[]
+  /** Opaque — store and echo back verbatim as `cursor` on the next incremental request. */
+  next_cursor: string
+  session: ChatSessionRef
+}
+
+// ---------------------------------------------------------------------------
 // Events — internal/api/events.go
 // ---------------------------------------------------------------------------
 

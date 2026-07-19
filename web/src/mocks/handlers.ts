@@ -7,6 +7,7 @@
 
 import { http, HttpResponse } from 'msw'
 import type {
+  ChatEntry,
   Project,
   Question,
   QuestionMessage,
@@ -18,6 +19,7 @@ import type {
   TaskStatus,
 } from '../lib/types'
 import {
+  chatEntries,
   githubRepos,
   messages,
   projects,
@@ -63,6 +65,23 @@ let sessionsState = sessions.map((s) => ({ ...s }))
 
 export function resetSessions(): void {
   sessionsState = sessions.map((s) => ({ ...s }))
+}
+
+// Mutable copy of per-session chat transcripts (internal/api/chat.go). Tests
+// simulating new agent/transcript activity should call `appendChatEntry` and
+// reset via `resetChatEntries()` in `afterEach`.
+let chatEntriesState: Record<string, ChatEntry[]> = Object.fromEntries(
+  Object.entries(chatEntries).map(([id, entries]) => [id, entries.map((e) => ({ ...e }))]),
+)
+
+export function resetChatEntries(): void {
+  chatEntriesState = Object.fromEntries(
+    Object.entries(chatEntries).map(([id, entries]) => [id, entries.map((e) => ({ ...e }))]),
+  )
+}
+
+export function appendChatEntry(sessionId: string, entry: ChatEntry): void {
+  chatEntriesState[sessionId] = [...(chatEntriesState[sessionId] ?? []), entry]
 }
 
 // Mutable copy of tasks + subtasks, written by task create/status/cancel
@@ -148,6 +167,48 @@ export const handlers = [
       )
     }
     return HttpResponse.json(session)
+  }),
+
+  // GET /v1/sessions/:id/chat — internal/api/chat.go, docs/13-chat.md.
+  // Fixture cursor semantics: an opaque decimal offset into the session's
+  // fixture transcript array. cursor="" is tail semantics (last `limit`
+  // entries); cursor="<N>" returns everything at/after index N, uncapped —
+  // matching the real handler's "incremental reads aren't sliced" contract.
+  http.get('/v1/sessions/:id/chat', ({ params, request }) => {
+    const id = params.id as string
+    const session = sessionsState.find((s) => s.id === id)
+    if (!session) {
+      return HttpResponse.json(
+        { error: { code: 'session_not_found', message: `session ${id} not found` } },
+        { status: 404 },
+      )
+    }
+    const url = new URL(request.url)
+    const cursorParam = url.searchParams.get('cursor') ?? ''
+    const limitParam = url.searchParams.get('limit')
+    const limit = limitParam ? Number(limitParam) : 200
+    const all = chatEntriesState[id] ?? []
+
+    let start: number
+    let entries: ChatEntry[]
+    if (cursorParam) {
+      start = Number(cursorParam) || 0
+      entries = all.slice(start)
+    } else {
+      start = Math.max(0, all.length - limit)
+      entries = all.slice(start)
+    }
+
+    return HttpResponse.json({
+      entries,
+      next_cursor: all.length > 0 ? String(start + entries.length) : '',
+      session: {
+        id: session.id,
+        kind: session.kind,
+        state: session.state,
+        activity: session.activity,
+      },
+    })
   }),
 
   http.get('/v1/repos', () => HttpResponse.json(reposState)),

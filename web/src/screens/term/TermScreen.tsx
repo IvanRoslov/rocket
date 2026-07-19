@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { TermChatSwitch } from '../../components/TermChatSwitch'
 import { TermPanel } from '../../components/TermPanel'
 import { useSession } from '../../lib/queries'
 import { useTermFontSize } from '../../lib/termFontSize'
@@ -76,6 +77,9 @@ export function TermScreen() {
         <span className="term-screen__name">{name}</span>
         <span className="term-screen__meta">tmux · live attach</span>
         <div className="term-screen__spacer" />
+        <div className="term-screen__switch">
+          <TermChatSwitch sessionId={sessionId} active="term" />
+        </div>
         <span className="term-screen__geometry">
           {geometry ? `${geometry.cols}×${geometry.rows}` : '80×24'}
         </span>
