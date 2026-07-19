@@ -15,6 +15,7 @@ import (
 
 	"github.com/IvanRoslov/rocket/internal/agent"
 	_ "github.com/IvanRoslov/rocket/internal/agent/claudecode" // register the claude-code agent
+	_ "github.com/IvanRoslov/rocket/internal/agent/codex"      // register the codex agent
 	"github.com/IvanRoslov/rocket/internal/api"
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
