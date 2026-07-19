@@ -218,7 +218,7 @@ export const handlers = [
     if (body.parent_id !== undefined) {
       const parent = tasksState.find((t) => t.id === body.parent_id)
       if (!parent) {
-        return HttpResponse.json({ error: { code: 'task_not_found', message: `task ${body.parent_id} not found` } }, { status: 400 })
+        return HttpResponse.json({ error: { code: 'task_not_found', message: `task ${body.parent_id} not found` } }, { status: 404 })
       }
       if (parent.parent_id !== undefined) {
         return HttpResponse.json(
