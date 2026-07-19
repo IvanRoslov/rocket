@@ -98,6 +98,11 @@ export interface SystemInfo {
   log_tail: string[]
 }
 
+export interface SystemCleanupResult {
+  killed_tmux: string[]
+  removed_worktrees: string[]
+}
+
 export type TaskStatus = 'backlog' | 'in_progress' | 'review' | 'done' | 'cancelled'
 
 export interface Task {

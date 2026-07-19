@@ -11,10 +11,12 @@ import type {
   Session,
   Settings,
   SystemInfo,
+  SystemCleanupResult,
   Task,
   TaskDetail,
   TaskDoc,
   TaskLogEntry,
+  TaskStatus,
 } from './types'
 
 /** Base URL of the active server; components behind the servers screen can assume it exists. */
@@ -217,6 +219,89 @@ export function useQuestionAnswer() {
   return useMutation({
     mutationFn: (p: { id: number; body: string }) =>
       api.post(baseUrl, `/v1/questions/${p.id}/answer`, { body: p.body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'task'] }),
+  })
+}
+
+export function useKillSession() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { id: string; cleanup?: boolean }) =>
+      api.post(baseUrl, `/v1/sessions/${p.id}/kill${p.cleanup ? '?cleanup=true' : ''}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'sessions'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'system'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'task'] })
+    },
+  })
+}
+
+export function useRestoreSession() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.post<Session>(baseUrl, `/v1/sessions/${id}/restore`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'sessions'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'system'] })
+    },
+  })
+}
+
+export function useCancelTask() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.post<Task>(baseUrl, `/v1/tasks/${id}/cancel`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'tasks'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'task'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'sessions'] })
+    },
+  })
+}
+
+export function useMoveTask() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { id: number; status: TaskStatus }) =>
+      api.patch<Task>(baseUrl, `/v1/tasks/${p.id}`, { status: p.status }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'tasks'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'task'] })
+    },
+  })
+}
+
+export function useUpdateTask() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { id: number; title?: string; description?: string }) =>
+      api.patch<Task>(baseUrl, `/v1/tasks/${p.id}`, { title: p.title, description: p.description }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'tasks'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'task'] })
+    },
+  })
+}
+
+export function useSystemCleanup() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.post<SystemCleanupResult>(baseUrl, '/v1/system/cleanup'),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'system'] }),
+  })
+}
+
+export function useQuestionDismiss() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.post(baseUrl, `/v1/questions/${id}/answer`, { dismiss: true }),
     onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'task'] }),
   })
 }
