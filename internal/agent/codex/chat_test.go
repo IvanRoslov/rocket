@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -403,6 +404,42 @@ func TestTranscriptTailRotatesToNewerFile(t *testing.T) {
 	}
 	if !strings.Contains(cursor2, "rollout-new") {
 		t.Errorf("cursor2 = %q, want pointing at rollout-new", cursor2)
+	}
+}
+
+// TestTranscriptTailCursorOutsideSessionsRootFallsBackToNewest covers
+// finding 1 of the final-review fix brief: a client-supplied cursor whose
+// path points outside $CODEX_HOME/sessions/ must be treated as invalid
+// (same fallback as an empty/malformed cursor), not read.
+func TestTranscriptTailCursorOutsideSessionsRootFallsBackToNewest(t *testing.T) {
+	home := withCodexHome(t)
+	wt := t.TempDir()
+	now := time.Now()
+
+	writeSessionFile(t, home, now, "rollout-1", wt, []string{
+		`{"type":"event_msg","timestamp":"2026-07-19T08:28:06.210Z","payload":{"type":"user_message","message":"legit"}}`,
+	}, now)
+
+	// A file outside $CODEX_HOME/sessions/ that an untrusted cursor could
+	// point at.
+	outsideDir := t.TempDir()
+	outsidePath := filepath.Join(outsideDir, "secret.jsonl")
+	if err := os.WriteFile(outsidePath, []byte(`{"type":"event_msg","timestamp":"x","payload":{"type":"user_message","message":"SECRET"}}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+
+	c := New()
+	entries, _, err := c.TranscriptTail(context.Background(), agent.ActivityRef{WorktreePath: wt}, outsidePath+":0")
+	if err != nil {
+		t.Fatalf("TranscriptTail() error = %v", err)
+	}
+	if len(entries) != 1 || entries[0].Text != "legit" {
+		t.Fatalf("entries = %+v, want fallback to the legit session (outside-root cursor must be rejected)", entries)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Text, "SECRET") {
+			t.Fatalf("entries leaked outside-file content: %+v", entries)
+		}
 	}
 }
 

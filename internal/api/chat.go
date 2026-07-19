@@ -45,13 +45,17 @@ func registerChatRoutes(mux *http.ServeMux, d Deps) {
 // handleSessionChat serves GET /v1/sessions/{id}/chat?cursor=&limit=.
 //
 // cursor=="" returns only the last `limit` entries of the transcript (tail
-// semantics), for the initial load; cursor!="" returns ALL entries the agent
-// reports past that cursor, unsliced — limit only applies to the
-// cursor=="" tail case. This is a deliberate simplification (see
+// semantics), for the initial load; cursor!="" normally returns ALL entries
+// the agent reports past that cursor, unsliced (see
 // docs/superpowers/specs/2026-07-19-session-chat-design.md and the task-3
 // binding resolutions): incremental cursor-based reads are expected to be
-// small by construction, so no further slicing/cursor-recomputation is
-// done for them.
+// small by construction, so no further slicing/cursor-recomputation is done
+// for them in the common case. However, the same `limit` cap is always
+// applied as a backstop regardless of cursor: an invalid/stale cursor (e.g.
+// the transcript file was deleted/rotated, or a client-supplied cursor the
+// adapter rejected as untrusted) makes the adapter fall back to reading
+// from byte 0 of the current transcript, which without this cap would
+// return the entire transcript history in one response.
 //
 // If the session's agent is unknown (e.g. a stale/removed adapter), this
 // responds 200 with an empty entries list rather than failing the request,
@@ -107,7 +111,7 @@ func handleSessionChat(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
-	if cursor == "" && len(entries) > limit {
+	if len(entries) > limit {
 		entries = entries[len(entries)-limit:]
 	}
 

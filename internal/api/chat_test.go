@@ -252,6 +252,44 @@ func TestChatLimitClamp(t *testing.T) {
 	}
 }
 
+// TestChatIncrementalInvalidCursorRespectsLimit covers finding 3 of the
+// final-review fix brief: an incremental request (cursor != "") whose
+// cursor is invalid (here: doesn't resolve to any real file, so the
+// claudecode adapter falls back to reading the newest transcript from byte
+// 0, i.e. the whole thing) must still be capped at `limit` entries by the
+// handler, not return the full transcript unsliced.
+func TestChatIncrementalInvalidCursorRespectsLimit(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", base)
+	wt := "/tmp/some/worktree"
+
+	writeChatTranscript(t, base, wt, 10)
+
+	d := chatTestDeps(t)
+	seedChatSession(t, d.Store, "sess1", wt)
+	srv := newTestServer(t, d)
+
+	badCursor := "/tmp/does/not/exist.jsonl:0"
+	resp := getJSON(t, srv.URL+"/v1/sessions/sess1/chat?limit=3&cursor="+url.QueryEscape(badCursor))
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var body struct {
+		Entries []chatEntryResponse `json:"entries"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Entries) != 3 {
+		t.Fatalf("len(entries) = %d, want 3 (capped at limit despite invalid cursor forcing a from-scratch read)", len(body.Entries))
+	}
+	if body.Entries[0].Text != "msg 7" || body.Entries[2].Text != "msg 9" {
+		t.Errorf("entries = %+v, want tail msg 7..msg 9", body.Entries)
+	}
+}
+
 func appendChatLine(t *testing.T, path, line string) {
 	t.Helper()
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)

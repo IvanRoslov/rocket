@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -223,17 +224,39 @@ func readChatEntriesFrom(path string, offset int64) ([]agent.ChatEntry, int64, e
 	return entries, pos, nil
 }
 
+// pathWithinDir reports whether path is contained within dir, after
+// cleaning both. Guards against a naive prefix check on unclean paths (e.g.
+// dir="/a/b" wrongly matching path="/a/bc") and against directory traversal
+// via "..". A path equal to dir itself is not "within" it. Same helper as
+// claudecode's (not shared: the two packages don't currently share any
+// non-agent-interface code, and this is a two-line pure function).
+func pathWithinDir(path, dir string) bool {
+	if dir == "" {
+		return false
+	}
+	rel, err := filepath.Rel(filepath.Clean(dir), filepath.Clean(path))
+	if err != nil {
+		return false
+	}
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return true
+}
+
 // resolveTailCursor decodes cursor (format "<path>:<offset>") into a
 // starting (path, offset) pair to read from. An empty cursor, a malformed
-// cursor, a cursor whose file no longer exists, or an offset beyond the
-// current file size (the file was truncated/replaced) all fall back to
-// starting from byte 0 of worktreePath's current newest matching session
-// file (same selection as Activity: findMatchingSession).
+// cursor, a cursor whose path falls outside the codex sessions root (
+// $CODEX_HOME/sessions/ — untrusted client input, see pathWithinDir and
+// sessionsRoot in activity.go), a cursor whose file no longer exists, or an
+// offset beyond the current file size (the file was truncated/replaced) all
+// fall back to starting from byte 0 of worktreePath's current newest
+// matching session file (same selection as Activity: findMatchingSession).
 func resolveTailCursor(worktreePath, cursor string) (string, int64, error) {
 	if cursor != "" {
 		if idx := strings.LastIndex(cursor, ":"); idx >= 0 {
 			p := cursor[:idx]
-			if off, err := strconv.ParseInt(cursor[idx+1:], 10, 64); err == nil {
+			if off, err := strconv.ParseInt(cursor[idx+1:], 10, 64); err == nil && pathWithinDir(p, sessionsRoot()) {
 				if info, statErr := os.Stat(p); statErr == nil && off <= info.Size() {
 					return p, off, nil
 				}

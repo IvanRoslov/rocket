@@ -323,6 +323,42 @@ func TestTranscriptTailRotatesToNewerFile(t *testing.T) {
 	}
 }
 
+// TestTranscriptTailCursorOutsideTranscriptDirFallsBackToNewest covers
+// finding 1 of the final-review fix brief: a client-supplied cursor whose
+// path points outside this ref's transcript directory must be treated as
+// invalid (same fallback as an empty/malformed cursor), not read.
+func TestTranscriptTailCursorOutsideTranscriptDirFallsBackToNewest(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", base)
+	wt := "/tmp/some/worktree"
+
+	writeTranscript(t, base, wt, "sess.jsonl", []string{
+		`{"type":"user","message":{"role":"user","content":"legit"}}`,
+	}, time.Now())
+
+	// A file outside the transcript directory that an untrusted cursor
+	// could point at.
+	outsideDir := t.TempDir()
+	outsidePath := filepath.Join(outsideDir, "secret.jsonl")
+	if err := os.WriteFile(outsidePath, []byte(`{"type":"user","message":{"role":"user","content":"SECRET"}}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+
+	cc := New()
+	entries, _, err := cc.TranscriptTail(context.Background(), agent.ActivityRef{WorktreePath: wt}, outsidePath+":0")
+	if err != nil {
+		t.Fatalf("TranscriptTail() error = %v", err)
+	}
+	if len(entries) != 1 || entries[0].Text != "legit" {
+		t.Fatalf("entries = %+v, want fallback to the legit transcript (outside-dir cursor must be rejected)", entries)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Text, "SECRET") {
+			t.Fatalf("entries leaked outside-file content: %+v", entries)
+		}
+	}
+}
+
 func TestTranscriptTailNoDirReturnsErrNoSignal(t *testing.T) {
 	base := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", base)
