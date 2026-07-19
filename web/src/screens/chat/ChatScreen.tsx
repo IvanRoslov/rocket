@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Markdown } from '../../components/Markdown'
 import { ApiError } from '../../lib/api'
+import { classifyUserEntry, fromEntryParts, systemEntryTitle } from '../../lib/classifyUserEntry'
 import { timeAgo } from '../../lib/format'
 import { useMessages, useSendMessage, useSession } from '../../lib/queries'
 import { useSessionChat } from '../../lib/useSessionChat'
@@ -86,7 +87,32 @@ function buildFeed(entries: ChatEntry[], optimistic: OptimisticMessage[]): FeedI
   const pending = optimistic.filter(
     (o) => o.largeFile || !entries.some((e) => e.role === 'user' && e.text === o.body),
   )
-  const items: FeedItem[] = entries.map((e, i) => ({ kind: 'entry', key: `e-${i}-${e.ts}`, entry: e }))
+  // The `[large message]` pointer entry that a largeFile-collapsed optimistic
+  // bubble already stands in for would otherwise render a second time as its
+  // own (system) row — hide that specific entry from the feed, but leave any
+  // other `[large message]`/`[task #...]` entries (e.g. loaded from history
+  // with no matching optimistic send) to render as collapsed system rows.
+  const consumed = new Set<number>()
+  for (const o of optimistic) {
+    if (!o.largeFile) continue
+    const createdS = o.createdAt / 1000
+    const idx = entries.findIndex(
+      (e, i) =>
+        !consumed.has(i) &&
+        e.role === 'user' &&
+        e.text.startsWith('[large message]') &&
+        e.ts >= createdS - LARGE_MESSAGE_MATCH_WINDOW_S &&
+        e.ts <= createdS + LARGE_MESSAGE_MATCH_WINDOW_S,
+    )
+    if (idx !== -1) consumed.add(idx)
+  }
+  const items: FeedItem[] = entries
+    .map((e, i) => ({ kind: 'entry' as const, key: `e-${i}-${e.ts}`, entry: e, idx: i }))
+    .filter((item) => !consumed.has(item.idx))
+    .map(({ idx, ...rest }) => {
+      void idx
+      return rest
+    })
   for (const o of pending) items.push({ kind: 'optimistic', key: `o-${o.localId}`, msg: o })
   return items
 }
@@ -113,6 +139,52 @@ function EntryBubble({ entry }: { entry: ChatEntry }) {
       <div className={own ? 'chat-screen__bubble chat-screen__bubble--own' : 'chat-screen__bubble'}>
         <div className="chat-screen__body">
           <Markdown compact>{entry.text}</Markdown>
+        </div>
+        {entry.ts > 0 && <div className="chat-screen__when">{timeAgo(entry.ts)}</div>}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Collapsed single-line plaque for a `role: "user"` entry that's actually a
+ * service inject (task-notification hooks, `<system-...>` reminders,
+ * `[large message]`/`[task #...]` pointers) rather than something the human
+ * typed. Collapsed by default; click reveals the raw text verbatim (no
+ * markdown — this is machine-formatted, not prose).
+ */
+function SystemRow({ entry }: { entry: ChatEntry }) {
+  const [expanded, setExpanded] = useState(false)
+  const title = systemEntryTitle(entry.text)
+  return (
+    <div className="chat-screen__system-row">
+      <button
+        type="button"
+        className="chat-screen__system-toggle"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <span className="chat-screen__system-icon" aria-hidden="true">
+          ⚙
+        </span>
+        <span className="chat-screen__system-title">{title || '(пусто)'}</span>
+      </button>
+      {expanded && <pre className="chat-screen__system-body">{entry.text}</pre>}
+    </div>
+  )
+}
+
+/** Left-aligned, neutrally-styled bubble for a `[from <session>]` queue inject from another agent. */
+function FromBubble({ entry }: { entry: ChatEntry }) {
+  const parts = fromEntryParts(entry.text)
+  const session = parts?.session ?? ''
+  const body = parts?.body ?? entry.text
+  return (
+    <div className="chat-screen__row">
+      <div className="chat-screen__bubble chat-screen__bubble--from">
+        <div className="chat-screen__from-badge">from {session}</div>
+        <div className="chat-screen__body">
+          <Markdown compact>{body}</Markdown>
         </div>
         {entry.ts > 0 && <div className="chat-screen__when">{timeAgo(entry.ts)}</div>}
       </div>
@@ -293,7 +365,7 @@ export function ChatScreen() {
         {session && <Dot state={dotState(session)} />}
         <span className="chat-screen__name">{name}</span>
         <div className="chat-screen__spacer" />
-        <TermChatSwitch sessionId={sessionId} active="chat" />
+        <TermChatSwitch sessionId={sessionId} active="chat" tone="light" />
         <button type="button" className="chat-screen__attach" onClick={handleCopyAttach}>
           attach ⧉
         </button>
@@ -305,17 +377,21 @@ export function ChatScreen() {
       <div className="chat-screen__feed" ref={feedRef} onScroll={handleScroll}>
         {loading && feed.length === 0 && <p className="chat-screen__empty">Loading…</p>}
         {!loading && feed.length === 0 && <p className="chat-screen__empty">No messages yet.</p>}
-        {feed.map((item) =>
-          item.kind === 'entry' ? (
-            item.entry.role === 'tool' ? (
-              <ToolRow key={item.key} entry={item.entry} />
-            ) : (
-              <EntryBubble key={item.key} entry={item.entry} />
-            )
-          ) : (
-            <OptimisticBubble key={item.key} msg={item.msg} />
-          ),
-        )}
+        {feed.map((item) => {
+          if (item.kind === 'optimistic') {
+            return <OptimisticBubble key={item.key} msg={item.msg} />
+          }
+          const { entry } = item
+          if (entry.role === 'tool') {
+            return <ToolRow key={item.key} entry={entry} />
+          }
+          if (entry.role === 'user') {
+            const kind = classifyUserEntry(entry.text)
+            if (kind === 'system') return <SystemRow key={item.key} entry={entry} />
+            if (kind === 'from') return <FromBubble key={item.key} entry={entry} />
+          }
+          return <EntryBubble key={item.key} entry={entry} />
+        })}
       </div>
 
       <div className="chat-screen__composer">

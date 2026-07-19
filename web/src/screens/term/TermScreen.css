@@ -56,18 +56,8 @@
 .term-screen__switch {
   flex: none;
 }
-.term-screen__switch .segmented {
-  background: #2a2a2e;
-  padding: 2px;
-}
-.term-screen__switch .segmented__option {
-  height: 26px;
-  color: var(--text-4, #a1a1aa);
-}
-.term-screen__switch .segmented__option--active {
-  background: #3a3a3f;
-  color: var(--dark-text, #d4d4d8);
-}
+/* Sizing/tone come from the shared .term-chat-switch/.segmented--dark uikit
+ * classes (components/uikit.css) — TermChatSwitch's tone="dark" prop. */
 .term-screen__geometry {
   font: 11.5px var(--font-mono, monospace);
   color: var(--text-3, #71717a);

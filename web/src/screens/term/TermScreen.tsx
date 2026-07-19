@@ -78,7 +78,7 @@ export function TermScreen() {
         <span className="term-screen__meta">tmux · live attach</span>
         <div className="term-screen__spacer" />
         <div className="term-screen__switch">
-          <TermChatSwitch sessionId={sessionId} active="term" />
+          <TermChatSwitch sessionId={sessionId} active="term" tone="dark" />
         </div>
         <span className="term-screen__geometry">
           {geometry ? `${geometry.cols}×${geometry.rows}` : '80×24'}

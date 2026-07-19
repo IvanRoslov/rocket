@@ -68,6 +68,11 @@
   --dark-text: #d4d4d8;
   --dark-text-2: #e4e4e7;
   --dark-log: #a7d3a7;
+  --dark-border: #3a3a3f;
+
+  /* Dark segmented control (e.g. the term/chat switch on /term's dark header) */
+  --dark-segmented-bg: #2a2a2e;
+  --dark-segmented-active-bg: #3a3a3f;
 
   /* Fonts */
   --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;

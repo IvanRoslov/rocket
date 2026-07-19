@@ -4,7 +4,7 @@
 // with an optimistic bubble, and cursor-based increments append to the feed.
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
@@ -150,6 +150,61 @@ describe('ChatScreen GFM rendering', () => {
     expect(table).toBeInTheDocument()
     expect(screen.getByText('Option')).toBeInTheDocument()
     expect(screen.getByText('$2')).toBeInTheDocument()
+  })
+})
+
+describe('ChatScreen service inject classification', () => {
+  it('renders a task-notification user entry as a collapsed system row, expanding on click', async () => {
+    appendChatEntry('s-billing-v2-orch', {
+      role: 'user',
+      text: '<task-notification><summary>Задача #7 закрыта</summary>полный текст уведомления</task-notification>',
+      ts: 1_800_000_700,
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('смотрю на трейс')
+
+    const toggle = await screen.findByRole('button', { name: /Задача #7 закрыта/ })
+    expect(toggle).toBeInTheDocument()
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText(/полный текст уведомления/)).not.toBeInTheDocument()
+
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText(/полный текст уведомления/)).toBeInTheDocument()
+  })
+
+  it('renders a [large message] pointer entry with no matching optimistic send as a collapsed system row', async () => {
+    appendChatEntry('s-billing-v2-orch', {
+      role: 'user',
+      text: '[large message] stored as file, 4.2kb',
+      ts: 1_800_000_701,
+    })
+    renderPage()
+    await screen.findByText('смотрю на трейс')
+
+    expect(await screen.findByRole('button', { name: /large message.*stored as file/i })).toBeInTheDocument()
+  })
+
+  it('renders a [from <session>] queue inject as a left-aligned bubble with a from-badge, not the own bubble', async () => {
+    appendChatEntry('s-billing-v2-orch', {
+      role: 'user',
+      text: '[from billing-v2-w1] схема готова к ревью',
+      ts: 1_800_000_702,
+    })
+    renderPage()
+    await screen.findByText('смотрю на трейс')
+
+    const body = await screen.findByText('схема готова к ревью')
+    const row = body.closest('.chat-screen__row')
+    expect(row).not.toHaveClass('chat-screen__row--own')
+    expect(within(row as HTMLElement).getByText('from billing-v2-w1')).toBeInTheDocument()
+  })
+
+  it('still renders a plain human user entry as the own right-aligned bubble', async () => {
+    renderPage()
+    const bubble = await screen.findByText('почему упал тест biling_test.go?')
+    expect(bubble.closest('.chat-screen__row')).toHaveClass('chat-screen__row--own')
   })
 })
 

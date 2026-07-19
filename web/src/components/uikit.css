@@ -255,6 +255,32 @@
   color: var(--text);
 }
 
+/* Dark-chrome tone (e.g. TermChatSwitch on /term's dark header) — same
+ * shape, swaps the light surface colors for the dark-header equivalents. */
+.segmented--dark {
+  background: var(--dark-segmented-bg);
+}
+.segmented--dark .segmented__option {
+  color: var(--text-4);
+}
+.segmented--dark .segmented__option--active {
+  background: var(--dark-segmented-active-bg);
+  color: var(--dark-text);
+}
+
+/* ---------- TermChatSwitch (Терминал | Чат) ---------- */
+/* Sizing tuned to line up with the 28px back/attach buttons flanking it in
+ * both the /term and /chat headers. */
+.term-chat-switch {
+  padding: 2px;
+  gap: 2px;
+}
+.term-chat-switch .segmented__option {
+  height: 26px;
+  padding: 0 13px;
+  font-size: 12px;
+}
+
 /* ---------- SearchInput ---------- */
 .search-input {
   position: relative;
