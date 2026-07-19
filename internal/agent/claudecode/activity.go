@@ -52,13 +52,22 @@ func configDir() string {
 }
 
 // transcriptDir returns the directory containing transcript .jsonl files
-// for the given worktree path.
+// for the given worktree path. Claude Code slugifies the fully resolved
+// path (e.g. on macOS /tmp is a symlink to /private/tmp — trustWorktree in
+// claudecode.go already accounts for this same quirk when keying
+// ~/.claude.json), so worktreePath is resolved through any symlinks before
+// slugifying; if resolution fails (e.g. the path doesn't exist), the given
+// path is used as-is rather than failing lookup entirely.
 func transcriptDir(worktreePath string) string {
 	base := configDir()
 	if base == "" {
 		return ""
 	}
-	return filepath.Join(base, "projects", slugify(worktreePath))
+	resolved := worktreePath
+	if r, err := filepath.EvalSymlinks(worktreePath); err == nil {
+		resolved = r
+	}
+	return filepath.Join(base, "projects", slugify(resolved))
 }
 
 // newestTranscript returns the path and mtime of the most recently modified
