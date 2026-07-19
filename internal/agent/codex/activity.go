@@ -23,18 +23,34 @@ const freshWindow = 30 * time.Second
 // looking for the last JSONL record. Same as claudecode.
 const tailReadSize = 64 * 1024
 
-// sessionsDirs returns the two date-sharded directories under
-// $CODEX_HOME/sessions/ that could contain a session started "today" in
-// local time: today's dir and yesterday's, to cover a session that started
-// just before local midnight and is still being polled just after (per
-// recon: codex shards sessions by YYYY/MM/DD).
+// sessionScanDays bounds how many trailing day-shards sessionsDirs scans.
+// Codex shards a session's JSONL file by the date the session *started*
+// (YYYY/MM/DD under $CODEX_HOME/sessions/) and keeps appending to that same
+// file for the session's whole lifetime — including its mtime, which is
+// what findMatchingSession/classify use as the activity signal. A worker
+// session that started more than a day or two ago (long-running task,
+// resumed session, etc.) therefore lives in an old date-shard, not today's
+// or yesterday's. Scanning only the last two days made such sessions
+// invisible to Activity, which decays them to idle right when phase 5's
+// merge-grace idle check needs a real signal most. 14 days comfortably
+// covers rocket's longest expected worker lifetimes while keeping the
+// per-poll directory scan bounded and cheap.
+const sessionScanDays = 14
+
+// sessionsDirs returns the sessionScanDays trailing date-sharded directories
+// under $CODEX_HOME/sessions/ (today back through sessionScanDays-1 days
+// ago) that could contain a still-active session, since codex shards a
+// session's file by its start date and keeps appending to it for the
+// session's lifetime (per recon). Nonexistent directories are skipped by
+// the caller (os.ReadDir on a missing dir just errs and is ignored).
 func sessionsDirs(now time.Time) []string {
 	base := codexHome()
 	if base == "" {
 		return nil
 	}
-	dirs := make([]string, 0, 2)
-	for _, day := range []time.Time{now, now.Add(-24 * time.Hour)} {
+	dirs := make([]string, 0, sessionScanDays)
+	for i := 0; i < sessionScanDays; i++ {
+		day := now.Add(-time.Duration(i) * 24 * time.Hour)
 		dirs = append(dirs, filepath.Join(base, "sessions", day.Format("2006"), day.Format("01"), day.Format("02")))
 	}
 	return dirs
@@ -75,11 +91,11 @@ func sessionCwd(path string) (string, bool) {
 	return rec.Payload.Cwd, true
 }
 
-// findMatchingSession scans today's and yesterday's session directories for
-// *.jsonl files whose session_meta.payload.cwd matches worktreePath, and
-// returns the path and mtime of the newest match. Returns agent.ErrNoSignal
-// if no matching file is found (missing dirs, no cwd match, or no session
-// files at all).
+// findMatchingSession scans the last sessionScanDays session directories
+// for *.jsonl files whose session_meta.payload.cwd matches worktreePath,
+// and returns the path and mtime of the newest match. Returns
+// agent.ErrNoSignal if no matching file is found (missing dirs, no cwd
+// match, or no session files at all).
 func findMatchingSession(worktreePath string) (string, time.Time, error) {
 	want := worktreePath
 	if r, err := filepath.EvalSymlinks(worktreePath); err == nil {
@@ -221,7 +237,7 @@ func classify(raw string, mtime time.Time) activity.State {
 }
 
 // Activity implements agent.Agent. It locates the newest session file whose
-// recorded cwd matches ref.WorktreePath (searching today's and yesterday's
+// recorded cwd matches ref.WorktreePath (searching the last sessionScanDays
 // date-sharded session directories) and classifies activity state from its
 // mtime and last record, same shape as claudecode.Activity.
 func (c *Codex) Activity(ctx context.Context, ref agent.ActivityRef) (activity.State, time.Time, error) {

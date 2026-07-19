@@ -173,6 +173,26 @@ func TestActivityFindsSessionInYesterdaysDir(t *testing.T) {
 	}
 }
 
+func TestActivityFindsSessionInOldDateShard(t *testing.T) {
+	home := withCodexHome(t)
+	wt := t.TempDir()
+	fiveDaysAgo := time.Now().Add(-5 * 24 * time.Hour)
+	old := time.Now().Add(-5 * time.Minute)
+
+	writeSessionFile(t, home, fiveDaysAgo, "rollout-old-shard", wt,
+		[]string{`{"type":"event_msg","timestamp":"x","payload":{"type":"task_complete"}}`},
+		old)
+
+	c := New()
+	state, _, err := c.Activity(context.TODO(), agent.ActivityRef{WorktreePath: wt})
+	if err != nil {
+		t.Fatalf("Activity failed to find session in a 5-day-old date shard: %v", err)
+	}
+	if state != activity.Ready {
+		t.Errorf("state = %v, want Ready", state)
+	}
+}
+
 func TestActivityPicksNewestMatchingFile(t *testing.T) {
 	home := withCodexHome(t)
 	wt := t.TempDir()
