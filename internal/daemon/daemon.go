@@ -18,6 +18,7 @@ import (
 	"github.com/IvanRoslov/rocket/internal/api"
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
+	"github.com/IvanRoslov/rocket/internal/ghpoller"
 	"github.com/IvanRoslov/rocket/internal/github"
 	"github.com/IvanRoslov/rocket/internal/heartbeat"
 	"github.com/IvanRoslov/rocket/internal/monitor"
@@ -71,6 +72,8 @@ func Run(cfg *config.Config) error {
 	mon := monitor.New(st, b, rt, cfg, agent.Get)
 	q := queue.New(st, b, rt, cfg, mon.Activity)
 	hb := heartbeat.New(st, b, cfg, mon.Activity, q.Wake)
+	// NopNotifier is a placeholder until Task 6 wires up real PR reactions.
+	ghp := ghpoller.New(st, b, githubClientFactory(st, cfg), cfg, ghpoller.NopNotifier{})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -96,6 +99,7 @@ func Run(cfg *config.Config) error {
 	go q.Run(ctx)
 
 	go hb.Run(ctx)
+	go ghp.Run(ctx)
 
 	shutdownCalled := make(chan struct{})
 	var shutdownOnce func()
