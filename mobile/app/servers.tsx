@@ -164,7 +164,7 @@ export default function ServersScreen() {
         </View>
         <Text style={styles.headerTitle}>Servers</Text>
       </View>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <ScrollView
           contentContainerStyle={{ padding: 16, gap: 12 }}
           refreshControl={

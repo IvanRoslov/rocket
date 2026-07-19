@@ -404,7 +404,7 @@ export default function TaskScreen() {
         ]}
       />
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <ScrollView
           contentContainerStyle={{ paddingBottom: hasSessions ? 90 + insets.bottom : 24 }}
           refreshControl={

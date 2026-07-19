@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Animated, Easing, Modal, Pressable, StyleSheet, View } from 'react-native'
+import { Animated, Easing, KeyboardAvoidingView, Modal, Pressable, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 /**
@@ -50,7 +50,7 @@ export function BottomSheet({
       <Animated.View style={[StyleSheet.absoluteFill, styles.backdrop, { opacity: progress }]}>
         <Pressable style={{ flex: 1 }} onPress={onClose} />
       </Animated.View>
-      <View style={styles.host} pointerEvents="box-none">
+      <KeyboardAvoidingView style={styles.host} behavior="padding" pointerEvents="box-none">
         <Animated.View
           style={[
             styles.sheet,
@@ -66,7 +66,7 @@ export function BottomSheet({
           <View style={styles.grabber} />
           {children}
         </Animated.View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   )
 }
