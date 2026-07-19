@@ -583,7 +583,7 @@ func isNoServerError(stderr string) bool {
 // LooksLikeQuizWidget reports whether a pane tail is showing Claude Code's
 // interactive AskUserQuestion widget. Matched against the two stable
 // markers observed live (docs/superpowers/recon/2026-07-19-quiz-recon.md
-// §2, CLI v2.1.215): the footer hint line («Enter to select · …», present
+// §2 + live acceptance, CLI v2.1.215): the footer hint line («Enter to select · …», present
 // on every widget screen) and the tab row's «✔ Submit» caption (present on
 // multi-question quizzes and the review screen). This is deliberately
 // narrow, Claude-specific TUI coupling: generic "pane changed" heuristics
@@ -591,5 +591,6 @@ func isNoServerError(stderr string) bool {
 // animates the tail even while a draft is still unsubmitted.
 func LooksLikeQuizWidget(tail string) bool {
 	return strings.Contains(tail, "Enter to select · ") ||
-		strings.Contains(tail, "✔ Submit")
+		strings.Contains(tail, "✔ Submit") ||
+		strings.Contains(tail, "Ready to submit your answers?")
 }

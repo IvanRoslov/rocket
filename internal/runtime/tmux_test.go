@@ -630,6 +630,7 @@ func TestLooksLikeQuizWidget(t *testing.T) {
 		{"single question footer", "  3. Blue\n  4. Type something.\n\nEnter to select · ↑/↓ to navigate · Esc to cancel", true},
 		{"multi question footer", "  5. Chat about this\n\nEnter to select · Tab/Arrow keys to navigate · Esc to cancel", true},
 		{"tab row submit", "←  ☒ Color  ☐ Fruits  ✔ Submit  →\n\nPick fruits\n❯ 1. [ ] Apple", true},
+		{"single-question review screen", "Review your answers\n ● Confirm?\n   → Yes\nReady to submit your answers?\n❯ 1. Submit answers", true},
 		{"plain composer", "❯ some draft text\n  ⏵⏵ bypass permissions on (shift+tab to cycle)", false},
 		{"agent output with word Enter", "Press Enter to continue in your shell\n❯ ", false},
 		{"empty", "", false},
