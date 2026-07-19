@@ -213,6 +213,8 @@
 }
 
 .chat-screen__tool-group-summary {
+  /* фид — flex-колонка со скроллом: без flex:none кнопку сжимает до нескольких пикселей */
+  flex: none;
   align-self: flex-start;
   display: flex;
   align-items: center;
@@ -234,6 +236,7 @@
   border-color: var(--border-hover);
 }
 .chat-screen__tool-group {
+  flex: none;
   display: flex;
   flex-direction: column;
   gap: 2px;
