@@ -72,6 +72,14 @@ func (f *fakeAgent) Activity(ctx context.Context, ref agent.ActivityRef) (activi
 	return f.state, f.ts, nil
 }
 
+func (f *fakeAgent) TranscriptTail(ctx context.Context, ref agent.ActivityRef, cursor string) ([]agent.ChatEntry, string, error) {
+	return nil, "", agent.ErrNoSignal
+}
+
+func (f *fakeAgent) TranscriptStat(ctx context.Context, ref agent.ActivityRef) (int64, int64, error) {
+	return 0, 0, agent.ErrNoSignal
+}
+
 // testMonitor builds a Monitor wired to a real (temp-dir) store+bus, a
 // fake runtime and a fake pane prober, plus a resolveAgent closure that
 // looks up agents by name in the given map.
