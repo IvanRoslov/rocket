@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -40,6 +41,7 @@ func reposTestDeps(t *testing.T) Deps {
 
 	d := testDeps(t, nil)
 	d.Store = st
+	d.Bus = bus.New(st)
 	return d
 }
 

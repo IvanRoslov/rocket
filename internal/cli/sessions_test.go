@@ -115,7 +115,7 @@ func TestRenderSessionsColumnsAndDash(t *testing.T) {
 	renderSessions(sessions, &buf, now)
 	out := buf.String()
 
-	for _, col := range []string{"SESSION", "KIND", "PROJECT", "REPO", "STATE", "ACTIVITY", "AGE"} {
+	for _, col := range []string{"SESSION", "KIND", "PROJECT", "REPO", "STATE", "ACTIVITY", "PR", "CI", "AGE"} {
 		if !strings.Contains(out, col) {
 			t.Errorf("output missing header column %q; got:\n%s", col, out)
 		}
@@ -150,5 +150,61 @@ func TestRenderSessionsColumnsAndDash(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("did not find demo-orch row")
+	}
+}
+
+func TestRenderSessionsWithPRAndCI(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	sessions := []sessionRow{
+		{
+			ID:        "worker-with-pr",
+			Kind:      "worker",
+			ProjectID: "demo",
+			RepoID:    "scratch",
+			State:     "running",
+			Activity:  "editing",
+			PRNumber:  42,
+			PRState:   "open",
+			CIState:   "passing",
+			CreatedAt: now.Add(-5 * time.Minute).Unix(),
+		},
+		{
+			ID:        "worker-no-pr",
+			Kind:      "worker",
+			ProjectID: "demo",
+			RepoID:    "scratch",
+			State:     "running",
+			Activity:  "idle",
+			PRNumber:  0,
+			PRState:   "",
+			CIState:   "",
+			CreatedAt: now.Add(-10 * time.Minute).Unix(),
+		},
+	}
+
+	var buf bytes.Buffer
+	renderSessions(sessions, &buf, now)
+	out := buf.String()
+
+	if !strings.Contains(out, "#42") {
+		t.Errorf("output missing PR #42; got:\n%s", out)
+	}
+	if !strings.Contains(out, "passing") {
+		t.Errorf("output missing CI state passing; got:\n%s", out)
+	}
+
+	// Both should have dashes for missing PR/CI
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	foundNoPR := false
+	for _, l := range lines {
+		if strings.Contains(l, "worker-no-pr") {
+			foundNoPR = true
+			if !strings.Contains(l, "-") {
+				t.Errorf("expected worker-no-pr row to have dash for missing PR; got: %q", l)
+			}
+		}
+	}
+	if !foundNoPR {
+		t.Errorf("did not find worker-no-pr row")
 	}
 }

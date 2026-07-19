@@ -23,6 +23,9 @@ type taskRow struct {
 	RepoID      string `json:"repo_id,omitempty"`
 	FeatureSlug string `json:"feature_slug,omitempty"`
 	SessionID   string `json:"session_id,omitempty"`
+	PRNumber    int    `json:"pr_number,omitempty"`
+	PRState     string `json:"pr_state,omitempty"`
+	CIState     string `json:"ci_state,omitempty"`
 }
 
 // taskDetailRow represents a full task detail as returned by GET /v1/tasks/{id}.
@@ -902,7 +905,7 @@ func renderTaskCard(task taskDetailRow, docs []taskDocRow, logs []taskLogRow, qu
 	if len(task.Subtasks) > 0 {
 		fmt.Fprintf(w, "## Subtasks\n")
 		tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-		fmt.Fprintf(tw, "ID\tTITLE\tSTATUS\tREPO\tSESSION\n")
+		fmt.Fprintf(tw, "ID\tTITLE\tSTATUS\tREPO\tSESSION\tPR\tCI\n")
 		for _, st := range task.Subtasks {
 			repo := st.RepoID
 			if st.RepoID == "" {
@@ -912,7 +915,15 @@ func renderTaskCard(task taskDetailRow, docs []taskDocRow, logs []taskLogRow, qu
 			if session == "" {
 				session = "-"
 			}
-			fmt.Fprintf(tw, "#%d\t%s\t%s\t%s\t%s\n", st.ID, st.Title, st.Status, repo, session)
+			pr := "-"
+			if st.PRNumber > 0 {
+				pr = fmt.Sprintf("#%d (%s)", st.PRNumber, st.PRState)
+			}
+			ci := st.CIState
+			if ci == "" {
+				ci = "-"
+			}
+			fmt.Fprintf(tw, "#%d\t%s\t%s\t%s\t%s\t%s\t%s\n", st.ID, st.Title, st.Status, repo, session, pr, ci)
 		}
 		tw.Flush()
 		fmt.Fprintf(w, "\n")

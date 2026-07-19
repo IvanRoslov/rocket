@@ -78,11 +78,41 @@ type Manager struct {
 	// workspace state at a time") beat the complexity of per-id locks.
 	// Revisit if contention becomes a real bottleneck.
 	mu sync.Mutex
+
+	// getToken is an optional function that returns the GitHub token to be
+	// injected into session environments. If nil or returns empty string, no
+	// token is injected.
+	getToken func() string
 }
 
 // NewManager builds a Manager wired to the given dependencies.
 func NewManager(st *store.Store, b *bus.Bus, rt runtime.Runtime, ws workspace.Workspace, cfg *config.Config) *Manager {
 	return &Manager{st: st, bus: b, rt: rt, ws: ws, cfg: cfg}
+}
+
+// SetTokenSource sets the function used to retrieve the GitHub token for
+// session environments. If f is nil or returns an empty string, no GH_TOKEN
+// will be injected into session environments.
+func (m *Manager) SetTokenSource(f func() string) {
+	m.getToken = f
+}
+
+// injectToken adds the GitHub token to the environment map if a token source
+// is configured and returns a non-empty token. It does not override GH_TOKEN
+// if it's already present in the environment (repo.Env takes precedence).
+func (m *Manager) injectToken(env map[string]string) {
+	// Don't inject if already set by repo config or if no token source
+	if _, exists := env["GH_TOKEN"]; exists {
+		return
+	}
+	if m.getToken == nil {
+		return
+	}
+
+	token := m.getToken()
+	if token != "" {
+		env["GH_TOKEN"] = token
+	}
 }
 
 // Spawn validates req, reserves a session name/branch, persists the session,
@@ -238,6 +268,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 	}
 
 	env := mergeEnv(repo.Env, ag.Env(spec))
+	m.injectToken(env)
 	cmd := shellJoin(ag.LaunchCommand(spec))
 
 	if _, err := m.rt.Create(ctx, runtime.CreateSpec{
@@ -424,6 +455,7 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 	}
 
 	env := mergeEnv(repo.Env, ag.Env(spec))
+	m.injectToken(env)
 	cmd := shellJoin(ag.LaunchCommand(spec))
 
 	if _, err := m.rt.Create(ctx, runtime.CreateSpec{
@@ -513,7 +545,31 @@ func allowedReposDesc(st *store.Store, project store.Project) (string, error) {
 func (m *Manager) Kill(ctx context.Context, id string, cleanup bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.terminate(ctx, id, "killed", "session.killed", nil, cleanup)
+}
 
+// Complete transitions a live session to its final "done" state: destroys
+// the runtime handle (best-effort) and the workspace, marks the session
+// done, and publishes session.state_changed{to:"done", reason:"pr_merged"}
+// followed by workspace.cleanup. It is the terminal path used by the
+// auto-cleanup flow after a worker's PR merges (see ghpoller.Reactions),
+// distinct from Kill in that the session ends up "done" rather than
+// "killed" and cleanup is unconditional. Completing a session already in a
+// terminal state is idempotent for the state/runtime-destroy step (mirrors
+// Kill), but workspace cleanup still runs.
+func (m *Manager) Complete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.terminate(ctx, id, "done", "session.state_changed",
+		map[string]any{"to": "done", "reason": "pr_merged"}, true)
+}
+
+// terminate is the shared implementation behind Kill and Complete: it
+// best-effort destroys the runtime handle, transitions the session to
+// finalState (skipped if the session is already terminal), publishes
+// event/eventData for that transition, and — if cleanup is true — destroys
+// the workspace and publishes workspace.cleanup. Callers must hold m.mu.
+func (m *Manager) terminate(ctx context.Context, id, finalState, event string, eventData map[string]any, cleanup bool) error {
 	sess, err := m.st.GetSession(id)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -524,10 +580,10 @@ func (m *Manager) Kill(ctx context.Context, id string, cleanup bool) error {
 
 	if !isTerminal(sess.State) {
 		_ = m.rt.Destroy(ctx, runtime.Handle{Name: sess.TmuxName})
-		if err := m.st.UpdateSessionState(id, "killed"); err != nil {
+		if err := m.st.UpdateSessionState(id, finalState); err != nil {
 			return err
 		}
-		m.bus.Publish("session.killed", id, nil)
+		m.bus.Publish(event, id, eventData)
 	}
 
 	if cleanup {
@@ -633,6 +689,7 @@ func (m *Manager) Restore(ctx context.Context, id string) error {
 	}
 
 	env := mergeEnv(repo.Env, ag.Env(spec))
+	m.injectToken(env)
 	cmd := shellJoin(ag.LaunchCommand(spec))
 
 	if _, err := m.rt.Create(ctx, runtime.CreateSpec{

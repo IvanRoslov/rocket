@@ -1034,3 +1034,60 @@ func TestRenderTaskCardSubtaskRepoID(t *testing.T) {
 		t.Errorf("expected '-' for empty RepoID in subtask table")
 	}
 }
+
+// TestRenderTaskCardSubtaskWithPRAndCI tests that subtask table includes PR and CI columns.
+func TestRenderTaskCardSubtaskWithPRAndCI(t *testing.T) {
+	now := time.Now()
+	task := taskDetailRow{
+		ID:        1,
+		Title:     "My Task",
+		Status:    "in_progress",
+		ProjectID: "proj-1",
+		Subtasks: []taskRow{
+			{ID: 10, Title: "Subtask with PR", Status: "in_progress", SessionID: "sess-1", PRNumber: 42, PRState: "open", CIState: "passing"},
+			{ID: 11, Title: "Subtask without PR", Status: "backlog", SessionID: "sess-2", PRNumber: 0, PRState: "", CIState: ""},
+		},
+	}
+
+	w := &bytes.Buffer{}
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, w, now)
+
+	output := w.String()
+
+	// Check for PR column header
+	if !strings.Contains(output, "PR") || !strings.Contains(output, "CI") {
+		t.Errorf("expected PR and CI column headers in output")
+	}
+
+	// Check for PR #42 (open) in first subtask
+	if !strings.Contains(output, "#42 (open)") {
+		t.Errorf("expected PR #42 (open) in output, got:\n%s", output)
+	}
+
+	// Check for CI passing
+	if !strings.Contains(output, "passing") {
+		t.Errorf("expected CI state 'passing' in output")
+	}
+
+	// Check for dashes in subtask without PR
+	lines := strings.Split(output, "\n")
+	subtaskSection := false
+	foundNoPR := false
+	for _, line := range lines {
+		if strings.Contains(line, "Subtasks") {
+			subtaskSection = true
+			continue
+		}
+		if subtaskSection && strings.Contains(line, "#11") && strings.Contains(line, "Subtask without PR") {
+			foundNoPR = true
+			// Should have at least one dash for empty PR/CI
+			if !strings.Contains(line, "-") {
+				t.Errorf("expected dashes for empty PR/CI in line: %q", line)
+			}
+			break
+		}
+	}
+	if !foundNoPR {
+		t.Errorf("did not find subtask without PR in output")
+	}
+}

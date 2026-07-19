@@ -12,6 +12,16 @@ func TestRepoAddWrongArgCountIsUsageError(t *testing.T) {
 	}
 }
 
+func TestRepoAddGithubAndPathIsUsageError(t *testing.T) {
+	cmd := newRepoAddCmd()
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"--github", "acme/widgets", "some/path"})
+	err := cmd.Execute()
+	if exitCode(err) != 3 {
+		t.Fatalf("exitCode = %d, want 3 (err=%v)", exitCode(err), err)
+	}
+}
+
 func TestRepoLsWrongArgCountIsUsageError(t *testing.T) {
 	cmd := newRepoLsCmd()
 	cmd.SilenceUsage = true

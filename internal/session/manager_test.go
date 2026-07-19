@@ -583,6 +583,20 @@ func seedRunningSession(t *testing.T, st *store.Store, id string) store.Session 
 	return sess
 }
 
+func seedErroredSession(t *testing.T, st *store.Store, id string) store.Session {
+	t.Helper()
+	sess := store.Session{
+		ID: id, Kind: "worker", ProjectID: "proj1", RepoID: "repo1",
+		FeatureSlug: "myfeat", Agent: "fake", Branch: "feature/myfeat/mytask",
+		WorktreePath: "/fake/wt/" + id, TmuxName: id, State: "errored",
+		Prompt: "test prompt",
+	}
+	if err := st.AddSession(sess); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+	return sess
+}
+
 func TestKillWithoutCleanup(t *testing.T) {
 	m, st, b, rt, ws := testManager(t)
 	seedProjectRepo(t, st, "proj1", "repo1")
@@ -1125,4 +1139,254 @@ func TestSpawnOrchestratorAgentUnknown(t *testing.T) {
 
 	_, err = m.SpawnOrchestrator(context.Background(), task, proj, "nope")
 	assertValidationCode(t, err, "agent_unknown")
+}
+
+// --- GitHub Token Injection -----------------------------------------------
+
+func TestSpawnInjectsGHTokenWhenTokenSourceSet(t *testing.T) {
+	m, st, _, rt, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+
+	// Set a token source on the manager
+	m.SetTokenSource(func() string { return "ghp_test_token_123" })
+
+	sess, err := m.Spawn(context.Background(), SpawnReq{
+		Project: "proj1", Repo: "repo1", Task: "mytask", Feature: "myfeat",
+		Prompt: "test", AgentName: "fake",
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	if len(rt.created) != 1 {
+		t.Fatalf("expected 1 runtime.Create call, got %d", len(rt.created))
+	}
+
+	env := rt.created[0].Env
+	if env["GH_TOKEN"] != "ghp_test_token_123" {
+		t.Errorf("GH_TOKEN = %q, want ghp_test_token_123", env["GH_TOKEN"])
+	}
+
+	// Verify session was created
+	if sess.ID != "myfeat-mytask" {
+		t.Errorf("Session ID = %q, want myfeat-mytask", sess.ID)
+	}
+}
+
+func TestSpawnDoesNotInjectGHTokenWhenTokenSourceNil(t *testing.T) {
+	m, st, _, rt, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+
+	// Don't set a token source (it's nil by default)
+
+	sess, err := m.Spawn(context.Background(), SpawnReq{
+		Project: "proj1", Repo: "repo1", Task: "mytask", Feature: "myfeat",
+		Prompt: "test", AgentName: "fake",
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	if len(rt.created) != 1 {
+		t.Fatalf("expected 1 runtime.Create call, got %d", len(rt.created))
+	}
+
+	env := rt.created[0].Env
+	if _, exists := env["GH_TOKEN"]; exists {
+		t.Errorf("GH_TOKEN should not be set, but got %q", env["GH_TOKEN"])
+	}
+
+	// Verify session was created
+	if sess.ID != "myfeat-mytask" {
+		t.Errorf("Session ID = %q, want myfeat-mytask", sess.ID)
+	}
+}
+
+func TestSpawnDoesNotInjectGHTokenWhenTokenSourceReturnsEmpty(t *testing.T) {
+	m, st, _, rt, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+
+	// Set a token source that returns empty string
+	m.SetTokenSource(func() string { return "" })
+
+	sess, err := m.Spawn(context.Background(), SpawnReq{
+		Project: "proj1", Repo: "repo1", Task: "mytask", Feature: "myfeat",
+		Prompt: "test", AgentName: "fake",
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	if len(rt.created) != 1 {
+		t.Fatalf("expected 1 runtime.Create call, got %d", len(rt.created))
+	}
+
+	env := rt.created[0].Env
+	if _, exists := env["GH_TOKEN"]; exists {
+		t.Errorf("GH_TOKEN should not be set, but got %q", env["GH_TOKEN"])
+	}
+
+	// Verify session was created
+	if sess.ID != "myfeat-mytask" {
+		t.Errorf("Session ID = %q, want myfeat-mytask", sess.ID)
+	}
+}
+
+func TestSpawnRespectsRepoEnvGHTokenOverride(t *testing.T) {
+	m, st, _, rt, _ := testManager(t)
+
+	// Add repo with GH_TOKEN already set in its environment
+	if err := st.AddRepo(store.Repo{
+		ID: "repo1", Path: "/tmp/repo1", DefaultBranch: "main",
+		Env: map[string]string{"GH_TOKEN": "ghp_repo_token_xyz"},
+	}); err != nil {
+		t.Fatalf("AddRepo: %v", err)
+	}
+
+	if err := st.AddProject(store.Project{ID: "proj1", Name: "proj1", MainRepo: "repo1"}); err != nil {
+		t.Fatalf("AddProject: %v", err)
+	}
+
+	// Set a token source on the manager
+	m.SetTokenSource(func() string { return "ghp_manager_token_abc" })
+
+	sess, err := m.Spawn(context.Background(), SpawnReq{
+		Project: "proj1", Repo: "repo1", Task: "mytask", Feature: "myfeat",
+		Prompt: "test", AgentName: "fake",
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	if len(rt.created) != 1 {
+		t.Fatalf("expected 1 runtime.Create call, got %d", len(rt.created))
+	}
+
+	env := rt.created[0].Env
+	// Repo env should win
+	if env["GH_TOKEN"] != "ghp_repo_token_xyz" {
+		t.Errorf("GH_TOKEN = %q, want ghp_repo_token_xyz (from repo.Env)", env["GH_TOKEN"])
+	}
+
+	// Verify session was created
+	if sess.ID != "myfeat-mytask" {
+		t.Errorf("Session ID = %q, want myfeat-mytask", sess.ID)
+	}
+}
+
+func TestSpawnOrchestratorInjectsGHToken(t *testing.T) {
+	m, st, _, rt, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	proj, err := st.GetProject("proj1")
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+
+	// Set a token source
+	m.SetTokenSource(func() string { return "ghp_orch_token_456" })
+
+	task := store.Task{ID: 1, Title: "Test task", Description: "d", ProjectID: "proj1"}
+
+	_, err = m.SpawnOrchestrator(context.Background(), task, proj, "fake")
+	if err != nil {
+		t.Fatalf("SpawnOrchestrator: %v", err)
+	}
+
+	if len(rt.created) != 1 {
+		t.Fatalf("expected 1 runtime.Create call, got %d", len(rt.created))
+	}
+
+	env := rt.created[0].Env
+	if env["GH_TOKEN"] != "ghp_orch_token_456" {
+		t.Errorf("GH_TOKEN = %q, want ghp_orch_token_456", env["GH_TOKEN"])
+	}
+}
+
+func TestRestoreInjectsGHToken(t *testing.T) {
+	m, st, _, rt, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	seedErroredSession(t, st, "worker1")
+
+	// Set a token source
+	m.SetTokenSource(func() string { return "ghp_restore_token_789" })
+
+	err := m.Restore(context.Background(), "worker1")
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	if len(rt.created) != 1 {
+		t.Fatalf("expected 1 runtime.Create call, got %d", len(rt.created))
+	}
+
+	env := rt.created[0].Env
+	if env["GH_TOKEN"] != "ghp_restore_token_789" {
+		t.Errorf("GH_TOKEN = %q, want ghp_restore_token_789", env["GH_TOKEN"])
+	}
+}
+
+// --- Complete ----------------------------------------------------------
+
+func TestComplete_TransitionsToDoneAndDestroysWorkspace(t *testing.T) {
+	m, st, b, rt, ws := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	seedRunningSession(t, st, "sess1")
+
+	ch, cancel := b.Subscribe()
+	defer cancel()
+
+	if err := m.Complete(context.Background(), "sess1"); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	stored, err := st.GetSession("sess1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if stored.State != "done" {
+		t.Errorf("State = %q, want done", stored.State)
+	}
+	if len(rt.destroyed) != 1 || rt.destroyed[0] != "sess1" {
+		t.Errorf("runtime.Destroy calls = %v", rt.destroyed)
+	}
+	if len(ws.destroyed) != 1 || ws.destroyed[0] != "sess1" {
+		t.Errorf("workspace.Destroy calls = %v", ws.destroyed)
+	}
+
+	events := drainEvents(ch)
+	if len(events) != 2 {
+		t.Fatalf("events = %d, want 2: %v", len(events), events)
+	}
+	if events[0].Type != "session.state_changed" || events[1].Type != "workspace.cleanup" {
+		t.Errorf("unexpected event types: %v, %v", events[0].Type, events[1].Type)
+	}
+}
+
+func TestComplete_IdempotentOnAlreadyDone(t *testing.T) {
+	m, st, _, rt, ws := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	seedRunningSession(t, st, "sess1")
+
+	if err := m.Complete(context.Background(), "sess1"); err != nil {
+		t.Fatalf("first Complete: %v", err)
+	}
+	destroyedBefore := len(rt.destroyed)
+
+	if err := m.Complete(context.Background(), "sess1"); err != nil {
+		t.Fatalf("second Complete: %v", err)
+	}
+
+	stored, err := st.GetSession("sess1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if stored.State != "done" {
+		t.Errorf("State = %q, want done (unchanged)", stored.State)
+	}
+	if len(rt.destroyed) != destroyedBefore {
+		t.Errorf("runtime.Destroy should not be called again: %v", rt.destroyed)
+	}
+	if len(ws.destroyed) != 2 || ws.destroyed[0] != "sess1" || ws.destroyed[1] != "sess1" {
+		t.Errorf("workspace.Destroy should still run on idempotent Complete: %v", ws.destroyed)
+	}
 }

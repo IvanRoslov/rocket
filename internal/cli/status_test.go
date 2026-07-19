@@ -53,7 +53,7 @@ func TestRenderStatusOrchestratorAndWorkers(t *testing.T) {
 	if !strings.Contains(out, "orchestrator: demo-orch [running] planning (2h ago)") {
 		t.Errorf("expected orchestrator line, got: %q", out)
 	}
-	for _, col := range []string{"SESSION", "ACTIVITY", "AGE"} {
+	for _, col := range []string{"SESSION", "ACTIVITY", "PR", "CI", "AGE"} {
 		if !strings.Contains(out, col) {
 			t.Errorf("expected worker table column %q, got: %q", col, out)
 		}
@@ -63,6 +63,27 @@ func TestRenderStatusOrchestratorAndWorkers(t *testing.T) {
 	}
 	if !strings.Contains(out, "demo-worker-2") || !strings.Contains(out, "30s") {
 		t.Errorf("expected worker 2 row, got: %q", out)
+	}
+}
+
+// TestRenderStatusWorkerWithPRAndCI tests rendering workers with PR and CI info.
+func TestRenderStatusWorkerWithPRAndCI(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	sessions := []sessionRow{
+		{ID: "demo-orch", Kind: "orchestrator", State: "running", CreatedAt: now.Unix()},
+		{ID: "worker-with-pr", Kind: "worker", State: "running", Activity: "testing", PRNumber: 42, PRState: "open", CIState: "failing", CreatedAt: now.Add(-5 * time.Minute).Unix()},
+		{ID: "worker-no-pr", Kind: "worker", State: "running", Activity: "idle", PRNumber: 0, PRState: "", CIState: "", CreatedAt: now.Add(-10 * time.Minute).Unix()},
+	}
+
+	var buf bytes.Buffer
+	renderStatus("demo-feature", sessions, &buf, now)
+	out := buf.String()
+
+	if !strings.Contains(out, "#42") {
+		t.Errorf("expected PR #42 in output; got:\n%s", out)
+	}
+	if !strings.Contains(out, "failing") {
+		t.Errorf("expected CI state failing in output; got:\n%s", out)
 	}
 }
 

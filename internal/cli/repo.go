@@ -20,12 +20,21 @@ func newRepoCmd() *cobra.Command {
 
 func newRepoAddCmd() *cobra.Command {
 	var id string
+	var githubRepo string
 	cmd := &cobra.Command{
-		Use:   "add <path>",
-		Short: "Зарегистрировать репозиторий",
+		Use:   "add [path]",
+		Short: "Зарегистрировать репозиторий (локальный путь или --github owner/name)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) != 1 {
-				return &usageError{message: "usage: rocket repo add <path> [--id <id>]"}
+			reqBody := map[string]string{}
+			switch {
+			case githubRepo != "" && len(args) > 0:
+				return &usageError{message: "usage: rocket repo add <path> [--id <id>] | rocket repo add --github owner/name [--id <id>]"}
+			case githubRepo != "":
+				reqBody["github"] = githubRepo
+			case len(args) == 1:
+				reqBody["path"] = args[0]
+			default:
+				return &usageError{message: "usage: rocket repo add <path> [--id <id>] | rocket repo add --github owner/name [--id <id>]"}
 			}
 
 			c, _, err := connect(true)
@@ -33,7 +42,6 @@ func newRepoAddCmd() *cobra.Command {
 				return err
 			}
 
-			reqBody := map[string]string{"path": args[0]}
 			if id != "" {
 				reqBody["id"] = id
 			}
@@ -51,6 +59,7 @@ func newRepoAddCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&id, "id", "", "явный id репозитория")
+	cmd.Flags().StringVar(&githubRepo, "github", "", "GitHub-репозиторий owner/name для клонирования")
 	return cmd
 }
 

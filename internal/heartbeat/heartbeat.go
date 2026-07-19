@@ -206,7 +206,15 @@ func stalledWorkerLine(w store.Session, now time.Time, threshold time.Duration) 
 		since := now.Sub(time.Unix(w.ActivityTS, 0))
 		if since > threshold {
 			mins := int(since.Minutes())
-			return fmt.Sprintf("- %s: %s %dm, no PR", w.ID, w.Activity, mins), true
+			prInfo := "no PR"
+			if w.PRNumber > 0 {
+				ci := w.CIState
+				if ci == "" {
+					ci = "unknown"
+				}
+				prInfo = fmt.Sprintf("PR #%d CI %s", w.PRNumber, ci)
+			}
+			return fmt.Sprintf("- %s: %s %dm, %s", w.ID, w.Activity, mins, prInfo), true
 		}
 	}
 	return "", false
