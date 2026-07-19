@@ -43,6 +43,15 @@ export interface ProjectCardProps {
   updatedAt: number
 }
 
+/** Formats the linked-repos suffix as `first, two +N more` so the repos
+ * line never grows past one line even for projects with dozens of linked
+ * repos. */
+function linkedSummary(linked: string[]): string {
+  const shown = linked.slice(0, 2).join(', ')
+  const rest = linked.length - 2
+  return rest > 0 ? `${shown} +${rest} more` : shown
+}
+
 export function ProjectCard({ project, updatedAt }: ProjectCardProps) {
   const hasLinked = project.linked.length > 0
   const { data: projectTasks } = useProjectTasks(project.id)
@@ -66,13 +75,16 @@ export function ProjectCard({ project, updatedAt }: ProjectCardProps) {
         </Badge>
       </div>
 
-      <div className="project-card__repos">
+      <div
+        className="project-card__repos"
+        title={hasLinked ? `${project.main} + ${project.linked.join(', ')}` : project.main}
+      >
         <span className="project-card__repo project-card__repo--main">⌂ {project.main}</span>
         {hasLinked && (
           <>
             <span className="project-card__repo-sep">+</span>
             <span className="project-card__repo project-card__repo--linked">
-              {project.linked.join(', ')}
+              {linkedSummary(project.linked)}
             </span>
           </>
         )}

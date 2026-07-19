@@ -88,6 +88,35 @@ describe('ProjectsScreen', () => {
     expect(screen.queryByText('web, infra')).not.toBeInTheDocument()
   })
 
+  it('clamps the repo line to the first two linked repos + a "+N more" suffix when a project has many linked repos', async () => {
+    const linked = Array.from({ length: 24 }, (_, i) => `repo-${i + 1}`)
+    server.use(
+      http.get('/v1/projects', () =>
+        HttpResponse.json([
+          {
+            id: 'platform',
+            name: 'Platform',
+            main: 'platform',
+            linked,
+            live_sessions: 0,
+            created_at: 1_800_000_000 - 2 * 24 * 60 * 60,
+          },
+        ]),
+      ),
+      http.get('/v1/sessions', () => HttpResponse.json([])),
+      http.get('/v1/tasks', () => HttpResponse.json({ tasks: [] })),
+    )
+
+    renderScreen()
+
+    await screen.findByText('Platform')
+    expect(screen.getByText('⌂ platform')).toBeInTheDocument()
+    expect(screen.getByText('repo-1, repo-2 +22 more')).toBeInTheDocument()
+
+    const repoLine = screen.getByText('repo-1, repo-2 +22 more').closest('.project-card__repos')!
+    expect(repoLine).toHaveAttribute('title', `platform + ${linked.join(', ')}`)
+  })
+
   it('renders an empty state with a "Create project" action when there are no projects', async () => {
     server.use(
       http.get('/v1/projects', () => HttpResponse.json([])),

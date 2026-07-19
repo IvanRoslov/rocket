@@ -117,9 +117,14 @@
   font: 12.5px var(--font-ui);
   color: var(--text-2);
   margin-bottom: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .project-card__repo {
   font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .project-card__repo--linked {
   color: var(--text-3);
