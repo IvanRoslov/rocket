@@ -74,6 +74,9 @@ func Run(cfg *config.Config) error {
 	hb := heartbeat.New(st, b, cfg, mon.Activity, q.Wake)
 	reactions := ghpoller.NewReactions(st, b, q.Wake, mgr, mon.Activity, cfg)
 	defer reactions.Stop()
+	if err := reactions.RearmPending(); err != nil {
+		slog.Error("rearm pending merge-grace timers failed (non-fatal)", "error", err)
+	}
 	ghp := ghpoller.New(st, b, githubClientFactory(st, cfg), cfg, reactions)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

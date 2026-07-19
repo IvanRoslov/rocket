@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/github"
+	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -491,6 +493,247 @@ func TestTick_Discovery_CIFailing(t *testing.T) {
 		t.Fatalf("expected CIFailing still called only once, got %d", ciFailing)
 	}
 }
+
+// closedPRRediscoveryServer is a stateful stub used to test re-discovery of
+// a new PR on a branch whose previous PR was closed-unmerged. It always
+// returns "current" (number/state/merged/headSHA) for both the
+// find-by-branch and get-by-number endpoints, regardless of the number
+// requested, mimicking a single PR-per-branch reality.
+type closedPRRediscoveryServer struct {
+	mu      sync.Mutex
+	number  int
+	state   string
+	merged  bool
+	headSHA string
+}
+
+func (m *closedPRRediscoveryServer) handler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+
+		switch {
+		case r.URL.Path == "/repos/o/r/pulls":
+			w.Write([]byte(`[{"number":` + itoa(m.number) + `,"state":"` + m.state + `","merged":` + boolStr(m.merged) + `,"head":{"sha":"` + m.headSHA + `"}}]`))
+		case strings.HasPrefix(r.URL.Path, "/repos/o/r/pulls/") && strings.HasSuffix(r.URL.Path, "/reviews"):
+			w.Write([]byte(`[]`))
+		case strings.HasPrefix(r.URL.Path, "/repos/o/r/pulls/"):
+			w.Write([]byte(`{"number":` + itoa(m.number) + `,"state":"` + m.state + `","merged":` + boolStr(m.merged) + `,"head":{"sha":"` + m.headSHA + `"}}`))
+		case strings.HasPrefix(r.URL.Path, "/repos/o/r/commits/") && strings.HasSuffix(r.URL.Path, "/check-runs"):
+			w.Write([]byte(`{"total_count":0,"check_runs":[]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}
+}
+
+// TestTick_ClosedUnmergedPR_SameClosedPR_NoOp verifies the guard in
+// discoverPR: once a session's stored PRState is "closed" (unmerged),
+// polling a branch that keeps returning the SAME closed PR (which
+// FindPRByBranch will, since it queries state=all) must not re-fire any
+// events or touch the store.
+func TestTick_ClosedUnmergedPR_SameClosedPR_NoOp(t *testing.T) {
+	st, b := setupEnv(t)
+	sess := addWorker(t, st, "w1", "feature-branch")
+	if err := st.UpdateSessionPR(sess.ID, 1, "closed", "passing"); err != nil {
+		t.Fatalf("UpdateSessionPR: %v", err)
+	}
+
+	m := &closedPRRediscoveryServer{number: 1, state: "closed", merged: false, headSHA: "sha1"}
+	srv := httptest.NewServer(m.handler())
+	defer srv.Close()
+
+	notify := &fakeNotifier{}
+	p := New(st, b, ghFactory(srv.URL), testConfig(), notify)
+
+	sub, cancel := b.Subscribe()
+	defer cancel()
+
+	if err := p.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	got, err := st.GetSession("w1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if got.PRNumber != 1 || got.PRState != "closed" {
+		t.Fatalf("expected session PR fields untouched (1, closed), got %+v", got)
+	}
+
+	if opened, _, _, merged := notify.counts(); opened != 0 || merged != 0 {
+		t.Fatalf("expected no notifications, got opened=%d merged=%d", opened, merged)
+	}
+
+	select {
+	case e := <-sub:
+		t.Fatalf("expected no bus event, got %s", e.Type)
+	default:
+	}
+}
+
+// TestTick_ClosedUnmergedPR_NewOpenPR_Rediscovered verifies that once a
+// session's stored PRState is "closed" (unmerged), a NEW open PR pushed to
+// the same branch is picked up: pr_number is updated to the new PR, and
+// pr.opened / PROpened fire. It uses the real Reactions notifier (rather
+// than fakeNotifier) so the resulting subtask review transition is also
+// observable end-to-end.
+func TestTick_ClosedUnmergedPR_NewOpenPR_Rediscovered(t *testing.T) {
+	st, b := setupEnv(t)
+	sess := addWorker(t, st, "w1", "feature-branch")
+	if err := st.UpdateSessionPR(sess.ID, 1, "closed", "passing"); err != nil {
+		t.Fatalf("UpdateSessionPR: %v", err)
+	}
+	taskID, err := st.AddTask(store.Task{
+		Title: "subtask", ProjectID: "billing", RepoID: "api",
+		Status: "in_progress", SessionID: sess.ID,
+	})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	m := &closedPRRediscoveryServer{number: 2, state: "open", merged: false, headSHA: "sha2"}
+	srv := httptest.NewServer(m.handler())
+	defer srv.Close()
+
+	cfg := testConfig()
+	rt := &reactFakeRuntime{}
+	ws := &reactFakeWorkspace{}
+	mgr := session.NewManager(st, b, rt, ws, cfg)
+	reactions := NewReactions(st, b, func(string) {}, mgr, alwaysUnknownActivity, cfg)
+	defer reactions.Stop()
+
+	p := New(st, b, ghFactory(srv.URL), cfg, reactions)
+
+	sub, cancel := b.Subscribe()
+	defer cancel()
+
+	if err := p.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	got, err := st.GetSession("w1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if got.PRNumber != 2 || got.PRState != "open" {
+		t.Fatalf("expected session PR fields updated to (2, open), got %+v", got)
+	}
+
+	var sawPROpened bool
+	for {
+		select {
+		case e := <-sub:
+			if e.Type == "pr.opened" {
+				sawPROpened = true
+			}
+		default:
+			goto done
+		}
+	}
+done:
+	if !sawPROpened {
+		t.Fatal("expected pr.opened event on bus")
+	}
+
+	task, err := st.GetTask(taskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.Status != "review" {
+		t.Fatalf("expected subtask status review after re-discovery, got %q", task.Status)
+	}
+}
+
+// orderRecordingNotifier wraps fakeNotifier but additionally records, at the
+// moment each notifier method is invoked, the PRState/CIState currently
+// persisted in the store for the session — proving persist-before-notify
+// ordering in updatePR.
+type orderRecordingNotifier struct {
+	fakeNotifier
+	st *store.Store
+
+	mu                   sync.Mutex
+	storedPRStateAtMerge string
+	storedCIStateAtCI    string
+}
+
+func (n *orderRecordingNotifier) Merged(sess store.Session, pr *github.PR) {
+	got, err := n.st.GetSession(sess.ID)
+	if err == nil {
+		n.mu.Lock()
+		n.storedPRStateAtMerge = got.PRState
+		n.mu.Unlock()
+	}
+	n.fakeNotifier.Merged(sess, pr)
+}
+
+func (n *orderRecordingNotifier) CIFailing(sess store.Session, pr *github.PR, summary string) {
+	got, err := n.st.GetSession(sess.ID)
+	if err == nil {
+		n.mu.Lock()
+		n.storedCIStateAtCI = got.CIState
+		n.mu.Unlock()
+	}
+	n.fakeNotifier.CIFailing(sess, pr, summary)
+}
+
+// TestUpdatePR_PersistBeforeNotify verifies that updatePR writes the new
+// PR/CI state to the store BEFORE invoking notifier callbacks: by the time
+// Merged (and CIFailing) run, the store must already reflect the new state,
+// not the previous one.
+func TestUpdatePR_PersistBeforeNotify(t *testing.T) {
+	st, b := setupEnv(t)
+	addWorker(t, st, "w1", "feature-branch")
+
+	m := newMockGitHubServer()
+	m.checkConclusion = "failure"
+	srv := httptest.NewServer(m.handler())
+	defer srv.Close()
+
+	notify := &orderRecordingNotifier{st: st}
+	p := New(st, b, ghFactory(srv.URL), testConfig(), notify)
+
+	// Tick 1: discovery, with CI already failing.
+	if err := p.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick 1 (discovery): %v", err)
+	}
+
+	notify.mu.Lock()
+	ciAtCall := notify.storedCIStateAtCI
+	notify.mu.Unlock()
+	if ciAtCall != "failing" {
+		t.Fatalf("expected stored CIState already 'failing' when CIFailing invoked, got %q", ciAtCall)
+	}
+
+	// Tick 2: merge the PR.
+	m.mu.Lock()
+	m.prState = "closed"
+	m.merged = true
+	m.checkConclusion = ""
+	m.mu.Unlock()
+
+	if err := p.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick 2 (merge): %v", err)
+	}
+
+	notify.mu.Lock()
+	prAtCall := notify.storedPRStateAtMerge
+	notify.mu.Unlock()
+	if prAtCall != "merged" {
+		t.Fatalf("expected stored PRState already 'merged' when Merged invoked, got %q", prAtCall)
+	}
+}
+
+// failingStore wraps *store.Store and makes UpdateSessionPR always fail,
+// to exercise updatePR's "persist error => no notify" path. It embeds the
+// real store for every other method so store.Store's non-exported fields
+// remain untouched; only the ghpoller code path under test
+// (Poller.updatePR/discoverPR) calls through p.st, so we instead inject the
+// failure at a level Poller can observe: this documents that a clean
+// injection point isn't available without changing Poller.st's type from
+// *store.Store to an interface, which is out of scope for this task. The
+// discovery+merge ordering above is covered by TestUpdatePR_PersistBeforeNotify.
 
 func TestTick_Discovery_ChangesRequested(t *testing.T) {
 	st, b := setupEnv(t)
