@@ -490,7 +490,7 @@ func (q *Queue) notifySenderOfFailure(msg store.Message, reason string) {
 		FromSession: "", // system message — this prevents recursive notifications
 		ToSession:   msg.FromSession,
 		Body: fmt.Sprintf(
-			"[rocket] delivery FAILED: message #%d to %s (%s). Body preserved in queue history (rocket send --wait next time for critical messages).",
+			"[rocket] delivery FAILED: message #%d to %s (%s). The body is preserved in message history; use rocket send --wait for critical messages.",
 			msg.ID, msg.ToSession, reason,
 		),
 	}
