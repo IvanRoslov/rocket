@@ -5,12 +5,26 @@
   display: flex;
   min-height: 0;
   background: var(--dark-surface, #161618);
+  /* The terminal's visual inset lives HERE, on the wrapper — deliberately
+   * NOT on .term-panel__xterm. FitAddon derives cols/rows from the fit
+   * container's computed width, which under the global
+   * box-sizing: border-box resolves to the border-box width, so any
+   * padding on the fit container itself is silently counted as usable
+   * cell space — xterm then lays out ~2 columns more than actually fit
+   * and the grid runs under/past the padding («не помещается в попапе»).
+   * With the padding on this wrapper the fit container's border-box IS
+   * the true usable area and the fitted grid always fits it exactly. */
+  padding: 18px 22px;
 }
 .term-panel__xterm {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  padding: 18px 22px;
+  /* Clip xterm's canvas/DOM rows: between a container resize and the
+   * FitAddon refit (or if a fallback glyph paints wide) the terminal may
+   * momentarily be larger than the panel — it must never overflow the
+   * overlay or push the page into horizontal scroll. */
+  overflow: hidden;
 }
 .term-panel__banner {
   position: absolute;

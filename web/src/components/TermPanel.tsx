@@ -20,8 +20,7 @@
 //     backoff/failure counters reset on the next successful open.
 
 import { FitAddon } from '@xterm/addon-fit'
-import { Unicode11Addon } from '@xterm/addon-unicode11'
-import { WebglAddon } from '@xterm/addon-webgl'
+import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
@@ -155,61 +154,101 @@ export function encodeResize(cols: number, rows: number): string {
 }
 
 /**
- * Loads the Unicode 11 width tables into `term` and activates them.
+ * Loads the grapheme-cluster-aware Unicode width provider ('15-graphemes')
+ * into `term` and activates it.
  *
- * Root cause this fixes: tmux computes character cell widths via utf8proc
- * (Unicode-aware), so it treats most pictographic emoji (e.g. 🚀 U+1F680)
- * as occupying 2 columns. xterm.js's *default* width table implements only
- * the much older Unicode 6 rules and treats the same characters as 1
- * column wide. That single-column disagreement is enough to corrupt
- * rendering: tmux advances its cursor model 2 columns past such a glyph
- * before emitting the next one (typically a plain space), but xterm only
- * reserves 1 column for it, so xterm draws that next cell one column
- * early — landing on top of / merging into the emoji's cell instead of
- * the blank column tmux left — and the drift compounds across a line
- * (visible as glyphs glued to following text, shifted content, and
- * leftover fragments once a scroll-region redraw runs on top of it).
- * Loading Unicode 11's tables brings xterm's width computation much
- * closer to tmux's for ordinary emoji, eliminating that class of drift.
+ * Root cause this fixes (byte-level proof, round 6 debug session): tmux
+ * computes character cell widths via utf8proc, which gives VS16
+ * emoji-presentation sequences — a base char followed by U+FE0F, e.g.
+ * Claude Code's spinner ✳️ (U+2733 U+FE0F) — width 2. xterm's per-codepoint
+ * width tables (both the default Unicode 6 and the Unicode11 addon used
+ * previously) give U+2733 width 1 and U+FE0F width 0, so the same sequence
+ * occupies only 1 column in xterm. tmux keeps a per-attached-client cell
+ * model and sends *minimal diffs* against it: a captured attach byte
+ * stream shows tmux emitting `CSI row;3 H` — cursor to column 3, skipping
+ * columns 1-2 it believes still hold the unchanged 2-wide spinner — before
+ * rewriting the rest of a spinner line. In xterm the spinner only covered
+ * column 1, so column 2 (and, as the desync compounds across scroll-region
+ * redraws, columns 0-1 of other rows) keeps stale glyphs from earlier
+ * frames until something forces a full repaint. That is exactly the
+ * "stale 1-2 letter fragments in the first columns during streaming"
+ * corruption.
+ *
+ * The UnicodeGraphemesAddon registers a grapheme-cluster-aware provider:
+ * U+FE0F *joins* the preceding base char and widens the cluster to 2
+ * columns (verified: charProperties(U+FE0F, after U+2733) reports width 2,
+ * and plain wide emoji like 🚀 U+1F680 stay width 2), matching tmux's
+ * utf8proc model and keeping the two cell grids in lockstep.
  *
  * Requires `allowProposedApi: true` on the Terminal (activeVersion is a
  * proposed API); the caller's Terminal options set that.
  */
-export function configureUnicode11(term: Terminal): void {
-  term.loadAddon(new Unicode11Addon())
-  term.unicode.activeVersion = '11'
+export function configureUnicodeGraphemes(term: Terminal): void {
+  term.loadAddon(new UnicodeGraphemesAddon())
+  term.unicode.activeVersion = '15-graphemes'
 }
 
 /**
- * Loads the WebGL renderer addon, falling back silently to xterm's default
- * DOM renderer if WebGL is unavailable (headless test envs, blocklisted
- * GPUs) or the context is later lost.
+ * Terminal options for the tmux-attach terminal. Exported so tests can
+ * assert the invariants that keep xterm's grid byte-for-byte in lockstep
+ * with tmux's per-client cell model.
  *
- * Root cause this fixes: the DOM renderer draws each row as a separate DOM
- * line, so it can't tile box-drawing/block glyphs (or generally keep frames
- * pixel-aligned) cleanly across rows under fast, continuous writes — this is
- * exactly the "obryvki pervyh bukv strok, nalozheniya" (stray first-letter
- * fragments, overlapping text) symptom seen under heavy Claude Code TUI
- * output, which self-heals once output pauses and xterm catches up on a
- * clean repaint. The WebGL renderer custom-draws glyphs into a texture atlas
- * per cell instead, so frames stay connected under load. Returns the addon
- * (or null if it couldn't be loaded) so the caller can dispose it on
- * teardown.
+ * CRITICAL: `convertEol` must stay OFF (xterm's default). tmux talks to
+ * its attached client with minimal diffs and optimizes cursor movement: a
+ * captured attach byte stream (round 6 debug session) shows sequences
+ * like `CSI 24;28 H "9" LF "10"` — write "9" at row 24 col 28, then a
+ * *bare LF*, which in a real terminal means "move down one row, KEEP the
+ * column", then write "10" in the same column of row 25 (tmux updating a
+ * column of line numbers across consecutive rows with a 1-byte move).
+ * With `convertEol: true` xterm rewrites that LF into CR+LF, resetting
+ * the column to 0, so "10 — …" lands at the line start — reproducibly
+ * yielding the exact "stale 1-2 char fragments in the first columns +
+ * overlapped text during streaming, healed by the next full repaint"
+ * corruption (verified by replaying the same captured stream into a
+ * headless xterm with the flag on vs off: off matches tmux's grid
+ * exactly, on corrupts). The daemon side is a real PTY, so output
+ * newlines already arrive as CR+LF where a column reset is intended —
+ * convertEol buys nothing here and must never come back.
  */
-export function loadWebglAddon(term: Terminal): WebglAddon | null {
-  try {
-    const addon = new WebglAddon()
-    addon.onContextLoss(() => {
-      addon.dispose()
-    })
-    term.loadAddon(addon)
-    return addon
-  } catch {
-    // WebGL unavailable (e.g. jsdom in tests, no GPU) — xterm keeps using
-    // the DOM renderer.
-    return null
+export function buildTerminalOptions(
+  fontSize?: number
+): NonNullable<ConstructorParameters<typeof Terminal>[0]> {
+  return {
+    fontFamily: TERMINAL_FONT,
+    fontSize: fontSize ?? DEFAULT_TERM_FONT_SIZE,
+    lineHeight: 1.25,
+    fontWeight: 'normal',
+    fontWeightBold: '600',
+    theme: TERMINAL_THEME,
+    // Required to reach term.unicode (activeVersion is a proposed API).
+    // See configureUnicodeGraphemes(): xterm's width table must match
+    // tmux's utf8proc widths — including VS16 emoji-presentation
+    // sequences like Claude Code's spinner ✳️ (U+2733 U+FE0F), 2 columns
+    // in tmux — or tmux's minimal per-client diffs address cells xterm
+    // laid out one column over.
+    allowProposedApi: true,
+    // JetBrains-Mono-class monospace fonts don't cover every glyph agent
+    // TUIs emit (powerline separators, some emoji); a fallback-font glyph
+    // wider than the cell bleeds into the next cell and overlaps
+    // following text. Shrinks any overlapping glyph back to fit its cell.
+    rescaleOverlappingGlyphs: true,
   }
 }
+
+// NOTE — no WebGL renderer, deliberately (round 6). Round 5 added
+// @xterm/addon-webgl (058bdf7) chasing the mid-stream corruption, but the
+// byte-level investigation proved that corruption lived in the GRID, not
+// the paint: tmux's minimal per-client diffs desynced from xterm's cell
+// model via (a) VS16 emoji widths (see configureUnicodeGraphemes) and
+// (b) convertEol rewriting tmux's bare-LF cursor moves (see
+// buildTerminalOptions). With both fixed the DOM renderer is pixel-clean
+// under heavy streaming — verified live against the real Claude Code TUI.
+// The WebGL beta addon, meanwhile, has a demonstrated devicePixelRatio
+// bug: after a dpr change (browser zoom, moving the window to a
+// non-retina display) it sizes its canvas backing store for the old dpr
+// but paints a viewport for the new one, squeezing the whole terminal
+// into a quarter of the canvas until remount. Correct > fast; the DOM
+// renderer stays.
 
 export function TermPanel({ sessionId, readonly, onResize, fontSize }: TermPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -239,54 +278,19 @@ export function TermPanel({ sessionId, readonly, onResize, fontSize }: TermPanel
     const container = containerRef.current
     if (!container) return
 
-    const term = new Terminal({
-      convertEol: true,
-      fontFamily: TERMINAL_FONT,
-      fontSize: fontSize ?? DEFAULT_TERM_FONT_SIZE,
-      lineHeight: 1.25,
-      fontWeight: 'normal',
-      fontWeightBold: '600',
-      theme: TERMINAL_THEME,
-      // Required to reach term.unicode below (activeVersion is a proposed
-      // API). See the Unicode11Addon load just after: without it, xterm's
-      // default (Unicode 6) character-width table disagrees with tmux's
-      // utf8proc-based width table for glyphs introduced since — notably
-      // pictographic emoji (e.g. 🚀 U+1F680) that tmux renders 2 columns
-      // wide but xterm renders 1. That single-column disagreement makes
-      // xterm draw the next cell (typically the space after an emoji
-      // status icon) one column early, so it lands on/merges into the
-      // glyph tmux already placed there instead of the blank column tmux
-      // left for it — visible as glyphs glued to the following text and,
-      // as the drift compounds across a scroll region redraw, stale
-      // fragments and horizontal shift elsewhere on the line. Loading the
-      // Unicode 11 width tables here brings xterm's width table much
-      // closer to tmux's, eliminating the mismatch for ordinary emoji.
-      allowProposedApi: true,
-      // JetBrains-Mono-class monospace fonts don't cover every glyph agent
-      // TUIs emit (powerline separators, some emoji); a fallback-font glyph
-      // wider than the cell bleeds into the next cell and overlaps
-      // following text. Shrinks any overlapping glyph back to fit its cell.
-      rescaleOverlappingGlyphs: true,
-    })
+    const term = new Terminal(buildTerminalOptions(fontSize))
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
-    configureUnicode11(term)
+    configureUnicodeGraphemes(term)
     term.open(container)
+    // Debug handle for live-buffer inspection (used by the round-6 renderer
+    // investigation and any future "is the grid right but the paint stale?"
+    // question). Harmless in production.
+    ;(window as unknown as { __rocketTerm?: Terminal }).__rocketTerm = term
     fitAddon.fit()
     onResizeRef.current?.(term.cols, term.rows)
     termRef.current = term
     fitAddonRef.current = fitAddon
-
-    // WebGL renderer — deferred one frame past term.open() (matches the
-    // reference implementation) so the initial viewport/atlas sizing has
-    // settled before the addon measures it. See loadWebglAddon() for why
-    // this specifically targets the mid-stream corruption symptom.
-    let webglAddon: WebglAddon | null = null
-    let webglMounted = true
-    const webglRaf = requestAnimationFrame(() => {
-      if (!webglMounted) return
-      webglAddon = loadWebglAddon(term)
-    })
 
     let ws: WebSocket | null = null
     let pingTimer: ReturnType<typeof setInterval> | null = null
@@ -405,13 +409,6 @@ export function TermPanel({ sessionId, readonly, onResize, fontSize }: TermPanel
 
     return () => {
       cancelled = true
-      webglMounted = false
-      cancelAnimationFrame(webglRaf)
-      try {
-        webglAddon?.dispose()
-      } catch {
-        // addon may already be disposed via the context-loss handler
-      }
       clearTimers()
       resizeObserver.disconnect()
       ws?.close()

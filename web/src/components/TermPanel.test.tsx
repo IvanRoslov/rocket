@@ -10,10 +10,10 @@ import {
   MAX_HANDSHAKE_FAILURES,
   NORMAL_CLOSURE_CODE,
   TermPanel,
-  configureUnicode11,
+  buildTerminalOptions,
+  configureUnicodeGraphemes,
   decideOnClose,
   encodeResize,
-  loadWebglAddon,
   nextReconnectDelay,
   termUrl,
 } from './TermPanel'
@@ -68,58 +68,60 @@ describe('encodeResize', () => {
   })
 })
 
-describe('configureUnicode11', () => {
-  // Regression test for character-overlap corruption: tmux (via utf8proc)
-  // renders pictographic emoji like 🚀 (U+1F680) as 2 columns wide, but
-  // xterm.js's default Unicode 6 width table renders the same glyph as 1
-  // column — the mismatch that made a following space column collide
-  // with the emoji's second cell, gluing status icons to the text after
-  // them (reproduced live via tmux + a real browser; see the debug
-  // session for screenshots). Asserts the fix directly: after
-  // configureUnicode11 runs, xterm's own width computation for 🚀 matches
-  // tmux's (2 columns), not the stale 1-column default.
-  it('makes xterm treat wide emoji (e.g. 🚀 U+1F680) as 2 columns, matching tmux/utf8proc', async () => {
-    // xterm.js queries matchMedia for DPR change tracking; jsdom has none.
-    const originalMatchMedia = window.matchMedia
-    window.matchMedia = vi.fn().mockReturnValue({
-      matches: false,
-      media: '',
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      addListener: () => {},
-      removeListener: () => {},
-      dispatchEvent: () => false,
-    }) as unknown as typeof window.matchMedia
+describe('buildTerminalOptions', () => {
+  // Regression tests for the second (and final) root cause of the
+  // streaming corruption: convertEol. tmux optimizes its per-client
+  // diffs with bare LF as "move down one row, KEEP the column" (captured
+  // attach stream: `CSI 24;28 H "9" LF "10"` — line numbers updated down
+  // a column with a 1-byte move). convertEol rewrites LF into CR+LF,
+  // resetting the column to 0 and smearing every such diff across the
+  // line start. Replaying the same captured byte stream into a headless
+  // xterm with convertEol on vs off reproduced/eliminated the corruption
+  // deterministically.
+  it('leaves convertEol off so bare LF keeps the column, matching real terminal semantics', () => {
+    expect(buildTerminalOptions().convertEol).toBeUndefined()
+  })
 
-    const term = new Terminal({ allowProposedApi: true })
-    const div = document.createElement('div')
-    document.body.appendChild(div)
-    term.open(div)
-
-    // Before the fix: default table gives this emoji 1 column.
-    await new Promise<void>((resolve) => term.write('X\u{1F680}|', () => resolve()))
-    expect(term.buffer.active.cursorX).toBe(3) // 'X' + 1-col emoji + '|'
-
-    term.reset()
-    configureUnicode11(term)
-    await new Promise<void>((resolve) => term.write('X\u{1F680}|', () => resolve()))
-    expect(term.buffer.active.cursorX).toBe(4) // 'X' + 2-col emoji + '|'
-
+  it('bare LF moves down but keeps the cursor column (tmux minimal-diff invariant)', async () => {
+    const term = new Terminal(buildTerminalOptions())
+    // No open() needed: the write pipeline works headless in jsdom.
+    await new Promise<void>((resolve) => term.write('\x1b[1;28H9\n10', () => resolve()))
+    // After "9" the cursor is at col 28 (0-based); LF must keep it there
+    // (moving to row 2), so "10" starts at col 28 — with convertEol it
+    // would have started at col 0.
+    expect(term.buffer.active.cursorY).toBe(1)
+    expect(term.buffer.active.cursorX).toBe(30)
+    const row2 = term.buffer.active.getLine(1)!.translateToString(false)
+    expect(row2.slice(28, 30)).toBe('10')
+    expect(row2.slice(0, 2)).toBe('  ')
     term.dispose()
-    div.remove()
-    window.matchMedia = originalMatchMedia
+  })
+
+  it('keeps the tuned rendering/API options', () => {
+    const opts = buildTerminalOptions(16)
+    expect(opts.fontSize).toBe(16)
+    expect(opts.allowProposedApi).toBe(true)
+    expect(opts.rescaleOverlappingGlyphs).toBe(true)
   })
 })
 
-describe('loadWebglAddon', () => {
-  // jsdom's `canvas` shim (used so the DOM renderer's WidthCache can call
-  // getContext('2d') in tests) implements no WebGL context, so
-  // canvas.getContext('webgl2') returns null and @xterm/addon-webgl throws
-  // from its constructor. This is exactly the "WebGL unavailable" path a
-  // real browser hits on a headless/blocklisted GPU — asserts the addon
-  // fails closed (falls back to the DOM renderer) instead of crashing the
-  // terminal mount.
-  it('returns null and does not throw when WebGL is unavailable (e.g. jsdom)', () => {
+describe('configureUnicodeGraphemes', () => {
+  // Regression tests for the tmux/xterm cell-width desync that produced
+  // stale 1-2 column fragments during streaming output.
+  //
+  // Byte-level root cause (round 6 debug session): tmux measures cell
+  // widths with utf8proc, which gives VS16 emoji-presentation sequences —
+  // base char + U+FE0F, e.g. Claude Code's spinner ✳️ (U+2733 U+FE0F) —
+  // width 2. xterm's Unicode 6 AND Unicode 11 tables both give U+2733
+  // width 1 and U+FE0F width 0 (per-codepoint APIs can't widen a
+  // cluster). tmux keeps a per-client cell model and sends minimal
+  // diffs: a captured attach stream shows tmux emitting `CUP row;3`
+  // (skip columns 1-2, "unchanged" ✳️) before rewriting the rest of the
+  // spinner line — but in xterm the spinner only covered column 1, so
+  // column 2 keeps whatever was there in a previous frame. The
+  // grapheme-cluster-aware provider ('15-graphemes') joins base+VS16 and
+  // reports width 2, matching tmux's model exactly.
+  function stubMatchMedia() {
     // xterm.js queries matchMedia for DPR change tracking; jsdom has none.
     const originalMatchMedia = window.matchMedia
     window.matchMedia = vi.fn().mockReturnValue({
@@ -131,18 +133,51 @@ describe('loadWebglAddon', () => {
       removeListener: () => {},
       dispatchEvent: () => false,
     }) as unknown as typeof window.matchMedia
+    return () => {
+      window.matchMedia = originalMatchMedia
+    }
+  }
 
+  function openTerm(): { term: Terminal; cleanup: () => void } {
+    const restore = stubMatchMedia()
     const term = new Terminal({ allowProposedApi: true })
     const div = document.createElement('div')
     document.body.appendChild(div)
     term.open(div)
+    return {
+      term,
+      cleanup: () => {
+        term.dispose()
+        div.remove()
+        restore()
+      },
+    }
+  }
 
-    expect(() => loadWebglAddon(term)).not.toThrow()
-    expect(loadWebglAddon(term)).toBeNull()
+  it('makes xterm treat VS16 emoji sequences (✳️ U+2733 U+FE0F) as 2 columns, matching tmux/utf8proc', async () => {
+    const { term, cleanup } = openTerm()
 
-    term.dispose()
-    div.remove()
-    window.matchMedia = originalMatchMedia
+    // Before the fix: U+2733 is width 1 and U+FE0F width 0 under both the
+    // default (Unicode 6) and Unicode 11 tables — total 1 column.
+    await new Promise<void>((resolve) => term.write('X✳️|', () => resolve()))
+    expect(term.buffer.active.cursorX).toBe(3) // 'X' + 1-col spinner + '|'
+
+    term.reset()
+    configureUnicodeGraphemes(term)
+    await new Promise<void>((resolve) => term.write('X✳️|', () => resolve()))
+    expect(term.buffer.active.cursorX).toBe(4) // 'X' + 2-col spinner + '|'
+
+    cleanup()
+  })
+
+  it('keeps plain wide emoji (🚀 U+1F680) at 2 columns, matching tmux/utf8proc', async () => {
+    const { term, cleanup } = openTerm()
+
+    configureUnicodeGraphemes(term)
+    await new Promise<void>((resolve) => term.write('X\u{1F680}|', () => resolve()))
+    expect(term.buffer.active.cursorX).toBe(4) // 'X' + 2-col emoji + '|'
+
+    cleanup()
   })
 })
 
