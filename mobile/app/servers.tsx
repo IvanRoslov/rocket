@@ -5,6 +5,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,7 +13,9 @@ import {
   View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { useQueryClient } from '@tanstack/react-query'
 import { useHealth } from '../src/api/queries'
+import { ActionSheet } from '../src/components/ActionSheet'
 import { Card, Dot, GhostButton, MonoText, PrimaryButton } from '../src/components/ui'
 import { uptime } from '../src/lib/format'
 import { useServers, type ServerEntry } from '../src/servers/ServerContext'
@@ -23,6 +26,13 @@ function ServerCard({ server }: { server: ServerEntry }) {
   const health = useHealth(`http://${server.host}:${server.port}`)
   const online = health.isSuccess
   const isActive = activeId === server.id
+  const [menu, setMenu] = useState(false)
+
+  const confirmRemove = () =>
+    Alert.alert('Remove server', `Remove “${server.name}” from the list?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: () => removeServer(server.id) },
+    ])
 
   return (
     <Pressable
@@ -30,22 +40,20 @@ function ServerCard({ server }: { server: ServerEntry }) {
         setActive(server.id)
         router.replace('/(tabs)')
       }}
-      onLongPress={() =>
-        Alert.alert('Remove server', `Remove “${server.name}” from the list?`, [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Remove', style: 'destructive', onPress: () => removeServer(server.id) },
-        ])
-      }
+      onLongPress={() => setMenu(true)}
     >
       <Card style={isActive ? { borderColor: colors.indigoBorder, backgroundColor: '#fbfbff' } : undefined}>
         <View style={styles.cardHead}>
-          <Dot color={online ? colors.green : health.isLoading ? colors.amber : colors.red} size={9} />
+          <Dot color={online ? colors.green : health.isLoading || health.isFetching ? colors.amber : colors.red} size={9} />
           <Text style={styles.serverName}>{server.name}</Text>
           {isActive ? (
             <View style={styles.activePill}>
               <Text style={{ color: colors.indigoFg, fontSize: 10.5, fontWeight: '600' }}>active</Text>
             </View>
           ) : null}
+          <Pressable onPress={() => setMenu(true)} hitSlop={10}>
+            <Text style={{ fontSize: 17, color: colors.textDim }}>⋯</Text>
+          </Pressable>
         </View>
         <MonoText style={{ color: colors.textDim, marginBottom: 6 }}>
           {server.host}:{server.port}
@@ -53,11 +61,27 @@ function ServerCard({ server }: { server: ServerEntry }) {
         <Text style={{ fontSize: 12, color: colors.textFaint }}>
           {online
             ? `rocketd ${health.data.version} · up ${health.data.uptime.replace(/(\.\d+)?s.*/, 's')}`
-            : health.isLoading
+            : health.isLoading || health.isFetching
               ? 'checking…'
               : 'offline — daemon unreachable'}
         </Text>
       </Card>
+      <ActionSheet
+        visible={menu}
+        title={`${server.name} · ${server.host}:${server.port}`}
+        onClose={() => setMenu(false)}
+        actions={[
+          {
+            label: 'Connect',
+            onPress: () => {
+              setActive(server.id)
+              router.replace('/(tabs)')
+            },
+          },
+          { label: 'Check again', onPress: () => health.refetch() },
+          { label: 'Remove server', destructive: true, onPress: confirmRemove },
+        ]}
+      />
     </Pressable>
   )
 }
@@ -130,6 +154,7 @@ function AddServerForm({ onDone }: { onDone: () => void }) {
 export default function ServersScreen() {
   const { servers } = useServers()
   const [adding, setAdding] = useState(false)
+  const qc = useQueryClient()
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.page }} edges={['top', 'bottom']}>
@@ -140,9 +165,17 @@ export default function ServersScreen() {
         <Text style={styles.headerTitle}>Servers</Text>
       </View>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
+        <ScrollView
+          contentContainerStyle={{ padding: 16, gap: 12 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={false}
+              onRefresh={() => qc.refetchQueries({ predicate: (q) => q.queryKey[1] === 'health' })}
+            />
+          }
+        >
           <Text style={styles.lede}>
-            Pick the machine running rocketd. Tap to connect, long-press to remove.
+            Pick the machine running rocketd. Tap to connect, ⋯ for actions.
           </Text>
           {servers.map((s) => (
             <ServerCard key={s.id} server={s} />
