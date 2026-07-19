@@ -11,8 +11,16 @@ import (
 
 // Config represents the rocket daemon configuration.
 type Config struct {
-	Port                 int           `yaml:"port"`
-	Host                 string        `yaml:"host"`
+	Port int    `yaml:"port"`
+	Host string `yaml:"host"`
+	// TLSPort is the https/HTTP/2 listener port (same host, same handler).
+	// Browsers cap cleartext HTTP/1.1 at ~6 connections per host, which a
+	// dashboard full of SSE streams exhausts (page loads then hang);
+	// HTTP/2 — which browsers only speak over TLS — multiplexes everything
+	// over one connection. 0 disables the listener. The certificate lives
+	// in <home>/tls/ (auto-generated self-signed; replace with an
+	// mkcert-issued pair to avoid the browser trust warning).
+	TLSPort              int           `yaml:"tls_port"`
 	HeartbeatInterval    time.Duration `yaml:"heartbeat_interval"`
 	GithubPollInterval   time.Duration `yaml:"github_poll_interval"`
 	DefaultAgent         string        `yaml:"default_agent"`
@@ -72,6 +80,7 @@ func Load(home string) (*Config, error) {
 	cfg := &Config{
 		Port:                      4477,
 		Host:                      "127.0.0.1",
+		TLSPort:                   4478,
 		HeartbeatInterval:         5 * time.Minute,
 		GithubPollInterval:        2 * time.Minute,
 		DefaultAgent:              "claude-code",

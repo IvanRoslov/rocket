@@ -6,9 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/bus"
@@ -135,8 +137,9 @@ func Serve(ctx context.Context, d Deps) error {
 	handler := NewHandler(d)
 	unixSrv := &http.Server{Handler: handler}
 	tcpSrv := &http.Server{Handler: handler}
+	var tlsSrv *http.Server
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 	go func() {
 		if err := unixSrv.Serve(unixLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- fmt.Errorf("unix server: %w", err)
@@ -147,6 +150,36 @@ func Serve(ctx context.Context, d Deps) error {
 			errCh <- fmt.Errorf("tcp server: %w", err)
 		}
 	}()
+
+	// Optional https listener (tls_port, 0 = off). Its whole point is
+	// HTTP/2: browsers cap cleartext HTTP/1.1 at ~6 connections per host,
+	// which the dashboard's long-lived SSE streams exhaust (page loads then
+	// stall in the queue); over TLS net/http negotiates h2 via ALPN
+	// automatically and everything multiplexes onto one connection.
+	if d.Cfg.TLSPort > 0 {
+		certFile, keyFile, created, err := EnsureTLSCert(filepath.Join(d.Cfg.Home, "tls"), d.Cfg.Host)
+		if err != nil {
+			slog.Error("tls: ensure certificate failed, https listener disabled", "error", err)
+		} else {
+			tlsAddr := fmt.Sprintf("%s:%d", d.Cfg.Host, d.Cfg.TLSPort)
+			tlsLn, err := net.Listen("tcp", tlsAddr)
+			if err != nil {
+				slog.Error("tls: listen failed, https listener disabled", "addr", tlsAddr, "error", err)
+			} else {
+				tlsSrv = &http.Server{Handler: handler}
+				if created {
+					slog.Info("tls: generated self-signed certificate; trust it once to silence the browser warning (or replace with an mkcert pair)",
+						"cert", certFile)
+				}
+				slog.Info("tls: https listener up (HTTP/2)", "addr", "https://"+tlsAddr)
+				go func() {
+					if err := tlsSrv.ServeTLS(tlsLn, certFile, keyFile); err != nil && !errors.Is(err, http.ErrServerClosed) {
+						errCh <- fmt.Errorf("tls server: %w", err)
+					}
+				}()
+			}
+		}
+	}
 
 	var fatalErr error
 	select {
@@ -161,6 +194,9 @@ func Serve(ctx context.Context, d Deps) error {
 	defer cancel()
 	_ = unixSrv.Shutdown(shutdownCtx)
 	_ = tcpSrv.Shutdown(shutdownCtx)
+	if tlsSrv != nil {
+		_ = tlsSrv.Shutdown(shutdownCtx)
+	}
 	os.Remove(sockPath)
 
 	return fatalErr
