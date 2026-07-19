@@ -200,3 +200,65 @@ func TestActivityPicksNewestMatchingFile(t *testing.T) {
 		t.Errorf("state = %v, want Ready (from the newer file, not the older error one)", state)
 	}
 }
+
+func TestActivityResolvesSymlinksInWorktreePath(t *testing.T) {
+	home := withCodexHome(t)
+	// Create a real directory and a symlink to it
+	realDir := t.TempDir()
+	symlinkDir := filepath.Join(t.TempDir(), "symlink")
+	if err := os.Symlink(realDir, symlinkDir); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	now := time.Now()
+	old := now.Add(-5 * time.Minute)
+
+	// Write session with real path as cwd
+	writeSessionFile(t, home, now, "rollout-1", realDir,
+		[]string{`{"type":"event_msg","timestamp":"x","payload":{"type":"task_complete"}}`},
+		old)
+
+	// Query Activity with symlink path
+	c := New()
+	state, mtime, err := c.Activity(context.TODO(), agent.ActivityRef{WorktreePath: symlinkDir})
+	if err != nil {
+		t.Fatalf("Activity failed to match symlink to resolved path: %v", err)
+	}
+	if state != activity.Ready {
+		t.Errorf("state = %v, want Ready", state)
+	}
+	if !mtime.Equal(old) {
+		t.Errorf("mtime = %v, want %v", mtime, old)
+	}
+}
+
+func TestActivityResolvesSymlinksInSessionCwd(t *testing.T) {
+	home := withCodexHome(t)
+	// Create a real directory and a symlink to it
+	realDir := t.TempDir()
+	symlinkDir := filepath.Join(t.TempDir(), "symlink")
+	if err := os.Symlink(realDir, symlinkDir); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	now := time.Now()
+	old := now.Add(-5 * time.Minute)
+
+	// Write session with symlink path as cwd
+	writeSessionFile(t, home, now, "rollout-1", symlinkDir,
+		[]string{`{"type":"event_msg","timestamp":"x","payload":{"type":"task_complete"}}`},
+		old)
+
+	// Query Activity with real path
+	c := New()
+	state, mtime, err := c.Activity(context.TODO(), agent.ActivityRef{WorktreePath: realDir})
+	if err != nil {
+		t.Fatalf("Activity failed to match resolved path to symlink in session: %v", err)
+	}
+	if state != activity.Ready {
+		t.Errorf("state = %v, want Ready", state)
+	}
+	if !mtime.Equal(old) {
+		t.Errorf("mtime = %v, want %v", mtime, old)
+	}
+}

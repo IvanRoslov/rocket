@@ -81,7 +81,11 @@ func sessionCwd(path string) (string, bool) {
 // if no matching file is found (missing dirs, no cwd match, or no session
 // files at all).
 func findMatchingSession(worktreePath string) (string, time.Time, error) {
-	want := filepath.Clean(worktreePath)
+	want := worktreePath
+	if r, err := filepath.EvalSymlinks(worktreePath); err == nil {
+		want = r
+	}
+	want = filepath.Clean(want)
 
 	var bestPath string
 	var bestMTime time.Time
@@ -96,7 +100,15 @@ func findMatchingSession(worktreePath string) (string, time.Time, error) {
 			}
 			path := filepath.Join(dir, e.Name())
 			cwd, ok := sessionCwd(path)
-			if !ok || filepath.Clean(cwd) != want {
+			if !ok {
+				continue
+			}
+			cwdResolved := cwd
+			if r, err := filepath.EvalSymlinks(cwd); err == nil {
+				cwdResolved = r
+			}
+			cwdResolved = filepath.Clean(cwdResolved)
+			if cwdResolved != want {
 				continue
 			}
 			info, err := e.Info()
