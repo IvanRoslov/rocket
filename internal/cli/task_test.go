@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/IvanRoslov/rocket/internal/client"
 )
 
 // TestTaskAddUsage tests usage violations for task add.
@@ -172,6 +174,63 @@ func TestTaskMoveUsage(t *testing.T) {
 				t.Errorf("expected usageError, got %T: %v", err, err)
 			}
 		})
+	}
+}
+
+// TestTaskMoveForceFlagRegistered verifies the --force flag is registered
+// and parses cleanly on task move. This deliberately stops at flag parsing
+// (ParseFlags) rather than calling cmd.Execute()/RunE, since RunE calls
+// connect(true) with autostart=true — which, in this environment, would
+// reach and mutate the real local rocket daemon's live task database
+// rather than failing cleanly.
+func TestTaskMoveForceFlagRegistered(t *testing.T) {
+	cmd := newTaskMoveCmd()
+	if cmd.Flags().Lookup("force") == nil {
+		t.Fatal("expected --force flag to be registered on task move")
+	}
+	if err := cmd.ParseFlags([]string{"1", "in_progress", "--force"}); err != nil {
+		t.Fatalf("ParseFlags with --force: %v", err)
+	}
+	if !cmd.Flags().Changed("force") {
+		t.Error("expected --force to be marked as changed after parsing")
+	}
+}
+
+// TestRenderMoveErrorReviewBlocked verifies the review_blocked 409 is
+// rendered with the open/live details and a --force hint.
+func TestRenderMoveErrorReviewBlocked(t *testing.T) {
+	apiErr := &client.APIError{
+		Code:    "review_blocked",
+		Message: "open subtasks: [3 4]; live workers: [worker-1] — retry with --force to override",
+	}
+	rendered := renderMoveError(apiErr)
+	if rendered == nil {
+		t.Fatal("expected a non-nil error")
+	}
+	msg := rendered.Error()
+	if !strings.Contains(msg, "3 4") {
+		t.Errorf("rendered message missing open subtask ids: %q", msg)
+	}
+	if !strings.Contains(msg, "worker-1") {
+		t.Errorf("rendered message missing live worker id: %q", msg)
+	}
+	if !strings.Contains(msg, "--force") {
+		t.Errorf("rendered message missing --force hint: %q", msg)
+	}
+}
+
+// TestRenderMoveErrorPassesThroughOtherErrors verifies non-review_blocked
+// errors are returned unchanged.
+func TestRenderMoveErrorPassesThroughOtherErrors(t *testing.T) {
+	apiErr := &client.APIError{Code: "invalid_status", Message: "bad status"}
+	rendered := renderMoveError(apiErr)
+	if rendered != apiErr {
+		t.Errorf("expected passthrough of non-review_blocked error, got %v", rendered)
+	}
+
+	other := errors.New("boom")
+	if renderMoveError(other) != other {
+		t.Errorf("expected passthrough of non-APIError")
 	}
 }
 

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -368,8 +369,26 @@ func newTaskShowCmd() *cobra.Command {
 	}
 }
 
+// patchTaskResponseRow mirrors internal/api.patchTaskResponse: taskRow plus
+// an optional cleaned_up flag, set only when a root task was moved to done.
+type patchTaskResponseRow struct {
+	taskRow
+	CleanedUp *bool `json:"cleaned_up,omitempty"`
+}
+
+// renderMoveError turns a review-blocked 409 into a friendlier message that
+// surfaces the --force hint; other errors pass through unchanged.
+func renderMoveError(err error) error {
+	var apiErr *client.APIError
+	if errors.As(err, &apiErr) && apiErr.Code == "review_blocked" {
+		return fmt.Errorf("cannot move to review: %s\nhint: rerun with --force to override", apiErr.Message)
+	}
+	return err
+}
+
 func newTaskMoveCmd() *cobra.Command {
-	return &cobra.Command{
+	var force bool
+	cmd := &cobra.Command{
 		Use:   "move <id> <status>",
 		Short: "Переместить задачу в другой статус",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -396,18 +415,26 @@ func newTaskMoveCmd() *cobra.Command {
 			}
 
 			path := apiPath("v1", "tasks", args[0])
-			var resp taskRow
+			if force {
+				path += "?force=true"
+			}
+			var resp patchTaskResponseRow
 			if err := c.Patch(path, reqBody, &resp); err != nil {
-				return err
+				return renderMoveError(err)
 			}
 
 			if flags.JSON {
 				return printJSON(cmd, resp)
 			}
 			cmd.Printf("task #%d moved to %s\n", resp.ID, resp.Status)
+			if resp.CleanedUp != nil && *resp.CleanedUp {
+				cmd.Println("orchestrator cleaned up")
+			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&force, "force", false, "переместить в review, несмотря на открытые подзадачи/живых воркеров")
+	return cmd
 }
 
 func newTaskCancelCmd() *cobra.Command {

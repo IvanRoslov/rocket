@@ -922,6 +922,304 @@ func TestCancelTaskNotFound(t *testing.T) {
 	}
 }
 
+// --- PATCH /v1/tasks/{id} review gate & done cascade --------------------
+
+// addTestWorkerSession inserts a worker session directly into the store,
+// with ParentID set to the given orchestrator session id, as
+// liveWorkerSessionIDs (the review gate) and Manager.KillCascade (the done
+// cascade) both key off ParentID.
+func addTestWorkerSession(t *testing.T, d Deps, id, projectID, parentSessionID string) store.Session {
+	t.Helper()
+	sess := store.Session{
+		ID:        id,
+		Kind:      "worker",
+		ProjectID: projectID,
+		RepoID:    projectID + "-repo",
+		ParentID:  parentSessionID,
+		Agent:     "fake",
+		Branch:    "feature/x/" + id,
+		TmuxName:  id,
+		State:     "running",
+	}
+	if err := d.Store.AddSession(sess); err != nil {
+		t.Fatalf("AddSession %s: %v", id, err)
+	}
+	return sess
+}
+
+func decodeJSONBody(t *testing.T, resp *http.Response) map[string]any {
+	t.Helper()
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	return body
+}
+
+func TestPatchTaskReviewBlockedByOpenSubtask(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+	orchSess := addTestSession(t, d, "orch-1", "orchestrator", "proj1")
+
+	rootID, err := d.Store.AddTask(store.Task{Title: "Root", ProjectID: "proj1", SessionID: orchSess.ID})
+	if err != nil {
+		t.Fatalf("AddTask root: %v", err)
+	}
+	subID, err := d.Store.AddTask(store.Task{Title: "Sub", ProjectID: "proj1", ParentID: rootID})
+	if err != nil {
+		t.Fatalf("AddTask sub: %v", err)
+	}
+
+	resp := patchJSON(t, srv.URL+"/v1/tasks/"+itoa(rootID), map[string]any{"status": "review"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	body := decodeJSONBody(t, resp)
+	errObj, _ := body["error"].(map[string]any)
+	if errObj["code"] != "review_blocked" {
+		t.Errorf("code = %v, want review_blocked", errObj["code"])
+	}
+	open, _ := body["open_subtasks"].([]any)
+	if len(open) != 1 || int64(open[0].(float64)) != subID {
+		t.Errorf("open_subtasks = %v, want [%d]", open, subID)
+	}
+	if lw, ok := body["live_workers"]; ok && lw != nil {
+		t.Errorf("live_workers = %v, want absent/empty", lw)
+	}
+
+	root, err := d.Store.GetTask(rootID)
+	if err != nil {
+		t.Fatalf("GetTask root: %v", err)
+	}
+	if root.Status == "review" {
+		t.Errorf("root status moved to review despite open subtask")
+	}
+}
+
+func TestPatchTaskReviewBlockedByLiveWorker(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+	orchSess := addTestSession(t, d, "orch-1", "orchestrator", "proj1")
+	workerSess := addTestWorkerSession(t, d, "worker-1", "proj1", orchSess.ID)
+
+	rootID, err := d.Store.AddTask(store.Task{Title: "Root", ProjectID: "proj1", SessionID: orchSess.ID})
+	if err != nil {
+		t.Fatalf("AddTask root: %v", err)
+	}
+	subID, err := d.Store.AddTask(store.Task{Title: "Sub", ProjectID: "proj1", ParentID: rootID, SessionID: workerSess.ID})
+	if err != nil {
+		t.Fatalf("AddTask sub: %v", err)
+	}
+	if err := d.Store.UpdateTaskStatus(subID, "done"); err != nil {
+		t.Fatalf("UpdateTaskStatus sub done: %v", err)
+	}
+
+	resp := patchJSON(t, srv.URL+"/v1/tasks/"+itoa(rootID), map[string]any{"status": "review"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	body := decodeJSONBody(t, resp)
+	errObj, _ := body["error"].(map[string]any)
+	if errObj["code"] != "review_blocked" {
+		t.Errorf("code = %v, want review_blocked", errObj["code"])
+	}
+	live, _ := body["live_workers"].([]any)
+	if len(live) != 1 || live[0] != "worker-1" {
+		t.Errorf("live_workers = %v, want [worker-1]", live)
+	}
+}
+
+func TestPatchTaskReviewForceBypasses(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+	orchSess := addTestSession(t, d, "orch-1", "orchestrator", "proj1")
+	addTestWorkerSession(t, d, "worker-1", "proj1", orchSess.ID)
+
+	rootID, err := d.Store.AddTask(store.Task{Title: "Root", ProjectID: "proj1", SessionID: orchSess.ID})
+	if err != nil {
+		t.Fatalf("AddTask root: %v", err)
+	}
+	if _, err := d.Store.AddTask(store.Task{Title: "Sub", ProjectID: "proj1", ParentID: rootID}); err != nil {
+		t.Fatalf("AddTask sub: %v", err)
+	}
+
+	resp := patchJSON(t, srv.URL+"/v1/tasks/"+itoa(rootID)+"?force=true", map[string]any{"status": "review"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	root, err := d.Store.GetTask(rootID)
+	if err != nil {
+		t.Fatalf("GetTask root: %v", err)
+	}
+	if root.Status != "review" {
+		t.Errorf("root status = %q, want review", root.Status)
+	}
+}
+
+func TestPatchTaskReviewCleanStatePasses(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+	orchSess := addTestSession(t, d, "orch-1", "orchestrator", "proj1")
+
+	rootID, err := d.Store.AddTask(store.Task{Title: "Root", ProjectID: "proj1", SessionID: orchSess.ID})
+	if err != nil {
+		t.Fatalf("AddTask root: %v", err)
+	}
+	subID, err := d.Store.AddTask(store.Task{Title: "Sub", ProjectID: "proj1", ParentID: rootID})
+	if err != nil {
+		t.Fatalf("AddTask sub: %v", err)
+	}
+	if err := d.Store.UpdateTaskStatus(subID, "done"); err != nil {
+		t.Fatalf("UpdateTaskStatus sub done: %v", err)
+	}
+
+	resp := patchJSON(t, srv.URL+"/v1/tasks/"+itoa(rootID), map[string]any{"status": "review"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	root, err := d.Store.GetTask(rootID)
+	if err != nil {
+		t.Fatalf("GetTask root: %v", err)
+	}
+	if root.Status != "review" {
+		t.Errorf("root status = %q, want review", root.Status)
+	}
+}
+
+func TestPatchTaskDoneCascadesOrchestratorCleanup(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+	orchSess := addTestSession(t, d, "orch-1", "orchestrator", "proj1")
+	workerSess := addTestWorkerSession(t, d, "worker-1", "proj1", orchSess.ID)
+
+	rootID, err := d.Store.AddTask(store.Task{Title: "Root", ProjectID: "proj1", SessionID: orchSess.ID})
+	if err != nil {
+		t.Fatalf("AddTask root: %v", err)
+	}
+
+	resp := patchJSON(t, srv.URL+"/v1/tasks/"+itoa(rootID), map[string]any{"status": "done"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	body := decodeJSONBody(t, resp)
+	if body["cleaned_up"] != true {
+		t.Errorf("cleaned_up = %v, want true", body["cleaned_up"])
+	}
+
+	orchAfter, err := d.Store.GetSession(orchSess.ID)
+	if err != nil {
+		t.Fatalf("GetSession orch-1: %v", err)
+	}
+	if orchAfter.State != "killed" {
+		t.Errorf("orch-1 state = %q, want killed", orchAfter.State)
+	}
+	workerAfter, err := d.Store.GetSession(workerSess.ID)
+	if err != nil {
+		t.Fatalf("GetSession worker-1: %v", err)
+	}
+	if workerAfter.State != "killed" {
+		t.Errorf("worker-1 state = %q, want killed", workerAfter.State)
+	}
+
+	entries, err := d.Store.ListTaskLog(rootID, "")
+	if err != nil {
+		t.Fatalf("ListTaskLog: %v", err)
+	}
+	found := false
+	for _, e := range entries {
+		if e.Body == "feature closed, orchestrator and workers cleaned up" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected cleanup log entry, got %+v", entries)
+	}
+}
+
+func TestPatchTaskDoneWithDeadOrchestratorNoCascade(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+	orchSess := addTestSession(t, d, "orch-1", "orchestrator", "proj1")
+	if err := d.Store.UpdateSessionState(orchSess.ID, "killed"); err != nil {
+		t.Fatalf("UpdateSessionState: %v", err)
+	}
+
+	rootID, err := d.Store.AddTask(store.Task{Title: "Root", ProjectID: "proj1", SessionID: orchSess.ID})
+	if err != nil {
+		t.Fatalf("AddTask root: %v", err)
+	}
+
+	resp := patchJSON(t, srv.URL+"/v1/tasks/"+itoa(rootID), map[string]any{"status": "done"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (kill errors must not fail the request): %s", resp.StatusCode, decodeJSONBody(t, resp))
+	}
+	body := decodeJSONBody(t, resp)
+	if body["cleaned_up"] != false {
+		t.Errorf("cleaned_up = %v, want false", body["cleaned_up"])
+	}
+
+	root, err := d.Store.GetTask(rootID)
+	if err != nil {
+		t.Fatalf("GetTask root: %v", err)
+	}
+	if root.Status != "done" {
+		t.Errorf("root status = %q, want done", root.Status)
+	}
+}
+
+func TestPatchSubtaskDoneDoesNotCascade(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+	orchSess := addTestSession(t, d, "orch-1", "orchestrator", "proj1")
+	workerSess := addTestWorkerSession(t, d, "worker-1", "proj1", orchSess.ID)
+
+	rootID, err := d.Store.AddTask(store.Task{Title: "Root", ProjectID: "proj1", SessionID: orchSess.ID})
+	if err != nil {
+		t.Fatalf("AddTask root: %v", err)
+	}
+	subID, err := d.Store.AddTask(store.Task{Title: "Sub", ProjectID: "proj1", ParentID: rootID, SessionID: workerSess.ID})
+	if err != nil {
+		t.Fatalf("AddTask sub: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPatch, srv.URL+"/v1/tasks/"+itoa(subID), bytesReader([]byte(`{"status":"done"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(sessionHeader, "worker-1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	body := decodeJSONBody(t, resp)
+	if v, ok := body["cleaned_up"]; ok {
+		t.Errorf("cleaned_up = %v, want field absent for subtask done", v)
+	}
+
+	orchAfter, err := d.Store.GetSession(orchSess.ID)
+	if err != nil {
+		t.Fatalf("GetSession orch-1: %v", err)
+	}
+	if orchAfter.State != "running" {
+		t.Errorf("orch-1 state = %q, want still running", orchAfter.State)
+	}
+}
+
 // --- GET/PUT /v1/tasks/{id}/docs -----------------------------------------
 
 func TestPutTaskDocInvalidKind(t *testing.T) {

@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/IvanRoslov/rocket/internal/session"
@@ -451,6 +453,87 @@ type patchTaskRequest struct {
 	Description *string `json:"description"`
 }
 
+// patchTaskResponse is the JSON shape of PATCH /v1/tasks/{id}. CleanedUp is
+// only set (non-nil) when the request moved a root task to "done", to tell
+// the caller whether the task's orchestrator (and its workers) were live
+// and got killed as part of the transition.
+type patchTaskResponse struct {
+	taskResponse
+	CleanedUp *bool `json:"cleaned_up,omitempty"`
+}
+
+// reviewBlockedResponse is the 409 body returned when PATCH ?status=review
+// is refused because the root task still has open subtasks and/or live
+// worker sessions.
+type reviewBlockedResponse struct {
+	Error struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+	OpenSubtasks []int64  `json:"open_subtasks,omitempty"`
+	LiveWorkers  []string `json:"live_workers,omitempty"`
+}
+
+func writeReviewBlocked(w http.ResponseWriter, openSubtasks []int64, liveWorkers []string) {
+	var body reviewBlockedResponse
+	body.Error.Code = "review_blocked"
+	body.Error.Message = reviewBlockedMessage(openSubtasks, liveWorkers)
+	body.OpenSubtasks = openSubtasks
+	body.LiveWorkers = liveWorkers
+	writeJSON(w, http.StatusConflict, body)
+}
+
+// reviewBlockedMessage renders a human-readable summary of why a review
+// transition was blocked, ending with a hint to use --force to override.
+func reviewBlockedMessage(openSubtasks []int64, liveWorkers []string) string {
+	var parts []string
+	if len(openSubtasks) > 0 {
+		parts = append(parts, fmt.Sprintf("open subtasks: %v", openSubtasks))
+	}
+	if len(liveWorkers) > 0 {
+		parts = append(parts, fmt.Sprintf("live workers: %v", liveWorkers))
+	}
+	return strings.Join(parts, "; ") + " — retry with --force to override"
+}
+
+// openSubtaskIDs returns the ids of taskID's subtasks that are not yet
+// done or cancelled.
+func openSubtaskIDs(d Deps, taskID int64) ([]int64, error) {
+	subtasks, err := d.Store.ListTasks(store.TaskFilter{ParentSet: true, Parent: taskID})
+	if err != nil {
+		return nil, err
+	}
+	var open []int64
+	for _, s := range subtasks {
+		if s.Status != "done" && s.Status != "cancelled" {
+			open = append(open, s.ID)
+		}
+	}
+	return open, nil
+}
+
+// liveWorkerSessionIDs returns the ids of live (spawning/running) worker
+// sessions whose ParentID is orchestratorSessionID.
+func liveWorkerSessionIDs(d Deps, orchestratorSessionID string) ([]string, error) {
+	if orchestratorSessionID == "" {
+		return nil, nil
+	}
+	sessions, err := d.Store.ListSessions(store.SessionFilter{All: true})
+	if err != nil {
+		return nil, err
+	}
+	var live []string
+	for _, s := range sessions {
+		if s.Kind != "worker" || s.ParentID != orchestratorSessionID {
+			continue
+		}
+		if s.State == "spawning" || s.State == "running" {
+			live = append(live, s.ID)
+		}
+	}
+	return live, nil
+}
+
 func handlePatchTask(w http.ResponseWriter, r *http.Request, d Deps) {
 	id, ok := parseTaskID(w, r)
 	if !ok {
@@ -481,6 +564,24 @@ func handlePatchTask(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
+	if req.Status != nil && *req.Status == "review" && task.ParentID == 0 && r.URL.Query().Get("force") != "true" {
+		openSubtasks, err := openSubtaskIDs(d, task.ID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		liveWorkers, err := liveWorkerSessionIDs(d, task.SessionID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		if len(openSubtasks) > 0 || len(liveWorkers) > 0 {
+			writeReviewBlocked(w, openSubtasks, liveWorkers)
+			return
+		}
+	}
+
+	var cleanedUp *bool
 	if req.Status != nil {
 		if err := applyTaskStatusChange(d, task, caller, *req.Status); err != nil {
 			// UpdateTaskStatus's only failure mode here is a status value
@@ -492,6 +593,11 @@ func handlePatchTask(w http.ResponseWriter, r *http.Request, d Deps) {
 		// Reflect the change for the title/description update below and
 		// the final response.
 		task.Status = *req.Status
+
+		if *req.Status == "done" && task.ParentID == 0 {
+			done := cascadeOrchestratorCleanup(r.Context(), d, task)
+			cleanedUp = &done
+		}
 	}
 
 	if req.Title != nil || req.Description != nil {
@@ -511,7 +617,46 @@ func handlePatchTask(w http.ResponseWriter, r *http.Request, d Deps) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, toTaskResponse(updated))
+	writeJSON(w, http.StatusOK, patchTaskResponse{taskResponse: toTaskResponse(updated), CleanedUp: cleanedUp})
+}
+
+// cascadeOrchestratorCleanup kills task's orchestrator session (and, via
+// KillCascade, any workers still attached to it) when a root task is moved
+// to "done" — automating the manual "the human kills the orchestrator"
+// step. Returns whether a live orchestrator was actually cleaned up. Kill
+// failures are logged but do not fail the request: the task's status change
+// already succeeded.
+func cascadeOrchestratorCleanup(ctx context.Context, d Deps, task store.Task) bool {
+	if task.SessionID == "" || d.Manager == nil {
+		return false
+	}
+	sess, err := d.Store.GetSession(task.SessionID)
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			log.Printf("task %d done: lookup orchestrator session %s: %v", task.ID, task.SessionID, err)
+		}
+		return false
+	}
+	if isSessionTerminal(sess.State) {
+		return false
+	}
+
+	if err := d.Manager.KillCascade(ctx, task.SessionID, true); err != nil {
+		log.Printf("task %d done: kill cascade for orchestrator session %s: %v", task.ID, task.SessionID, err)
+		return false
+	}
+
+	d.Bus.Publish("task.orchestrator_cleaned_up", task.SessionID, map[string]any{
+		"task_id": task.ID, "session_id": task.SessionID,
+	})
+	if _, err := d.Store.AddTaskLog(store.TaskLogEntry{
+		TaskID: task.ID,
+		Kind:   "status",
+		Body:   "feature closed, orchestrator and workers cleaned up",
+	}); err != nil {
+		log.Printf("task %d done: add cleanup task log: %v", task.ID, err)
+	}
+	return true
 }
 
 func handlePostTaskCancel(w http.ResponseWriter, r *http.Request, d Deps) {
