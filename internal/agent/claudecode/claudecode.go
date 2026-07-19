@@ -127,7 +127,7 @@ func hookMatcherFor(event string) string {
 }
 
 // activityHookCommand builds the shell command rocket wires into
-// settings.json hooks for the given state. It uses the project-relative
+// settings.local.json hooks for the given state. It uses the project-relative
 // form ("sh .rocket/activity-hook.sh <state>") since Claude Code runs hook
 // commands with cwd set to the project root.
 func activityHookCommand(state string) string {
@@ -135,14 +135,14 @@ func activityHookCommand(state string) string {
 }
 
 // hookCommand is the {"type":"command","command":"..."} shape of a single
-// hook within a settings.json hooks[event][].hooks array.
+// hook within a settings.local.json hooks[event][].hooks array.
 type hookCommand struct {
 	Type    string `json:"type"`
 	Command string `json:"command"`
 }
 
 // hookMatcherGroup is the {"matcher":"...","hooks":[...]} shape of a single
-// entry within settings.json hooks[event].
+// entry within settings.local.json hooks[event].
 type hookMatcherGroup struct {
 	Matcher string        `json:"matcher,omitempty"`
 	Hooks   []hookCommand `json:"hooks"`
