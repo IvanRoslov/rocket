@@ -126,6 +126,35 @@ func TestSSE_Live(t *testing.T) {
 	}
 }
 
+// TestSSE_ChatUpdatedFlowsThrough verifies that a session.chat_updated event
+// (as published by the monitor's chat watcher) flows through the generic SSE
+// stream unchanged, same as any other bus event — the chat feature needs no
+// SSE-side changes.
+func TestSSE_ChatUpdatedFlowsThrough(t *testing.T) {
+	d := sseTestDeps(t)
+	srv := newTestServer(t, d)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	resp, scanner := openSSE(t, ctx, srv.URL+"/v1/events/stream")
+	defer resp.Body.Close()
+
+	time.Sleep(50 * time.Millisecond)
+	d.Bus.Publish("session.chat_updated", "sess1", map[string]any{})
+
+	events, _ := readSSEStream(t, scanner, 1, time.Now().Add(3*time.Second))
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].event != "session.chat_updated" {
+		t.Errorf("event = %q, want session.chat_updated", events[0].event)
+	}
+	if !strings.Contains(events[0].data, `"session_id":"sess1"`) {
+		t.Errorf("data = %q, missing session_id", events[0].data)
+	}
+}
+
 func TestSSE_CatchupThenLive(t *testing.T) {
 	d := sseTestDeps(t)
 	srv := newTestServer(t, d)

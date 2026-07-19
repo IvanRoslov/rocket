@@ -91,6 +91,13 @@ func nonEmptyLines(s string) []string {
 	return out
 }
 
+// chatStat records the last-observed transcript (mtime, size) for a session,
+// as reported by agent.Agent.TranscriptStat.
+type chatStat struct {
+	mtime int64
+	size  int64
+}
+
 // Monitor runs the activity polling cascade and exposes a push path for
 // out-of-band updates (e.g. from an API endpoint fed by the agent itself).
 type Monitor struct {
@@ -104,6 +111,7 @@ type Monitor struct {
 	mu    sync.Mutex
 	push  map[string]pushEntry
 	cache map[string]activity.State
+	chat  map[string]chatStat
 }
 
 // New builds a Monitor. resolveAgent is typically agent.Get.
@@ -117,6 +125,7 @@ func New(st *store.Store, b *bus.Bus, rt runtime.Runtime, cfg *config.Config, re
 		prober:       execProber{},
 		push:         make(map[string]pushEntry),
 		cache:        make(map[string]activity.State),
+		chat:         make(map[string]chatStat),
 	}
 }
 
@@ -216,9 +225,11 @@ func (m *Monitor) sweep(ctx context.Context) {
 	for _, sess := range sessions {
 		sessionIDs[sess.ID] = true
 		m.pollSession(ctx, sess, liveSet, err == nil)
+		m.pollChat(ctx, sess)
 	}
 
-	// Prune stale entries from cache and push maps whose sessions no longer exist.
+	// Prune stale entries from cache, push and chat maps whose sessions no
+	// longer exist.
 	m.mu.Lock()
 	for id := range m.cache {
 		if !sessionIDs[id] {
@@ -230,7 +241,45 @@ func (m *Monitor) sweep(ctx context.Context) {
 			delete(m.push, id)
 		}
 	}
+	for id := range m.chat {
+		if !sessionIDs[id] {
+			delete(m.chat, id)
+		}
+	}
 	m.mu.Unlock()
+}
+
+// pollChat checks whether sess's transcript has changed since the last
+// sweep (via the agent's cheap TranscriptStat) and, if so, publishes
+// session.chat_updated. The first observation of a session is seeded
+// silently (no event), so daemon startup doesn't produce a spurious ping for
+// every already-running session. ErrNoSignal (no transcript yet) and any
+// agent-resolution failure are skipped silently — this is a best-effort
+// ping, not a correctness-critical path.
+func (m *Monitor) pollChat(ctx context.Context, sess store.Session) {
+	ag, err := m.resolveAgent(sess.Agent)
+	if err != nil {
+		return
+	}
+
+	mtime, size, err := ag.TranscriptStat(ctx, agent.ActivityRef{SessionID: sess.ID, WorktreePath: sess.WorktreePath})
+	if err != nil {
+		return
+	}
+
+	m.mu.Lock()
+	prev, seen := m.chat[sess.ID]
+	m.chat[sess.ID] = chatStat{mtime: mtime, size: size}
+	m.mu.Unlock()
+
+	if !seen {
+		return
+	}
+	if prev.mtime == mtime && prev.size == size {
+		return
+	}
+
+	m.bus.Publish("session.chat_updated", sess.ID, map[string]any{})
 }
 
 // pollSession runs the cascade for a single session: tmux-dead check,
