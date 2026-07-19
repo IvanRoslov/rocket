@@ -411,6 +411,106 @@ func TestMergedGrace_SessionAlreadyKilled_Untouched(t *testing.T) {
 	}
 }
 
+// --- RearmPending -----------------------------------------------------
+
+func TestRearmPending_MergedRunningSession_CompletesAfterGrace(t *testing.T) {
+	grace := 30 * time.Millisecond
+	e := setupReactEnv(t, grace, true)
+	sess := e.addWorker(t, "w1")
+	task := e.addSubtask(t, sess.ID, "review")
+	if err := e.st.UpdateSessionPR(sess.ID, 5, "merged", "passing"); err != nil {
+		t.Fatalf("UpdateSessionPR: %v", err)
+	}
+
+	sub, cancel := e.b.Subscribe()
+	defer cancel()
+
+	r := newTestReactions(e, func(string) {}, idleActivity)
+	defer r.Stop()
+
+	if err := r.RearmPending(); err != nil {
+		t.Fatalf("RearmPending: %v", err)
+	}
+
+	waitForSessionState(t, e.st, sess.ID, "done", time.Second)
+	waitForDestroyedCount(t, e.ws, 1, time.Second)
+
+	// RearmPending must not itself perform any task transition or publish
+	// any pr.merged event: Merged() already did that (before the restart
+	// this call is simulating); RearmPending only restores the timer.
+	got, err := e.st.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got.Status != "review" {
+		t.Fatalf("expected subtask status untouched by RearmPending (still review), got %q", got.Status)
+	}
+	logs, err := e.st.ListTaskLog(task.ID, "")
+	if err != nil {
+		t.Fatalf("ListTaskLog: %v", err)
+	}
+	if len(logs) != 0 {
+		t.Fatalf("expected no task log entries from RearmPending, got %d: %+v", len(logs), logs)
+	}
+
+	deadline := time.After(200 * time.Millisecond)
+	for {
+		select {
+		case ev := <-sub:
+			if ev.Type == "pr.merged" {
+				t.Fatalf("expected no pr.merged event from RearmPending, got one")
+			}
+		case <-deadline:
+			return
+		}
+	}
+}
+
+func TestRearmPending_CalledTwice_SingleTimerPerSession(t *testing.T) {
+	// Long grace so the timer(s) can't fire during the assertion window.
+	e := setupReactEnv(t, time.Hour, true)
+	sess := e.addWorker(t, "w1")
+	if err := e.st.UpdateSessionPR(sess.ID, 5, "merged", "passing"); err != nil {
+		t.Fatalf("UpdateSessionPR: %v", err)
+	}
+
+	r := newTestReactions(e, func(string) {}, idleActivity)
+	defer r.Stop()
+
+	if err := r.RearmPending(); err != nil {
+		t.Fatalf("RearmPending 1: %v", err)
+	}
+	if err := r.RearmPending(); err != nil {
+		t.Fatalf("RearmPending 2: %v", err)
+	}
+
+	r.mu.Lock()
+	got := len(r.timers)
+	r.mu.Unlock()
+	if got != 1 {
+		t.Fatalf("expected exactly 1 timer scheduled after two RearmPending calls, got %d", got)
+	}
+}
+
+func TestRearmPending_NoMergedSessions_NoTimers(t *testing.T) {
+	e := setupReactEnv(t, time.Hour, true)
+	e.addWorker(t, "w1") // PRState is empty, not "merged"
+
+	r := newTestReactions(e, func(string) {}, idleActivity)
+	defer r.Stop()
+
+	if err := r.RearmPending(); err != nil {
+		t.Fatalf("RearmPending: %v", err)
+	}
+
+	r.mu.Lock()
+	got := len(r.timers)
+	r.mu.Unlock()
+	if got != 0 {
+		t.Fatalf("expected no timers scheduled, got %d", got)
+	}
+}
+
 // --- Stop -----------------------------------------------------------------
 
 func TestStop_CancelsPendingTimers(t *testing.T) {

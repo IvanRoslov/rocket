@@ -175,7 +175,11 @@ func (p *Poller) resolveOwnerRepo(ctx context.Context, repoID string, cache map[
 // tickSession polls GitHub for a single session's PR/CI status and persists
 // any changes.
 func (p *Poller) tickSession(ctx context.Context, client *github.Client, sess store.Session, owner, repo string) error {
-	if sess.PRNumber == 0 {
+	// A stored PRState of "closed" (i.e. closed-unmerged) means the PR we
+	// were tracking is dead; go back to branch discovery so a NEW PR pushed
+	// to the same branch is picked up. discoverPR itself guards against
+	// re-processing the same closed-unmerged PR forever.
+	if sess.PRNumber == 0 || sess.PRState == "closed" {
 		return p.discoverPR(ctx, client, sess, owner, repo)
 	}
 	return p.updatePR(ctx, client, sess, owner, repo)
@@ -199,12 +203,24 @@ func (p *Poller) discoverPR(ctx context.Context, client *github.Client, sess sto
 		return err
 	}
 
+	prState := mapPRState(pr)
+
+	// Guard against re-processing the same closed-unmerged PR: FindPRByBranch
+	// queries state=all, so once we've recorded a PR as closed-unmerged it
+	// keeps being returned on every subsequent tick. Without this guard
+	// we'd re-fire pr.opened/PROpened (and any alert notifications) forever
+	// for a PR that hasn't actually changed. If a NEW PR was opened on the
+	// branch (different number) or this same PR has since reopened or merged,
+	// we fall through and record it normally.
+	if sess.PRNumber != 0 && pr.Number == sess.PRNumber && pr.State == "closed" && !pr.Merged {
+		return nil
+	}
+
 	ci, err := client.CheckRollup(ctx, owner, repo, pr.HeadSHA)
 	if err != nil {
 		return err
 	}
 
-	prState := mapPRState(pr)
 	if err := p.st.UpdateSessionPR(sess.ID, pr.Number, prState, ci); err != nil {
 		return err
 	}
@@ -243,15 +259,37 @@ func (p *Poller) updatePR(ctx context.Context, client *github.Client, sess store
 
 	newPRState := mapPRState(pr)
 
-	if newPRState == "merged" && sess.PRState != "merged" {
+	// Capture the previously-stored state BEFORE persisting: the once-only
+	// notification semantics below (merged fires once, CI-changed fires only
+	// on an actual transition) must derive from what was on disk before this
+	// tick, not from the value we're about to write.
+	prevPRState := sess.PRState
+	prevCIState := sess.CIState
+
+	// Persist before notifying: if the store write fails, return the error
+	// and skip all events/notifications rather than risk notifying about a
+	// state change that never made it to disk (which would desync from a
+	// future tick's dedup logic keyed on stored state).
+	//
+	// Note: there is a narrow crash window between this persist and the
+	// notifications below. A crash there loses the subtask→done transition
+	// permanently (RearmPending only re-arms cleanup, not the forward
+	// transition). This is an accepted risk documented in PR review.
+	if newPRState != prevPRState || ci != prevCIState {
+		if err := p.st.UpdateSessionPR(sess.ID, pr.Number, newPRState, ci); err != nil {
+			return err
+		}
+	}
+
+	if newPRState == "merged" && prevPRState != "merged" {
 		p.bus.Publish("pr.merged", sess.ID, map[string]any{"number": pr.Number})
 		p.notify.Merged(sess, pr)
 	}
 
-	if ci != sess.CIState {
+	if ci != prevCIState {
 		p.bus.Publish("pr.ci_changed", sess.ID, map[string]any{
 			"number": pr.Number,
-			"from":   sess.CIState,
+			"from":   prevCIState,
 			"to":     ci,
 		})
 		if ci == "failing" {
@@ -265,11 +303,6 @@ func (p *Poller) updatePR(ctx context.Context, client *github.Client, sess store
 	}
 	p.setLastReviewState(sess.ID, pr.ReviewDecision)
 
-	if newPRState != sess.PRState || ci != sess.CIState {
-		if err := p.st.UpdateSessionPR(sess.ID, pr.Number, newPRState, ci); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 

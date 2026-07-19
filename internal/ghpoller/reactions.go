@@ -37,6 +37,7 @@ type Reactions struct {
 	lastNotifiedSHA map[string]string // sessionID -> last CI-failing HeadSHA notified
 	timers          []*time.Timer
 	stopped         bool
+	rearmed         map[string]bool // sessionID -> already re-armed by RearmPending (guards duplicate calls)
 }
 
 // NewReactions builds a Reactions notifier.
@@ -57,6 +58,45 @@ func NewReactions(
 		cfg:             cfg,
 		lastNotifiedSHA: make(map[string]string),
 	}
+}
+
+// RearmPending restores in-memory merge-grace timers lost across a daemon
+// restart: it scans live worker sessions (state spawning|running) whose
+// stored PRState is already "merged" and re-schedules the grace timer for
+// each. Merged() already performed the task transition and published
+// pr.merged/notified Merged the first time this PR was observed merged, so
+// RearmPending does neither — it only restores the pending timer. Safe to
+// call more than once: a session is only ever re-armed the first time.
+func (r *Reactions) RearmPending() error {
+	sessions, err := r.st.ListSessions(store.SessionFilter{Kind: "worker"})
+	if err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	if r.rearmed == nil {
+		r.rearmed = make(map[string]bool)
+	}
+	var toArm []string
+	for _, sess := range sessions {
+		if sess.PRState != "merged" {
+			continue
+		}
+		if r.rearmed[sess.ID] {
+			continue
+		}
+		r.rearmed[sess.ID] = true
+		toArm = append(toArm, sess.ID)
+	}
+	r.mu.Unlock()
+
+	for _, id := range toArm {
+		r.scheduleGrace(id, 0)
+	}
+	if len(toArm) > 0 {
+		slog.Info("ghpoller: reactions: rearmed pending merge-grace timers", "count", len(toArm))
+	}
+	return nil
 }
 
 // Stop cancels every pending merge-grace timer and prevents new ones from

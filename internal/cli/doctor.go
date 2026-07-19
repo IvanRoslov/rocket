@@ -11,6 +11,7 @@ import (
 
 	"github.com/IvanRoslov/rocket/internal/agent"
 	_ "github.com/IvanRoslov/rocket/internal/agent/claudecode" // registers "claude-code" in agent.Registry()
+	_ "github.com/IvanRoslov/rocket/internal/agent/codex"      // registers "codex" in agent.Registry()
 	"github.com/spf13/cobra"
 )
 
