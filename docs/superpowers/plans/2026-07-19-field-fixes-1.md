@@ -94,3 +94,7 @@
 **Root cause:** internal/daemon тесты биндят дефолтный порт 4477; при живом пользовательском демоне порт занят → все Run-тесты падают «not healthy in 3s».
 - Fix: тестовый конфиг демона выбирает свободный порт (net.Listen("tcp","127.0.0.1:0") → закрыть → использовать номер; или Port:0 с поддержкой в api.Serve отдавать фактический — проще первый вариант, помеха-гонка приемлема в тестах).
 - [ ] Commit: `test(daemon): use ephemeral port to avoid collision with live daemon`.
+
+### Дополнение к Task 7 (фидбек «done должен убивать оркестратора»)
+
+- PATCH корневой задачи → done: после смены статуса — KillCascade оркестратора задачи (workers first, cleanup=true), как в cancel-пути; событие/status-лог «feature closed, orchestrator cleaned up». Подзадача → done оркестратора не трогает. CLI `task move <id> done` печатает, что оркестратор зачищен. Спека 12-tasks.md: «review → done — пользователь принял» — каскад согласован с 08-orchestrators.md «пользователь убивает оркестратора» (автоматизируем этот ручной шаг).
