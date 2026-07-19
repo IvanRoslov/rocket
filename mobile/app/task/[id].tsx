@@ -353,7 +353,12 @@ export default function TaskScreen() {
   }
 
   const chips = [
-    ...(open.length > 0 ? [{ key: 'questions', label: 'Questions', count: open.length, warn: awaiting.length > 0 }] : []),
+    {
+      key: 'questions',
+      label: 'Questions',
+      ...(open.length > 0 ? { count: open.length } : {}),
+      warn: awaiting.length > 0,
+    },
     { key: 'overview', label: 'Overview' },
     { key: 'docs', label: 'Docs' },
     { key: 'journal', label: 'Journal' },
