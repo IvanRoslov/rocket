@@ -285,8 +285,12 @@ export function useRestoreSession(): UseMutationResult<Session, Error, string> {
 }
 
 export function useSystemCleanup(): UseMutationResult<SystemCleanupResult, Error, void> {
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: () => api.post<SystemCleanupResult>('/v1/system/cleanup'),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['system'] })
+    },
   })
 }
 

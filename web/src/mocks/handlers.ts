@@ -527,16 +527,19 @@ export const handlers = [
     }
     const path = body.path ?? ''
     const name = path.split('/').filter(Boolean).pop() ?? 'repo'
-    return HttpResponse.json({
-      id: body.id ?? name,
-      path,
-      default_branch: 'main',
-      auto_cleanup: true,
-      env: {},
-      symlinks: [],
-      post_create: [],
-      created_at: Math.floor(Date.now() / 1000),
-    })
+    return HttpResponse.json(
+      {
+        id: body.id ?? name,
+        path,
+        default_branch: 'main',
+        auto_cleanup: true,
+        env: {},
+        symlinks: [],
+        post_create: [],
+        created_at: Math.floor(Date.now() / 1000),
+      },
+      { status: 201 },
+    )
   }),
 
   http.post('/v1/projects', async ({ request }) => {

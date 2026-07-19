@@ -45,7 +45,7 @@ const CI_SYMBOL: Record<CiState, string> = { passing: '✔', pending: '⏳', fai
 const CI_TONE: Record<CiState, BadgeTone> = { passing: 'ok', pending: 'warn', failing: 'err' }
 
 /** worst-of a set of worker CI states: failing > pending > passing. */
-function worstCiState(states: CiState[]): CiState | undefined {
+export function worstCiState(states: CiState[]): CiState | undefined {
   return states.reduce<CiState | undefined>((worst, s) => {
     if (!worst || CI_SEVERITY[s] > CI_SEVERITY[worst]) return s
     return worst
