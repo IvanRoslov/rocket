@@ -4,10 +4,14 @@
 #   make stop    — остановить демон
 #   make status  — статус демона
 #   make test    — go-тесты + web-тесты
+#   make apk     — собрать Android APK мобильного приложения (mobile/)
 
 BIN := bin/rocket
+JAVA_HOME_ANDROID ?= /opt/homebrew/opt/openjdk@17
+ANDROID_HOME ?= $(HOME)/Library/Android/sdk
+APK := mobile/android/app/build/outputs/apk/release/app-release.apk
 
-.PHONY: build web-build go-build install start stop restart status test clean
+.PHONY: build web-build go-build install start stop restart status test clean apk
 
 build: web-build go-build
 
@@ -43,3 +47,12 @@ test:
 
 clean:
 	rm -rf bin
+
+# APK мобильного приложения. Требует Android SDK и JDK 17
+# (brew install openjdk@17). android/ генерируется expo prebuild при
+# отсутствии; готовый APK — mobile/android/app/build/outputs/apk/release/.
+apk:
+	cd mobile && npm install --no-audit --no-fund
+	[ -d mobile/android ] || (cd mobile && npx expo prebuild -p android --no-install)
+	cd mobile/android && JAVA_HOME=$(JAVA_HOME_ANDROID) ANDROID_HOME=$(ANDROID_HOME) ./gradlew assembleRelease -q
+	@echo "APK: $(APK)"
