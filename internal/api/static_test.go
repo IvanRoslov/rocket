@@ -119,6 +119,55 @@ func TestStaticMissingAssetReturns404(t *testing.T) {
 	}
 }
 
+// TestStaticNonGetMethodReturns405 verifies that a non-GET/HEAD request to a
+// non-/v1 path (served by the SPA catch-all) gets a 405 with an Allow header
+// instead of a plain 404.
+func TestStaticNonGetMethodReturns405(t *testing.T) {
+	d := testDeps(t, nil)
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/p/billing/tasks/12", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", resp.StatusCode)
+	}
+	if allow := resp.Header.Get("Allow"); allow != "GET, HEAD" {
+		t.Errorf("Allow header = %q, want %q", allow, "GET, HEAD")
+	}
+}
+
+// TestStaticNonGetV1MethodReturns404 verifies that a non-GET/HEAD request to
+// an unmatched /v1 path still gets the standard JSON 404, not a 405 — the
+// Allow-header 405 behavior is only for the SPA catch-all outside /v1.
+func TestStaticNonGetV1MethodReturns404(t *testing.T) {
+	d := testDeps(t, nil)
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/definitely-missing", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
 // TestRealV1RoutesStillWork verifies that registering the static
 // catch-all at "/" doesn't shadow real, more specific /v1 routes.
 func TestRealV1RoutesStillWork(t *testing.T) {

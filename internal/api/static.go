@@ -22,7 +22,12 @@ func registerStaticRoutes(mux *http.ServeMux) {
 	fileServer := http.FileServer(http.FS(dist))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			writeErr(w, http.StatusNotFound, "not_found", "unknown route")
+			if strings.HasPrefix(r.URL.Path, "/v1") {
+				writeErr(w, http.StatusNotFound, "not_found", "unknown route")
+				return
+			}
+			w.Header().Set("Allow", "GET, HEAD")
+			writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 			return
 		}
 		p := strings.TrimPrefix(r.URL.Path, "/")

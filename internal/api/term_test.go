@@ -39,6 +39,44 @@ func TestParseControlGarbage(t *testing.T) {
 	}
 }
 
+func TestValidResizeBounds(t *testing.T) {
+	cases := []struct {
+		name       string
+		cols, rows int
+		want       bool
+	}{
+		{"min valid", 1, 1, true},
+		{"max valid", 4096, 4096, true},
+		{"typical", 100, 40, true},
+		{"zero cols", 0, 40, false},
+		{"zero rows", 100, 0, false},
+		{"negative cols", -1, 40, false},
+		{"negative rows", 100, -1, false},
+		{"cols too large", 4097, 40, false},
+		{"rows too large", 100, 4097, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := validResize(tc.cols, tc.rows); got != tc.want {
+				t.Errorf("validResize(%d, %d) = %v, want %v", tc.cols, tc.rows, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseControlResizeOutOfBounds(t *testing.T) {
+	// parseControl only validates JSON shape/type; bounds checking is done
+	// separately via validResize so out-of-range resize frames still parse
+	// ok=true and are rejected downstream instead of killing the connection.
+	c, ok := parseControl([]byte(`{"type":"resize","cols":-1,"rows":999999}`))
+	if !ok {
+		t.Fatalf("expected ok=true")
+	}
+	if validResize(c.Cols, c.Rows) {
+		t.Errorf("expected validResize to reject cols=%d rows=%d", c.Cols, c.Rows)
+	}
+}
+
 func TestSessionTermUnknownSession(t *testing.T) {
 	d := sessionsTestDeps(t)
 	srv := newTestServer(t, d)

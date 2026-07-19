@@ -44,6 +44,18 @@ func parseControl(data []byte) (termControl, bool) {
 	}
 }
 
+// maxTermDim bounds resize control frames: PTY dimensions outside
+// [1, maxTermDim] are rejected rather than applied, so a malformed or
+// malicious resize can't panic pty.Setsize or exhaust memory without
+// killing the connection.
+const maxTermDim = 4096
+
+// validResize reports whether cols/rows are in the acceptable range for a
+// PTY resize.
+func validResize(cols, rows int) bool {
+	return cols >= 1 && cols <= maxTermDim && rows >= 1 && rows <= maxTermDim
+}
+
 // handleSessionTerm upgrades the connection to a WebSocket and proxies a
 // tmux attach session's PTY over it: server->client binary frames carry PTY
 // output; client->server binary frames carry input; client->server text
@@ -77,6 +89,9 @@ func handleSessionTerm(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 	defer conn.CloseNow()
+	// Default read limit is 32KiB, which is far too small for a large paste
+	// into the terminal; a paste bigger than that kills the connection.
+	conn.SetReadLimit(1 << 20)
 
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
@@ -134,7 +149,13 @@ func handleSessionTerm(w http.ResponseWriter, r *http.Request, d Deps) {
 			if c, ok := parseControl(data); ok {
 				switch c.Type {
 				case "resize":
-					_ = pty.Setsize(ptmx, &pty.Winsize{Cols: uint16(c.Cols), Rows: uint16(c.Rows)})
+					// Readonly clients (view-only observers) must not resize
+					// the shared PTY out from under the writer; treat resize
+					// like input and ignore it. Out-of-range dimensions are
+					// also ignored rather than killing the connection.
+					if !readonly && validResize(c.Cols, c.Rows) {
+						_ = pty.Setsize(ptmx, &pty.Winsize{Cols: uint16(c.Cols), Rows: uint16(c.Rows)})
+					}
 				case "ping":
 					_ = conn.Write(ctx, websocket.MessageText, []byte(`{"type":"pong"}`))
 				}
