@@ -22,6 +22,14 @@ describe('classifyUserEntry', () => {
     expect(classifyUserEntry('[task #42] answered: yes')).toBe('system')
   })
 
+  it('classifies [rocket heartbeat] daemon injects as system', () => {
+    expect(classifyUserEntry('[rocket heartbeat] Feature x status: ready')).toBe('system')
+  })
+
+  it('classifies [rocket] daemon injects as system', () => {
+    expect(classifyUserEntry('[rocket] CI failing on PR #5: build error')).toBe('system')
+  })
+
   it('classifies [from <session>] queue injects as from', () => {
     expect(classifyUserEntry('[from billing-v2-w1] status update')).toBe('from')
   })

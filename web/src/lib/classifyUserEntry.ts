@@ -18,7 +18,8 @@ export function classifyUserEntry(text: string): UserEntryKind {
     value.includes('[SYSTEM NOTIFICATION - NOT USER INPUT]') ||
     value.startsWith('<system-') ||
     value.startsWith('[large message]') ||
-    value.startsWith('[task #')
+    value.startsWith('[task #') ||
+    value.startsWith('[rocket')
   ) {
     return 'system'
   }
