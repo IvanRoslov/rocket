@@ -620,3 +620,23 @@ func TestTmux_Inject_SettlePauseCappedAt2s(t *testing.T) {
 		t.Errorf("settle duration = %v, want capped 2s", calls[0])
 	}
 }
+
+func TestLooksLikeQuizWidget(t *testing.T) {
+	cases := []struct {
+		name string
+		tail string
+		want bool
+	}{
+		{"single question footer", "  3. Blue\n  4. Type something.\n\nEnter to select · ↑/↓ to navigate · Esc to cancel", true},
+		{"multi question footer", "  5. Chat about this\n\nEnter to select · Tab/Arrow keys to navigate · Esc to cancel", true},
+		{"tab row submit", "←  ☒ Color  ☐ Fruits  ✔ Submit  →\n\nPick fruits\n❯ 1. [ ] Apple", true},
+		{"plain composer", "❯ some draft text\n  ⏵⏵ bypass permissions on (shift+tab to cycle)", false},
+		{"agent output with word Enter", "Press Enter to continue in your shell\n❯ ", false},
+		{"empty", "", false},
+	}
+	for _, c := range cases {
+		if got := looksLikeQuizWidget(c.tail); got != c.want {
+			t.Errorf("%s: looksLikeQuizWidget = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

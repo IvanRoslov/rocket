@@ -315,6 +315,36 @@ func TestSetupWorkspaceWiresQuizHookMatchers(t *testing.T) {
 		"PreToolUse":  "pending",
 		"PostToolUse": "resolved",
 	}
+	// Stop is the cancellation backstop: PostToolUse does not fire for a
+	// REJECTED (Esc'd) quiz, but rejecting it ends the turn, which fires
+	// Stop. Wired with an empty matcher (lifecycle event).
+	{
+		groupsRaw, ok := hooks["Stop"]
+		if !ok {
+			t.Fatalf("hooks missing event Stop: %+v", hooks)
+		}
+		groups, _ := groupsRaw.([]any)
+		var found bool
+		for _, raw := range groups {
+			group, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if matcher, _ := group["matcher"].(string); matcher != "" {
+				continue
+			}
+			hookList, _ := group["hooks"].([]any)
+			for _, hRaw := range hookList {
+				h, _ := hRaw.(map[string]any)
+				if cmd, _ := h["command"].(string); cmd == "sh .rocket/quiz-hook.sh resolved" {
+					found = true
+				}
+			}
+		}
+		if !found {
+			t.Errorf("hooks[Stop] missing empty-matcher quiz-hook resolved command: %+v", groups)
+		}
+	}
 	for event, phase := range wantEventPhase {
 		groupsRaw, ok := hooks[event]
 		if !ok {

@@ -284,6 +284,18 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 	}
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			// Re-capture right before a RETRY Enter: if the agent has
+			// meanwhile replaced its composer with an interactive quiz
+			// widget, the draft was necessarily submitted (the widget only
+			// renders mid-turn) and another Enter would press a quiz
+			// button instead — see looksLikeQuizWidget.
+			if out, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name)); err == nil {
+				if looksLikeQuizWidget(tailLines(trimTrailingBlank(out), confirmWindow)) {
+					return nil
+				}
+			}
+		}
 		if _, _, err := runTmux(ctx, "send-keys", "-t", paneTarget(h.Name), "Enter"); err != nil {
 			return fmt.Errorf("send Enter: %w", err)
 		}
@@ -307,6 +319,17 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 			// the marker never rendered.
 			countGrowth := nonBlankLineCount(out) > baseCount
 			if markerAbsent || countGrowth {
+				return nil
+			}
+			// Quiz-widget guard: Claude Code's AskUserQuestion widget
+			// replacing the composer proves the draft was submitted (the
+			// widget only renders while the agent is processing a turn),
+			// even when neither marker-absent nor count-growth fired —
+			// e.g. the submitted message's echo keeps the marker line in
+			// the tail while the agent thinks. Confirm WITHOUT pressing
+			// Enter again: a further Enter would land on the widget and
+			// select a quiz option (live incident, 2026-07-19).
+			if looksLikeQuizWidget(out) {
 				return nil
 			}
 			if time.Now().After(deadline) {
@@ -554,4 +577,18 @@ func (t *tmuxRuntime) List(ctx context.Context) ([]string, error) {
 func isNoServerError(stderr string) bool {
 	s := strings.ToLower(stderr)
 	return strings.Contains(s, "no server running") || strings.Contains(s, "error connecting")
+}
+
+// looksLikeQuizWidget reports whether a pane tail is showing Claude Code's
+// interactive AskUserQuestion widget. Matched against the two stable
+// markers observed live (docs/superpowers/recon/2026-07-19-quiz-recon.md
+// §2, CLI v2.1.215): the footer hint line («Enter to select · …», present
+// on every widget screen) and the tab row's «✔ Submit» caption (present on
+// multi-question quizzes and the review screen). This is deliberately
+// narrow, Claude-specific TUI coupling: generic "pane changed" heuristics
+// cannot be used to stop Enter retries because Claude Code's spinner
+// animates the tail even while a draft is still unsubmitted.
+func looksLikeQuizWidget(tail string) bool {
+	return strings.Contains(tail, "Enter to select · ") ||
+		strings.Contains(tail, "✔ Submit")
 }

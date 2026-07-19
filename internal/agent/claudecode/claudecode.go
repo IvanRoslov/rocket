@@ -155,10 +155,16 @@ func writeQuizHookScript(worktreePath string) error {
 // quizHookEvents maps the Claude Code hook events rocket wires up for the
 // quiz channel to the phase value quiz-hook.sh should report for that
 // event: PreToolUse fires as the quiz is about to be shown ("pending"),
-// PostToolUse fires once it's been answered ("resolved").
+// PostToolUse fires once it's been answered ("resolved"), and Stop is the
+// cancellation backstop — PostToolUse does NOT fire for a REJECTED tool
+// call (Esc / declined quiz, verified live 2026-07-19), but rejecting the
+// quiz ends the agent's turn, which fires Stop. A Stop while a quiz is
+// pending therefore means the widget is gone either way; with no pending
+// quiz the resolved report is a cheap no-op (no event published).
 var quizHookEvents = map[string]string{
 	"PreToolUse":  "pending",
 	"PostToolUse": "resolved",
+	"Stop":        "resolved",
 }
 
 // quizHookMatcher is the hook matcher rocket wires the quiz hook to: it
@@ -292,7 +298,14 @@ func upsertClaudeSettings(worktreePath string) error {
 		mergeHookEntry(hooks, event, hookMatcherFor(event), activityHookCommand(state))
 	}
 	for event, phase := range quizHookEvents {
-		mergeHookEntry(hooks, event, quizHookMatcher, quizHookCommand(phase))
+		// Tool-use events are scoped to AskUserQuestion; Stop is a
+		// lifecycle event with no matcher concept (same rule as
+		// hookMatcherFor).
+		matcher := quizHookMatcher
+		if event == "Stop" {
+			matcher = ""
+		}
+		mergeHookEntry(hooks, event, matcher, quizHookCommand(phase))
 	}
 
 	hooksRaw, err := json.Marshal(hooks)
