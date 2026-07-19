@@ -219,6 +219,26 @@ func TestCIFailing_DedupPerSHA(t *testing.T) {
 	}
 }
 
+func TestCIFailing_SkipsTerminalSession(t *testing.T) {
+	e := setupReactEnv(t, time.Minute, true)
+	sess := e.addWorker(t, "w1")
+
+	// Kill the session first.
+	if err := e.mgr.Kill(context.Background(), sess.ID, false); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+
+	r := newTestReactions(e, func(string) {}, alwaysUnknownActivity)
+
+	// CIFailing on a killed session should not queue any message.
+	r.CIFailing(sess, fakePR(5, "sha1"), "checks failing")
+
+	msgs := queuedMessagesFor(t, e.st, sess.ID)
+	if len(msgs) != 0 {
+		t.Fatalf("expected no queued messages for terminal session, got %d: %+v", len(msgs), msgs)
+	}
+}
+
 // --- ChangesRequested ----------------------------------------------------
 
 func TestChangesRequested_MessageContent(t *testing.T) {

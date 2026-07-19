@@ -139,10 +139,21 @@ func (r *Reactions) Merged(sess store.Session, pr *github.PR) {
 }
 
 // enqueue queues body for delivery to sessionID, mirroring the enqueue
-// pattern used elsewhere (internal/api's deliverToOrchestrator): insert
-// with status "queued", publish message.queued, wake the recipient's
-// delivery worker.
+// pattern used elsewhere (internal/api's deliverToOrchestrator): check that
+// the target session exists and is non-terminal, then insert with status
+// "queued", publish message.queued, and wake the recipient's delivery worker.
+// If the session is missing or already terminal, enqueue is skipped (logged).
 func (r *Reactions) enqueue(sessionID, body string) {
+	sess, err := r.st.GetSession(sessionID)
+	if err != nil {
+		slog.Debug("ghpoller: reactions: enqueue target session not found, skipping", "session", sessionID)
+		return
+	}
+	if isSessionTerminal(sess.State) {
+		slog.Debug("ghpoller: reactions: enqueue target session is terminal, skipping", "session", sessionID, "state", sess.State)
+		return
+	}
+
 	id, err := r.st.AddMessage(store.Message{ToSession: sessionID, Body: body})
 	if err != nil {
 		slog.Error("ghpoller: reactions: enqueue message", "session", sessionID, "error", err)
@@ -216,4 +227,10 @@ func (r *Reactions) onGraceExpired(sessionID string, attempt int) {
 	if err := r.mgr.Complete(context.Background(), sessionID); err != nil {
 		slog.Error("ghpoller: reactions: complete session after merge grace", "session", sessionID, "error", err)
 	}
+}
+
+// isSessionTerminal reports whether a session state indicates the session
+// is no longer active and will not accept new messages.
+func isSessionTerminal(state string) bool {
+	return state == "killed" || state == "done" || state == "errored"
 }
