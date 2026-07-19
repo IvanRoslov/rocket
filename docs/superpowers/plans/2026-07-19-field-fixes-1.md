@@ -57,3 +57,29 @@
 ## Self-Review (выполнен)
 
 - Все четыре пункта фидбека покрыты (CI-гейт исключён по решению пользователя). Корень A обойдён архитектурно (inbox), гонка Claude Code дополнительно демпфирована settle-паузой. B не рекурсирует. C повторяет проверенный exclude-паттерн codex. D/E — синхронно с референсными доками.
+
+### Task 6: Поллер деградирует без Checks-права (полевой баг)
+
+**Root cause (лог живого демона):** fine-grained PAT без Checks:read → `/commits/{sha}/check-runs` 403 → tickSession возвращает ошибку ДО UpdateSessionPR → pr_number/pr_state никогда не пишутся, хотя PR найден; подзадачи не двигаются, merge-cleanup мёртв; ошибка молча повторяется каждый тик.
+
+**Files:** internal/ghpoller/poller.go, internal/github/client.go (типизировать permission-403: `ErrForbidden`), tests.
+
+- CheckRollup/GetPR-reviews ошибки НЕ должны ронять апдейт: PR-часть (number, pr_state, merged) записывается всегда; ci_state при недоступных чеках — "" (unknown, CLI покажет "-"); reviews при 403 — ReviewDecision "".
+- client: 403 без rate-limit-заголовка → `ErrForbidden` (typed, wrapped с endpoint'ом).
+- Лог-дедуп: permission-ошибка логается ОДИН раз на (repo, endpoint-kind) за жизнь процесса (map) уровнем WARN c подсказкой «grant Checks:read to the token»; плюс единоразовое событие `github.permission_warning {repo, endpoint}`.
+- [ ] TDD: стаб отдаёт 403 на check-runs → pr_number/pr_state записаны, ci_state пуст, merge детектится и cleanup-цепочка живёт; WARN один раз; событие один раз.
+- [ ] Commit: `fix(ghpoller): degrade gracefully without checks permission`.
+
+### Task 7: Гейт review при открытых подзадачах
+
+**Files:** internal/api/tasks.go, internal/cli/task.go, prompts (orchestrator.md: «слил PR воркера → сразу rocket task move <subtask> done» в Monitoring/Finishing), tests.
+
+- PATCH root-задачи → review: если есть подзадачи НЕ в done/cancelled → 409 `subtasks_open` {open:[ids]}; `?force=true` пропускает. CLI `task move <id> review` печатает список и подсказку `--force`.
+- [ ] TDD API + CLI usage; промпт-фразы в рендерах.
+- [ ] Commit: `feat(api): refuse review with open subtasks; prompt closes subtasks on merge`.
+
+### Task 8: Видимость прав токена
+
+**Files:** docs/testing/phase-4-live-github.md (права fine-grained PAT: Contents:read, Pull requests:read, Checks:read; classic — scope repo), internal/cli/doctor.go (+строка: github token set/absent через GET /v1/settings при живом демоне).
+
+- [ ] Commit: `docs+doctor: github token permission requirements`.
