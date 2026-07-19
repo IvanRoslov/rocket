@@ -7,6 +7,14 @@
 // EVENT_TYPES individually. On error we close and reopen after 2s; the
 // browser resends `Last-Event-ID` automatically so the daemon can resume
 // from where we left off.
+//
+// The underlying EventSource is a module-level SINGLETON shared by every
+// useEventStream() subscriber in the tab. Browsers cap cleartext HTTP/1.1
+// at ~6 connections per host ACROSS ALL TABS; when each mounted component
+// opened its own stream, a couple of dashboard tabs exhausted the pool and
+// fresh page loads hung waiting for a free slot (observed live: alternating
+// instant/stuck reloads). One connection per tab keeps the pool breathing
+// even without the HTTP/2 (tls_port) listener.
 
 import { useEffect, useRef } from 'react'
 import type { RocketEvent } from './types'
@@ -17,9 +25,12 @@ export const EVENT_TYPES = [
   'session.activity_changed',
   'session.killed',
   'session.restored',
-  // Pure ping — carries no `data` (docs/13-chat.md); consumers must re-fetch
-  // the chat feed by cursor rather than expect a payload here.
+  // Pure pings — carry no `data` (docs/13-chat.md); consumers must re-fetch
+  // by cursor / re-GET the session rather than expect a payload here.
   'session.chat_updated',
+  'session.quiz_asked',
+  'session.quiz_resolved',
+  'session.quiz_answer_unconfirmed',
   'message.queued',
   'message.delivered',
   'message.failed',
@@ -43,44 +54,69 @@ export const EVENT_TYPES = [
 
 const RECONNECT_DELAY_MS = 2000
 
+type Subscriber = (e: RocketEvent) => void
+
+const subscribers = new Set<Subscriber>()
+let sharedSource: EventSource | null = null
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+
+function dispatch(ev: MessageEvent): void {
+  let parsed: RocketEvent
+  try {
+    parsed = JSON.parse(ev.data) as RocketEvent
+  } catch {
+    // Malformed event payload; ignore rather than crash the stream.
+    return
+  }
+  for (const fn of subscribers) fn(parsed)
+}
+
+function connectShared(): void {
+  const source = new EventSource('/v1/events/stream')
+  sharedSource = source
+
+  for (const type of EVENT_TYPES) {
+    source.addEventListener(type, dispatch)
+  }
+
+  source.onerror = () => {
+    source.close()
+    sharedSource = null
+    // Reconnect only while someone is still listening; the last
+    // unsubscribe cancels the timer.
+    if (subscribers.size > 0 && reconnectTimer === null) {
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
+        if (subscribers.size > 0) connectShared()
+      }, RECONNECT_DELAY_MS)
+    }
+  }
+}
+
+function subscribe(fn: Subscriber): () => void {
+  subscribers.add(fn)
+  if (sharedSource === null && reconnectTimer === null) {
+    connectShared()
+  }
+  return () => {
+    subscribers.delete(fn)
+    if (subscribers.size === 0) {
+      if (reconnectTimer !== null) {
+        clearTimeout(reconnectTimer)
+        reconnectTimer = null
+      }
+      sharedSource?.close()
+      sharedSource = null
+    }
+  }
+}
+
 export function useEventStream(onEvent: (e: RocketEvent) => void): void {
   const onEventRef = useRef(onEvent)
   onEventRef.current = onEvent
 
   useEffect(() => {
-    let es: EventSource | null = null
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-    let cancelled = false
-
-    function connect() {
-      const source = new EventSource('/v1/events/stream')
-      es = source
-
-      for (const type of EVENT_TYPES) {
-        source.addEventListener(type, (ev: MessageEvent) => {
-          try {
-            const parsed = JSON.parse(ev.data) as RocketEvent
-            onEventRef.current(parsed)
-          } catch {
-            // Malformed event payload; ignore rather than crash the stream.
-          }
-        })
-      }
-
-      source.onerror = () => {
-        source.close()
-        if (!cancelled) {
-          reconnectTimer = setTimeout(connect, RECONNECT_DELAY_MS)
-        }
-      }
-    }
-
-    connect()
-
-    return () => {
-      cancelled = true
-      if (reconnectTimer !== null) clearTimeout(reconnectTimer)
-      es?.close()
-    }
+    const handler: Subscriber = (e) => onEventRef.current(e)
+    return subscribe(handler)
   }, [])
 }
