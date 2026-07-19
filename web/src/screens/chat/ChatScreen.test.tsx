@@ -78,8 +78,53 @@ describe('ChatScreen feed rendering', () => {
     expect(assistantBubble).not.toHaveClass('chat-screen__row--own')
 
     expect(screen.getByText('Bash')).toBeInTheDocument()
-    expect(screen.getByText(/"command":"go test/)).toBeInTheDocument()
-    expect(screen.getByText(/"command":"go test/).closest('.chat-screen__tool-row')).toBeInTheDocument()
+    expect(screen.getByText('go test ./internal/billing/...')).toBeInTheDocument()
+    expect(screen.getByText('go test ./internal/billing/...').closest('.chat-screen__tool-row')).toBeInTheDocument()
+  })
+})
+
+describe('ChatScreen tool grouping', () => {
+  it('collapses 3+ consecutive tool entries into one expandable summary row, single tool entries stay inline', async () => {
+    appendChatEntry('s-billing-v2-orch', {
+      role: 'tool',
+      tool_name: 'Bash',
+      text: '{"command":"ls"}',
+      ts: 1_800_000_800,
+    })
+    appendChatEntry('s-billing-v2-orch', {
+      role: 'tool',
+      tool_name: 'Edit',
+      text: '{"file_path":"/repo/foo.go"}',
+      ts: 1_800_000_801,
+    })
+    appendChatEntry('s-billing-v2-orch', {
+      role: 'tool',
+      tool_name: 'Edit',
+      text: '{"file_path":"/repo/bar.go"}',
+      ts: 1_800_000_802,
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('смотрю на трейс')
+
+    // The original fixture's lone Bash tool entry stays inline (no wrapper).
+    expect(screen.getByText('go test ./internal/billing/...')).toBeInTheDocument()
+
+    // The 3 newly appended tool entries collapse into one summary row.
+    const summary = await screen.findByRole('button', { name: /⚒ 3 действий · Bash ×1, Edit ×2/ })
+    expect(summary).toBeInTheDocument()
+    expect(screen.queryByText('ls')).not.toBeInTheDocument()
+    expect(screen.queryByText('foo.go')).not.toBeInTheDocument()
+
+    await user.click(summary)
+    expect(screen.getByText('ls')).toBeInTheDocument()
+    expect(screen.getByText('foo.go')).toBeInTheDocument()
+    expect(screen.getByText('bar.go')).toBeInTheDocument()
+
+    const collapseBtn = screen.getByRole('button', { name: /свернуть/ })
+    await user.click(collapseBtn)
+    expect(screen.queryByText('ls')).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /⚒ 3 действий/ })).toBeInTheDocument()
   })
 })
 

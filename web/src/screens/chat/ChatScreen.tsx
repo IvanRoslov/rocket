@@ -18,6 +18,7 @@ import { ApiError } from '../../lib/api'
 import { classifyUserEntry, fromEntryParts, systemEntryTitle } from '../../lib/classifyUserEntry'
 import { timeAgo } from '../../lib/format'
 import { useMessages, useSendMessage, useSession } from '../../lib/queries'
+import { groupChatEntries, summarizeToolEntry, type GroupableEntry, type ToolGroup } from '../../lib/toolDigest'
 import { useSessionChat } from '../../lib/useSessionChat'
 import type { ChatEntry, ChatSessionRef, MessageStatus } from '../../lib/types'
 import { Dot, type DotState } from '../../components/Dot'
@@ -123,11 +124,70 @@ const STATUS_LABEL: Record<MessageStatus, string> = {
   failed: 'failed',
 }
 
-function ToolRow({ entry }: { entry: ChatEntry }) {
+/** A single tool call rendered as a human digest (extracted command/file path) instead of raw JSON. */
+function ToolDigestLine({ entry }: { entry: ChatEntry }) {
+  const digest = summarizeToolEntry(entry.tool_name ?? '', entry.text)
   return (
     <div className="chat-screen__tool-row">
       <span className="chat-screen__tool-badge">{entry.tool_name}</span>
-      <span className="chat-screen__tool-text">{entry.text}</span>
+      <span className="chat-screen__tool-text">
+        {digest.command !== undefined ? (
+          <code className="chat-screen__tool-command">{digest.command}</code>
+        ) : digest.fileName !== undefined ? (
+          <span className="chat-screen__tool-file" title={digest.filePath}>
+            {digest.fileName}
+          </span>
+        ) : (
+          (digest.raw ?? entry.text)
+        )}
+        {digest.description && <span className="chat-screen__tool-desc"> — {digest.description}</span>}
+      </span>
+    </div>
+  )
+}
+
+/**
+ * A run of 2+ consecutive tool entries, collapsed into one compact summary
+ * row («⚒ N действий · Bash ×4, Edit ×3 ▸») that expands in place into the
+ * individual `ToolDigestLine`s on click, and collapses back on a second
+ * click. A run of exactly 1 tool entry never reaches this component — it's
+ * rendered directly as a `ToolDigestLine` by the feed loop.
+ */
+function ToolGroupRow({ group }: { group: ToolGroup<FeedItem> }) {
+  const [expanded, setExpanded] = useState(false)
+  const toolEntries = group.items
+    .map((gi) => (gi.value.kind === 'entry' ? gi.value.entry : undefined))
+    .filter((e): e is ChatEntry => e !== undefined)
+
+  const counts: { name: string; count: number }[] = []
+  const indexByName = new Map<string, number>()
+  for (const e of toolEntries) {
+    const name = e.tool_name ?? '?'
+    const i = indexByName.get(name)
+    if (i === undefined) {
+      indexByName.set(name, counts.length)
+      counts.push({ name, count: 1 })
+    } else {
+      counts[i].count += 1
+    }
+  }
+  const summary = counts.map((c) => `${c.name} ×${c.count}`).join(', ')
+
+  if (!expanded) {
+    return (
+      <button type="button" className="chat-screen__tool-group-summary" onClick={() => setExpanded(true)}>
+        ⚒ {toolEntries.length} действий · {summary} ▸
+      </button>
+    )
+  }
+  return (
+    <div className="chat-screen__tool-group chat-screen__tool-group--expanded">
+      {group.items.map((gi) =>
+        gi.value.kind === 'entry' ? <ToolDigestLine key={gi.key} entry={gi.value.entry} /> : null,
+      )}
+      <button type="button" className="chat-screen__tool-group-toggle" onClick={() => setExpanded(false)}>
+        ▾ свернуть
+      </button>
     </div>
   )
 }
@@ -311,9 +371,21 @@ export function ChatScreen() {
   }, [messages])
 
   const feed = buildFeed(entries, optimistic)
+  // Collapse adjacent tool entries (by feed position, so an optimistic or
+  // system/from bubble between two tool calls still breaks the run) into
+  // expandable groups.
+  const groupable: GroupableEntry<FeedItem>[] = feed.map((item) => ({
+    kind: 'item' as const,
+    key: item.key,
+    isTool: item.kind === 'entry' && item.entry.role === 'tool',
+    value: item,
+  }))
+  const grouped = groupChatEntries(groupable)
 
   // Autoscroll only when the reader is already at (or near) the bottom, so
-  // scrolling back through history isn't yanked away by new entries.
+  // scrolling back through history isn't yanked away by new entries. Keyed
+  // off the raw feed length (not `grouped`, and not affected by a group's
+  // local expand/collapse state), so toggling a group never re-triggers it.
   useEffect(() => {
     const el = feedRef.current
     if (!el || !atBottomRef.current) return
@@ -405,13 +477,17 @@ export function ChatScreen() {
       <div className="chat-screen__feed" ref={feedRef} onScroll={handleScroll}>
         {loading && feed.length === 0 && <p className="chat-screen__empty">Loading…</p>}
         {!loading && feed.length === 0 && <p className="chat-screen__empty">No messages yet.</p>}
-        {feed.map((item) => {
+        {grouped.map((g) => {
+          if (g.kind === 'tool-group') {
+            return <ToolGroupRow key={g.key} group={g} />
+          }
+          const item = g.value
           if (item.kind === 'optimistic') {
             return <OptimisticBubble key={item.key} msg={item.msg} />
           }
           const { entry } = item
           if (entry.role === 'tool') {
-            return <ToolRow key={item.key} entry={entry} />
+            return <ToolDigestLine key={item.key} entry={entry} />
           }
           if (entry.role === 'user') {
             const kind = classifyUserEntry(entry.text)
