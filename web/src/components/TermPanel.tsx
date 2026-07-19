@@ -101,6 +101,17 @@ export function TermPanel({ sessionId, readonly, onResize }: TermPanelProps) {
   // re-running the whole effect (which would recreate the xterm instance).
   const retryRef = useRef<() => void>(() => {})
 
+  // `onResize` is frequently an inline callback recreated on every parent
+  // render (e.g. TermOverlay). Keeping only the *latest* value in a ref lets
+  // the connect-effect below omit it from its dependency array — otherwise
+  // every parent re-render would tear down and reopen the WebSocket,
+  // producing an endless "closed before connection established" loop and a
+  // terminal that never stays open long enough to render anything.
+  const onResizeRef = useRef(onResize)
+  useEffect(() => {
+    onResizeRef.current = onResize
+  }, [onResize])
+
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -120,7 +131,7 @@ export function TermPanel({ sessionId, readonly, onResize }: TermPanelProps) {
     term.loadAddon(fitAddon)
     term.open(container)
     fitAddon.fit()
-    onResize?.(term.cols, term.rows)
+    onResizeRef.current?.(term.cols, term.rows)
 
     let ws: WebSocket | null = null
     let pingTimer: ReturnType<typeof setInterval> | null = null
@@ -224,7 +235,7 @@ export function TermPanel({ sessionId, readonly, onResize }: TermPanelProps) {
     }
 
     term.onResize(({ cols, rows }) => {
-      onResize?.(cols, rows)
+      onResizeRef.current?.(cols, rows)
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(encodeResize(cols, rows))
       }
@@ -245,7 +256,11 @@ export function TermPanel({ sessionId, readonly, onResize }: TermPanelProps) {
       term.dispose()
       retryRef.current = () => {}
     }
-  }, [sessionId, readonly, onResize])
+    // Intentionally omit `onResize` — it's read via `onResizeRef` above so
+    // that a new callback identity from the parent never tears down and
+    // reopens this WebSocket. Only a real identity/mode change (a different
+    // session, or flipping readonly) should reconnect.
+  }, [sessionId, readonly])
 
   return (
     <div className="term-panel">

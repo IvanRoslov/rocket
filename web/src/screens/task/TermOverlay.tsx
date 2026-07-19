@@ -5,7 +5,7 @@
 // attach-copy) so we don't reuse <Modal> directly, but we keep it
 // accessible the same way.
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { TermPanel } from '../../components/TermPanel'
 import './TermOverlay.css'
 
@@ -84,6 +84,14 @@ export function TermOverlay({ session, onClose }: TermOverlayProps) {
     }
   }
 
+  // Defense in depth: TermPanel already guards against callback-identity
+  // churn internally (see TermPanel.tsx's onResizeRef), but keeping this
+  // stable too means TermOverlay never contributes to unnecessary effect
+  // teardown/reopen cycles.
+  const handleTermResize = useCallback((cols: number, rows: number) => {
+    setGeometry({ cols, rows })
+  }, [])
+
   async function handleCopyAttach() {
     const cmd = `rocket attach ${session.tmux_name}`
     try {
@@ -125,7 +133,7 @@ export function TermOverlay({ session, onClose }: TermOverlayProps) {
         {copied && (
           <div className="term-overlay__copied">copied: rocket attach {session.tmux_name}</div>
         )}
-        <TermPanel sessionId={session.id} onResize={(cols, rows) => setGeometry({ cols, rows })} />
+        <TermPanel sessionId={session.id} onResize={handleTermResize} />
       </div>
     </div>
   )

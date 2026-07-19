@@ -233,4 +233,33 @@ describe('TermPanel', () => {
     })
     expect(MockWebSocket.instances).toHaveLength(2)
   })
+
+  it('does not tear down/reopen the WebSocket when onResize is given a new identity on rerender', () => {
+    const { rerender } = render(<TermPanel sessionId="sess-1" onResize={() => {}} />)
+
+    expect(MockWebSocket.instances).toHaveLength(1)
+
+    // Simulate a parent re-render that passes a brand-new onResize callback
+    // (the TermOverlay bug: an inline arrow function recreated every render).
+    // A stable connect-effect must not react to this at all.
+    act(() => {
+      rerender(<TermPanel sessionId="sess-1" onResize={() => {}} />)
+    })
+    expect(MockWebSocket.instances).toHaveLength(1)
+
+    act(() => {
+      rerender(<TermPanel sessionId="sess-1" onResize={() => {}} />)
+    })
+    expect(MockWebSocket.instances).toHaveLength(1)
+  })
+
+  it('still reconnects when sessionId actually changes', () => {
+    const { rerender } = render(<TermPanel sessionId="sess-1" onResize={() => {}} />)
+    expect(MockWebSocket.instances).toHaveLength(1)
+
+    act(() => {
+      rerender(<TermPanel sessionId="sess-2" onResize={() => {}} />)
+    })
+    expect(MockWebSocket.instances).toHaveLength(2)
+  })
 })
