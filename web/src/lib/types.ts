@@ -31,6 +31,14 @@ export interface Session {
   activity_ts?: number
   created_at: number
   updated_at: number
+  /**
+   * PR fields (phase 4, internal/api/sessions.go:30-32): omitted until the
+   * GitHub poller (every 2m, worker sessions only) finds a PR for the
+   * session's branch.
+   */
+  pr_number?: number
+  pr_state?: 'open' | 'closed' | 'merged'
+  ci_state?: 'passing' | 'pending' | 'failing'
 }
 
 // ---------------------------------------------------------------------------

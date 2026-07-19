@@ -1,0 +1,123 @@
+.journal-tab__filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.journal-tab__pill {
+  font: 500 12px var(--font-ui);
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  border-radius: 20px;
+  cursor: pointer;
+}
+.journal-tab__pill--active {
+  color: var(--text);
+  border-color: var(--border-hover);
+}
+
+.journal-tab__author-select {
+  margin-left: auto;
+  font: 500 12px var(--font-ui);
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 8px;
+}
+
+.journal-tab__timeline {
+  position: relative;
+  padding-left: 20px;
+}
+
+.journal-tab__line {
+  position: absolute;
+  left: 5px;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--border);
+}
+
+.journal-tab__entries {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.journal-tab__entry {
+  position: relative;
+}
+
+.journal-tab__dot {
+  position: absolute;
+  left: -19px;
+  top: 3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--bg);
+}
+.journal-tab__dot--indigo {
+  background: var(--accent);
+}
+.journal-tab__dot--err {
+  background: var(--err);
+}
+.journal-tab__dot--neutral {
+  background: var(--text-4);
+}
+.journal-tab__dot--ok {
+  background: var(--ok);
+}
+
+.journal-tab__entry-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.journal-tab__kind {
+  font: 600 11px var(--font-ui);
+  padding: 2px 7px;
+  border-radius: 5px;
+}
+.journal-tab__kind--indigo {
+  color: var(--accent-text);
+  background: var(--accent-selected-bg);
+}
+.journal-tab__kind--err {
+  color: var(--err-text);
+  background: var(--err-bg);
+}
+.journal-tab__kind--neutral {
+  color: var(--neutral-text);
+  background: var(--neutral-bg);
+}
+.journal-tab__kind--ok {
+  color: var(--ok-text);
+  background: var(--ok-bg);
+}
+
+.journal-tab__author {
+  font: 11.5px var(--font-mono);
+  color: var(--text-4);
+}
+.journal-tab__when {
+  font: 11.5px var(--font-ui);
+  color: var(--text-4);
+}
+.journal-tab__body {
+  font: 14px/1.5 var(--font-ui);
+  color: var(--text-2-alt);
+}
+.journal-tab__empty {
+  font: 13.5px var(--font-ui);
+  color: var(--text-4);
+}

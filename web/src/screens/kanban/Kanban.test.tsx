@@ -41,9 +41,9 @@ test('renders columns with fixtures distributed by status', async () => {
   expect(screen.getByText('Webhook retry backoff')).toBeInTheDocument()
   expect(screen.getByText('Legacy invoice migration')).toBeInTheDocument()
 
-  // #12 shows orchestrator liveness with 2 workers (s-billing-v2-w1, s-billing-v2-w2).
+  // #12 shows orchestrator liveness with 3 workers (s-billing-v2-w1/w2/w3).
   expect(screen.getByText(/orch:/)).toBeInTheDocument()
-  expect(screen.getByText(/2 workers/)).toBeInTheDocument()
+  expect(screen.getByText(/3 workers/)).toBeInTheDocument()
 })
 
 test('cancelled column hidden by default, shown via checkbox', async () => {

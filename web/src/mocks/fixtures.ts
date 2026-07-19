@@ -138,6 +138,26 @@ export const sessions: Session[] = [
     activity_ts: NOW - 40 * MIN,
     created_at: NOW - 2 * DAY,
     updated_at: NOW - 40 * MIN,
+    pr_number: 14,
+    pr_state: 'open',
+    ci_state: 'passing',
+  },
+  {
+    id: 's-billing-v2-w3',
+    kind: 'worker',
+    project_id: 'billing',
+    repo_id: 'infra',
+    feature_slug: 'billing-v2',
+    parent_id: 's-billing-v2-orch',
+    agent: 'claude',
+    branch: 'feature/billing-v2-migrations',
+    worktree_path: '/home/dev/.rocket/worktrees/billing-v2-w3',
+    tmux_name: 'billing-v2-w3',
+    state: 'errored',
+    activity: 'exited',
+    activity_ts: NOW - 90 * MIN,
+    created_at: NOW - 2 * DAY,
+    updated_at: NOW - 90 * MIN,
   },
 ]
 
@@ -220,6 +240,20 @@ export const subtasks: Task[] = [
     created_at: NOW - 2 * DAY,
     updated_at: NOW - 40 * MIN,
   },
+  {
+    id: 15,
+    parent_id: 12,
+    title: 'Data migration + backfill',
+    description: 'Backfill existing invoices into the prorated line-item schema.',
+    project_id: 'billing',
+    repo_id: 'infra',
+    status: 'in_progress',
+    feature_slug: 'billing-v2',
+    session_id: 's-billing-v2-w3',
+    created_by: 'orchestrator',
+    created_at: NOW - 2 * DAY,
+    updated_at: NOW - 90 * MIN,
+  },
 ]
 
 export const taskDocs: TaskDoc[] = [
@@ -281,6 +315,60 @@ export const taskLog: TaskLogEntry[] = [
 // messages -> "user"; that still holds once at least one orchestrator
 // message is appended without a user response after it.
 export const questions: Question[] = [
+  {
+    id: 1,
+    task_id: 12,
+    ordinal: 1,
+    asked_by: 's-billing-v2-orch',
+    body: 'Should the v2 flag default on for internal test accounts?',
+    status: 'resolved',
+    resolution: 'answered',
+    whose_turn: '',
+    asked_at: NOW - 2 * DAY,
+    resolved_at: NOW - 2 * DAY + 20 * MIN,
+    messages: [
+      {
+        id: 101,
+        author: 's-billing-v2-orch',
+        kind: 'reply',
+        body: 'Should internal test accounts get the v2 flag by default while we build this out?',
+        created_at: NOW - 2 * DAY,
+      },
+      {
+        id: 102,
+        kind: 'answer',
+        body: 'Yes — flip it on for @acme-internal accounts only.',
+        created_at: NOW - 2 * DAY + 20 * MIN,
+      },
+    ],
+  },
+  {
+    id: 2,
+    task_id: 12,
+    ordinal: 2,
+    asked_by: 's-billing-v2-orch',
+    body: 'Which currency rounding mode for invoice totals — half-up or banker’s?',
+    status: 'resolved',
+    resolution: 'answered',
+    whose_turn: '',
+    asked_at: NOW - 1 * DAY,
+    resolved_at: NOW - 1 * DAY + 15 * MIN,
+    messages: [
+      {
+        id: 103,
+        author: 's-billing-v2-orch',
+        kind: 'reply',
+        body: 'Invoice totals need a rounding mode — half-up or banker’s rounding?',
+        created_at: NOW - 1 * DAY,
+      },
+      {
+        id: 104,
+        kind: 'answer',
+        body: 'Half-up, to match what finance already uses.',
+        created_at: NOW - 1 * DAY + 15 * MIN,
+      },
+    ],
+  },
   {
     id: 3,
     task_id: 12,

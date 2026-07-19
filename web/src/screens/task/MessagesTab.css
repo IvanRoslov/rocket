@@ -1,0 +1,101 @@
+.messages-tab__empty {
+  font: 13.5px var(--font-ui);
+  color: var(--text-4);
+}
+
+.messages-tab__list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.messages-tab__row {
+  display: flex;
+  justify-content: flex-start;
+}
+.messages-tab__row--own {
+  justify-content: flex-end;
+}
+
+.messages-tab__bubble {
+  max-width: 72%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 9px 12px;
+}
+.messages-tab__bubble--own {
+  background: var(--accent-selected-bg);
+  border-color: var(--accent-selected-border);
+}
+
+.messages-tab__bubble-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 3px;
+}
+.messages-tab__author {
+  font: 600 11.5px var(--font-mono);
+  color: var(--text-2);
+}
+.messages-tab__bubble--own .messages-tab__author {
+  color: var(--accent-text);
+}
+.messages-tab__when {
+  font: 10.5px var(--font-ui);
+  color: var(--text-4);
+}
+.messages-tab__body {
+  font: 13.5px/1.5 var(--font-ui);
+  color: var(--text);
+}
+.messages-tab__status {
+  font: 10.5px var(--font-ui);
+  margin-top: 3px;
+}
+.messages-tab__status--delivered {
+  color: var(--ok);
+}
+.messages-tab__status--queued {
+  color: var(--warn-text);
+}
+.messages-tab__status--failed {
+  color: var(--err-text);
+}
+
+.messages-tab__compose {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  position: sticky;
+  bottom: 0;
+  background: var(--bg);
+  padding-top: 8px;
+}
+.messages-tab__compose textarea {
+  flex: 1;
+  resize: none;
+  min-height: 40px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font: 13.5px var(--font-ui);
+  outline: none;
+  background: var(--surface);
+}
+.messages-tab__compose button {
+  height: 40px;
+  padding: 0 16px;
+  background: var(--text);
+  color: var(--surface);
+  border: none;
+  border-radius: 10px;
+  font: 600 13px var(--font-ui);
+  cursor: pointer;
+}
+.messages-tab__compose button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

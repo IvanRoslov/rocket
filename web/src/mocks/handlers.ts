@@ -56,6 +56,15 @@ export function resetProjects(): void {
   projectsState = projects.map((p) => ({ ...p, linked: [...p.linked] }))
 }
 
+// Mutable copy of sessions, written by `POST /v1/sessions/{id}/restore`
+// (errored -> running). Tests that mutate this should call `resetSessions()`
+// in `afterEach`.
+let sessionsState = sessions.map((s) => ({ ...s }))
+
+export function resetSessions(): void {
+  sessionsState = sessions.map((s) => ({ ...s }))
+}
+
 // Mutable copy of tasks + subtasks, written by task create/status/cancel
 // mutations. `nextTaskId` seeds past the highest fixture id.
 let tasksState: Task[] = [...tasks, ...subtasks].map((t) => ({ ...t }))
@@ -100,7 +109,7 @@ function openQuestionsFor(taskId: number): number {
 
 function taskDetailFor(task: Task) {
   const taskSubtasks = tasksState.filter((t) => t.parent_id === task.id)
-  const session = task.session_id ? sessions.find((s) => s.id === task.session_id) : undefined
+  const session = task.session_id ? sessionsState.find((s) => s.id === task.session_id) : undefined
   return {
     ...task,
     subtasks: taskSubtasks,
@@ -117,7 +126,7 @@ export const handlers = [
   http.get('/v1/sessions', ({ request }) => {
     const url = new URL(request.url)
     const project = url.searchParams.get('project')
-    const result = project ? sessions.filter((s) => s.project_id === project) : sessions
+    const result = project ? sessionsState.filter((s) => s.project_id === project) : sessionsState
     return HttpResponse.json(result)
   }),
 
@@ -134,7 +143,7 @@ export const handlers = [
 
   http.post('/v1/sessions/:id/kill', ({ params }) => {
     const id = params.id as string
-    const session = sessions.find((s) => s.id === id)
+    const session = sessionsState.find((s) => s.id === id)
     if (!session) {
       return HttpResponse.json(
         { error: { code: 'not_found', message: `session ${id} not found` } },
@@ -142,6 +151,20 @@ export const handlers = [
       )
     }
     return HttpResponse.json({ status: 'killed' })
+  }),
+
+  http.post('/v1/sessions/:id/restore', ({ params }) => {
+    const id = params.id as string
+    const session = sessionsState.find((s) => s.id === id)
+    if (!session) {
+      return HttpResponse.json(
+        { error: { code: 'not_found', message: `session ${id} not found` } },
+        { status: 404 },
+      )
+    }
+    session.state = 'running'
+    session.activity = 'ready'
+    return HttpResponse.json(session)
   }),
 
   http.get('/v1/messages', ({ request }) => {

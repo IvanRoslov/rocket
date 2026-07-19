@@ -244,8 +244,12 @@ export function useSendMessage(): UseMutationResult<
   Error,
   { to: string; body: string; from?: string }
 > {
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (payload) => api.post('/v1/messages', payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['messages'] })
+    },
   })
 }
 
@@ -257,6 +261,22 @@ export function useKillSession(): UseMutationResult<
   return useMutation({
     mutationFn: ({ id, cleanup }) =>
       api.post(`/v1/sessions/${id}/kill${cleanup ? '?cleanup=true' : ''}`),
+  })
+}
+
+/**
+ * `POST /v1/sessions/{id}/restore` (phase 4): re-spawns an `errored` worker
+ * session on its existing branch/worktree. Not in the phase-3 contract doc
+ * (which predates it) but referenced by the Task screen brief for the
+ * SessionRail's "restore" action on errored workers.
+ */
+export function useRestoreSession(): UseMutationResult<Session, Error, string> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.post<Session>(`/v1/sessions/${id}/restore`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sessions'] })
+    },
   })
 }
 
@@ -498,6 +518,12 @@ export function wireInvalidation(queryClient: QueryClient) {
       queryClient.invalidateQueries({ queryKey: ['task'] })
     } else if (event.type.startsWith('repo.clone_')) {
       queryClient.invalidateQueries({ queryKey: ['repos'] })
+    } else if (event.type.startsWith('pr.')) {
+      // PR state changes (phase 4): re-fetch the sessions carrying pr_*
+      // fields plus the task/board views that surface PR badges.
+      queryClient.invalidateQueries({ queryKey: ['sessions'] })
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task'] })
     }
   }
 }
