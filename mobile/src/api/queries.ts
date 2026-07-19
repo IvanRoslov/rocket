@@ -3,6 +3,7 @@ import { api } from './client'
 import { useConnection } from './events'
 import { useServers } from '../servers/ServerContext'
 import type {
+  GithubRepo,
   Health,
   Message,
   Project,
@@ -303,6 +304,64 @@ export function useQuestionDismiss() {
   return useMutation({
     mutationFn: (id: number) => api.post(baseUrl, `/v1/questions/${id}/answer`, { dismiss: true }),
     onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'task'] }),
+  })
+}
+
+export function useGithubRepos(q: string, enabled = true) {
+  const baseUrl = useBaseUrl()
+  return useQuery({
+    queryKey: [baseUrl, 'github-repos', q],
+    queryFn: async () =>
+      (await api.get<{ repos: GithubRepo[] }>(baseUrl, `/v1/github/repos?q=${encodeURIComponent(q)}`)).repos ?? [],
+    enabled,
+    staleTime: 60000,
+  })
+}
+
+export function useRegisterRepo() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { github?: string; path?: string; id?: string }) => api.post<Repo>(baseUrl, '/v1/repos', p),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'repos'] }),
+  })
+}
+
+export function useDeleteRepo() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.del(baseUrl, `/v1/repos/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'repos'] }),
+  })
+}
+
+export function useCreateProject() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { id?: string; name: string; main: string; linked?: string[] }) =>
+      api.post<Project>(baseUrl, '/v1/projects', p),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'projects'] }),
+  })
+}
+
+export function useUpdateProject() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { id: string; name?: string; main?: string; linked?: string[] }) =>
+      api.patch<Project>(baseUrl, `/v1/projects/${p.id}`, { name: p.name, main: p.main, linked: p.linked }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'projects'] }),
+  })
+}
+
+export function useDeleteProject() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.del(baseUrl, `/v1/projects/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'projects'] }),
   })
 }
 

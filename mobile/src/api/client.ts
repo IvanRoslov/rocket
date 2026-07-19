@@ -35,7 +35,8 @@ async function request<T>(baseUrl: string, path: string, init?: RequestInit): Pr
     }
     throw new ApiError(code, message, res.status)
   }
-  return (await res.json()) as T
+  if (res.status === 204) return undefined as T
+  return (await res.json().catch(() => undefined)) as T
 }
 
 export const api = {
@@ -46,4 +47,5 @@ export const api = {
     request<T>(baseUrl, path, { method: 'PUT', body: JSON.stringify(body) }),
   patch: <T>(baseUrl: string, path: string, body: unknown) =>
     request<T>(baseUrl, path, { method: 'PATCH', body: JSON.stringify(body) }),
+  del: <T = void>(baseUrl: string, path: string) => request<T>(baseUrl, path, { method: 'DELETE' }),
 }

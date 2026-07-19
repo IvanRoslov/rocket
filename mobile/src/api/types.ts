@@ -180,6 +180,12 @@ export interface Question {
   messages: QuestionMessage[]
 }
 
+export interface GithubRepo {
+  full_name: string
+  private: boolean
+  default_branch: string
+}
+
 export interface Settings {
   github_token: string
   login?: string

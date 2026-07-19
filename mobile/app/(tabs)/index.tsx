@@ -76,6 +76,10 @@ export default function ProjectsScreen() {
           <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }}>{active?.name ?? 'server'}</Text>
           <Text style={{ fontSize: 10, color: colors.textFaint }}>▾</Text>
         </Pressable>
+        <View style={{ flex: 1 }} />
+        <Pressable style={styles.addBtn} onPress={() => router.navigate('/project/new')}>
+          <Text style={{ color: '#fff', fontSize: 19, lineHeight: 22 }}>＋</Text>
+        </Pressable>
       </View>
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24 }}>
         <Text style={styles.h1}>Projects</Text>
@@ -101,9 +105,10 @@ export default function ProjectsScreen() {
                 tasks={(tasks.data ?? []).filter((t) => t.project_id === p.id && !t.parent_id)}
               />
             ))}
-            {projects.isSuccess && projects.data.length === 0 ? (
-              <EmptyState text="No projects yet — create one from the desktop dashboard." />
-            ) : null}
+            <Pressable style={styles.createCard} onPress={() => router.navigate('/project/new')}>
+              <Text style={{ fontSize: 20, color: colors.textDim }}>＋</Text>
+              <Text style={{ fontSize: 13.5, fontWeight: '600', color: colors.textDim }}>Create project</Text>
+            </Pressable>
           </View>
         )}
       </ScrollView>
@@ -129,6 +134,25 @@ const styles = StyleSheet.create({
     backgroundColor: colors.ink,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  addBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: colors.ink,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  createCard: {
+    height: 56,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: '#d4d4d1',
+    borderRadius: radius.xxl,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
   serverChip: {
     flexDirection: 'row',
