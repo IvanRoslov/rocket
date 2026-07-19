@@ -369,9 +369,23 @@ func TestStripSkillsRemovesWorkerBlock(t *testing.T) {
 	if strings.Contains(stripped, "<!-- skills:start -->") || strings.Contains(stripped, "<!-- skills:end -->") {
 		t.Error("StripSkills left marker lines behind")
 	}
-	if strings.Contains(stripped, "Superpowers") || strings.Contains(stripped, "superpowers:") {
-		t.Errorf("StripSkills left Superpowers content behind:\n%s", stripped)
+	// The skill-only lines (marked individually) must be gone.
+	if strings.Contains(stripped, "You have the Superpowers skills plugin") {
+		t.Error("StripSkills left the Superpowers intro sentence behind")
 	}
+	if strings.Contains(stripped, "superpowers:writing-plans") {
+		t.Error("StripSkills left the writing-plans invocation behind")
+	}
+	if strings.Contains(stripped, "superpowers:systematic-debugging") {
+		t.Error("StripSkills left the systematic-debugging invocation behind")
+	}
+	// NOTE: steps 3 and 5 mention "superpowers:test-driven-development",
+	// "superpowers:subagent-driven-development" and
+	// "superpowers:verification-before-completion" mid-line, sharing the line
+	// with non-skill delivery text (commit/verify instructions). Those clauses
+	// are not line-separable without editing the surrounding prose, so per the
+	// scoping rule they are intentionally left unmarked and survive stripping
+	// as a documented, minor cosmetic leftover.
 	// Surrounding sections must remain, and remain coherent (headings intact).
 	if !strings.Contains(stripped, "## Ground rules") {
 		t.Error("StripSkills should not remove content outside the skills block")
@@ -384,6 +398,58 @@ func TestStripSkillsRemovesWorkerBlock(t *testing.T) {
 	}
 	if strings.Contains(stripped, "\n\n\n") {
 		t.Error("StripSkills should collapse blank lines left behind by a removed block")
+	}
+}
+
+// TestStripSkillsWorkerKeepsDeliverySteps guards the critical regression this
+// fix addresses: markers used to wrap the entire "Workflow" section, so
+// StripSkills (used for non-claude-code runtimes like codex) deleted the PR
+// open / CI react / merged-done steps along with the skill invocations. The
+// markers now scope only the skill-specific lines, so these delivery steps
+// must survive StripSkills intact.
+func TestStripSkillsWorkerKeepsDeliverySteps(t *testing.T) {
+	raw := rawTemplate(t, "worker")
+	stripped := StripSkills(raw)
+
+	for _, want := range []string{"gh pr create", "CI", "merged", "rocket task log", "rocket send"} {
+		if !strings.Contains(stripped, want) {
+			t.Errorf("stripped worker render missing required phrase %q:\n%s", want, stripped)
+		}
+	}
+}
+
+// TestStripSkillsFullRenderUnchanged pins down the hard requirement that the
+// non-stripped (claude-code) render is unaffected by scoping the markers more
+// tightly: every original workflow step's key phrase must still be present,
+// in its original relative order, in the full render.
+func TestStripSkillsFullRenderUnchanged(t *testing.T) {
+	vars := completeVars()
+	result, err := Render("", "worker", vars)
+	if err != nil {
+		t.Fatalf("Render failed: %v", err)
+	}
+
+	steps := []string{
+		"Read the brief (your first message) carefully",
+		"Plan: invoke superpowers:writing-plans for the implementation plan.",
+		"Implement: superpowers:test-driven-development",
+		"Any bug or failing test",
+		"Before declaring done",
+		"Open the PR: gh pr create",
+		"After the PR: react to CI failures",
+		"When the PR is merged your job is done",
+	}
+	last := -1
+	for _, phrase := range steps {
+		idx := strings.Index(result, phrase)
+		if idx == -1 {
+			t.Errorf("full render missing original step phrase %q", phrase)
+			continue
+		}
+		if idx < last {
+			t.Errorf("full render step phrase %q is out of original order", phrase)
+		}
+		last = idx
 	}
 }
 
