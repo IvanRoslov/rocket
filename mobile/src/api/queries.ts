@@ -6,6 +6,7 @@ import type {
   GithubRepo,
   Health,
   Message,
+  QuizAnswer,
   Project,
   Question,
   Repo,
@@ -362,6 +363,16 @@ export function useDeleteProject() {
   return useMutation({
     mutationFn: (id: string) => api.del(baseUrl, `/v1/projects/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'projects'] }),
+  })
+}
+
+export function useQuizAnswer() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { sessionId: string; answers: QuizAnswer[] }) =>
+      api.post<{ status: string }>(baseUrl, `/v1/sessions/${p.sessionId}/quiz/answer`, { answers: p.answers }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'sessions'] }),
   })
 }
 

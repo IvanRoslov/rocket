@@ -223,6 +223,9 @@ function SessionsSheet({
                   <Dot color={sessionDot(orch.state, orch.activity)} size={8} />
                   <Text style={styles.sheetKindLabel}>ORCHESTRATOR</Text>
                   <View style={{ flex: 1 }} />
+                  {orch.pending_quiz ? (
+                    <Badge label="? quiz" fg={colors.amberDeep} bg={colors.amberBg} />
+                  ) : null}
                   <Badge {...sessionBadge(orch.state, orch.activity)} />
                   <Pressable onPress={() => setMenuFor(orch)} hitSlop={8}>
                     <Text style={{ fontSize: 16, color: colors.textDim }}>⋯</Text>

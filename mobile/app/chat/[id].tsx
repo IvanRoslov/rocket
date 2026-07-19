@@ -5,6 +5,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -13,8 +14,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useChatFeed } from '../../src/api/chat'
 import { useMessages, useSendMessage } from '../../src/api/queries'
-import type { ChatEntry } from '../../src/api/types'
+import type { ChatEntry, ClosedQuizEcho } from '../../src/api/types'
 import { Markdown } from '../../src/components/Markdown'
+import { ClosedQuizCard, PendingQuizCard } from '../../src/components/QuizCard'
 import { useToast } from '../../src/components/Toast'
 import { BackButton, Badge, Dot, MonoText, PrimaryButton } from '../../src/components/ui'
 import { classifyUserEntry } from '../../src/lib/chatDisplay'
@@ -43,6 +45,9 @@ function SystemRow({ label, body }: { label: string; body: string }) {
 }
 
 function EntryBubble({ entry }: { entry: ChatEntry }) {
+  if (entry.role === 'quiz_answer') {
+    return <ClosedQuizCard echo={entry.quiz as ClosedQuizEcho | undefined} fallback={entry.text} />
+  }
   if (entry.role === 'tool') {
     return (
       <View style={styles.toolRow}>
@@ -99,7 +104,8 @@ export default function ChatScreen() {
   const [showTools, setShowTools] = useState(false)
   const listRef = useRef<FlatList<Row>>(null)
 
-  const canWrite = session?.kind === 'orchestrator' && session.state === 'running'
+  const pendingQuiz = session?.pending_quiz
+  const canWrite = session?.kind === 'orchestrator' && session.state === 'running' && !pendingQuiz
 
   // Tool calls and system-injected user entries (task notifications,
   // reminders, heartbeats) are noise for the phone view — hidden unless
@@ -207,7 +213,11 @@ export default function ChatScreen() {
           }
         />
 
-        {canWrite ? (
+        {pendingQuiz ? (
+          <ScrollView style={styles.quizHost} contentContainerStyle={{ padding: 12 }}>
+            <PendingQuizCard sessionId={id} quiz={pendingQuiz} />
+          </ScrollView>
+        ) : canWrite ? (
           <View style={styles.composer}>
             <TextInput
               style={styles.input}
@@ -289,6 +299,12 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     color: colors.text,
     backgroundColor: colors.page,
+  },
+  quizHost: {
+    maxHeight: '62%',
+    backgroundColor: colors.card,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
   },
   readonlyBar: {
     alignItems: 'center',

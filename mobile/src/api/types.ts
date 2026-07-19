@@ -25,6 +25,7 @@ export interface Session {
   pr_number?: number
   pr_state?: 'open' | 'closed' | 'merged'
   ci_state?: 'passing' | 'pending' | 'failing'
+  pending_quiz?: PendingQuiz
 }
 
 export interface Project {
@@ -194,7 +195,7 @@ export interface Settings {
 // Chat — docs/13-chat.md. A read-only mirror of the agent's native
 // transcript; sending goes through the regular message queue.
 
-export type ChatRole = 'user' | 'assistant' | 'tool'
+export type ChatRole = 'user' | 'assistant' | 'tool' | 'quiz_answer'
 
 export interface ChatEntry {
   role: ChatRole
@@ -203,6 +204,50 @@ export interface ChatEntry {
   tool_name?: string
   /** Unix seconds; 0 when the transcript record has no timestamp. */
   ts: number
+  /**
+   * AskUserQuestion rounds only: raw quiz JSON. On the tool entry — the
+   * tool input (camelCase multiSelect); on the quiz_answer entry — echo of
+   * `{questions, answers}` where answers maps question text → chosen label.
+   */
+  quiz?: ClosedQuizEcho | { questions?: RawQuizQuestion[] }
+}
+
+export interface RawQuizQuestion {
+  question: string
+  header?: string
+  multiSelect?: boolean
+  options?: { label: string; description?: string }[]
+}
+
+export interface ClosedQuizEcho {
+  questions?: RawQuizQuestion[]
+  answers?: Record<string, string>
+}
+
+// Live quiz state — docs/13-chat.md "Квизы (AskUserQuestion)".
+
+export interface QuizOption {
+  label: string
+  description?: string
+}
+
+export interface PendingQuizQuestion {
+  question: string
+  header?: string
+  multi_select: boolean
+  options: QuizOption[]
+}
+
+export interface PendingQuiz {
+  questions: PendingQuizQuestion[]
+  asked_at: number
+}
+
+/** One answer per pending-quiz question: either option indices or free text. */
+export interface QuizAnswer {
+  question_index: number
+  option_indices?: number[]
+  text?: string
 }
 
 export interface ChatSessionInfo {
@@ -210,6 +255,7 @@ export interface ChatSessionInfo {
   kind: string
   state: SessionState
   activity?: SessionActivity
+  pending_quiz?: PendingQuiz
 }
 
 export interface ChatResponse {
