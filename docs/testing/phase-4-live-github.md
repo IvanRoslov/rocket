@@ -24,6 +24,23 @@ day to day.
   always read `passing` (no check runs = vacuously passing) and the CI
   reaction can't be exercised.
 
+## Token permissions
+
+GitHub Personal Access Tokens (PAT) must have the following minimum scopes to function correctly:
+
+- **Classic PAT**: `repo` scope (full private repository access)
+- **Fine-grained PAT**: Repository permissions:
+  - Contents: Read
+  - Pull requests: Read
+  - **Checks: Read** (required for CI state polling)
+
+Without `Checks:Read`, rocket will still track PRs and merges, but:
+- CI state will display as "-" instead of polling status
+- CI nudges (reactions when CI fails) will be disabled
+- A one-time warning appears in the daemon log and fires a `github.permission_warning` event
+
+Without `Pull requests:Read`, the `ReviewDecision` field will be unavailable and review-triggered reactions will not fire.
+
 ## Setup
 
 1. **Start the daemon** (first run creates `~/.rocket/config.yaml` with
