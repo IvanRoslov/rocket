@@ -585,6 +585,11 @@ func (m *Manager) terminate(ctx context.Context, id, finalState, event string, e
 		if err := m.st.UpdateSessionState(id, finalState); err != nil {
 			return err
 		}
+		// Terminal sessions can't answer a pending quiz, so clear it along
+		// with the state transition (best-effort: the transition already
+		// happened, and a leftover pending_quiz is harmless clutter, not a
+		// correctness issue worth failing the whole call over).
+		_ = m.st.ClearPendingQuiz(id)
 		m.bus.Publish(event, id, eventData)
 	}
 
@@ -1035,6 +1040,7 @@ func (m *Manager) Cleanup(ctx context.Context) (killedTmux, removedWorktrees []s
 // more relevant error to return.
 func (m *Manager) markErrored(id string, cause error) {
 	_ = m.st.UpdateSessionState(id, "errored")
+	_ = m.st.ClearPendingQuiz(id)
 	m.bus.Publish("session.state_changed", id, map[string]any{
 		"from": "spawning", "to": "errored", "reason": cause.Error(),
 	})
