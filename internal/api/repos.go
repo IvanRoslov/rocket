@@ -136,6 +136,7 @@ func handlePostRepo(w http.ResponseWriter, r *http.Request, d Deps) {
 		ID:            id,
 		Path:          path,
 		DefaultBranch: defaultBranch(path),
+		AutoCleanup:   true,
 	}
 
 	if err := d.Store.AddRepo(repo); err != nil {
@@ -335,6 +336,7 @@ func handlePostRepoGithub(w http.ResponseWriter, r *http.Request, d Deps, req po
 		ID:            id,
 		Path:          targetDir,
 		DefaultBranch: resolveClonedDefaultBranch(targetDir, owner, name),
+		AutoCleanup:   true,
 	}
 	if err := d.Store.AddRepo(repo); err != nil {
 		if errors.Is(err, store.ErrExists) {
