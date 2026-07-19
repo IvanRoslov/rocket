@@ -122,32 +122,30 @@
   color: var(--err-text);
 }
 
-.chat-screen__system-row {
-  align-self: center;
-  max-width: 90%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+.chat-screen__bubble--system {
+  background: var(--warn-bg-2, #fffbeb);
+  border-color: var(--warn-border-2, #fde68a);
+}
+.chat-screen__system-badge {
+  font: 600 10.5px var(--font-mono);
+  color: var(--warn-text);
+  text-transform: lowercase;
+  margin-bottom: 3px;
 }
 .chat-screen__system-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  display: block;
+  width: 100%;
   max-width: 100%;
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--surface-2);
-  color: var(--text-4);
-  font: 500 11px var(--font-ui);
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: 500 13.5px var(--font-ui);
+  text-align: left;
   cursor: pointer;
 }
 .chat-screen__system-toggle:hover {
-  color: var(--text-3);
-  border-color: var(--border-hover);
-}
-.chat-screen__system-icon {
-  flex: none;
+  color: var(--text-2);
 }
 .chat-screen__system-title {
   min-width: 0;
@@ -156,7 +154,7 @@
   white-space: nowrap;
 }
 .chat-screen__system-body {
-  margin-top: 4px;
+  margin-top: 6px;
   max-width: 100%;
   max-height: 260px;
   overflow: auto;

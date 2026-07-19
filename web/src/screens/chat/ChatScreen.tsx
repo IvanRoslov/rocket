@@ -147,29 +147,57 @@ function EntryBubble({ entry }: { entry: ChatEntry }) {
 }
 
 /**
- * Collapsed single-line plaque for a `role: "user"` entry that's actually a
- * service inject (task-notification hooks, `<system-...>` reminders,
- * `[large message]`/`[task #...]` pointers) rather than something the human
- * typed. Collapsed by default; click reveals the raw text verbatim (no
- * markdown — this is machine-formatted, not prose).
+ * A `role: "user"` entry that's actually a service inject (rocket heartbeat
+ * lines, task-notification hooks, `<system-...>` reminders, `[large
+ * message]`/`[task #...]` pointers) rather than something the human typed —
+ * these are NOT the operator's own words, so they render as a pale-yellow
+ * bubble on the LEFT (opposite of the own/right bubble) with a small "rocket"
+ * / "system" badge, making them impossible to mistake for something the user
+ * said.
+ *
+ * Short, non-XML texts (heartbeat summaries etc.) render in full — they're
+ * meant to be skimmed. Long or XML-wrapped payloads (`<task-notification>`
+ * dumps) stay collapsed behind the existing summary/first-60-chars title,
+ * expanding to raw monospace text (no markdown — this is machine-formatted,
+ * not prose) on click.
  */
+const SYSTEM_SHORT_MAX_LEN = 400
+
+function isShortSystemText(text: string): boolean {
+  return text.length <= SYSTEM_SHORT_MAX_LEN && !text.startsWith('<')
+}
+
+function systemBadge(text: string): string {
+  return text.startsWith('[rocket') ? 'rocket' : 'system'
+}
+
 function SystemRow({ entry }: { entry: ChatEntry }) {
   const [expanded, setExpanded] = useState(false)
-  const title = systemEntryTitle(entry.text)
+  const badge = systemBadge(entry.text)
+  const short = isShortSystemText(entry.text)
   return (
-    <div className="chat-screen__system-row">
-      <button
-        type="button"
-        className="chat-screen__system-toggle"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <span className="chat-screen__system-icon" aria-hidden="true">
-          ⚙
-        </span>
-        <span className="chat-screen__system-title">{title || '(пусто)'}</span>
-      </button>
-      {expanded && <pre className="chat-screen__system-body">{entry.text}</pre>}
+    <div className="chat-screen__row">
+      <div className="chat-screen__bubble chat-screen__bubble--system">
+        <div className="chat-screen__system-badge">{badge}</div>
+        {short ? (
+          <div className="chat-screen__body">
+            <Markdown compact>{entry.text}</Markdown>
+          </div>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="chat-screen__system-toggle"
+              aria-expanded={expanded}
+              onClick={() => setExpanded((v) => !v)}
+            >
+              <span className="chat-screen__system-title">{systemEntryTitle(entry.text) || '(пусто)'}</span>
+            </button>
+            {expanded && <pre className="chat-screen__system-body">{entry.text}</pre>}
+          </>
+        )}
+        {entry.ts > 0 && <div className="chat-screen__when">{timeAgo(entry.ts)}</div>}
+      </div>
     </div>
   )
 }

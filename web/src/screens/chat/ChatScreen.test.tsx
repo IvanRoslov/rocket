@@ -154,7 +154,7 @@ describe('ChatScreen GFM rendering', () => {
 })
 
 describe('ChatScreen service inject classification', () => {
-  it('renders a task-notification user entry as a collapsed system row, expanding on click', async () => {
+  it('renders a task-notification user entry as a collapsed pale-yellow left bubble, expanding on click', async () => {
     appendChatEntry('s-billing-v2-orch', {
       role: 'user',
       text: '<task-notification><summary>Задача #7 закрыта</summary>полный текст уведомления</task-notification>',
@@ -169,12 +169,17 @@ describe('ChatScreen service inject classification', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByText(/полный текст уведомления/)).not.toBeInTheDocument()
 
+    const row = toggle.closest('.chat-screen__row')
+    expect(row).not.toHaveClass('chat-screen__row--own')
+    expect(within(row as HTMLElement).getByText('system')).toBeInTheDocument()
+    expect(toggle.closest('.chat-screen__bubble')).toHaveClass('chat-screen__bubble--system')
+
     await user.click(toggle)
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText(/полный текст уведомления/)).toBeInTheDocument()
   })
 
-  it('renders a [large message] pointer entry with no matching optimistic send as a collapsed system row', async () => {
+  it('renders a short [large message] pointer entry fully, not collapsed', async () => {
     appendChatEntry('s-billing-v2-orch', {
       role: 'user',
       text: '[large message] stored as file, 4.2kb',
@@ -183,7 +188,46 @@ describe('ChatScreen service inject classification', () => {
     renderPage()
     await screen.findByText('смотрю на трейс')
 
-    expect(await screen.findByRole('button', { name: /large message.*stored as file/i })).toBeInTheDocument()
+    const body = await screen.findByText('[large message] stored as file, 4.2kb')
+    expect(screen.queryByRole('button', { name: /large message/i })).not.toBeInTheDocument()
+    const row = body.closest('.chat-screen__row')
+    expect(row).not.toHaveClass('chat-screen__row--own')
+    expect(body.closest('.chat-screen__bubble')).toHaveClass('chat-screen__bubble--system')
+  })
+
+  it('renders a short [rocket heartbeat] entry fully, in a pale-yellow left bubble with a "rocket" badge', async () => {
+    appendChatEntry('s-billing-v2-orch', {
+      role: 'user',
+      text: '[rocket heartbeat] 3 sessions running, 1 idle, 0 errored',
+      ts: 1_800_000_703,
+    })
+    renderPage()
+    await screen.findByText('смотрю на трейс')
+
+    const body = await screen.findByText('[rocket heartbeat] 3 sessions running, 1 idle, 0 errored')
+    const bubble = body.closest('.chat-screen__bubble')
+    expect(bubble).toHaveClass('chat-screen__bubble--system')
+    const row = body.closest('.chat-screen__row')
+    expect(row).not.toHaveClass('chat-screen__row--own')
+    expect(within(bubble as HTMLElement).getByText('rocket')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /heartbeat/i })).not.toBeInTheDocument()
+  })
+
+  it('renders a long <task-notification> dump collapsed with the system badge, expanding to raw text', async () => {
+    const longBody = 'x'.repeat(500)
+    appendChatEntry('s-billing-v2-orch', {
+      role: 'user',
+      text: `<task-notification><summary>Длинное уведомление</summary>${longBody}</task-notification>`,
+      ts: 1_800_000_704,
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('смотрю на трейс')
+
+    const toggle = await screen.findByRole('button', { name: /Длинное уведомление/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await user.click(toggle)
+    expect(screen.getByText(new RegExp(longBody))).toBeInTheDocument()
   })
 
   it('renders a [from <session>] queue inject as a left-aligned bubble with a from-badge, not the own bubble', async () => {
