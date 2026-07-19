@@ -35,6 +35,12 @@ func (f *systemFakeRuntime) Capture(ctx context.Context, h runtime.Handle, lines
 	return "", nil
 }
 func (f *systemFakeRuntime) Alive(ctx context.Context, h runtime.Handle) bool { return true }
+func (f *systemFakeRuntime) PinWindowSize(ctx context.Context, h runtime.Handle, clientCols, clientRows int) error {
+	return nil
+}
+
+func (f *systemFakeRuntime) UnpinWindowSize(ctx context.Context, h runtime.Handle) error { return nil }
+
 func (f *systemFakeRuntime) Destroy(ctx context.Context, h runtime.Handle) error {
 	f.destroyed = append(f.destroyed, h.Name)
 	return nil

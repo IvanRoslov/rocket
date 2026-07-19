@@ -816,6 +816,36 @@ func (m *Manager) AttachCommand(id string) ([]string, error) {
 	return m.rt.AttachCommand(runtime.Handle{Name: sess.TmuxName}), nil
 }
 
+// PinWindowSize pins the session's tmux window to the drawable area of a
+// clientCols×clientRows client (see runtime.Runtime.PinWindowSize). The
+// web terminal calls this on every resize so the window always matches
+// the web client exactly, per the client-size policy in
+// docs/03-daemon-api.md.
+func (m *Manager) PinWindowSize(ctx context.Context, id string, clientCols, clientRows int) error {
+	sess, err := m.st.GetSession(id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return validationErr("session_not_found", "session not found: "+id)
+		}
+		return err
+	}
+	return m.rt.PinWindowSize(ctx, runtime.Handle{Name: sess.TmuxName}, clientCols, clientRows)
+}
+
+// UnpinWindowSize releases a PinWindowSize override so the window follows
+// attached clients again. Called when the last web terminal for the
+// session disconnects.
+func (m *Manager) UnpinWindowSize(ctx context.Context, id string) error {
+	sess, err := m.st.GetSession(id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return validationErr("session_not_found", "session not found: "+id)
+		}
+		return err
+	}
+	return m.rt.UnpinWindowSize(ctx, runtime.Handle{Name: sess.TmuxName})
+}
+
 // TmuxInfo describes one live tmux session for /v1/system inspection.
 type TmuxInfo struct {
 	// Name is the tmux session name.

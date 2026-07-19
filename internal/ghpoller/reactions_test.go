@@ -33,6 +33,12 @@ func (f *reactFakeRuntime) Capture(ctx context.Context, h runtime.Handle, lines 
 	return "", nil
 }
 func (f *reactFakeRuntime) Alive(ctx context.Context, h runtime.Handle) bool { return true }
+func (f *reactFakeRuntime) PinWindowSize(ctx context.Context, h runtime.Handle, clientCols, clientRows int) error {
+	return nil
+}
+
+func (f *reactFakeRuntime) UnpinWindowSize(ctx context.Context, h runtime.Handle) error { return nil }
+
 func (f *reactFakeRuntime) Destroy(ctx context.Context, h runtime.Handle) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -52,6 +52,12 @@ func (f *fakeRuntime) Alive(ctx context.Context, h runtime.Handle) bool {
 	return f.aliveMap[h.Name]
 }
 
+func (f *fakeRuntime) PinWindowSize(ctx context.Context, h runtime.Handle, clientCols, clientRows int) error {
+	return nil
+}
+
+func (f *fakeRuntime) UnpinWindowSize(ctx context.Context, h runtime.Handle) error { return nil }
+
 func (f *fakeRuntime) Destroy(ctx context.Context, h runtime.Handle) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

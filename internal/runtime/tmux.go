@@ -114,26 +114,24 @@ func (t *tmuxRuntime) Create(ctx context.Context, spec CreateSpec) (Handle, erro
 	// Multiple clients (e.g. the web dashboard's term WS attach and a
 	// local `tmux attach`/`rocket attach`) can be attached to the same
 	// session simultaneously — docs/03-daemon-api.md promises that works.
-	// tmux's session-level window-size option controls which single size
-	// the shared window is rendered at when clients disagree; the tmux
-	// default, "latest", snaps the window to whichever client most
-	// recently became active, including a *smaller* one. When that
-	// happens, the window (and everything drawing into it, e.g. a
-	// full-screen TUI) redraws at the smaller size while any other,
-	// larger client's terminal emulator still believes it has the old
-	// (bigger) dimensions — the client never receives escape codes for
-	// the columns/rows outside the new smaller size, so stale content
-	// from the previous, bigger frame is left behind uncleared. That
-	// reads as corrupted, overlapping output. "largest" instead sizes
-	// the window to the biggest attached client, so a smaller client
-	// attaching only crops its own view (standard, harmless tmux
-	// behavior) rather than shrinking everyone else's.
+	// tmux fundamentally renders one window at ONE size; when attached
+	// clients disagree, someone gets a cropped (and, as the cursor moves,
+	// horizontally panned) view, which reads as clipped lines and stale
+	// redraw fragments. The client-size policy (docs/03-daemon-api.md
+	// «Размер окна») is: the WEB terminal is the primary surface and must
+	// always render full-width, so while a web terminal is attached the
+	// daemon pins the window to the web client's exact size via
+	// PinWindowSize (window-size manual), and any degradation (crop/pad)
+	// goes to local clients. Outside that, "latest" — the tmux default,
+	// set explicitly here for determinism — lets local clients drive the
+	// window natively. ("largest" was tried in cd293f3 and rejected: a
+	// wider local client permanently cropped the web view.)
 	// set-option's -t resolves an exact-match "=name" target at the
 	// pane/window level (per tmux's target syntax), which fails here with
 	// "no such window" since window-size is a session-scoped option;
 	// unlike sessionTarget's other callers (send-keys, paste-buffer,
 	// has-session, kill-session), this needs the bare session name.
-	if _, _, err := runTmux(ctx, "set-option", "-t", spec.Name, "window-size", "largest"); err != nil {
+	if _, _, err := runTmux(ctx, "set-option", "-t", spec.Name, "window-size", "latest"); err != nil {
 		return Handle{}, fmt.Errorf("set window-size for session %q: %w", spec.Name, err)
 	}
 
@@ -422,6 +420,70 @@ func isNoSessionError(stderr string) bool {
 	return strings.Contains(s, "can't find session") ||
 		strings.Contains(s, "no such session") ||
 		strings.Contains(s, "session not found")
+}
+
+// statusLineRows maps the value of tmux's "status" option to the number
+// of terminal rows the status line occupies at the bottom of a client:
+// "off" → 0, "on" → 1, "2".."5" → that many rows. Unknown values fall
+// back to 1 (the tmux default is "on").
+func statusLineRows(status string) int {
+	switch s := strings.TrimSpace(status); s {
+	case "off":
+		return 0
+	case "on", "":
+		return 1
+	case "2", "3", "4", "5":
+		return int(s[0] - '0')
+	default:
+		return 1
+	}
+}
+
+// PinWindowSize pins the session's window to exactly the drawable area of
+// a clientCols×clientRows client: tmux reserves statusLineRows rows of
+// the client for the status line, so the window itself must be that much
+// shorter or tmux vertically pans the view (visible as a "[0,N]"
+// indicator and misplaced redraws). `resize-window -x -y` both resizes
+// the window and flips its window-size option to "manual", which is
+// exactly the pin semantic: the window stops following other clients
+// until UnpinWindowSize.
+func (t *tmuxRuntime) PinWindowSize(ctx context.Context, h Handle, clientCols, clientRows int) error {
+	if err := validateName(h.Name); err != nil {
+		return err
+	}
+	status, _, err := runTmux(ctx, "display-message", "-p", "-t", paneTarget(h.Name), "#{status}")
+	if err != nil {
+		return fmt.Errorf("query status option for %q: %w", h.Name, err)
+	}
+	rows := clientRows - statusLineRows(status)
+	if rows < 1 {
+		rows = 1
+	}
+	if clientCols < 1 {
+		clientCols = 1
+	}
+	if _, _, err := runTmux(ctx, "resize-window", "-t", paneTarget(h.Name),
+		"-x", fmt.Sprintf("%d", clientCols), "-y", fmt.Sprintf("%d", rows)); err != nil {
+		return fmt.Errorf("pin window size for %q: %w", h.Name, err)
+	}
+	return nil
+}
+
+// UnpinWindowSize undoes PinWindowSize: it overwrites the "manual"
+// window-size (set implicitly by resize-window) with the base "latest"
+// policy at window scope, so the window follows attached clients again.
+// Window scope is used deliberately — it is exactly where resize-window
+// wrote "manual", and a window-scope value always wins, so this restores
+// automatic sizing no matter what other scopes hold. Safe to call on a
+// never-pinned session.
+func (t *tmuxRuntime) UnpinWindowSize(ctx context.Context, h Handle) error {
+	if err := validateName(h.Name); err != nil {
+		return err
+	}
+	if _, _, err := runTmux(ctx, "set-option", "-w", "-t", paneTarget(h.Name), "window-size", "latest"); err != nil {
+		return fmt.Errorf("restore window-size for %q: %w", h.Name, err)
+	}
+	return nil
 }
 
 func (t *tmuxRuntime) AttachCommand(h Handle) []string {

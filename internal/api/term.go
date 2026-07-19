@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
 	"os/exec"
+	"sync"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/creack/pty"
@@ -13,11 +16,47 @@ import (
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
+// termClaims refcounts, per session, the writer terminal connections that
+// have pinned the tmux window to their size (Manager.PinWindowSize). The
+// window must stay pinned while ANY writer web terminal is attached (two
+// dashboard tabs on the same session must not unpin each other), and be
+// released only when the last one disconnects.
+type termClaims struct {
+	mu     sync.Mutex
+	counts map[string]int
+}
+
+func newTermClaims() *termClaims {
+	return &termClaims{counts: make(map[string]int)}
+}
+
+// claim registers one writer connection for the session.
+func (c *termClaims) claim(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.counts[id]++
+}
+
+// release unregisters one writer connection and reports whether it was
+// the last one (i.e. the caller should unpin the window).
+func (c *termClaims) release(id string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := c.counts[id] - 1
+	if n <= 0 {
+		delete(c.counts, id)
+		return true
+	}
+	c.counts[id] = n
+	return false
+}
+
 // registerTermRoutes wires the /v1/sessions/{id}/term WebSocket terminal
 // route onto mux.
 func registerTermRoutes(mux *http.ServeMux, d Deps) {
+	claims := newTermClaims()
 	mux.HandleFunc("GET /v1/sessions/{id}/term", func(w http.ResponseWriter, r *http.Request) {
-		handleSessionTerm(w, r, d)
+		handleSessionTerm(w, r, d, claims)
 	})
 }
 
@@ -61,7 +100,15 @@ func validResize(cols, rows int) bool {
 // output; client->server binary frames carry input; client->server text
 // frames carry JSON control messages (resize/ping). Closing the WS kills
 // only the attach client process, never the underlying tmux session.
-func handleSessionTerm(w http.ResponseWriter, r *http.Request, d Deps) {
+//
+// Client-size policy (docs/03-daemon-api.md «Размер окна»): the web
+// terminal is the primary surface, so on every resize control frame from
+// a writer connection the daemon both resizes the attach PTY and PINS the
+// tmux window to that exact size (window-size manual). Differently-sized
+// local clients get a cropped/padded view instead of corrupting the web
+// one. When the last writer web terminal disconnects, the pin is released
+// and the window follows local clients again ("latest").
+func handleSessionTerm(w http.ResponseWriter, r *http.Request, d Deps, claims *termClaims) {
 	id := r.PathValue("id")
 
 	sess, err := d.Store.GetSession(id)
@@ -112,6 +159,23 @@ func handleSessionTerm(w http.ResponseWriter, r *http.Request, d Deps) {
 	readonly := r.URL.Query().Get("readonly") == "true"
 	ctx := r.Context()
 
+	// Writer connections pin the tmux window to their size (see the
+	// handler doc comment). Claim/release brackets the whole connection
+	// so a second tab can't be unpinned by the first one closing; the
+	// actual pin happens on each resize frame below. Unpin runs on a
+	// fresh context: r.Context() is already canceled by the time the
+	// client has disconnected.
+	if !readonly {
+		claims.claim(id)
+		defer func() {
+			if claims.release(id) {
+				unpinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = d.Manager.UnpinWindowSize(unpinCtx, id)
+			}
+		}()
+	}
+
 	// pty -> ws: streams attach client output to the browser. Exits when
 	// the PTY read errors out (attach process died) or the write to the ws
 	// fails (connection closed).
@@ -155,6 +219,13 @@ func handleSessionTerm(w http.ResponseWriter, r *http.Request, d Deps) {
 					// also ignored rather than killing the connection.
 					if !readonly && validResize(c.Cols, c.Rows) {
 						_ = pty.Setsize(ptmx, &pty.Winsize{Cols: uint16(c.Cols), Rows: uint16(c.Rows)})
+						// Pin the tmux window to this client's size so the
+						// web view always renders full-width regardless of
+						// other (e.g. wider local) clients; see the handler
+						// doc comment for the policy. Best-effort: a failed
+						// pin degrades to tmux's own sizing rather than
+						// killing the terminal.
+						_ = d.Manager.PinWindowSize(ctx, id, c.Cols, c.Rows)
 					}
 				case "ping":
 					_ = conn.Write(ctx, websocket.MessageText, []byte(`{"type":"pong"}`))

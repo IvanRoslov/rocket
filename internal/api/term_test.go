@@ -131,3 +131,34 @@ func TestSessionTermDeadSession(t *testing.T) {
 		t.Errorf("code = %q, want session_not_live", eb.Error.Code)
 	}
 }
+
+// TestTermClaimsRefcount verifies the pin-refcount semantics: with two
+// writer terminals on the same session, closing one must NOT release the
+// window pin (the survivor still owns the size); only the last close
+// releases. Sessions are counted independently.
+func TestTermClaimsRefcount(t *testing.T) {
+	c := newTermClaims()
+
+	c.claim("a")
+	c.claim("a")
+	c.claim("b")
+
+	if c.release("a") {
+		t.Fatalf("first of two releases for 'a' must not be last")
+	}
+	if !c.release("a") {
+		t.Fatalf("second release for 'a' must be last")
+	}
+	if !c.release("b") {
+		t.Fatalf("sole release for 'b' must be last")
+	}
+	// Releasing beyond zero (defensive) still reports last and does not
+	// underflow into negative counts.
+	if !c.release("a") {
+		t.Fatalf("release of unclaimed session must report last")
+	}
+	c.claim("a")
+	if !c.release("a") {
+		t.Fatalf("claim after over-release must behave normally")
+	}
+}

@@ -173,7 +173,7 @@ func TestTmux_ListContainsCreated(t *testing.T) {
 // told, which leaves stale content behind and reads as corrupted,
 // overlapping output. Create must set window-size to "largest" so the
 // window always matches the biggest attached client instead.
-func TestTmux_CreateSetsWindowSizeLargest(t *testing.T) {
+func TestTmux_CreateSetsWindowSizeLatest(t *testing.T) {
 	requireTmux(t)
 	ctx := context.Background()
 	rt := NewTmux()
@@ -189,8 +189,77 @@ func TestTmux_CreateSetsWindowSizeLargest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("show-options window-size: %v", err)
 	}
-	if got := strings.TrimSpace(out); got != "window-size largest" {
-		t.Fatalf("expected window-size largest, got %q", got)
+	if got := strings.TrimSpace(out); got != "window-size latest" {
+		t.Fatalf("expected window-size latest, got %q", got)
+	}
+}
+
+func TestStatusLineRows(t *testing.T) {
+	cases := map[string]int{
+		"off": 0, "on": 1, "on\n": 1, "": 1, "2": 2, "5": 5, "garbage": 1,
+	}
+	for in, want := range cases {
+		if got := statusLineRows(in); got != want {
+			t.Errorf("statusLineRows(%q) = %d, want %d", in, got, want)
+		}
+	}
+}
+
+// TestTmux_PinUnpinWindowSize verifies the web-primary client-size policy
+// plumbing (docs/03-daemon-api.md «Размер окна»): PinWindowSize resizes
+// the window to the client's drawable area (client rows minus the status
+// line) and flips window-size to manual, so no other client can resize
+// the window; UnpinWindowSize restores the "latest" policy.
+func TestTmux_PinUnpinWindowSize(t *testing.T) {
+	requireTmux(t)
+	ctx := context.Background()
+	rt := NewTmux()
+
+	name := uniqueName(t, "")
+	h, err := rt.Create(ctx, CreateSpec{Name: name, Dir: t.TempDir(), Command: "cat"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer rt.Destroy(ctx, h)
+
+	// The status option is inherited from the user/global config; compute
+	// the expected drawable height the same way PinWindowSize does.
+	statusOut, _, err := runTmux(ctx, "display-message", "-p", "-t", paneTarget(name), "#{status}")
+	if err != nil {
+		t.Fatalf("query status: %v", err)
+	}
+	wantRows := 30 - statusLineRows(statusOut)
+
+	if err := rt.PinWindowSize(ctx, h, 100, 30); err != nil {
+		t.Fatalf("PinWindowSize: %v", err)
+	}
+
+	out, _, err := runTmux(ctx, "display-message", "-p", "-t", paneTarget(name), "#{window_width}x#{window_height}")
+	if err != nil {
+		t.Fatalf("query window size: %v", err)
+	}
+	if got := strings.TrimSpace(out); got != fmt.Sprintf("100x%d", wantRows) {
+		t.Fatalf("pinned window size = %q, want 100x%d", got, wantRows)
+	}
+	out, _, err = runTmux(ctx, "show-options", "-w", "-t", paneTarget(name), "window-size")
+	if err != nil {
+		t.Fatalf("show-options -w window-size: %v", err)
+	}
+	if got := strings.TrimSpace(out); got != "window-size manual" {
+		t.Fatalf("after pin, window-level window-size = %q, want manual", got)
+	}
+
+	if err := rt.UnpinWindowSize(ctx, h); err != nil {
+		t.Fatalf("UnpinWindowSize: %v", err)
+	}
+	// The "manual" pin must be replaced by the automatic "latest" policy
+	// at window scope (where resize-window wrote "manual").
+	out, _, err = runTmux(ctx, "show-options", "-w", "-t", paneTarget(name), "window-size")
+	if err != nil {
+		t.Fatalf("show-options -w window-size after unpin: %v", err)
+	}
+	if got := strings.TrimSpace(out); got != "window-size latest" {
+		t.Fatalf("after unpin, window-level window-size = %q, want latest", got)
 	}
 }
 

@@ -34,7 +34,13 @@ func (sessFakeRuntime) Inject(ctx context.Context, h runtime.Handle, text string
 func (sessFakeRuntime) Capture(ctx context.Context, h runtime.Handle, lines int) (string, error) {
 	return "", nil
 }
-func (sessFakeRuntime) Alive(ctx context.Context, h runtime.Handle) bool    { return true }
+func (sessFakeRuntime) Alive(ctx context.Context, h runtime.Handle) bool { return true }
+func (sessFakeRuntime) PinWindowSize(ctx context.Context, h runtime.Handle, clientCols, clientRows int) error {
+	return nil
+}
+
+func (sessFakeRuntime) UnpinWindowSize(ctx context.Context, h runtime.Handle) error { return nil }
+
 func (sessFakeRuntime) Destroy(ctx context.Context, h runtime.Handle) error { return nil }
 func (sessFakeRuntime) AttachCommand(h runtime.Handle) []string {
 	return []string{"tmux", "attach", "-t", h.Name}
@@ -67,7 +73,15 @@ func (sessFakeRuntimeErrorOnCreate) Inject(ctx context.Context, h runtime.Handle
 func (sessFakeRuntimeErrorOnCreate) Capture(ctx context.Context, h runtime.Handle, lines int) (string, error) {
 	return "", nil
 }
-func (sessFakeRuntimeErrorOnCreate) Alive(ctx context.Context, h runtime.Handle) bool    { return true }
+func (sessFakeRuntimeErrorOnCreate) Alive(ctx context.Context, h runtime.Handle) bool { return true }
+func (sessFakeRuntimeErrorOnCreate) PinWindowSize(ctx context.Context, h runtime.Handle, clientCols, clientRows int) error {
+	return nil
+}
+
+func (sessFakeRuntimeErrorOnCreate) UnpinWindowSize(ctx context.Context, h runtime.Handle) error {
+	return nil
+}
+
 func (sessFakeRuntimeErrorOnCreate) Destroy(ctx context.Context, h runtime.Handle) error { return nil }
 func (sessFakeRuntimeErrorOnCreate) AttachCommand(h runtime.Handle) []string {
 	return []string{"tmux", "attach", "-t", h.Name}

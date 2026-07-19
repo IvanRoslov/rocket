@@ -55,7 +55,13 @@ func (f *fakeRuntime) Capture(ctx context.Context, h runtime.Handle, lines int) 
 	return "", nil
 }
 
-func (f *fakeRuntime) Alive(ctx context.Context, h runtime.Handle) bool    { return true }
+func (f *fakeRuntime) Alive(ctx context.Context, h runtime.Handle) bool { return true }
+func (f *fakeRuntime) PinWindowSize(ctx context.Context, h runtime.Handle, clientCols, clientRows int) error {
+	return nil
+}
+
+func (f *fakeRuntime) UnpinWindowSize(ctx context.Context, h runtime.Handle) error { return nil }
+
 func (f *fakeRuntime) Destroy(ctx context.Context, h runtime.Handle) error { return nil }
 func (f *fakeRuntime) AttachCommand(h runtime.Handle) []string             { return nil }
 func (f *fakeRuntime) List(ctx context.Context) ([]string, error)          { return nil, nil }

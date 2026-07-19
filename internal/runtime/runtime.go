@@ -37,6 +37,17 @@ type Runtime interface {
 	// AttachCommand returns the argv a user can run to attach to the
 	// session interactively.
 	AttachCommand(h Handle) []string
+	// PinWindowSize pins the session's window to exactly the area a
+	// client of clientCols×clientRows can display (minus multiplexer
+	// chrome such as the tmux status line), overriding any automatic
+	// window sizing until UnpinWindowSize is called. While pinned, other
+	// attached clients see a cropped/padded view; the pinning client
+	// renders pixel-perfect. See docs/03-daemon-api.md «Размер окна».
+	PinWindowSize(ctx context.Context, h Handle, clientCols, clientRows int) error
+	// UnpinWindowSize removes a PinWindowSize override and restores
+	// automatic window sizing driven by attached clients. Unpinning a
+	// session that was never pinned is not an error.
+	UnpinWindowSize(ctx context.Context, h Handle) error
 	// List returns the names of all currently live sessions, for
 	// reconciliation against rocket's own bookkeeping.
 	List(ctx context.Context) ([]string, error)

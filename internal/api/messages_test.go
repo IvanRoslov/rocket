@@ -29,7 +29,13 @@ func (msgFakeRuntime) Inject(ctx context.Context, h runtime.Handle, text string)
 func (msgFakeRuntime) Capture(ctx context.Context, h runtime.Handle, lines int) (string, error) {
 	return "", nil
 }
-func (msgFakeRuntime) Alive(ctx context.Context, h runtime.Handle) bool    { return true }
+func (msgFakeRuntime) Alive(ctx context.Context, h runtime.Handle) bool { return true }
+func (msgFakeRuntime) PinWindowSize(ctx context.Context, h runtime.Handle, clientCols, clientRows int) error {
+	return nil
+}
+
+func (msgFakeRuntime) UnpinWindowSize(ctx context.Context, h runtime.Handle) error { return nil }
+
 func (msgFakeRuntime) Destroy(ctx context.Context, h runtime.Handle) error { return nil }
 func (msgFakeRuntime) AttachCommand(h runtime.Handle) []string             { return nil }
 func (msgFakeRuntime) List(ctx context.Context) ([]string, error)          { return nil, nil }
