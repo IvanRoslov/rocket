@@ -316,6 +316,19 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 			return
 		}
 
+		if sess.PendingQuiz != "" {
+			// Recipient has a pending AskUserQuestion quiz on screen: text
+			// injected now would corrupt the TUI widget. Hold the message
+			// (stays queued, no failure, no events, no retries burned) and
+			// wait/re-check the same way as an active/unknown activity
+			// state — the resolved hook clearing PendingQuiz publishes a
+			// bus event that wakes this straight back up.
+			if !q.waitForReady(ctx, msg.ToSession) {
+				return // ctx cancelled
+			}
+			continue
+		}
+
 		state, known := q.getActivity(msg.ToSession)
 		switch {
 		case known && (state == activity.Blocked || state == activity.Exited):

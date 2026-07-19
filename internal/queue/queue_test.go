@@ -236,6 +236,57 @@ func TestQueue_WaitsWhileActiveThenDelivers(t *testing.T) {
 	}
 }
 
+// TestQueue_PendingQuizHoldsDeliveryThenResumesAfterClear verifies that a
+// message to a recipient with a pending AskUserQuestion quiz on screen is
+// held (stays queued, no Inject call, no failure) until the quiz is
+// cleared, at which point the normal delivery cycle picks it up.
+func TestQueue_PendingQuizHoldsDeliveryThenResumesAfterClear(t *testing.T) {
+	h := newTestQueue(t)
+	h.addRunningSession(t, "recv", activity.Ready)
+
+	if err := h.st.SetPendingQuiz("recv", `{"q":1}`); err != nil {
+		t.Fatalf("SetPendingQuiz: %v", err)
+	}
+
+	id, err := h.st.AddMessage(store.Message{ToSession: "recv", Body: "hello"})
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+
+	ch, cancel := h.b.Subscribe()
+	defer cancel()
+
+	h.q.Wake("recv")
+
+	// While a quiz is pending, the message must stay queued (not failed),
+	// with no Inject call and no message.failed event.
+	time.Sleep(150 * time.Millisecond)
+	if got := messageStatus(t, h.st, id); got != "queued" {
+		t.Fatalf("status = %q while quiz pending, want queued", got)
+	}
+	if n := h.rt.callCount(); n != 0 {
+		t.Fatalf("Inject called %d times while quiz pending, want 0", n)
+	}
+	select {
+	case e := <-ch:
+		if e.Type == "message.failed" {
+			t.Fatalf("unexpected message.failed event while quiz pending: %+v", e)
+		}
+	default:
+	}
+
+	if err := h.st.ClearPendingQuiz("recv"); err != nil {
+		t.Fatalf("ClearPendingQuiz: %v", err)
+	}
+	h.b.Publish("session.activity_changed", "recv", map[string]any{"to": "ready"})
+
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" },
+		"message delivered after quiz cleared")
+	if n := h.rt.callCount(); n != 1 {
+		t.Fatalf("Inject called %d times, want 1", n)
+	}
+}
+
 func TestQueue_UnconfirmedSubmitMarkerGoneTreatedAsDelivered(t *testing.T) {
 	h := newTestQueue(t)
 	h.addRunningSession(t, "recv", activity.Ready)
