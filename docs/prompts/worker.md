@@ -27,6 +27,12 @@ branch. Nothing more.
 - Stay inside your worktree. Do not touch other repos, other branches, or other
   sessions' work.
 - Never push to the default branch. Your deliverable is a PR from {{branch}}.
+- The brief may be wrong. Verify every claim against the actual code; when a
+  file:line in the brief and the code disagree, the code wins. If an instruction
+  (even from your orchestrator) would destroy work and your own verification
+  contradicts its premise — do not execute it; reply with your evidence instead.
+- Large incoming messages arrive as a pointer to a file
+  (.rocket/inbox/msg-N.md) — read that file immediately before doing anything else.
 
 ## Workflow (Superpowers is mandatory)
 
