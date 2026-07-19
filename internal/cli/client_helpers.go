@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"fmt"
 	"net/url"
 	"os"
 	"strings"
+	"testing"
 
 	"github.com/IvanRoslov/rocket/internal/client"
 	"github.com/IvanRoslov/rocket/internal/config"
@@ -51,7 +53,15 @@ func loadConfig() (*config.Config, error) {
 // global --socket override and the given autostart preference. On failure
 // to reach a running (or newly autostarted) daemon it returns
 // client.ErrDaemonUnavailable, which Execute maps to exit code 2.
+//
+// NOTE: Under go test, connect() is disabled to prevent CLI tests from
+// accidentally connecting to the live daemon. Tests should stub the client
+// or test at ParseFlags level instead (2026-07-19 incident).
 func connect(autostart bool) (*client.Client, *config.Config, error) {
+	if testing.Testing() {
+		return nil, nil, fmt.Errorf("cli: connect() is disabled under go test (a test almost hit the live daemon); stub the client or test at ParseFlags level")
+	}
+
 	cfg, err := loadConfig()
 	if err != nil {
 		return nil, nil, err

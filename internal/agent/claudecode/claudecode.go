@@ -29,8 +29,10 @@ func (c *ClaudeCode) Available() error {
 }
 
 // SetupWorkspace prepares the worktree for a Claude Code launch: it writes
-// the push-channel activity hook script, wires it into .claude/settings.json
-// hooks, and writes the system prompt to .rocket-prompt.md if provided.
+// the push-channel activity hook script, wires it into
+// .claude/settings.local.json hooks, writes the system prompt to
+// .rocket-prompt.md if provided, and excludes rocket's own plumbing files
+// from the worktree's git status.
 func (c *ClaudeCode) SetupWorkspace(spec agent.LaunchSpec) error {
 	if err := writeActivityHookScript(spec.WorktreePath); err != nil {
 		return fmt.Errorf("write activity hook script: %w", err)
@@ -42,12 +44,26 @@ func (c *ClaudeCode) SetupWorkspace(spec agent.LaunchSpec) error {
 		return fmt.Errorf("trust worktree: %w", err)
 	}
 
-	if spec.SystemPrompt == "" {
-		return nil
+	if spec.SystemPrompt != "" {
+		promptPath := filepath.Join(spec.WorktreePath, ".rocket-prompt.md")
+		if err := os.WriteFile(promptPath, []byte(spec.SystemPrompt), 0o600); err != nil {
+			return err
+		}
 	}
 
-	promptPath := filepath.Join(spec.WorktreePath, ".rocket-prompt.md")
-	return os.WriteFile(promptPath, []byte(spec.SystemPrompt), 0o600)
+	// Keep rocket's own harness plumbing out of the worker's git status: a
+	// worker running `git status`/`git diff` (or a reviewer looking at its
+	// PR) should never see .claude/settings.local.json, the .rocket/
+	// directory, or the launch/prompt scaffolding files rocket writes.
+	// Best-effort and a no-op for already-tracked paths or non-git dirs.
+	agent.ExcludeFromGit(spec.WorktreePath, []string{
+		".claude/settings.local.json",
+		".rocket/",
+		".rocket-prompt.md",
+		".rocket-launch.sh",
+	})
+
+	return nil
 }
 
 // activityHookRelPath is the hook script's path relative to the worktree
@@ -111,7 +127,7 @@ func hookMatcherFor(event string) string {
 }
 
 // activityHookCommand builds the shell command rocket wires into
-// settings.json hooks for the given state. It uses the project-relative
+// settings.local.json hooks for the given state. It uses the project-relative
 // form ("sh .rocket/activity-hook.sh <state>") since Claude Code runs hook
 // commands with cwd set to the project root.
 func activityHookCommand(state string) string {
@@ -119,30 +135,35 @@ func activityHookCommand(state string) string {
 }
 
 // hookCommand is the {"type":"command","command":"..."} shape of a single
-// hook within a settings.json hooks[event][].hooks array.
+// hook within a settings.local.json hooks[event][].hooks array.
 type hookCommand struct {
 	Type    string `json:"type"`
 	Command string `json:"command"`
 }
 
 // hookMatcherGroup is the {"matcher":"...","hooks":[...]} shape of a single
-// entry within settings.json hooks[event].
+// entry within settings.local.json hooks[event].
 type hookMatcherGroup struct {
 	Matcher string        `json:"matcher,omitempty"`
 	Hooks   []hookCommand `json:"hooks"`
 }
 
 // upsertClaudeSettings idempotently merges rocket's activity-hook wiring
-// into <worktreePath>/.claude/settings.json. It preserves any existing
-// content: unknown top-level keys are round-tripped untouched, and existing
-// hook entries for other events/matchers are kept. Re-running against a
-// file that already has our entries is a no-op (no duplicates).
+// into <worktreePath>/.claude/settings.local.json. settings.local.json (not
+// settings.json) is used deliberately: it is Claude Code's per-user/local
+// override file, conventionally untracked by git (unlike settings.json,
+// which projects commit), so rocket's harness plumbing does not pollute a
+// worker's PR diff. It preserves any existing content: unknown top-level
+// keys are round-tripped untouched, and existing hook entries for other
+// events/matchers are kept. Re-running against a file that already has our
+// entries is a no-op (no duplicates). .claude/settings.json is never
+// touched or created by rocket.
 func upsertClaudeSettings(worktreePath string) error {
 	dir := filepath.Join(worktreePath, ".claude")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	path := filepath.Join(dir, "settings.json")
+	path := filepath.Join(dir, "settings.local.json")
 
 	settings := map[string]json.RawMessage{}
 	if data, err := os.ReadFile(path); err == nil {

@@ -12,6 +12,7 @@ import (
 	"github.com/IvanRoslov/rocket/internal/agent"
 	_ "github.com/IvanRoslov/rocket/internal/agent/claudecode" // registers "claude-code" in agent.Registry()
 	_ "github.com/IvanRoslov/rocket/internal/agent/codex"      // registers "codex" in agent.Registry()
+	"github.com/IvanRoslov/rocket/internal/client"
 	"github.com/spf13/cobra"
 )
 
@@ -84,14 +85,32 @@ func printDoctorResults(w io.Writer, results []checkResult) (anyFail bool) {
 }
 
 // runDoctorChecks runs every doctor check and returns their results in a
-// stable order: tmux, git, daemon, then each registered agent, then the
-// Superpowers plugin check.
+// stable order: tmux, git, daemon, GitHub (if daemon is running), then each
+// registered agent, then the Superpowers plugin check.
 func runDoctorChecks() []checkResult {
 	var results []checkResult
 
 	results = append(results, checkTmux())
 	results = append(results, checkGit())
-	results = append(results, checkDaemon())
+
+	// Connect to daemon (if running) once to use for multiple checks
+	c, _, err := connect(false)
+	if err != nil {
+		results = append(results, checkResult{statusWarn, "daemon", "не запущен"})
+	} else {
+		var health struct {
+			Version string `json:"version"`
+			Uptime  string `json:"uptime"`
+		}
+		if err := c.Get("/v1/health", nil, &health); err != nil {
+			results = append(results, checkResult{statusWarn, "daemon", "не отвечает"})
+		} else {
+			results = append(results, checkResult{statusOK, "daemon", fmt.Sprintf("запущен (version %s, uptime %s)", health.Version, health.Uptime)})
+			// Only check GitHub token if daemon is running
+			results = append(results, checkGitHub(c))
+		}
+	}
+
 	results = append(results, checkAgents()...)
 	results = append(results, checkSuperpowers())
 
@@ -149,20 +168,19 @@ func checkGit() checkResult {
 	return checkResult{statusOK, "git", trimTrailingNewline(string(out))}
 }
 
-func checkDaemon() checkResult {
-	c, _, err := connect(false)
-	if err != nil {
-		return checkResult{statusWarn, "daemon", "не запущен"}
+func checkGitHub(c *client.Client) checkResult {
+	var settings struct {
+		GitHubToken string `json:"github_token"`
+	}
+	if err := c.Get("/v1/settings", nil, &settings); err != nil {
+		// GET /v1/settings should never fail, but if it does, skip this check
+		return checkResult{statusWarn, "github", "не удалось проверить настройки"}
 	}
 
-	var health struct {
-		Version string `json:"version"`
-		Uptime  string `json:"uptime"`
+	if settings.GitHubToken != "" {
+		return checkResult{statusOK, "github", "token set (PR tracking active)"}
 	}
-	if err := c.Get("/v1/health", nil, &health); err != nil {
-		return checkResult{statusWarn, "daemon", "не отвечает"}
-	}
-	return checkResult{statusOK, "daemon", fmt.Sprintf("запущен (version %s, uptime %s)", health.Version, health.Uptime)}
+	return checkResult{statusWarn, "github", "no token — PR/CI tracking inactive (rocket github auth <token>)"}
 }
 
 func checkAgents() []checkResult {

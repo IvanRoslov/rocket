@@ -24,6 +24,23 @@ day to day.
   always read `passing` (no check runs = vacuously passing) and the CI
   reaction can't be exercised.
 
+## Token permissions
+
+GitHub Personal Access Tokens (PAT) must have the following minimum scopes to function correctly:
+
+- **Classic PAT**: `repo` scope (full private repository access)
+- **Fine-grained PAT**: Repository permissions (minimum required):
+  - **Contents: Read** (REQUIRED — core repository access)
+  - **Pull requests: Read** (REQUIRED — PR discovery and tracking; missing causes hard failure on `/pulls` endpoint)
+
+Optional permissions (degrade gracefully if absent):
+  - **Checks: Read** (optional with degradation — CI state will display as "-", CI nudges disabled, one-time warning in daemon log)
+  - **Pull request reviews: Read** (optional with degradation — `ReviewDecision` field unavailable, review-triggered reactions do not fire)
+
+Without `Contents:Read` or `Pull requests:Read`, rocket cannot discover or track PRs — these are REQUIRED permissions.
+Without `Checks:Read`, CI state polling is disabled but PR tracking continues.
+Without `Pull request reviews:Read`, the review decision is empty and review nudges do not fire.
+
 ## Setup
 
 1. **Start the daemon** (first run creates `~/.rocket/config.yaml` with

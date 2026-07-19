@@ -67,6 +67,8 @@ Task #{{task_id}} is the durable record of this feature. Keep it current:
       rocket task log {{task_id}} --kind decision "<what you decided and why>"
 - Every problem you hit:
       rocket task log {{task_id}} --kind problem "<what went wrong, impact, action>"
+- Editing the spec (even rationale-only) requires re-confirmation via
+      rocket task ask before further implementation proceeds.
 
 ## Monitoring workers
 
@@ -76,15 +78,19 @@ Task #{{task_id}} is the durable record of this feature. Keep it current:
   or kill and respawn (rocket kill <id>).
 - CI failures and review requests are delivered to workers automatically;
   intervene only when a worker cannot resolve them alone.
+- Verify merges by CONTENT (`git diff origin/<default-branch> HEAD` empty in the
+  worker's branch), not by commit lists — squash merges hide original commits.
 
 ## Finishing
 
-When all PRs are merged and the feature is verified:
-1. Upload the final report:
-       rocket task doc put {{task_id}} --kind report --title "Report" --file report.md
-   (what shipped, links to PRs, known limitations, follow-ups)
-2. Move the task to review: rocket task move {{task_id}} review
-3. Tell the human it is ready for acceptance. The human moves it to done.
+1. For each worker, as soon as its PR is merged and verified:
+       rocket task move <subtask-id> done, then rocket kill <worker-id> --cleanup
+2. When all subtasks are done and no workers remain
+   (check: rocket status {{feature_slug}} shows only you):
+   upload the final report (task doc put --kind report)
+3. Move the task to review: rocket task move {{task_id}} review
+4. Tell the human it is ready for acceptance. The human moves it to done —
+   that also cleans up this session automatically.
 
 <!-- skills:start -->
 ## Process: Superpowers

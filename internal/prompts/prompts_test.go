@@ -223,6 +223,14 @@ func TestRenderKickoffTemplate(t *testing.T) {
 	if !strings.Contains(result, "Implement feature X") {
 		t.Error("task_title not properly substituted")
 	}
+
+	// Spec confirmation gate: reopens on any spec edit.
+	if !strings.Contains(result, "reopens this gate") {
+		t.Error("kickoff template missing spec re-confirmation gate phrase")
+	}
+	if !strings.Contains(result, `rocket task ask 123 "Confirm spec v<N>`) {
+		t.Error("kickoff template missing rocket task ask confirmation command")
+	}
 }
 
 func TestRenderWorkerTemplate(t *testing.T) {
@@ -245,6 +253,40 @@ func TestRenderWorkerTemplate(t *testing.T) {
 	// Verify substitutions
 	if !strings.Contains(result, "sess-001") {
 		t.Error("session_id not properly substituted")
+	}
+
+	// Evidence-based pushback: brief may be wrong, code wins.
+	if !strings.Contains(result, "the code wins") {
+		t.Error("worker template missing 'code wins' evidence-based pushback phrase")
+	}
+
+	// Inbox pointer note for large incoming messages.
+	if !strings.Contains(result, "inbox/msg-") {
+		t.Error("worker template missing inbox/msg- pointer note")
+	}
+}
+
+func TestRenderOrchestratorFieldFixes(t *testing.T) {
+	vars := completeVars()
+
+	result, err := Render("", "orchestrator", vars)
+	if err != nil {
+		t.Fatalf("Render orchestrator failed: %v", err)
+	}
+
+	// Merge verification by content, not commit lists.
+	if !strings.Contains(result, "squash merges") {
+		t.Error("orchestrator template missing squash-merge verification note")
+	}
+
+	// Finishing sequence: per-worker done+kill as soon as merged/verified.
+	if !strings.Contains(result, "task move <subtask-id> done") {
+		t.Error("orchestrator template missing field-tested finishing sequence")
+	}
+
+	// Spec re-confirmation on edit.
+	if !strings.Contains(result, "re-confirmation via") {
+		t.Error("orchestrator template missing spec re-confirmation tracking bullet")
 	}
 }
 

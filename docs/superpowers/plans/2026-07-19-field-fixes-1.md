@@ -57,3 +57,44 @@
 ## Self-Review (выполнен)
 
 - Все четыре пункта фидбека покрыты (CI-гейт исключён по решению пользователя). Корень A обойдён архитектурно (inbox), гонка Claude Code дополнительно демпфирована settle-паузой. B не рекурсирует. C повторяет проверенный exclude-паттерн codex. D/E — синхронно с референсными доками.
+
+### Task 6: Поллер деградирует без Checks-права (полевой баг)
+
+**Root cause (лог живого демона):** fine-grained PAT без Checks:read → `/commits/{sha}/check-runs` 403 → tickSession возвращает ошибку ДО UpdateSessionPR → pr_number/pr_state никогда не пишутся, хотя PR найден; подзадачи не двигаются, merge-cleanup мёртв; ошибка молча повторяется каждый тик.
+
+**Files:** internal/ghpoller/poller.go, internal/github/client.go (типизировать permission-403: `ErrForbidden`), tests.
+
+- CheckRollup/GetPR-reviews ошибки НЕ должны ронять апдейт: PR-часть (number, pr_state, merged) записывается всегда; ci_state при недоступных чеках — "" (unknown, CLI покажет "-"); reviews при 403 — ReviewDecision "".
+- client: 403 без rate-limit-заголовка → `ErrForbidden` (typed, wrapped с endpoint'ом).
+- Лог-дедуп: permission-ошибка логается ОДИН раз на (repo, endpoint-kind) за жизнь процесса (map) уровнем WARN c подсказкой «grant Checks:read to the token»; плюс единоразовое событие `github.permission_warning {repo, endpoint}`.
+- [ ] TDD: стаб отдаёт 403 на check-runs → pr_number/pr_state записаны, ci_state пуст, merge детектится и cleanup-цепочка живёт; WARN один раз; событие один раз.
+- [ ] Commit: `fix(ghpoller): degrade gracefully without checks permission`.
+
+### Task 7: Гейт review при открытых подзадачах
+
+**Files:** internal/api/tasks.go, internal/cli/task.go, prompts (orchestrator.md: «слил PR воркера → сразу rocket task move <subtask> done» в Monitoring/Finishing), tests.
+
+- PATCH root-задачи → review: если есть подзадачи НЕ в done/cancelled → 409 `subtasks_open` {open:[ids]}; `?force=true` пропускает. CLI `task move <id> review` печатает список и подсказку `--force`.
+- [ ] TDD API + CLI usage; промпт-фразы в рендерах.
+- [ ] Commit: `feat(api): refuse review with open subtasks; prompt closes subtasks on merge`.
+
+### Task 8: Видимость прав токена
+
+**Files:** docs/testing/phase-4-live-github.md (права fine-grained PAT: Contents:read, Pull requests:read, Checks:read; classic — scope repo), internal/cli/doctor.go (+строка: github token set/absent через GET /v1/settings при живом демоне).
+
+- [ ] Commit: `docs+doctor: github token permission requirements`.
+
+### Дополнение к Task 7 (фидбек «сессии воркеров не убиты»)
+
+- Гейт review дополнительно проверяет ЖИВЫХ воркеров фичи (sessions kind=worker, parent=оркестратор задачи, state spawning|running): есть → тот же 409 (поле `live_workers:[ids]`), `--force` пропускает.
+- orchestrator.md Finishing — явная последовательность: 1) PR слит и проверен → сразу `task move <subtask> done`; 2) все подзадачи done → `rocket kill <worker> --cleanup` каждого; 3) `rocket status <slug>` и `tmux ls` пусты; 4) отчёт → `task move <id> review`. Плюс строка в Monitoring: «Verify merges by CONTENT (`git diff origin/main HEAD` empty), not by commit lists — squash merges hide original commits.»
+
+### Task 9: Тесты демона — эфемерный порт (env-коллизия)
+
+**Root cause:** internal/daemon тесты биндят дефолтный порт 4477; при живом пользовательском демоне порт занят → все Run-тесты падают «not healthy in 3s».
+- Fix: тестовый конфиг демона выбирает свободный порт (net.Listen("tcp","127.0.0.1:0") → закрыть → использовать номер; или Port:0 с поддержкой в api.Serve отдавать фактический — проще первый вариант, помеха-гонка приемлема в тестах).
+- [ ] Commit: `test(daemon): use ephemeral port to avoid collision with live daemon`.
+
+### Дополнение к Task 7 (фидбек «done должен убивать оркестратора»)
+
+- PATCH корневой задачи → done: после смены статуса — KillCascade оркестратора задачи (workers first, cleanup=true), как в cancel-пути; событие/status-лог «feature closed, orchestrator cleaned up». Подзадача → done оркестратора не трогает. CLI `task move <id> done` печатает, что оркестратор зачищен. Спека 12-tasks.md: «review → done — пользователь принял» — каскад согласован с 08-orchestrators.md «пользователь убивает оркестратора» (автоматизируем этот ручной шаг).

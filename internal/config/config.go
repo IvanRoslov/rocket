@@ -11,16 +11,23 @@ import (
 
 // Config represents the rocket daemon configuration.
 type Config struct {
-	Port                      int           `yaml:"port"`
-	Host                      string        `yaml:"host"`
-	HeartbeatInterval         time.Duration `yaml:"heartbeat_interval"`
-	GithubPollInterval        time.Duration `yaml:"github_poll_interval"`
-	DefaultAgent              string        `yaml:"default_agent"`
-	ReposDir                  string        `yaml:"repos_dir"`
-	WorktreesDir              string        `yaml:"worktrees_dir"`
-	ActivityPollInterval      time.Duration `yaml:"activity_poll_interval"`
-	ReadyToIdle               time.Duration `yaml:"ready_to_idle"`
-	QueueTimeout              time.Duration `yaml:"queue_timeout"`
+	Port                 int           `yaml:"port"`
+	Host                 string        `yaml:"host"`
+	HeartbeatInterval    time.Duration `yaml:"heartbeat_interval"`
+	GithubPollInterval   time.Duration `yaml:"github_poll_interval"`
+	DefaultAgent         string        `yaml:"default_agent"`
+	ReposDir             string        `yaml:"repos_dir"`
+	WorktreesDir         string        `yaml:"worktrees_dir"`
+	ActivityPollInterval time.Duration `yaml:"activity_poll_interval"`
+	ReadyToIdle          time.Duration `yaml:"ready_to_idle"`
+	QueueTimeout         time.Duration `yaml:"queue_timeout"`
+	// LargeMessageThreshold is the body-size cutoff (in bytes) above which
+	// deliver() writes the full message to a file in the recipient's
+	// worktree inbox and injects a short pointer instead of the full body
+	// (see internal/queue's deliver doc comment for why: injecting large
+	// pastes directly into the TUI intermittently loses them). Messages to
+	// recipients without a worktree always inject the full body.
+	LargeMessageThreshold     int           `yaml:"large_message_threshold"`
 	WorkerStallThreshold      time.Duration `yaml:"worker_stall_threshold"`
 	QuestionReminderThreshold time.Duration `yaml:"question_reminder_threshold"`
 	GithubAPIBase             string        `yaml:"github_api_base"`
@@ -73,6 +80,7 @@ func Load(home string) (*Config, error) {
 		ActivityPollInterval:      5 * time.Second,
 		ReadyToIdle:               5 * time.Minute,
 		QueueTimeout:              30 * time.Minute,
+		LargeMessageThreshold:     2048,
 		WorkerStallThreshold:      15 * time.Minute,
 		QuestionReminderThreshold: 30 * time.Minute,
 		GithubAPIBase:             "https://api.github.com",

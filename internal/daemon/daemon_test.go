@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -25,6 +26,18 @@ func shortHomeDir(t *testing.T) string {
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	return dir
+}
+
+// freeTestPort finds and returns an available ephemeral TCP port suitable for
+// testing. This avoids port collisions with the live daemon or other tests.
+func freeTestPort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("find free port: %v", err)
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
 }
 
 // waitForHealth polls the daemon's health endpoint until it responds ok or
@@ -52,6 +65,7 @@ func TestRunServesHealthAndShutsDownCleanly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
+	cfg.Port = freeTestPort(t)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -103,6 +117,7 @@ func TestRunHonorsSocketOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
+	cfg.Port = freeTestPort(t)
 
 	overrideDir, err := os.MkdirTemp("", "rktsock")
 	if err != nil {
@@ -146,6 +161,7 @@ func TestRunFailsWhenAlreadyRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
+	cfg.Port = freeTestPort(t)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -170,6 +186,7 @@ func TestRunRemovesStalePidFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
+	cfg.Port = freeTestPort(t)
 
 	// Write a pid file referencing a pid that (almost certainly) does not
 	// exist, simulating a daemon that crashed without cleaning up.

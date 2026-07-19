@@ -30,12 +30,10 @@ package codex
 import (
 	"bytes"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"syscall"
 
 	"github.com/IvanRoslov/rocket/internal/agent"
@@ -139,75 +137,16 @@ func upsertAgentsMD(worktreePath, systemPrompt string) error {
 		return err
 	}
 
-	excludeAgentsMDIfUntracked(worktreePath)
+	// Mitigation for repos where AGENTS.md is not already tracked by git:
+	// exclude it from the worktree's git status so the rocket-managed block
+	// doesn't show up as an untracked file / accidental diff in the
+	// worker's own git status. If AGENTS.md is already tracked by git, this
+	// intentionally leaves it (and info/exclude) alone — see
+	// docs/testing/phase-5-live-multiagent.md for the known limitation that
+	// repos with a pre-existing tracked AGENTS.md will see the rocket block
+	// show up in worker diffs, and reviewers should strip it.
+	agent.ExcludeFromGit(worktreePath, []string{"AGENTS.md"})
 	return nil
-}
-
-// excludeAgentsMDIfUntracked is a mitigation for repos where AGENTS.md is
-// not already tracked by git: it appends "AGENTS.md" to the worktree's
-// git exclude file (.git/info/exclude, resolved via `git rev-parse
-// --git-path` so this also works when <worktreePath>/.git is a file
-// pointing at a separate gitdir, as in a `git worktree` checkout) so the
-// rocket-managed block doesn't show up as an untracked file / accidental
-// diff in the worker's own git status. If AGENTS.md is already tracked by
-// git, this intentionally leaves it (and .git/info/exclude) alone — see
-// docs/testing/phase-5-live-multiagent.md for the known limitation that
-// repos with a pre-existing tracked AGENTS.md will see the rocket block
-// show up in worker diffs, and reviewers should strip it.
-//
-// Best-effort: any error (git not available, not a git repo, etc.) is
-// logged at debug level and otherwise ignored — this is a hygiene nicety,
-// not something SetupWorkspace should fail over.
-func excludeAgentsMDIfUntracked(worktreePath string) {
-	checkTracked := exec.Command("git", "-C", worktreePath, "ls-files", "--error-unmatch", "AGENTS.md")
-	if err := checkTracked.Run(); err == nil {
-		// Tracked by git — leave it (and info/exclude) alone.
-		slog.Debug("codex: AGENTS.md is tracked by git, not adding to info/exclude", "worktree", worktreePath)
-		return
-	}
-
-	excludePathOut, err := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-path", "info/exclude").Output()
-	if err != nil {
-		slog.Debug("codex: resolve git-path info/exclude failed, skipping", "worktree", worktreePath, "error", err)
-		return
-	}
-	excludeRel := strings.TrimSpace(string(excludePathOut))
-	excludePath := excludeRel
-	if !filepath.IsAbs(excludePath) {
-		excludePath = filepath.Join(worktreePath, excludeRel)
-	}
-
-	existing, err := os.ReadFile(excludePath)
-	if err != nil && !os.IsNotExist(err) {
-		slog.Debug("codex: read info/exclude failed, skipping", "path", excludePath, "error", err)
-		return
-	}
-	for _, line := range strings.Split(string(existing), "\n") {
-		if strings.TrimSpace(line) == "AGENTS.md" {
-			// Already present — idempotent no-op.
-			return
-		}
-	}
-
-	if err := os.MkdirAll(filepath.Dir(excludePath), 0o755); err != nil {
-		slog.Debug("codex: mkdir info/exclude parent failed, skipping", "path", excludePath, "error", err)
-		return
-	}
-	f, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		slog.Debug("codex: open info/exclude failed, skipping", "path", excludePath, "error", err)
-		return
-	}
-	defer f.Close()
-
-	out := ""
-	if len(existing) > 0 && existing[len(existing)-1] != '\n' {
-		out += "\n"
-	}
-	out += "AGENTS.md\n"
-	if _, err := f.WriteString(out); err != nil {
-		slog.Debug("codex: write info/exclude failed", "path", excludePath, "error", err)
-	}
 }
 
 // seedCodexTrust ensures worktreePath is marked trusted in
