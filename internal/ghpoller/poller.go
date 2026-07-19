@@ -210,9 +210,9 @@ func (p *Poller) discoverPR(ctx context.Context, client *github.Client, sess sto
 	// keeps being returned on every subsequent tick. Without this guard
 	// we'd re-fire pr.opened/PROpened (and any alert notifications) forever
 	// for a PR that hasn't actually changed. If a NEW PR was opened on the
-	// branch (different number) or this same PR has since merged, we fall
-	// through and record it normally.
-	if sess.PRNumber != 0 && pr.Number == sess.PRNumber && sess.PRState == "closed" && prState != "merged" {
+	// branch (different number) or this same PR has since reopened or merged,
+	// we fall through and record it normally.
+	if sess.PRNumber != 0 && pr.Number == sess.PRNumber && pr.State == "closed" && !pr.Merged {
 		return nil
 	}
 
@@ -270,6 +270,11 @@ func (p *Poller) updatePR(ctx context.Context, client *github.Client, sess store
 	// and skip all events/notifications rather than risk notifying about a
 	// state change that never made it to disk (which would desync from a
 	// future tick's dedup logic keyed on stored state).
+	//
+	// Note: there is a narrow crash window between this persist and the
+	// notifications below. A crash there loses the subtask→done transition
+	// permanently (RearmPending only re-arms cleanup, not the forward
+	// transition). This is an accepted risk documented in PR review.
 	if newPRState != prevPRState || ci != prevCIState {
 		if err := p.st.UpdateSessionPR(sess.ID, pr.Number, newPRState, ci); err != nil {
 			return err
