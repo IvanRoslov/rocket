@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -24,6 +25,10 @@ type chatEntryResponse struct {
 	Text     string `json:"text"`
 	ToolName string `json:"tool_name,omitempty"`
 	TS       int64  `json:"ts"`
+	// Quiz is present only on AskUserQuestion entries: the full questions
+	// payload on the asking tool entry, the raw answers echo on the
+	// quiz_answer entry. See docs/13-chat.md «Квизы».
+	Quiz json.RawMessage `json:"quiz,omitempty"`
 }
 
 func toChatEntryResponse(e agent.ChatEntry) chatEntryResponse {
@@ -32,6 +37,7 @@ func toChatEntryResponse(e agent.ChatEntry) chatEntryResponse {
 		Text:     e.Text,
 		ToolName: e.ToolName,
 		TS:       e.TS,
+		Quiz:     e.Quiz,
 	}
 }
 
