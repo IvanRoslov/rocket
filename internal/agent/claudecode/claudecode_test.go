@@ -256,6 +256,120 @@ func TestSetupWorkspaceWritesActivityHookScript(t *testing.T) {
 	}
 }
 
+// TestSetupWorkspaceWritesQuizHookScript asserts that SetupWorkspace writes
+// an executable .rocket/quiz-hook.sh with the expected shebang, env var
+// references, and internal quiz endpoint.
+func TestSetupWorkspaceWritesQuizHookScript(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cc := New()
+	spec := agent.LaunchSpec{WorktreePath: tmpDir}
+
+	if err := cc.SetupWorkspace(spec); err != nil {
+		t.Fatalf("SetupWorkspace failed: %v", err)
+	}
+
+	scriptPath := filepath.Join(tmpDir, ".rocket", "quiz-hook.sh")
+	info, err := os.Stat(scriptPath)
+	if err != nil {
+		t.Fatalf("stat quiz hook script: %v", err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o700 {
+		t.Errorf("quiz hook script mode = %o, want 0700", mode)
+	}
+
+	content, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("read quiz hook script: %v", err)
+	}
+	if !strings.HasPrefix(string(content), "#!/bin/sh") {
+		t.Errorf("quiz hook script does not start with shebang: %q", string(content))
+	}
+	if !strings.Contains(string(content), "ROCKET_SOCKET") || !strings.Contains(string(content), "ROCKET_SESSION_ID") {
+		t.Errorf("quiz hook script missing expected env var references: %q", string(content))
+	}
+	if !strings.Contains(string(content), "/v1/internal/quiz") {
+		t.Errorf("quiz hook script missing internal quiz endpoint: %q", string(content))
+	}
+}
+
+// TestSetupWorkspaceWiresQuizHookMatchers asserts that settings.local.json
+// after SetupWorkspace contains both the activity hook ("*" matcher) and
+// the quiz hook ("AskUserQuestion" matcher) for PreToolUse and PostToolUse.
+func TestSetupWorkspaceWiresQuizHookMatchers(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cc := New()
+	spec := agent.LaunchSpec{WorktreePath: tmpDir}
+	if err := cc.SetupWorkspace(spec); err != nil {
+		t.Fatalf("SetupWorkspace failed: %v", err)
+	}
+
+	settings := readSettings(t, tmpDir)
+	hooks, ok := settings["hooks"].(map[string]any)
+	if !ok {
+		t.Fatalf("settings.json missing hooks object: %+v", settings)
+	}
+
+	wantEventPhase := map[string]string{
+		"PreToolUse":  "pending",
+		"PostToolUse": "resolved",
+	}
+	for event, phase := range wantEventPhase {
+		groupsRaw, ok := hooks[event]
+		if !ok {
+			t.Fatalf("hooks missing event %q: %+v", event, hooks)
+		}
+		groups, ok := groupsRaw.([]any)
+		if !ok {
+			t.Fatalf("hooks[%s] is not an array: %+v", event, groupsRaw)
+		}
+
+		var found bool
+		want := "sh .rocket/quiz-hook.sh " + phase
+		for _, raw := range groups {
+			group, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			matcher, _ := group["matcher"].(string)
+			if matcher != "AskUserQuestion" {
+				continue
+			}
+			hookList, _ := group["hooks"].([]any)
+			for _, hRaw := range hookList {
+				h, ok := hRaw.(map[string]any)
+				if !ok {
+					continue
+				}
+				if cmd, _ := h["command"].(string); cmd == want {
+					found = true
+				}
+			}
+		}
+		if !found {
+			t.Errorf("hooks[%s] missing AskUserQuestion matcher with command %q: %+v", event, want, groups)
+		}
+
+		// The activity hook's "*" matcher must still be present alongside
+		// the quiz hook's "AskUserQuestion" matcher (both matcher-hooks
+		// coexist per the task brief).
+		var foundActivity bool
+		for _, raw := range groups {
+			group, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if matcher, _ := group["matcher"].(string); matcher == "*" {
+				foundActivity = true
+			}
+		}
+		if !foundActivity {
+			t.Errorf("hooks[%s] missing activity hook's \"*\" matcher: %+v", event, groups)
+		}
+	}
+}
+
 func TestSetupWorkspaceWritesFreshSettingsJSON(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -381,17 +495,35 @@ func TestSetupWorkspaceHooksIdempotent(t *testing.T) {
 		t.Fatalf("settings.json missing hooks object: %+v", settings)
 	}
 
+	// PreToolUse now carries two matcher groups: "*" (activity hook) and
+	// "AskUserQuestion" (quiz hook). Running SetupWorkspace twice must not
+	// duplicate either group or the command within it.
 	preToolUse, ok := hooks["PreToolUse"].([]any)
 	if !ok {
 		t.Fatalf("hooks.PreToolUse is not an array: %+v", hooks["PreToolUse"])
 	}
-	if len(preToolUse) != 1 {
-		t.Fatalf("len(hooks.PreToolUse) = %d, want 1 (no duplicate groups)", len(preToolUse))
+	if len(preToolUse) != 2 {
+		t.Fatalf("len(hooks.PreToolUse) = %d, want 2 (no duplicate groups): %+v", len(preToolUse), preToolUse)
 	}
-	group := preToolUse[0].(map[string]any)
-	hookList := group["hooks"].([]any)
-	if len(hookList) != 1 {
-		t.Fatalf("len(hooks.PreToolUse[0].hooks) = %d, want 1 (no duplicate command)", len(hookList))
+	seenMatchers := map[string]bool{}
+	for _, raw := range preToolUse {
+		group, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("hooks.PreToolUse entry is not an object: %+v", raw)
+		}
+		matcher, _ := group["matcher"].(string)
+		if seenMatchers[matcher] {
+			t.Fatalf("duplicate matcher group %q in hooks.PreToolUse: %+v", matcher, preToolUse)
+		}
+		seenMatchers[matcher] = true
+
+		hookList, ok := group["hooks"].([]any)
+		if !ok || len(hookList) != 1 {
+			t.Fatalf("hooks.PreToolUse matcher %q has %d hooks, want 1 (no duplicate command): %+v", matcher, len(hookList), group["hooks"])
+		}
+	}
+	if !seenMatchers["*"] || !seenMatchers["AskUserQuestion"] {
+		t.Fatalf("hooks.PreToolUse missing expected matchers, got: %+v", seenMatchers)
 	}
 }
 
