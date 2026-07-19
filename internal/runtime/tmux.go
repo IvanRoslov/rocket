@@ -289,9 +289,9 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 			// meanwhile replaced its composer with an interactive quiz
 			// widget, the draft was necessarily submitted (the widget only
 			// renders mid-turn) and another Enter would press a quiz
-			// button instead — see looksLikeQuizWidget.
+			// button instead — see LooksLikeQuizWidget.
 			if out, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name)); err == nil {
-				if looksLikeQuizWidget(tailLines(trimTrailingBlank(out), confirmWindow)) {
+				if LooksLikeQuizWidget(tailLines(trimTrailingBlank(out), confirmWindow)) {
 					return nil
 				}
 			}
@@ -328,8 +328,9 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 			// e.g. the submitted message's echo keeps the marker line in
 			// the tail while the agent thinks. Confirm WITHOUT pressing
 			// Enter again: a further Enter would land on the widget and
-			// select a quiz option (live incident, 2026-07-19).
-			if looksLikeQuizWidget(out) {
+			// select a quiz option (live incident, 2026-07-19). Exported: the monitor reuses it
+			// as the cancelled-quiz backstop (see monitor.pollQuiz).
+			if LooksLikeQuizWidget(out) {
 				return nil
 			}
 			if time.Now().After(deadline) {
@@ -579,7 +580,7 @@ func isNoServerError(stderr string) bool {
 	return strings.Contains(s, "no server running") || strings.Contains(s, "error connecting")
 }
 
-// looksLikeQuizWidget reports whether a pane tail is showing Claude Code's
+// LooksLikeQuizWidget reports whether a pane tail is showing Claude Code's
 // interactive AskUserQuestion widget. Matched against the two stable
 // markers observed live (docs/superpowers/recon/2026-07-19-quiz-recon.md
 // §2, CLI v2.1.215): the footer hint line («Enter to select · …», present
@@ -588,7 +589,7 @@ func isNoServerError(stderr string) bool {
 // narrow, Claude-specific TUI coupling: generic "pane changed" heuristics
 // cannot be used to stop Enter retries because Claude Code's spinner
 // animates the tail even while a draft is still unsubmitted.
-func looksLikeQuizWidget(tail string) bool {
+func LooksLikeQuizWidget(tail string) bool {
 	return strings.Contains(tail, "Enter to select · ") ||
 		strings.Contains(tail, "✔ Submit")
 }

@@ -8,6 +8,7 @@ package monitor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -108,10 +109,11 @@ type Monitor struct {
 	resolveAgent func(name string) (agent.Agent, error)
 	prober       paneProber
 
-	mu    sync.Mutex
-	push  map[string]pushEntry
-	cache map[string]activity.State
-	chat  map[string]chatStat
+	mu       sync.Mutex
+	push     map[string]pushEntry
+	cache    map[string]activity.State
+	chat     map[string]chatStat
+	quizMiss map[string]int
 }
 
 // New builds a Monitor. resolveAgent is typically agent.Get.
@@ -126,6 +128,7 @@ func New(st *store.Store, b *bus.Bus, rt runtime.Runtime, cfg *config.Config, re
 		push:         make(map[string]pushEntry),
 		cache:        make(map[string]activity.State),
 		chat:         make(map[string]chatStat),
+		quizMiss:     make(map[string]int),
 	}
 }
 
@@ -226,6 +229,7 @@ func (m *Monitor) sweep(ctx context.Context) {
 		sessionIDs[sess.ID] = true
 		m.pollSession(ctx, sess, liveSet, err == nil)
 		m.pollChat(ctx, sess)
+		m.pollQuiz(ctx, sess)
 	}
 
 	// Prune stale entries from cache, push and chat maps whose sessions no
@@ -246,7 +250,82 @@ func (m *Monitor) sweep(ctx context.Context) {
 			delete(m.chat, id)
 		}
 	}
+	for id := range m.quizMiss {
+		if !sessionIDs[id] {
+			delete(m.quizMiss, id)
+		}
+	}
 	m.mu.Unlock()
+}
+
+// quizRenderGrace is how old a pending quiz must be before pollQuiz starts
+// pane-checking it: right after the PreToolUse hook fires the widget takes
+// a moment to render, and checking too early would read its absence as
+// "already closed".
+const quizRenderGrace = 10 * time.Second
+
+// quizMissThreshold is how many consecutive sweeps must observe the pane
+// WITHOUT the quiz widget before pollQuiz declares the quiz closed. Two
+// misses (~2 poll intervals) filter out transient capture glitches.
+const quizMissThreshold = 2
+
+// pollQuiz is the cancelled-quiz backstop. The precise close signal is the
+// PostToolUse quiz hook (POST /v1/internal/quiz resolved), but Claude Code
+// does NOT fire PostToolUse for a REJECTED tool call (Esc'd quiz), and the
+// Stop hook was observed not firing at all on CLI v2.1.215 — so a quiz
+// declined in the terminal would otherwise leave pending_quiz stale
+// forever, gating message delivery. While a session has a pending quiz
+// older than quizRenderGrace, this checks the pane tail each sweep: the
+// AskUserQuestion widget always renders at the bottom of the pane while
+// open (runtime.LooksLikeQuizWidget), so quizMissThreshold consecutive
+// sweeps without it mean the quiz is closed — clear pending and publish
+// session.quiz_resolved, exactly as the resolved hook would.
+func (m *Monitor) pollQuiz(ctx context.Context, sess store.Session) {
+	if sess.PendingQuiz == "" {
+		m.mu.Lock()
+		delete(m.quizMiss, sess.ID)
+		m.mu.Unlock()
+		return
+	}
+
+	var quiz struct {
+		AskedAt int64 `json:"asked_at"`
+	}
+	if err := json.Unmarshal([]byte(sess.PendingQuiz), &quiz); err == nil &&
+		quiz.AskedAt > 0 && time.Since(time.Unix(quiz.AskedAt, 0)) < quizRenderGrace {
+		return
+	}
+
+	out, err := m.rt.Capture(ctx, runtime.Handle{Name: sess.TmuxName}, 15)
+	if err != nil {
+		// Pane gone or capture failed — best-effort skip; a dead session's
+		// pending_quiz is cleared by its terminal state transition.
+		return
+	}
+	if runtime.LooksLikeQuizWidget(out) {
+		m.mu.Lock()
+		delete(m.quizMiss, sess.ID)
+		m.mu.Unlock()
+		return
+	}
+
+	m.mu.Lock()
+	m.quizMiss[sess.ID]++
+	misses := m.quizMiss[sess.ID]
+	if misses >= quizMissThreshold {
+		delete(m.quizMiss, sess.ID)
+	}
+	m.mu.Unlock()
+	if misses < quizMissThreshold {
+		return
+	}
+
+	if err := m.st.ClearPendingQuiz(sess.ID); err != nil {
+		slog.Warn("monitor: clear stale pending quiz", "session", sess.ID, "error", err)
+		return
+	}
+	slog.Info("monitor: pending quiz closed without resolved hook (widget gone)", "session", sess.ID)
+	m.bus.Publish("session.quiz_resolved", sess.ID, map[string]any{})
 }
 
 // pollChat checks whether sess's transcript has changed since the last

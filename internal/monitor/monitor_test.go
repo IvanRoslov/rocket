@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -117,7 +118,7 @@ func (f *fakeAgent) TranscriptStat(ctx context.Context, ref agent.ActivityRef) (
 // testMonitor builds a Monitor wired to a real (temp-dir) store+bus, a
 // fake runtime and a fake pane prober, plus a resolveAgent closure that
 // looks up agents by name in the given map.
-func testMonitor(t *testing.T, rt *fakeRuntime, prober *fakeProber, agents map[string]*fakeAgent) (*Monitor, *store.Store, *bus.Bus) {
+func testMonitor(t *testing.T, rt runtime.Runtime, prober *fakeProber, agents map[string]*fakeAgent) (*Monitor, *store.Store, *bus.Bus) {
 	t.Helper()
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "rocket.db"))
@@ -151,6 +152,7 @@ func testMonitor(t *testing.T, rt *fakeRuntime, prober *fakeProber, agents map[s
 		push:         make(map[string]pushEntry),
 		cache:        make(map[string]activity.State),
 		chat:         make(map[string]chatStat),
+		quizMiss:     make(map[string]int),
 	}
 	return m, st, b
 }
@@ -803,5 +805,118 @@ func TestChatWatcherKilledSessionNotWatched(t *testing.T) {
 	m.mu.Unlock()
 	if inChat {
 		t.Errorf("sess1 should be pruned from chat map after going terminal")
+	}
+}
+
+// quizFakeRuntime extends fakeRuntime with a scriptable Capture, for
+// pollQuiz tests.
+type quizFakeRuntime struct {
+	fakeRuntime
+	captureOut string
+	captureErr error
+}
+
+func (f *quizFakeRuntime) Capture(ctx context.Context, h runtime.Handle, lines int) (string, error) {
+	return f.captureOut, f.captureErr
+}
+
+const quizWidgetTail = "❯ 1. Red\n  2. Green\n  4. Type something.\n\nEnter to select · ↑/↓ to navigate · Esc to cancel"
+const plainComposerTail = "⏺ done\n\n❯ \n  ⏵⏵ bypass permissions on"
+
+func seedPendingQuiz(t *testing.T, st *store.Store, id string, askedAt int64) {
+	t.Helper()
+	if err := st.SetPendingQuiz(id, `{"questions":[{"question":"q"}],"asked_at":`+strconv.FormatInt(askedAt, 10)+`}`); err != nil {
+		t.Fatalf("SetPendingQuiz: %v", err)
+	}
+}
+
+func TestPollQuizWidgetGoneClearsAfterTwoMisses(t *testing.T) {
+	rt := &quizFakeRuntime{fakeRuntime: fakeRuntime{names: []string{"sess1"}}, captureOut: plainComposerTail}
+	prober := &fakeProber{onlyShell: map[string]bool{}}
+	agents := map[string]*fakeAgent{"fake": {state: activity.Active, ts: time.Now()}}
+	m, st, b := testMonitor(t, rt, prober, agents)
+
+	seedSession(t, st, store.Session{ID: "sess1", Agent: "fake", TmuxName: "sess1"})
+	seedPendingQuiz(t, st, "sess1", time.Now().Add(-time.Minute).Unix())
+
+	ch, cancel := b.Subscribe()
+	defer cancel()
+
+	m.sweep(context.Background())
+	sess, _ := st.GetSession("sess1")
+	if sess.PendingQuiz == "" {
+		t.Fatalf("pending cleared after ONE miss, want two-miss threshold")
+	}
+
+	m.sweep(context.Background())
+	sess, _ = st.GetSession("sess1")
+	if sess.PendingQuiz != "" {
+		t.Fatalf("pending not cleared after two misses")
+	}
+
+	var resolved bool
+	for _, e := range drainEvents(ch) {
+		if e.Type == "session.quiz_resolved" && e.SessionID == "sess1" {
+			resolved = true
+		}
+	}
+	if !resolved {
+		t.Errorf("expected session.quiz_resolved event")
+	}
+}
+
+func TestPollQuizWidgetStillVisibleKeepsPending(t *testing.T) {
+	rt := &quizFakeRuntime{fakeRuntime: fakeRuntime{names: []string{"sess1"}}, captureOut: quizWidgetTail}
+	prober := &fakeProber{onlyShell: map[string]bool{}}
+	agents := map[string]*fakeAgent{"fake": {state: activity.Active, ts: time.Now()}}
+	m, st, _ := testMonitor(t, rt, prober, agents)
+
+	seedSession(t, st, store.Session{ID: "sess1", Agent: "fake", TmuxName: "sess1"})
+	seedPendingQuiz(t, st, "sess1", time.Now().Add(-time.Minute).Unix())
+
+	for i := 0; i < 4; i++ {
+		m.sweep(context.Background())
+	}
+	sess, _ := st.GetSession("sess1")
+	if sess.PendingQuiz == "" {
+		t.Fatalf("pending cleared while widget still visible")
+	}
+}
+
+func TestPollQuizFreshQuizGraceNotChecked(t *testing.T) {
+	rt := &quizFakeRuntime{fakeRuntime: fakeRuntime{names: []string{"sess1"}}, captureOut: plainComposerTail}
+	prober := &fakeProber{onlyShell: map[string]bool{}}
+	agents := map[string]*fakeAgent{"fake": {state: activity.Active, ts: time.Now()}}
+	m, st, _ := testMonitor(t, rt, prober, agents)
+
+	seedSession(t, st, store.Session{ID: "sess1", Agent: "fake", TmuxName: "sess1"})
+	seedPendingQuiz(t, st, "sess1", time.Now().Unix())
+
+	for i := 0; i < 4; i++ {
+		m.sweep(context.Background())
+	}
+	sess, _ := st.GetSession("sess1")
+	if sess.PendingQuiz == "" {
+		t.Fatalf("pending cleared during render grace, want untouched")
+	}
+}
+
+func TestPollQuizWidgetReappearingResetsMissStreak(t *testing.T) {
+	rt := &quizFakeRuntime{fakeRuntime: fakeRuntime{names: []string{"sess1"}}, captureOut: plainComposerTail}
+	prober := &fakeProber{onlyShell: map[string]bool{}}
+	agents := map[string]*fakeAgent{"fake": {state: activity.Active, ts: time.Now()}}
+	m, st, _ := testMonitor(t, rt, prober, agents)
+
+	seedSession(t, st, store.Session{ID: "sess1", Agent: "fake", TmuxName: "sess1"})
+	seedPendingQuiz(t, st, "sess1", time.Now().Add(-time.Minute).Unix())
+
+	m.sweep(context.Background()) // miss 1
+	rt.captureOut = quizWidgetTail
+	m.sweep(context.Background()) // widget back: streak resets
+	rt.captureOut = plainComposerTail
+	m.sweep(context.Background()) // miss 1 again — must not clear yet
+	sess, _ := st.GetSession("sess1")
+	if sess.PendingQuiz == "" {
+		t.Fatalf("pending cleared after non-consecutive misses, want streak reset")
 	}
 }

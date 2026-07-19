@@ -635,8 +635,8 @@ func TestLooksLikeQuizWidget(t *testing.T) {
 		{"empty", "", false},
 	}
 	for _, c := range cases {
-		if got := looksLikeQuizWidget(c.tail); got != c.want {
-			t.Errorf("%s: looksLikeQuizWidget = %v, want %v", c.name, got, c.want)
+		if got := LooksLikeQuizWidget(c.tail); got != c.want {
+			t.Errorf("%s: LooksLikeQuizWidget = %v, want %v", c.name, got, c.want)
 		}
 	}
 }
