@@ -1,6 +1,7 @@
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useSessions, useSystem, useSystemCleanup } from '../../src/api/queries'
+import { ConnectionBanner } from '../../src/components/ConnectionBanner'
 import { Badge, Card, Dot, EmptyState, MonoText, SectionTitle } from '../../src/components/ui'
 import { bytes, sessionBadge, sessionDot, uptime } from '../../src/lib/format'
 import { useServers } from '../../src/servers/ServerContext'
@@ -63,10 +64,14 @@ export default function SystemScreen() {
           </Text>
         </Pressable>
       </View>
+      <ConnectionBanner />
       {system.isError ? (
         <EmptyState text="Server unreachable." />
       ) : (
-        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24 }}>
+        <ScrollView
+          contentContainerStyle={{ padding: 16, paddingBottom: 24 }}
+          refreshControl={<RefreshControl refreshing={false} onRefresh={() => system.refetch()} />}
+        >
           <View style={styles.grid}>
             {stats.map((c) => (
               <View key={c.label} style={styles.statCard}>

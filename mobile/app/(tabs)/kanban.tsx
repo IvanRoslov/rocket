@@ -4,6 +4,7 @@ import {
   Alert,
   Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -21,6 +22,8 @@ import {
   useTasks,
 } from '../../src/api/queries'
 import { ActionSheet } from '../../src/components/ActionSheet'
+import { ConnectionBanner } from '../../src/components/ConnectionBanner'
+import { useToast } from '../../src/components/Toast'
 import type { Task, TaskStatus } from '../../src/api/types'
 import { Badge, Card, ChipTabs, Dot, EmptyState, GhostButton, MonoText, PrimaryButton } from '../../src/components/ui'
 import { sessionDot } from '../../src/lib/format'
@@ -36,6 +39,7 @@ const COLUMNS: { key: TaskStatus; title: string; dot: string }[] = [
 
 function TaskCard({ task, workers, onLongPress }: { task: Task; workers: number; onLongPress: () => void }) {
   const start = useStartTask()
+  const toast = useToast()
   const { data: sessions } = useSessions(task.project_id)
   const orch = sessions?.find((s) => s.id === task.session_id)
 
@@ -63,7 +67,12 @@ function TaskCard({ task, workers, onLongPress }: { task: Task; workers: number;
         <PrimaryButton
           label={start.isPending ? 'Starting…' : 'Start orchestrator ▸'}
           disabled={start.isPending}
-          onPress={() => start.mutate(task.id)}
+          onPress={() =>
+            start.mutate(task.id, {
+              onSuccess: () => toast.show('Orchestrator starting…', 'ok'),
+              onError: (e) => toast.show((e as Error).message),
+            })
+          }
           style={{ marginTop: 8, height: 38, borderRadius: radius.md }}
         />
       ) : null}
@@ -131,6 +140,8 @@ export default function KanbanScreen() {
   const [menuTask, setMenuTask] = useState<Task | null>(null)
   const move = useMoveTask()
   const cancelTask = useCancelTask()
+  const toast = useToast()
+  const onErr = (e: unknown) => toast.show((e as Error).message)
 
   const roots = useMemo(() => (tasksQ.data ?? []).filter((t) => !t.parent_id), [tasksQ.data])
   const visible = roots.filter(
@@ -192,7 +203,11 @@ export default function KanbanScreen() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 90 }}>
+      <ConnectionBanner />
+      <ScrollView
+        contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 90 }}
+        refreshControl={<RefreshControl refreshing={false} onRefresh={() => tasksQ.refetch()} />}
+      >
         {visible.map((t) => (
           <TaskCard key={t.id} task={t} workers={workersOf(t)} onLongPress={() => setMenuTask(t)} />
         ))}
@@ -214,7 +229,7 @@ export default function KanbanScreen() {
             ? [
                 ...COLUMNS.filter((c) => c.key !== menuTask.status).map((c) => ({
                   label: `Move to ${c.title}`,
-                  onPress: () => move.mutate({ id: menuTask.id, status: c.key }),
+                  onPress: () => move.mutate({ id: menuTask.id, status: c.key }, { onError: onErr }),
                 })),
                 {
                   label: 'Cancel task',
@@ -223,7 +238,11 @@ export default function KanbanScreen() {
                   onPress: () =>
                     Alert.alert('Cancel task', `Cancel #${menuTask.id} and kill its sessions?`, [
                       { text: 'Keep', style: 'cancel' },
-                      { text: 'Cancel task', style: 'destructive', onPress: () => cancelTask.mutate(menuTask.id) },
+                      {
+                        text: 'Cancel task',
+                        style: 'destructive',
+                        onPress: () => cancelTask.mutate(menuTask.id, { onError: onErr }),
+                      },
                     ]),
                 },
               ]

@@ -1,8 +1,9 @@
 import { router } from 'expo-router'
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useProjects, useTasks } from '../../src/api/queries'
 import type { Project, Task } from '../../src/api/types'
+import { ConnectionBanner } from '../../src/components/ConnectionBanner'
 import { Badge, Card, Dot, EmptyState, MonoText } from '../../src/components/ui'
 import { ago } from '../../src/lib/format'
 import { useServers } from '../../src/servers/ServerContext'
@@ -81,7 +82,19 @@ export default function ProjectsScreen() {
           <Text style={{ color: '#fff', fontSize: 19, lineHeight: 22 }}>＋</Text>
         </Pressable>
       </View>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24 }}>
+      <ConnectionBanner />
+      <ScrollView
+        contentContainerStyle={{ padding: 16, paddingBottom: 24 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={false}
+            onRefresh={() => {
+              projects.refetch()
+              tasks.refetch()
+            }}
+          />
+        }
+      >
         <Text style={styles.h1}>Projects</Text>
         <Text style={styles.lede}>Each project is a product — a main repo plus linked repos where workers run.</Text>
         {projects.isError ? (

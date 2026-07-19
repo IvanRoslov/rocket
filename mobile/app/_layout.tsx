@@ -2,7 +2,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { useState, type ReactNode } from 'react'
+import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { ConnectionContext, useEventStream } from '../src/api/events'
+import { ToastProvider } from '../src/components/Toast'
 import { ServerProvider } from '../src/servers/ServerContext'
 import { colors } from '../src/theme'
 
@@ -25,13 +27,17 @@ export default function RootLayout() {
     <QueryClientProvider client={client}>
       <ServerProvider>
         <EventBridge>
-          <StatusBar style="dark" />
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: colors.page },
-            }}
-          />
+          <SafeAreaProvider>
+            <ToastProvider>
+              <StatusBar style="dark" />
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: { backgroundColor: colors.page },
+                }}
+              />
+            </ToastProvider>
+          </SafeAreaProvider>
         </EventBridge>
       </ServerProvider>
     </QueryClientProvider>

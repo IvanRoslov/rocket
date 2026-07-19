@@ -7,6 +7,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -31,6 +32,7 @@ import {
   useTaskQuestions,
 } from '../../src/api/queries'
 import { ActionSheet } from '../../src/components/ActionSheet'
+import { useToast } from '../../src/components/Toast'
 import type { Question, Session, TaskLogKind, TaskStatus } from '../../src/api/types'
 import { Badge, Card, ChipTabs, Dot, EmptyState, GhostButton, MonoText, PrimaryButton } from '../../src/components/ui'
 import { ago, sessionBadge, sessionDot } from '../../src/lib/format'
@@ -58,6 +60,7 @@ function QuestionCard({ q }: { q: Question }) {
   const [text, setText] = useState('')
   const [ctxOpen, setCtxOpen] = useState(false)
   const busy = reply.isPending || answer.isPending || dismiss.isPending
+  const toast = useToast()
 
   const confirmDismiss = () =>
     Alert.alert('Dismiss question', `Close Q${q.ordinal} without an answer?`, [
@@ -69,7 +72,10 @@ function QuestionCard({ q }: { q: Question }) {
     const body = text.trim()
     if (!body) return
     const m = final ? answer : reply
-    m.mutate({ id: q.id, body }, { onSuccess: () => setText('') })
+    m.mutate(
+      { id: q.id, body },
+      { onSuccess: () => setText(''), onError: (e) => toast.show((e as Error).message) },
+    )
   }
 
   return (
@@ -325,6 +331,8 @@ export default function TaskScreen() {
   const [taskMenu, setTaskMenu] = useState(false)
   const move = useMoveTask()
   const cancel = useCancelTask()
+  const toast = useToast()
+  const onErr = (e: unknown) => toast.show((e as Error).message)
 
   const t = detail.data
   const open = (questions.data ?? []).filter((q) => q.status === 'open')
@@ -377,7 +385,7 @@ export default function TaskScreen() {
             .filter((s) => s !== t.status)
             .map((s) => ({
               label: `Move to ${STATUS_BADGE[s].label}`,
-              onPress: () => move.mutate({ id: t.id, status: s }),
+              onPress: () => move.mutate({ id: t.id, status: s }, { onError: onErr }),
             })),
           {
             label: 'Cancel task',
@@ -386,14 +394,25 @@ export default function TaskScreen() {
             onPress: () =>
               Alert.alert('Cancel task', `Cancel #${t.id} and kill all its sessions?`, [
                 { text: 'Keep', style: 'cancel' },
-                { text: 'Cancel task', style: 'destructive', onPress: () => cancel.mutate(t.id) },
+                { text: 'Cancel task', style: 'destructive', onPress: () => cancel.mutate(t.id, { onError: onErr }) },
               ]),
           },
         ]}
       />
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={{ paddingBottom: hasSessions ? 90 : 24 }}>
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: hasSessions ? 90 : 24 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={false}
+              onRefresh={() => {
+                detail.refetch()
+                questions.refetch()
+              }}
+            />
+          }
+        >
           <View style={{ padding: 16, paddingBottom: 0 }}>
             <View style={styles.metaRow}>
               {t.feature_slug ? <MonoText style={{ fontSize: 12 }}>feature/{t.feature_slug}</MonoText> : null}
@@ -559,7 +578,7 @@ export default function TaskScreen() {
                     onPress={() =>
                       sendMsg.mutate(
                         { to: t.session!.id, body: msgText.trim() },
-                        { onSuccess: () => setMsgText('') },
+                        { onSuccess: () => setMsgText(''), onError: onErr },
                       )
                     }
                     style={{ height: 44, paddingHorizontal: 16, borderRadius: radius.lg }}
