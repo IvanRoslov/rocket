@@ -39,6 +39,24 @@ export interface TermPanelProps {
 const PING_INTERVAL_MS = 30_000
 const RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000]
 
+/**
+ * Concrete font-family string handed to xterm.js — deliberately NOT the
+ * `--font-mono` CSS custom property (see tokens.css). xterm's internal
+ * char-size measurement ultimately calls canvas `ctx.font = ...`, and the
+ * Canvas 2D API cannot resolve `var(...)` tokens: handing it
+ * `var(--font-mono, ...)` makes the browser silently fall back to its
+ * default canvas font for glyph-atlas measurement while xterm still lays
+ * out cells assuming the intended metrics. The DOM renderer masked this
+ * (real DOM text nodes resolve custom properties normally via the
+ * cascade), but the WebGL addon (058bdf7) measures via canvas and
+ * regressed to unusable tiny glyphs with huge letter-spacing the moment
+ * it was enabled. Also omits a leading generic family (`ui-monospace`)
+ * since generic families aren't guaranteed to resolve to a concrete font
+ * for canvas measurement either — list concrete faces first, matching
+ * tokens.css's `--font-mono` stack.
+ */
+const TERMINAL_FONT = '"SFMono-Regular", Menlo, Monaco, "Courier New", monospace'
+
 /** Default terminal font size (px). Kept above the 13.5px design-doc floor
  * for readability at the panel widths TermOverlay now targets. */
 export const DEFAULT_TERM_FONT_SIZE = 14
@@ -223,7 +241,7 @@ export function TermPanel({ sessionId, readonly, onResize, fontSize }: TermPanel
 
     const term = new Terminal({
       convertEol: true,
-      fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+      fontFamily: TERMINAL_FONT,
       fontSize: fontSize ?? DEFAULT_TERM_FONT_SIZE,
       lineHeight: 1.25,
       fontWeight: 'normal',
