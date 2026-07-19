@@ -409,7 +409,7 @@ func (t *tmuxRuntime) Destroy(ctx context.Context, h Handle) error {
 	}
 	_, stderr, err := runTmux(ctx, "kill-session", "-t", sessionTarget(h.Name))
 	if err != nil {
-		if isNoSessionError(stderr) {
+		if isNoSessionError(stderr) || isNoServerError(stderr) {
 			return nil
 		}
 		return fmt.Errorf("destroy session %q: %w", h.Name, err)
