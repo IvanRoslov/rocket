@@ -37,10 +37,17 @@ function ProjectCard({ project, tasks }: { project: Project; tasks: Task[] }) {
           </View>
         </View>
         <View style={styles.repoRow}>
-          <MonoText style={{ fontSize: 12.5 }}>⌂ {project.main}</MonoText>
-          {project.linked.length > 0 ? (
-            <MonoText style={{ fontSize: 12.5, color: colors.textDim }}> + {project.linked.join(', ')}</MonoText>
-          ) : null}
+          <MonoText style={{ fontSize: 12.5 }} numberOfLines={1}>
+            ⌂ {project.main}
+            {project.linked.length > 0 ? (
+              <MonoText style={{ fontSize: 12.5, color: colors.textDim }}>
+                {'  +  '}
+                {project.linked.length <= 2
+                  ? project.linked.join(', ')
+                  : `${project.linked.slice(0, 2).join(', ')} +${project.linked.length - 2} more`}
+              </MonoText>
+            ) : null}
+          </MonoText>
         </View>
         <View style={styles.statsRow}>
           {inProgress > 0 ? (

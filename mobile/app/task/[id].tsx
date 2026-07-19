@@ -4,7 +4,6 @@ import { useState } from 'react'
 import {
   Alert,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   RefreshControl,
@@ -32,6 +31,7 @@ import {
   useTaskQuestions,
 } from '../../src/api/queries'
 import { ActionSheet } from '../../src/components/ActionSheet'
+import { BottomSheet } from '../../src/components/BottomSheet'
 import { useToast } from '../../src/components/Toast'
 import type { Question, Session, TaskLogKind, TaskStatus } from '../../src/api/types'
 import { Badge, Card, ChipTabs, Dot, EmptyState, GhostButton, MonoText, PrimaryButton } from '../../src/components/ui'
@@ -171,10 +171,12 @@ function QuestionCard({ q }: { q: Question }) {
 }
 
 function SessionsSheet({
+  visible,
   orch,
   workers,
   onClose,
 }: {
+  visible: boolean
   orch?: Session
   workers: Session[]
   onClose: () => void
@@ -204,10 +206,8 @@ function SessionsSheet({
   }
 
   return (
-    <Modal transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
-          <View style={styles.grabber} />
+    <BottomSheet visible={visible} onClose={onClose}>
+      <View>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
             <Text style={{ fontSize: 15, fontWeight: '700' }}>Sessions</Text>
             <View style={{ flex: 1 }} />
@@ -309,9 +309,8 @@ function SessionsSheet({
                 : []
             }
           />
-        </Pressable>
-      </Pressable>
-    </Modal>
+      </View>
+    </BottomSheet>
   )
 }
 
@@ -599,7 +598,7 @@ export default function TaskScreen() {
           </Text>
         </Pressable>
       ) : null}
-      {sheetOpen ? <SessionsSheet orch={orch} workers={workers} onClose={() => setSheetOpen(false)} /> : null}
+      <SessionsSheet visible={sheetOpen} orch={orch} workers={workers} onClose={() => setSheetOpen(false)} />
     </SafeAreaView>
   )
 }
@@ -733,23 +732,6 @@ const styles = StyleSheet.create({
     shadowRadius: 11,
     shadowOffset: { width: 0, height: 6 },
     elevation: 6,
-  },
-  backdrop: { flex: 1, backgroundColor: 'rgba(15,15,17,.4)', justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: '#fbfbfa',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    padding: 16,
-    paddingBottom: 32,
-    maxHeight: '82%',
-  },
-  grabber: {
-    alignSelf: 'center',
-    width: 38,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: '#d4d4d1',
-    marginBottom: 14,
   },
   sheetKindLabel: { fontSize: 10.5, fontWeight: '600', color: colors.textFaint, letterSpacing: 0.5 },
   workerTermBtn: {

@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { createContext, useContext, useEffect, useState } from 'react'
-import EventSource from 'react-native-sse'
 import { useServers } from '../servers/ServerContext'
+import { connectSse } from './sse'
 
 /**
  * Maps a daemon event type (e.g. "session.state_changed") to the query-key
@@ -55,28 +55,19 @@ export function useEventStream(): { connected: boolean } {
 
   useEffect(() => {
     if (!baseUrl) return
-    const es = new EventSource(`${baseUrl}/v1/events/stream`, {
-      pollingInterval: 4000, // reconnect delay after drop
-    })
-
-    es.addEventListener('open', () => setConnected(true))
-    es.addEventListener('error', () => setConnected(false))
-    es.addEventListener('message', (e) => {
-      if (!e.data) return
-      try {
-        const ev = JSON.parse(e.data) as { type?: string }
-        const segments = parseEventType(ev.type ?? '')
+    const conn = connectSse(`${baseUrl}/v1/events/stream`, {
+      onOpen: () => setConnected(true),
+      onError: () => setConnected(false),
+      onEvent: (type) => {
+        const segments = parseEventType(type)
         if (segments.length === 0) return
         qc.invalidateQueries({ predicate: (q) => keyMatches(q.queryKey, segments) })
-      } catch {
-        // malformed event payload — ignore
-      }
+      },
     })
 
     return () => {
       setConnected(false)
-      es.removeAllEventListeners()
-      es.close()
+      conn.close()
     }
   }, [baseUrl, qc])
 

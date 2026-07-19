@@ -2,7 +2,6 @@ import { router } from 'expo-router'
 import { useMemo, useState } from 'react'
 import {
   Alert,
-  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -22,6 +21,7 @@ import {
   useTasks,
 } from '../../src/api/queries'
 import { ActionSheet } from '../../src/components/ActionSheet'
+import { BottomSheet } from '../../src/components/BottomSheet'
 import { ConnectionBanner } from '../../src/components/ConnectionBanner'
 import { useToast } from '../../src/components/Toast'
 import type { Task, TaskStatus } from '../../src/api/types'
@@ -80,16 +80,23 @@ function TaskCard({ task, workers, onLongPress }: { task: Task; workers: number;
   )
 }
 
-function NewTaskModal({ projectId, onClose }: { projectId: string; onClose: () => void }) {
+function NewTaskModal({
+  visible,
+  projectId,
+  onClose,
+}: {
+  visible: boolean
+  projectId: string
+  onClose: () => void
+}) {
   const create = useCreateTask()
+  const toast = useToast()
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
 
   return (
-    <Modal transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
-          <View style={styles.grabber} />
+    <BottomSheet visible={visible} onClose={onClose}>
+      <View>
           <Text style={{ fontSize: 15, fontWeight: '700', marginBottom: 14 }}>New task</Text>
           <TextInput
             style={styles.input}
@@ -115,15 +122,21 @@ function NewTaskModal({ projectId, onClose }: { projectId: string; onClose: () =
               onPress={() =>
                 create.mutate(
                   { title: title.trim(), description: description.trim() || undefined, project: projectId },
-                  { onSuccess: onClose },
+                  {
+                    onSuccess: () => {
+                      setTitle('')
+                      setDescription('')
+                      onClose()
+                    },
+                    onError: (e) => toast.show((e as Error).message),
+                  },
                 )
               }
               style={{ flex: 1 }}
             />
           </View>
-        </Pressable>
-      </Pressable>
-    </Modal>
+      </View>
+    </BottomSheet>
   )
 }
 
@@ -219,7 +232,9 @@ export default function KanbanScreen() {
           <Text style={{ color: '#fff', fontSize: 26, lineHeight: 30 }}>＋</Text>
         </Pressable>
       ) : null}
-      {creating && projectId ? <NewTaskModal projectId={projectId} onClose={() => setCreating(false)} /> : null}
+      {projectId ? (
+        <NewTaskModal visible={creating} projectId={projectId} onClose={() => setCreating(false)} />
+      ) : null}
       <ActionSheet
         visible={menuTask !== null}
         title={menuTask ? `#${menuTask.id} ${menuTask.title}` : ''}
@@ -300,26 +315,6 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 6 },
     elevation: 6,
-  },
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(15,15,17,.4)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: '#fbfbfa',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    padding: 16,
-    paddingBottom: 32,
-  },
-  grabber: {
-    alignSelf: 'center',
-    width: 38,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: '#d4d4d1',
-    marginBottom: 14,
   },
   input: {
     height: 44,

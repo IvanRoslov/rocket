@@ -26,8 +26,16 @@ export function SectionTitle({ children, right }: { children: string; right?: Re
   )
 }
 
-export function MonoText({ children, style }: { children: React.ReactNode; style?: object }) {
-  return <Text style={[{ fontFamily: mono, fontSize: 12, color: colors.textMid }, style]}>{children}</Text>
+export function MonoText({
+  children,
+  style,
+  ...rest
+}: { children: React.ReactNode; style?: object } & import('react-native').TextProps) {
+  return (
+    <Text style={[{ fontFamily: mono, fontSize: 12, color: colors.textMid }, style]} {...rest}>
+      {children}
+    </Text>
+  )
 }
 
 export interface ChipDef {

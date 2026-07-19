@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useGithubRepos, useRegisterRepo, useRepos } from '../api/queries'
 import { colors, mono, radius } from '../theme'
+import { BottomSheet } from './BottomSheet'
 import { GhostButton, MonoText, PrimaryButton } from './ui'
 
 type Source = 'registered' | 'github' | 'path'
@@ -33,8 +34,6 @@ export function RepoPicker({
   const github = useGithubRepos(query, visible && source === 'github')
   const register = useRegisterRepo()
 
-  if (!visible) return null
-
   const registered = (repos.data ?? []).filter((r) => !exclude.includes(r.id))
 
   const pickRegistered = (id: string) => {
@@ -54,11 +53,8 @@ export function RepoPicker({
   }
 
   return (
-    <Modal transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
-          <View style={styles.grabber} />
-          <Text style={{ fontSize: 15, fontWeight: '700', marginBottom: 12 }}>{title}</Text>
+    <BottomSheet visible={visible} onClose={onClose}>
+      <Text style={{ fontSize: 15, fontWeight: '700', marginBottom: 12 }}>{title}</Text>
 
           <View style={{ flexDirection: 'row', gap: 6, marginBottom: 14 }}>
             {(
@@ -172,30 +168,12 @@ export function RepoPicker({
             </View>
           ) : null}
 
-          <GhostButton label="Cancel" onPress={onClose} style={{ marginTop: 14 }} />
-        </Pressable>
-      </Pressable>
-    </Modal>
+      <GhostButton label="Cancel" onPress={onClose} style={{ marginTop: 14 }} />
+    </BottomSheet>
   )
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(15,15,17,.4)', justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: '#fbfbfa',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    padding: 16,
-    paddingBottom: 32,
-  },
-  grabber: {
-    alignSelf: 'center',
-    width: 38,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: '#d4d4d1',
-    marginBottom: 14,
-  },
   srcChip: {
     height: 32,
     paddingHorizontal: 13,
