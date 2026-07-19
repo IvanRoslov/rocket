@@ -302,9 +302,13 @@ func TestMergedGrace_WorkerIdle_CompletesAfterGrace(t *testing.T) {
 
 	waitForSessionState(t, e.st, sess.ID, "done", time.Second)
 
-	if e.ws.destroyedCount() != 1 {
-		t.Fatalf("expected workspace destroyed once, got %d", e.ws.destroyedCount())
-	}
+	// terminate() updates the session's state to "done" and then destroys
+	// the workspace, in that order but on the grace timer's own goroutine:
+	// waitForSessionState above only guarantees the state write has
+	// happened, not that Destroy has run yet, so poll for it too instead of
+	// asserting immediately (that immediate-check race is what made this
+	// test flaky).
+	waitForDestroyedCount(t, e.ws, 1, time.Second)
 
 	var sawCleanup bool
 	deadline := time.After(time.Second)
@@ -451,6 +455,20 @@ func waitForSessionState(t *testing.T, st *store.Store, id, want string, timeout
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for session %q to reach state %q", id, want)
+}
+
+// waitForDestroyedCount polls ws.destroyedCount() until it reaches want or
+// timeout elapses.
+func waitForDestroyedCount(t *testing.T, ws *reactFakeWorkspace, want int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if ws.destroyedCount() == want {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for workspace destroyedCount to reach %d, got %d", want, ws.destroyedCount())
 }
 
 type atomicBool struct {
