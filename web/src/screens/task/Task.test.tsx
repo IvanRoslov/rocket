@@ -300,6 +300,118 @@ describe('TaskScreen', () => {
     })
   })
 
+  describe('editing title and description', () => {
+    it('shows an Edit button on the Overview tab', async () => {
+      renderTask()
+      expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+
+      expect(screen.getByRole('button', { name: 'Edit task' })).toBeInTheDocument()
+    })
+
+    it('clicking Edit reveals title and description fields prefilled with the current values', async () => {
+      renderTask()
+      expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+
+      await userEvent.click(screen.getByRole('button', { name: 'Edit task' }))
+
+      expect(screen.getByLabelText('Task title')).toHaveValue('Billing v2')
+      expect(screen.getByLabelText('Task description')).toHaveValue(
+        'Rework the billing subsystem: new schema, prorated plan changes, and a redesigned billing UI.',
+      )
+    })
+
+    it('Save posts PATCH /v1/tasks/:id with the edited {title, description} and exits edit mode', async () => {
+      let capturedBody: unknown
+      server.use(
+        http.patch('/v1/tasks/:id', async ({ request, params }) => {
+          capturedBody = await request.json()
+          return HttpResponse.json({
+            id: Number(params.id),
+            title: (capturedBody as { title: string }).title,
+            description: (capturedBody as { description: string }).description,
+            project_id: 'billing',
+            status: 'in_progress',
+            created_by: 'user',
+            created_at: 1,
+            updated_at: 2,
+          })
+        }),
+      )
+
+      renderTask()
+      expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('button', { name: 'Edit task' }))
+
+      const titleInput = screen.getByLabelText('Task title')
+      await userEvent.clear(titleInput)
+      await userEvent.type(titleInput, 'Billing v2 (renamed)')
+
+      const descInput = screen.getByLabelText('Task description')
+      await userEvent.clear(descInput)
+      await userEvent.type(descInput, 'Updated description text.')
+
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+      await waitFor(() =>
+        expect(capturedBody).toEqual({
+          title: 'Billing v2 (renamed)',
+          description: 'Updated description text.',
+        }),
+      )
+      await waitFor(() => expect(screen.queryByLabelText('Task title')).not.toBeInTheDocument())
+    })
+
+    it('disables Save when the title is emptied', async () => {
+      renderTask()
+      expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('button', { name: 'Edit task' }))
+
+      const titleInput = screen.getByLabelText('Task title')
+      await userEvent.clear(titleInput)
+
+      expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    })
+
+    it('Cancel exits edit mode without saving', async () => {
+      renderTask()
+      expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('button', { name: 'Edit task' }))
+
+      const titleInput = screen.getByLabelText('Task title')
+      await userEvent.clear(titleInput)
+      await userEvent.type(titleInput, 'Should not be saved')
+
+      await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+      expect(screen.queryByLabelText('Task title')).not.toBeInTheDocument()
+      expect(screen.getByText('Billing v2')).toBeInTheDocument()
+    })
+
+    it('shows a muted placeholder for a task with no description', async () => {
+      server.use(
+        http.get('/v1/tasks/:id', () =>
+          HttpResponse.json({
+            id: 20,
+            title: 'Accidental empty task',
+            description: '',
+            project_id: 'billing',
+            status: 'backlog',
+            created_by: 'user',
+            created_at: 1,
+            updated_at: 1,
+            subtasks: [],
+            open_questions: 0,
+          }),
+        ),
+      )
+
+      renderTask('billing', 20)
+      expect(await screen.findByText('Accidental empty task')).toBeInTheDocument()
+
+      expect(screen.getByText('No description — click Edit to add one.')).toBeInTheDocument()
+    })
+  })
+
   describe('user-opened question threads', () => {
     it('renders a "you asked the orchestrator" header instead of the orchestrator name', async () => {
       renderTask('billing', 13)

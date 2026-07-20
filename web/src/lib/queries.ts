@@ -345,6 +345,28 @@ export function useMoveTask(): UseMutationResult<Task, Error, { id: number; stat
   })
 }
 
+/**
+ * `PATCH /v1/tasks/{id}` `{title?, description?}` -> bare taskResponse (200).
+ * Used by the Overview tab's inline title/description editor. The daemon
+ * does not itself reject an empty title on this path (see
+ * internal/api/tasks.go handlePatchTask) — callers must validate that
+ * client-side before calling mutate.
+ */
+export function useUpdateTask(): UseMutationResult<
+  Task,
+  Error,
+  { id: number; title?: string; description?: string }
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...body }) => api.patch<Task>(`/v1/tasks/${id}`, body),
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ['task', id] })
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    },
+  })
+}
+
 /** `POST /v1/tasks/{id}/cancel` (no body) -> bare taskResponse (200); cascades to kill sessions. */
 export function useCancelTask(): UseMutationResult<Task, Error, number> {
   const queryClient = useQueryClient()

@@ -1,3 +1,86 @@
+.overview-tab__edit-toggle {
+  align-self: flex-start;
+  height: 30px;
+  padding: 0 12px;
+  margin: 0 0 12px;
+  background: var(--surface);
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-btn-sm);
+  font: 600 12px var(--font-ui);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.overview-tab__edit-toggle:hover {
+  background: var(--surface-3);
+}
+
+.overview-tab__edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1.5px solid var(--border-hover);
+  background: var(--surface);
+  border-radius: 14px;
+  padding: 18px 20px;
+  margin-bottom: 22px;
+}
+.overview-tab__edit-title {
+  width: 100%;
+  padding: 10px 13px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font: 600 16px var(--font-ui);
+  color: var(--text);
+  outline: none;
+  background: var(--surface);
+}
+.overview-tab__edit-description {
+  width: 100%;
+  resize: vertical;
+  min-height: 140px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  font: 14px/1.6 var(--font-mono);
+  outline: none;
+  background: var(--surface);
+  color: var(--text-2);
+}
+.overview-tab__edit-error {
+  font: 13px var(--font-ui);
+  color: var(--err-text);
+}
+.overview-tab__edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.overview-tab__edit-save {
+  height: 37px;
+  padding: 0 17px;
+  background: var(--text);
+  color: var(--surface);
+  border: none;
+  border-radius: 9px;
+  font: 600 13px var(--font-ui);
+  cursor: pointer;
+}
+.overview-tab__edit-cancel {
+  height: 37px;
+  padding: 0 14px;
+  background: none;
+  border: 1px solid var(--border-hover);
+  border-radius: 9px;
+  font: 600 13px var(--font-ui);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.overview-tab__edit-save:disabled,
+.overview-tab__edit-cancel:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .overview-tab__description {
   font: 15px/1.65 var(--font-ui);
   color: var(--text-2-alt);

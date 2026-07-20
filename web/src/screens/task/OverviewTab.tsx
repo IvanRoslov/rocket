@@ -3,8 +3,10 @@
 // worker session), and the final report doc if the orchestrator has written
 // one (`kind: "report"`).
 
+import { useState } from 'react'
 import { Markdown } from '../../components/Markdown'
 import { Link } from 'react-router-dom'
+import { useUpdateTask } from '../../lib/queries'
 import type { Session, Task, TaskDoc, TaskStatus } from '../../lib/types'
 import './OverviewTab.css'
 
@@ -58,14 +60,85 @@ function prLabel(session: Session | undefined): { text: string; tone: string } {
 export function OverviewTab({ projectId, task, subtasks, sessions, docs }: OverviewTabProps) {
   const report = docs?.find((d) => d.kind === 'report')
 
+  const [editing, setEditing] = useState(false)
+  const [title, setTitle] = useState(task.title)
+  const [description, setDescription] = useState(task.description ?? '')
+  const update = useUpdateTask()
+
+  function startEdit() {
+    setTitle(task.title)
+    setDescription(task.description ?? '')
+    update.reset()
+    setEditing(true)
+  }
+
+  function cancelEdit() {
+    update.reset()
+    setEditing(false)
+  }
+
+  function handleSave() {
+    const trimmedTitle = title.trim()
+    if (!trimmedTitle) return
+    update.mutate(
+      { id: task.id, title: trimmedTitle, description },
+      { onSuccess: () => setEditing(false) },
+    )
+  }
+
   return (
     <div className="overview-tab">
-      {task.description ? (
-        <div className="overview-tab__description">
-          <Markdown>{task.description}</Markdown>
+      {editing ? (
+        <div className="overview-tab__edit-form">
+          <input
+            aria-label="Task title"
+            className="overview-tab__edit-title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            disabled={update.isPending}
+          />
+          <textarea
+            aria-label="Task description"
+            className="overview-tab__edit-description"
+            placeholder="Markdown description…"
+            rows={8}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            disabled={update.isPending}
+          />
+          {update.isError && <div className="overview-tab__edit-error">{update.error.message}</div>}
+          <div className="overview-tab__edit-actions">
+            <button
+              type="button"
+              className="overview-tab__edit-save"
+              onClick={handleSave}
+              disabled={update.isPending || !title.trim()}
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              className="overview-tab__edit-cancel"
+              onClick={cancelEdit}
+              disabled={update.isPending}
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       ) : (
-        <p className="overview-tab__description-empty">No description.</p>
+        <>
+          <button type="button" className="overview-tab__edit-toggle" onClick={startEdit} aria-label="Edit task">
+            ✎ Edit
+          </button>
+          {task.description ? (
+            <div className="overview-tab__description">
+              <Markdown>{task.description}</Markdown>
+            </div>
+          ) : (
+            <p className="overview-tab__description-empty">No description — click Edit to add one.</p>
+          )}
+        </>
       )}
 
       {task.parent_id === undefined && (
