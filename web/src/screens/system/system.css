@@ -61,21 +61,17 @@
 /* ---------- Layout ---------- */
 .system-grid {
   display: grid;
-  grid-template-columns: 1.6fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
   align-items: start;
-}
-.system-side {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  margin-top: 16px;
 }
 .panel__title {
   font: 650 14px var(--font-ui);
   margin-bottom: 12px;
 }
 
-/* ---------- Sessions table ---------- */
+/* ---------- Sessions panel (full width, cards) ---------- */
 .system-sessions {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -96,80 +92,114 @@
   font: 11.5px var(--font-ui);
   color: var(--text-4);
 }
-.session-row-head {
+.session-cards {
   display: grid;
-  grid-template-columns: 1.4fr 0.8fr 0.8fr 0.8fr 0.7fr;
-  padding: 9px 16px;
-  font: 600 11px var(--font-ui);
-  color: var(--text-4);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--divider);
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  padding: 14px 16px;
 }
-.session-row {
-  display: grid;
-  grid-template-columns: 1.4fr 0.8fr 0.8fr 0.8fr 0.7fr;
-  align-items: center;
-  padding: 11px 16px;
-  border-bottom: 1px solid var(--divider-2);
-}
-.session-row[data-orphan='true'] {
-  background: var(--warn-bg-2);
-}
-.session-row__name {
+.session-card {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
   min-width: 0;
+  background: var(--surface-3, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 11px 12px;
 }
-.session-row__name-text {
+.session-card[data-orphan='true'] {
+  background: var(--warn-bg-2);
+  border-color: var(--warn-border);
+}
+.session-card__row1 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.session-card__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-4);
+}
+.session-card__dot--ok {
+  background: var(--ok-text);
+}
+.session-card__dot--warn {
+  background: var(--warn-text);
+}
+.session-card__dot--err {
+  background: var(--err-text);
+}
+.session-card__dot--indigo {
+  background: var(--accent-text, var(--text-2));
+}
+.session-card__name {
+  flex: 1;
+  min-width: 0;
   font: 600 12.5px var(--font-mono);
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.session-row__kind {
-  font: 12px var(--font-ui);
-  color: var(--text-2);
+.session-card__kind {
+  flex: none;
+  font: 600 10px var(--font-ui);
+  color: var(--text-4);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 7px;
 }
-.session-row__agent {
+.session-card__row2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.session-card__agent {
   font: 12px var(--font-mono);
   color: var(--text-3);
 }
-.session-row__actions {
+.session-card__row3 {
   display: flex;
-  justify-content: flex-end;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
-.session-row__term {
+.session-card__term {
   display: inline-flex;
   align-items: center;
   height: 26px;
   padding: 0 9px;
   border-radius: 7px;
-  background: var(--surface-3, var(--surface));
+  background: var(--surface);
   border: 1px solid var(--border);
   font: 600 11.5px var(--font-ui);
   color: var(--text);
   text-decoration: none;
 }
-.session-row__term:hover {
+.session-card__term:hover {
   border-color: var(--border-hover);
 }
-.session-row__chat {
+.session-card__chat {
   display: inline-flex;
   align-items: center;
   height: 26px;
   padding: 0 9px;
   border-radius: 7px;
-  background: var(--surface-3, var(--surface));
+  background: var(--surface);
   border: 1px solid var(--border);
   font: 600 11.5px var(--font-ui);
   color: var(--text);
   text-decoration: none;
 }
-.session-row__chat:hover {
+.session-card__chat:hover {
   border-color: var(--border-hover);
 }
 
@@ -319,4 +349,17 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 760px) {
+  .system-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .system-grid {
+    grid-template-columns: 1fr;
+  }
+  .session-cards {
+    grid-template-columns: 1fr;
+  }
 }

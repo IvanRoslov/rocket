@@ -215,36 +215,34 @@ export function SystemScreen() {
         />
       </div>
 
-      <div className="system-grid">
-        <div className="system-sessions">
-          <div className="system-sessions__head">
-            <span className="system-sessions__head-title">tmux sessions &amp; agents</span>
-            <span className="system-sessions__head-note">reconciled with daemon state</span>
-          </div>
-          <div className="session-row-head">
-            <span>session</span>
-            <span>kind</span>
-            <span>agent</span>
-            <span>state</span>
-            <span></span>
-          </div>
+      <div className="system-sessions">
+        <div className="system-sessions__head">
+          <span className="system-sessions__head-title">tmux sessions &amp; agents</span>
+          <span className="system-sessions__head-note">reconciled with daemon state</span>
+        </div>
+        <div className="session-cards">
           {rows.map((row) => (
             <div
               key={row.key}
-              className="session-row"
+              className="session-card"
               data-testid="session-row"
               data-orphan={row.orphan ? 'true' : 'false'}
             >
-              <div className="session-row__name">
-                <span className="session-row__name-text">{row.name}</span>
+              <div className="session-card__row1">
+                <span className={`session-card__dot session-card__dot--${stateBadgeTone(row.state)}`} />
+                <span className="session-card__name" title={row.name}>
+                  {row.name}
+                </span>
+                {row.kind !== '—' && <span className="session-card__kind">{row.kind}</span>}
               </div>
-              <span className="session-row__kind">{row.kind}</span>
-              <span className="session-row__agent">{row.agent}</span>
-              <Badge tone={stateBadgeTone(row.state)}>{row.state}</Badge>
-              <div className="session-row__actions">
+              <div className="session-card__row2">
+                <span className="session-card__agent">{row.agent}</span>
+                <Badge tone={stateBadgeTone(row.state)}>{row.state}</Badge>
+              </div>
+              <div className="session-card__row3">
                 {row.session && (
                   <a
-                    className="session-row__term"
+                    className="session-card__term"
                     href={termPagePath(row.session.id)}
                     target="_blank"
                     rel="noopener noreferrer"
@@ -254,7 +252,7 @@ export function SystemScreen() {
                 )}
                 {row.session && (
                   <a
-                    className="session-row__chat"
+                    className="session-card__chat"
                     href={chatPagePath(row.session.id)}
                     target="_blank"
                     rel="noopener noreferrer"
@@ -271,8 +269,9 @@ export function SystemScreen() {
             </div>
           ))}
         </div>
+      </div>
 
-        <div className="system-side">
+      <div className="system-grid">
           <Card className="panel">
             <div className="panel__title">Message queue</div>
             <div className="queue-tiles">
@@ -334,7 +333,6 @@ export function SystemScreen() {
               </div>
             </div>
           </Card>
-        </div>
       </div>
 
       <div className="log-tail">
