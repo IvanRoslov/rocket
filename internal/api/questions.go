@@ -57,6 +57,10 @@ func whoseTurn(q store.Question, msgs []store.QuestionMessage) string {
 		return ""
 	}
 	if len(msgs) == 0 {
+		if q.AskedBy == "" {
+			// User-opened thread, no reply yet: the orchestrator owes a reply.
+			return "orchestrator"
+		}
 		// Last entry is the question itself, from the orchestrator.
 		return "user"
 	}
@@ -187,8 +191,16 @@ type postQuestionRequest struct {
 }
 
 // handlePostTaskQuestions serves POST /v1/tasks/{id}/questions
-// {body, context?}. Only the task's own orchestrator may ask a question, and
-// only on a root task.
+// {body, context?}, in one of two directions, and only on a root task:
+//   - The task's own orchestrator may open a question addressed to the
+//     human (AskedBy = the orchestrator's session id). No injection — the
+//     human reads it in the CLI/dashboard.
+//   - The human user (no X-Rocket-Session header) may open a question
+//     addressed to the task's orchestrator (AskedBy = ""). The question body
+//     is injected into the orchestrator's message queue so it reaches the
+//     agent.
+//
+// A worker caller, or an orchestrator not owning the task, gets 403.
 func handlePostTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 	id, ok := parseTaskID(w, r)
 	if !ok {
@@ -203,8 +215,8 @@ func handlePostTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 	if writeCallerErr(w, err) {
 		return
 	}
-	if caller == nil || caller.Kind != "orchestrator" || task.SessionID != caller.ID {
-		writeErr(w, http.StatusForbidden, "forbidden", "only the task's own orchestrator may ask questions")
+	if caller != nil && (caller.Kind != "orchestrator" || task.SessionID != caller.ID) {
+		writeErr(w, http.StatusForbidden, "forbidden", "only the human user or the task's own orchestrator may ask questions")
 		return
 	}
 	if task.ParentID != 0 {
@@ -224,7 +236,7 @@ func handlePostTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 
 	qid, err := d.Store.AddQuestion(store.Question{
 		TaskID:  id,
-		AskedBy: caller.ID,
+		AskedBy: callerAuthor(caller),
 		Body:    req.Body,
 		Context: req.Context,
 	})
@@ -233,7 +245,27 @@ func handlePostTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
-	d.Bus.Publish("task.question_asked", caller.ID, map[string]any{
+	if caller == nil {
+		q, ok := getQuestionOr404(w, d, qid)
+		if !ok {
+			return
+		}
+		ordinal, err := d.Store.QuestionOrdinal(q)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		body := fmt.Sprintf("[task #%d Q%d question] %s", task.ID, ordinal, req.Body)
+		if req.Context != "" {
+			body += "\n\n" + req.Context
+		}
+		if err := deliverToOrchestrator(d, task, body); err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+	}
+
+	d.Bus.Publish("task.question_asked", callerLabel(caller), map[string]any{
 		"task_id": id, "question_id": qid,
 	})
 

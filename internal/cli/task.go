@@ -118,6 +118,7 @@ func newTaskCmd() *cobra.Command {
 	cmd.AddCommand(newTaskDocCmd())
 	cmd.AddCommand(newTaskLogCmd())
 	cmd.AddCommand(newTaskAskCmd())
+	cmd.AddCommand(newTaskAskOrchCmd())
 	cmd.AddCommand(newTaskQuestionsCmd())
 	cmd.AddCommand(newTaskReplyCmd())
 	cmd.AddCommand(newTaskAnswerCmd())
@@ -587,12 +588,16 @@ func newTaskLogCmd() *cobra.Command {
 	return cmd
 }
 
+// newTaskAskCmd builds "rocket task ask": opens a question thread FROM the
+// task's own orchestrator TO the human. Called by the orchestrator agent
+// (its session id is auto-attached via $ROCKET_SESSION_ID); the server
+// rejects any other caller.
 func newTaskAskCmd() *cobra.Command {
 	var context string
 
 	cmd := &cobra.Command{
 		Use:   "ask <task-id> \"<вопрос>\"",
-		Short: "Задать вопрос пользователю по задаче",
+		Short: "Задать вопрос пользователю по задаче (от имени оркестратора этой задачи)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 2 {
 				return &usageError{message: "usage: rocket task ask <task-id> \"<вопрос>\" [--context <md>]"}
@@ -621,6 +626,53 @@ func newTaskAskCmd() *cobra.Command {
 				return printJSON(cmd, resp)
 			}
 			cmd.Printf("question Q%d (#%d) opened\n", resp.Ordinal, resp.ID)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&context, "context", "", "дополнительный контекст (MD)")
+	return cmd
+}
+
+// newTaskAskOrchCmd builds "rocket task ask-orch": the reverse direction —
+// the HUMAN opens a question thread addressed to the task's orchestrator.
+// The question body is injected into the orchestrator's message queue, so
+// it reaches the agent right away instead of waiting to be polled. The
+// orchestrator replies in-thread (rocket task reply); only the human who
+// opened it can resolve it (rocket task answer).
+func newTaskAskOrchCmd() *cobra.Command {
+	var context string
+
+	cmd := &cobra.Command{
+		Use:   "ask-orch <task-id> \"<вопрос>\"",
+		Short: "Задать вопрос оркестратору задачи (от пользователя)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 2 {
+				return &usageError{message: "usage: rocket task ask-orch <task-id> \"<вопрос>\" [--context <md>]"}
+			}
+			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
+				return &usageError{message: "invalid task id"}
+			}
+
+			c, _, err := connect(true)
+			if err != nil {
+				return err
+			}
+
+			reqBody := map[string]any{"body": args[1]}
+			if context != "" {
+				reqBody["context"] = context
+			}
+
+			path := apiPath("v1", "tasks", args[0], "questions")
+			var resp questionRow
+			if err := c.Post(path, reqBody, &resp); err != nil {
+				return err
+			}
+
+			if flags.JSON {
+				return printJSON(cmd, resp)
+			}
+			cmd.Printf("question Q%d (#%d) opened, delivered to the task's orchestrator\n", resp.Ordinal, resp.ID)
 			return nil
 		},
 	}

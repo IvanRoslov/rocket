@@ -92,7 +92,7 @@ tmux рендерит окно ровно в **одном** размере; пр
 | GET | `/v1/tasks/{id}/log` | Журнал; `?kind=` |
 | POST | `/v1/tasks/{id}/log` | `{kind, body}` |
 | GET | `/v1/tasks/{id}/questions` | Вопросы задачи с тредами; `?status=open` |
-| POST | `/v1/tasks/{id}/questions` | `{body, context?}` — только оркестратор задачи; событие `task.question_asked` |
+| POST | `/v1/tasks/{id}/questions` | `{body, context?}` — только на корневой задаче. Оркестратор задачи открывает вопрос пользователю (`asked_by` = его session id), без доставки. Пользователь (запрос без `X-Rocket-Session`) открывает вопрос оркестратору (`asked_by = ""`), и тело сразу доставляется в очередь оркестратора как `[task #N QM question] ...` (+ `context`, если есть); свежий такой тред имеет `whose_turn = "orchestrator"`. Воркер получает `403`. Событие `task.question_asked` |
 | POST | `/v1/questions/{id}/reply` | `{body}` — реплика в тред от любой стороны; вопрос остаётся open. Реплика пользователя доставляется оркестратору через очередь (`[task #N QM reply] ...`); реплика оркестратора поднимает бейдж пользователю. Событие `task.question_replied` |
 | POST | `/v1/questions/{id}/answer` | `{body}` или `{dismiss: true}` — только пользователь; финальный ответ закрывает вопрос (`resolved`), уходит оркестратору как `[task #N QM answer] ...`. Событие `task.question_resolved` |
 

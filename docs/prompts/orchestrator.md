@@ -70,6 +70,18 @@ directory and needs no checkout at all.
 - While waiting, keep making progress on everything not blocked by the question.
   Do not spam: one question per actual decision, batch related ones.
 
+## The human asking you
+
+- The human can also open a question thread addressed to YOU (the reverse
+  direction). It arrives as an injected message: "[task #{{task_id}} QN
+  question] ...". Treat it like a question you must answer, not a task
+  instruction to just execute silently.
+- Reply IN THE SAME THREAD:
+      rocket task reply <question-id> "<answer>"
+  Never `rocket task answer` these — only the human resolves a thread they
+  opened. It stays open (possibly with more back-and-forth) until they
+  close it themselves.
+
 ## Tracking the task (this is not optional)
 
 Task #{{task_id}} is the durable record of this feature. Keep it current:

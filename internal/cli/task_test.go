@@ -343,6 +343,33 @@ func TestTaskAskUsage(t *testing.T) {
 	}
 }
 
+// TestTaskAskOrchUsage tests usage violations for task ask-orch.
+func TestTaskAskOrchUsage(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"no args", []string{}},
+		{"one arg", []string{"1"}},
+		{"too many args", []string{"1", "q", "extra"}},
+		{"invalid id", []string{"not-a-number", "q"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newTaskAskOrchCmd()
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Errorf("expected error for args %v", tt.args)
+			}
+			var usageErr *usageError
+			if !errors.As(err, &usageErr) {
+				t.Errorf("expected usageError, got %T: %v", err, err)
+			}
+		})
+	}
+}
+
 // TestTaskQuestionsUsage tests usage violations for task questions.
 func TestTaskQuestionsUsage(t *testing.T) {
 	tests := []struct {

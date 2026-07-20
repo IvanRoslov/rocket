@@ -42,6 +42,27 @@ func TestAddQuestion_Defaults(t *testing.T) {
 	}
 }
 
+// TestAddQuestion_UserOpenedRoundTrips verifies a user-opened question
+// (AskedBy == "", the convention for a human-authored entry) round-trips
+// through the NOT NULL asked_by column without error.
+func TestAddQuestion_UserOpenedRoundTrips(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+
+	id, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "", Body: "What's the status?"})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+
+	got, err := s.GetQuestion(id)
+	if err != nil {
+		t.Fatalf("GetQuestion: %v", err)
+	}
+	if got.AskedBy != "" {
+		t.Errorf("AskedBy = %q, want empty", got.AskedBy)
+	}
+}
+
 func TestGetQuestion_NotFound(t *testing.T) {
 	s := openTestStore(t)
 	if _, err := s.GetQuestion(999); !errors.Is(err, ErrNotFound) {

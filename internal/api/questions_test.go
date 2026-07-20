@@ -40,6 +40,20 @@ func decodeQuestion(t *testing.T, resp *http.Response) questionResponse {
 	return q
 }
 
+func TestWhoseTurn_UserOpenedNoMessages(t *testing.T) {
+	q := store.Question{Status: "open", AskedBy: ""}
+	if got := whoseTurn(q, nil); got != "orchestrator" {
+		t.Errorf("whoseTurn = %q, want orchestrator", got)
+	}
+}
+
+func TestWhoseTurn_OrchestratorOpenedNoMessages(t *testing.T) {
+	q := store.Question{Status: "open", AskedBy: "orch-1"}
+	if got := whoseTurn(q, nil); got != "user" {
+		t.Errorf("whoseTurn = %q, want user", got)
+	}
+}
+
 // --- POST /v1/tasks/{id}/questions -------------------------------------
 
 func TestPostTaskQuestions_HappyPath(t *testing.T) {
@@ -89,18 +103,106 @@ func TestPostTaskQuestions_HappyPath(t *testing.T) {
 	}
 }
 
-func TestPostTaskQuestions_HumanForbidden(t *testing.T) {
+// TestPostTaskQuestions_HumanOpensThreadToOrchestrator covers the new
+// direction: a human (no X-Rocket-Session header) opens a question thread
+// addressed to the task's orchestrator. It should succeed with AskedBy=="",
+// whose_turn "orchestrator" (nothing has been said back yet), and the
+// question body should be injected into the orchestrator's message queue.
+func TestPostTaskQuestions_HumanOpensThreadToOrchestrator(t *testing.T) {
 	d := questionsTestDeps(t)
 	srv := newTestServer(t, d)
 	taskID := setupQuestionTask(t, d)
 
-	resp := postJSON(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", map[string]any{"body": "Q"})
+	resp := postJSON(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", map[string]any{"body": "What's the status?"})
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
 	}
-	if eb := decodeErr(t, resp); eb.Error.Code != "forbidden" {
-		t.Errorf("code = %q, want forbidden", eb.Error.Code)
+	q := decodeQuestion(t, resp)
+	if q.AskedBy != "" {
+		t.Errorf("AskedBy = %q, want empty (user-opened)", q.AskedBy)
+	}
+	if q.WhoseTurn != "orchestrator" {
+		t.Errorf("WhoseTurn = %q, want orchestrator", q.WhoseTurn)
+	}
+	if len(q.Messages) != 0 {
+		t.Errorf("Messages = %+v, want empty", q.Messages)
+	}
+
+	wantPrefix := "[task #" + itoa(taskID) + " Q1 question] What's the status?"
+	msgs, err := d.Store.ListMessages("orch-1", 10)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].Body != wantPrefix {
+		t.Fatalf("delivered messages = %+v, want single message %q", msgs, wantPrefix)
+	}
+}
+
+// TestPostTaskQuestions_HumanOpensThreadWithContext verifies the context is
+// appended to the injected body.
+func TestPostTaskQuestions_HumanOpensThreadWithContext(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	resp := postJSON(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions",
+		map[string]any{"body": "What's the status?", "context": "extra info"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+
+	wantBody := "[task #" + itoa(taskID) + " Q1 question] What's the status?\n\nextra info"
+	msgs, err := d.Store.ListMessages("orch-1", 10)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].Body != wantBody {
+		t.Fatalf("delivered messages = %+v, want single message %q", msgs, wantBody)
+	}
+}
+
+// TestUserOpenedQuestionThread_OrchestratorRepliesNoInjection covers the
+// tail of the reverse-direction flow: after a user opens a thread, the
+// orchestrator's reply flips whose_turn to "user" and lands thread-only
+// (no message re-injected to the orchestrator itself).
+func TestUserOpenedQuestionThread_OrchestratorRepliesNoInjection(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	askResp := postJSON(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", map[string]any{"body": "status?"})
+	q := decodeQuestion(t, askResp)
+	askResp.Body.Close()
+
+	// The initial injection counts as one delivered message; clear it isn't
+	// what we're asserting on below, only that no *additional* delivery
+	// happens on the orchestrator's reply.
+	before, err := d.Store.ListMessages("orch-1", 10)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+
+	replyResp := postJSONWithHeader(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/reply", "orch-1", map[string]any{"body": "all good"})
+	if replyResp.StatusCode != http.StatusCreated {
+		t.Fatalf("reply status = %d, want 201", replyResp.StatusCode)
+	}
+	afterReply := decodeQuestion(t, replyResp)
+	replyResp.Body.Close()
+	if afterReply.WhoseTurn != "user" {
+		t.Fatalf("WhoseTurn = %q, want user", afterReply.WhoseTurn)
+	}
+	if len(afterReply.Messages) != 1 || afterReply.Messages[0].Author != "orch-1" {
+		t.Fatalf("messages = %+v", afterReply.Messages)
+	}
+
+	after, err := d.Store.ListMessages("orch-1", 10)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("delivered messages after orch reply = %+v, want unchanged from %+v (thread-only)", after, before)
 	}
 }
 
