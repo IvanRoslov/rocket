@@ -47,6 +47,8 @@ export const EVENT_TYPES = [
   'task.question_asked',
   'task.question_replied',
   'task.question_resolved',
+  // Orchestrator disputed a final answer — the thread is open again.
+  'task.question_reopened',
   'orchestrator.heartbeat_sent',
   'pr.opened',
   'pr.ci_changed',

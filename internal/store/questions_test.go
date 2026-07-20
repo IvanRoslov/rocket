@@ -245,3 +245,38 @@ func TestQuestionOrdinal(t *testing.T) {
 		}
 	}
 }
+
+func TestReopenQuestion(t *testing.T) {
+	st := openTestStore(t)
+	taskID := mustAddQuestionTask(t, st)
+
+	qid, err := st.AddQuestion(Question{TaskID: taskID, Body: "Q"})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+
+	// Reopening an OPEN question is an error.
+	if err := st.ReopenQuestion(qid); !errors.Is(err, ErrQuestionOpen) {
+		t.Fatalf("reopen open question: err = %v, want ErrQuestionOpen", err)
+	}
+
+	if err := st.ResolveQuestion(qid, "answered"); err != nil {
+		t.Fatalf("ResolveQuestion: %v", err)
+	}
+	if err := st.ReopenQuestion(qid); err != nil {
+		t.Fatalf("ReopenQuestion: %v", err)
+	}
+
+	q, err := st.GetQuestion(qid)
+	if err != nil {
+		t.Fatalf("GetQuestion: %v", err)
+	}
+	if q.Status != "open" || q.Resolution != "" || q.ResolvedAt != 0 {
+		t.Errorf("after reopen: %+v, want open with cleared resolution/resolved_at", q)
+	}
+
+	// Unknown id → ErrNotFound.
+	if err := st.ReopenQuestion(99999); !errors.Is(err, ErrNotFound) {
+		t.Errorf("reopen unknown: err = %v, want ErrNotFound", err)
+	}
+}

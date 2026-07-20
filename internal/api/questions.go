@@ -311,9 +311,18 @@ func handlePostQuestionReply(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
+	// A resolved question is final for the human (409), but the task's own
+	// orchestrator may dispute the final answer: its reply REOPENS the
+	// thread (status back to open, resolution cleared) so the disagreement
+	// continues in the same thread with full context, instead of a
+	// disconnected new question. See docs/12-tasks.md «Q&A».
+	reopen := false
 	if q.Status != "open" {
-		writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
-		return
+		if caller == nil {
+			writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
+			return
+		}
+		reopen = true
 	}
 
 	var req postQuestionReplyRequest
@@ -326,6 +335,15 @@ func handlePostQuestionReply(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
+	if reopen {
+		if err := d.Store.ReopenQuestion(id); err != nil {
+			// Raced with something else touching the question; surface as
+			// conflict rather than corrupting the thread.
+			writeErr(w, http.StatusConflict, "question_resolved", "question state changed concurrently: "+err.Error())
+			return
+		}
+	}
+
 	if _, err := d.Store.AddQuestionMessage(store.QuestionMessage{
 		QuestionID: id,
 		Author:     callerAuthor(caller),
@@ -334,6 +352,12 @@ func handlePostQuestionReply(w http.ResponseWriter, r *http.Request, d Deps) {
 	}); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
+	}
+
+	if reopen {
+		d.Bus.Publish("task.question_reopened", callerLabel(caller), map[string]any{
+			"task_id": task.ID, "question_id": id,
+		})
 	}
 
 	if caller == nil {

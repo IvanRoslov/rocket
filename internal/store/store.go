@@ -22,6 +22,7 @@ var (
 	ErrExists           = errors.New("already exists")
 	ErrRepoInUse        = errors.New("repo is in use by a project")
 	ErrQuestionResolved = errors.New("question already resolved")
+	ErrQuestionOpen     = errors.New("question is not resolved")
 )
 
 // escapeDSNPath percent-encodes special characters in a file path for use in a
