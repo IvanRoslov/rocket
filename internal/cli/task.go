@@ -606,6 +606,10 @@ func newTaskAskCmd() *cobra.Command {
 				return &usageError{message: "invalid task id"}
 			}
 
+			if os.Getenv("ROCKET_SESSION_ID") == "" {
+				return errors.New("rocket task ask is for orchestrators asking the human; to ask the orchestrator a question use: rocket task ask-orch")
+			}
+
 			c, _, err := connect(true)
 			if err != nil {
 				return err
@@ -672,7 +676,7 @@ func newTaskAskOrchCmd() *cobra.Command {
 			if flags.JSON {
 				return printJSON(cmd, resp)
 			}
-			cmd.Printf("question Q%d (#%d) opened, delivered to the task's orchestrator\n", resp.Ordinal, resp.ID)
+			cmd.Printf("question Q%d (#%d) opened for the orchestrator\n", resp.Ordinal, resp.ID)
 			return nil
 		},
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -340,6 +341,57 @@ func TestTaskAskUsage(t *testing.T) {
 				t.Errorf("expected usageError, got %T: %v", err, err)
 			}
 		})
+	}
+}
+
+// TestTaskAskNoRocketSessionID tests that task ask without ROCKET_SESSION_ID
+// returns an error with the ask-orch hint.
+func TestTaskAskNoRocketSessionID(t *testing.T) {
+	// Ensure ROCKET_SESSION_ID is not set
+	oldSessionID := os.Getenv("ROCKET_SESSION_ID")
+	os.Unsetenv("ROCKET_SESSION_ID")
+	defer func() {
+		if oldSessionID != "" {
+			os.Setenv("ROCKET_SESSION_ID", oldSessionID)
+		}
+	}()
+
+	cmd := newTaskAskCmd()
+	cmd.SetArgs([]string{"1", "question text"})
+	err := cmd.Execute()
+
+	if err == nil {
+		t.Errorf("expected error when ROCKET_SESSION_ID not set")
+	}
+
+	// Check that the error message contains the ask-orch hint
+	if !strings.Contains(err.Error(), "ask-orch") {
+		t.Errorf("expected error to mention ask-orch, got: %v", err)
+	}
+}
+
+// TestTaskAskWithRocketSessionID tests that task ask with ROCKET_SESSION_ID
+// set does not return the ROCKET_SESSION_ID guard error (though connect may fail).
+func TestTaskAskWithRocketSessionID(t *testing.T) {
+	// Set ROCKET_SESSION_ID
+	oldSessionID := os.Getenv("ROCKET_SESSION_ID")
+	os.Setenv("ROCKET_SESSION_ID", "test-session-123")
+	defer func() {
+		if oldSessionID != "" {
+			os.Setenv("ROCKET_SESSION_ID", oldSessionID)
+		} else {
+			os.Unsetenv("ROCKET_SESSION_ID")
+		}
+	}()
+
+	cmd := newTaskAskCmd()
+	cmd.SetArgs([]string{"1", "question text"})
+	err := cmd.Execute()
+
+	// The command may fail from connect(), but should NOT return the
+	// ROCKET_SESSION_ID guard error message
+	if err != nil && err.Error() == "rocket task ask is for orchestrators asking the human; to ask the orchestrator a question use: rocket task ask-orch" {
+		t.Errorf("should not return ROCKET_SESSION_ID guard error when env var is set, got: %v", err)
 	}
 }
 
