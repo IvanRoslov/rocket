@@ -139,7 +139,12 @@ export function TaskScreen() {
           </div>
 
           {tab === 'questions' && (
-            <QuestionsTab taskId={taskId} questions={questions ?? []} orchestratorName={orchestrator?.tmux_name} />
+            <QuestionsTab
+              taskId={taskId}
+              questions={questions ?? []}
+              orchestratorName={orchestrator?.tmux_name}
+              hasLiveOrchestrator={orchestrator?.state === 'running'}
+            />
           )}
           {tab === 'overview' && (
             <OverviewTab

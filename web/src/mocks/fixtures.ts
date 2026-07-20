@@ -432,6 +432,40 @@ export const questions: Question[] = [
       },
     ],
   },
+  // User-opened threads (asked_by "") on task #13, opposite direction from
+  // Q1-Q3 above — the human asked the orchestrator, not the other way
+  // around. Q4 is fresh (no reply yet, whose_turn stays "orchestrator");
+  // Q5 already has an orchestrator reply, flipping whose_turn to "user".
+  {
+    id: 4,
+    task_id: 13,
+    ordinal: 1,
+    asked_by: '',
+    body: 'Should we backfill existing rows or only handle new ones going forward?',
+    status: 'open',
+    whose_turn: 'orchestrator',
+    asked_at: NOW - 10 * MIN,
+    messages: [],
+  },
+  {
+    id: 5,
+    task_id: 13,
+    ordinal: 2,
+    asked_by: '',
+    body: 'Is the migration safe to run while the app is live, or does it need a maintenance window?',
+    status: 'open',
+    whose_turn: 'user',
+    asked_at: NOW - 25 * MIN,
+    messages: [
+      {
+        id: 105,
+        author: 's-billing-v2-w1',
+        kind: 'reply',
+        body: 'It can run live — the new columns are nullable and backfilled asynchronously.',
+        created_at: NOW - 18 * MIN,
+      },
+    ],
+  },
 ]
 
 export const messages: Message[] = [

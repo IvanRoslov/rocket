@@ -5,7 +5,7 @@
 import { useState } from 'react'
 import { Markdown } from '../../components/Markdown'
 import { timeAgo } from '../../lib/format'
-import { useAnswerQuestion, useReplyQuestion } from '../../lib/queries'
+import { useAnswerQuestion, useAskOrchestrator, useReplyQuestion } from '../../lib/queries'
 import type { Question } from '../../lib/types'
 import './QuestionsTab.css'
 
@@ -13,6 +13,8 @@ export interface QuestionsTabProps {
   taskId: number
   questions: Question[]
   orchestratorName?: string
+  /** Whether the task has a live orchestrator session to receive a new question. */
+  hasLiveOrchestrator?: boolean
 }
 
 function whoseTurnLabel(question: Question): string {
@@ -29,6 +31,89 @@ function authorLabel(author: string | undefined, orchestratorName?: string): str
 function resolutionLabel(question: Question): string {
   if (question.resolution === 'dismissed') return 'dismissed'
   return 'resolved'
+}
+
+/**
+ * `asked_by === ""` means the human opened this thread TO the orchestrator
+ * (docs/12-tasks.md); anything else is the existing orchestrator-opened
+ * direction. The asker slot must never show `orchestratorName` for a
+ * user-opened thread — that would misattribute the question.
+ */
+function askerLabel(question: Question, orchestratorName?: string): string {
+  if (question.asked_by === '') return 'you asked the orchestrator'
+  return `${orchestratorName ?? question.asked_by} asked`
+}
+
+interface AskOrchestratorFormProps {
+  taskId: number
+  disabled: boolean
+}
+
+function AskOrchestratorForm({ taskId, disabled }: AskOrchestratorFormProps) {
+  const [open, setOpen] = useState(false)
+  const [body, setBody] = useState('')
+  const [context, setContext] = useState('')
+  const [ctxOpen, setCtxOpen] = useState(false)
+  const ask = useAskOrchestrator(taskId)
+
+  function reset() {
+    setOpen(false)
+    setBody('')
+    setContext('')
+    setCtxOpen(false)
+  }
+
+  function handleSubmit() {
+    if (!body.trim()) return
+    ask.mutate({ body, context: context.trim() || undefined }, { onSuccess: reset })
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="questions-tab__ask-toggle"
+        onClick={() => setOpen(true)}
+        disabled={disabled}
+        title={disabled ? 'No live orchestrator for this task' : undefined}
+      >
+        + Ask the orchestrator
+      </button>
+    )
+  }
+
+  return (
+    <div className="questions-tab__ask-form">
+      <textarea
+        aria-label="Ask the orchestrator"
+        placeholder="What do you want to ask the orchestrator?"
+        rows={3}
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+      />
+      {ctxOpen ? (
+        <textarea
+          aria-label="Context (optional, markdown)"
+          placeholder="Optional context (markdown)…"
+          rows={3}
+          value={context}
+          onChange={(e) => setContext(e.target.value)}
+        />
+      ) : (
+        <button type="button" className="questions-tab__ask-context-toggle" onClick={() => setCtxOpen(true)}>
+          ＋ Add context
+        </button>
+      )}
+      <div className="questions-tab__ask-actions">
+        <button type="button" className="questions-tab__ask-submit" onClick={handleSubmit} disabled={ask.isPending || !body.trim()}>
+          Ask
+        </button>
+        <button type="button" className="questions-tab__ask-cancel" onClick={reset} disabled={ask.isPending}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
 }
 
 interface ThreadCardProps {
@@ -82,7 +167,7 @@ function ThreadCard({ taskId, question, orchestratorName }: ThreadCardProps) {
           </span>
         )}
         <div className="question-thread__spacer" />
-        <span className="question-thread__asker">{orchestratorName ?? question.asked_by}</span>
+        <span className="question-thread__asker">{askerLabel(question, orchestratorName)}</span>
       </div>
       <div className="question-thread__body">
         <div className="question-thread__question">
@@ -240,7 +325,7 @@ function ResolvedThreadRow({ question, orchestratorName }: ResolvedThreadRowProp
   )
 }
 
-export function QuestionsTab({ taskId, questions, orchestratorName }: QuestionsTabProps) {
+export function QuestionsTab({ taskId, questions, orchestratorName, hasLiveOrchestrator }: QuestionsTabProps) {
   const open = questions.filter((q) => q.status === 'open').sort((a, b) => a.ordinal - b.ordinal)
   const resolved = questions
     .filter((q) => q.status === 'resolved')
@@ -248,6 +333,8 @@ export function QuestionsTab({ taskId, questions, orchestratorName }: QuestionsT
 
   return (
     <div className="questions-tab">
+      <AskOrchestratorForm taskId={taskId} disabled={!hasLiveOrchestrator} />
+
       {open.map((q) => (
         <ThreadCard key={q.id} taskId={taskId} question={q} orchestratorName={orchestratorName} />
       ))}

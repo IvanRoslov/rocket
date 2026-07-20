@@ -105,9 +105,11 @@ export function resetTasks(): void {
 }
 
 let questionsState: Question[] = questions.map((q) => ({ ...q, messages: q.messages.map((m) => ({ ...m })) }))
+let nextQuestionId = Math.max(...questionsState.map((q) => q.id)) + 1
 
 export function resetQuestions(): void {
   questionsState = questions.map((q) => ({ ...q, messages: q.messages.map((m) => ({ ...m })) }))
+  nextQuestionId = Math.max(...questionsState.map((q) => q.id)) + 1
 }
 
 let docsState: TaskDoc[] = taskDocs.map((d) => ({ ...d }))
@@ -548,6 +550,28 @@ export const handlers = [
     let result = questionsState.filter((q) => q.task_id === id)
     if (status) result = result.filter((q) => q.status === status)
     return HttpResponse.json({ questions: result })
+  }),
+
+  // Opens a user->orchestrator question thread (dashboard sends no
+  // X-Rocket-Session, so asked_by is "" and whose_turn starts "orchestrator").
+  http.post('/v1/tasks/:id/questions', async ({ params, request }) => {
+    const taskId = Number(params.id)
+    const body = (await request.json()) as { body: string; context?: string }
+    const ordinal = questionsState.filter((q) => q.task_id === taskId).length + 1
+    const question: Question = {
+      id: nextQuestionId++,
+      task_id: taskId,
+      ordinal,
+      asked_by: '',
+      body: body.body,
+      context: body.context,
+      status: 'open',
+      whose_turn: 'orchestrator',
+      asked_at: nowSeconds(),
+      messages: [],
+    }
+    questionsState.push(question)
+    return HttpResponse.json(question, { status: 201 })
   }),
 
   // --------------------------------------------------------------------

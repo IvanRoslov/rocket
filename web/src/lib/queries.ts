@@ -410,6 +410,26 @@ export function useAnswerQuestion(): UseMutationResult<
   })
 }
 
+/**
+ * `POST /v1/tasks/{id}/questions` `{body, context?}` -> bare questionResponse
+ * (201). Opens a question thread FROM the dashboard user TO the task's
+ * orchestrator (no `X-Rocket-Session` header — the api client never sends
+ * one, so the daemon treats the caller as the human). The response carries
+ * `asked_by: ""` and `whose_turn: "orchestrator"`.
+ */
+export function useAskOrchestrator(
+  taskId: number | undefined,
+): UseMutationResult<Question, Error, { body: string; context?: string }> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (payload) => api.post<Question>(`/v1/tasks/${taskId}/questions`, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['task', taskId, 'questions'] })
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+  })
+}
+
 /** `POST /v1/repos`: `{path}` for a local checkout, or `{github:"owner/name"}` to clone. */
 export function useRegisterRepo(): UseMutationResult<
   Repo,

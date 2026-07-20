@@ -214,4 +214,101 @@ describe('TaskScreen', () => {
 
     expect(screen.queryByText(/^← #\d+/)).not.toBeInTheDocument()
   })
+
+  describe('ask the orchestrator', () => {
+    it('posts {body} to /v1/tasks/:id/questions with no X-Rocket-Session header', async () => {
+      let capturedBody: unknown
+      let capturedHeader: string | null = null
+      server.use(
+        http.post('/v1/tasks/:id/questions', async ({ request }) => {
+          capturedBody = await request.json()
+          capturedHeader = request.headers.get('X-Rocket-Session')
+          return HttpResponse.json(
+            { id: 99, task_id: 12, ordinal: 4, asked_by: '', body: (capturedBody as { body: string }).body, status: 'open', whose_turn: 'orchestrator', asked_at: 1, messages: [] },
+            { status: 201 },
+          )
+        }),
+      )
+
+      renderTask()
+      expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('tab', { name: /^Questions/ }))
+
+      await userEvent.click(await screen.findByRole('button', { name: '+ Ask the orchestrator' }))
+      await userEvent.type(screen.getByLabelText('Ask the orchestrator'), 'What is the deploy plan?')
+      await userEvent.click(screen.getByRole('button', { name: 'Ask' }))
+
+      await waitFor(() => expect(capturedBody).toEqual({ body: 'What is the deploy plan?' }))
+      expect(capturedHeader).toBeNull()
+    })
+
+    it('disables the toggle when the task has no live orchestrator session', async () => {
+      server.use(
+        http.get('/v1/sessions', () =>
+          HttpResponse.json([
+            {
+              id: 's-billing-v2-orch',
+              kind: 'orchestrator',
+              project_id: 'billing',
+              repo_id: 'api',
+              feature_slug: 'billing-v2',
+              agent: 'claude',
+              branch: 'feature/billing-v2',
+              worktree_path: '/home/dev/.rocket/worktrees/billing-v2-orch',
+              tmux_name: 'billing-v2-orch',
+              state: 'errored',
+              created_at: 1,
+              updated_at: 1,
+            },
+          ]),
+        ),
+      )
+
+      renderTask()
+      expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('tab', { name: /^Questions/ }))
+
+      const toggle = await screen.findByRole('button', { name: '+ Ask the orchestrator' })
+      expect(toggle).toBeDisabled()
+    })
+  })
+
+  describe('user-opened question threads', () => {
+    it('renders a "you asked the orchestrator" header instead of the orchestrator name', async () => {
+      renderTask('billing', 13)
+      expect(await screen.findByText('Migrate billing schema')).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('tab', { name: /^Questions/ }))
+
+      expect(await screen.findAllByText('you asked the orchestrator')).toHaveLength(2)
+      expect(screen.queryByText('billing-v2-w1 asked')).not.toBeInTheDocument()
+    })
+
+    it('shows the right whose_turn badge for both a fresh and a replied-to user-opened thread', async () => {
+      renderTask('billing', 13)
+      await screen.findByText('Migrate billing schema')
+      await userEvent.click(screen.getByRole('tab', { name: /^Questions/ }))
+
+      const [firstAsker] = await screen.findAllByText('you asked the orchestrator')
+      const tabPanel = firstAsker.closest('.questions-tab') as HTMLElement
+      expect(within(tabPanel).getByText('Should we backfill existing rows or only handle new ones going forward?')).toBeInTheDocument()
+      expect(within(tabPanel).getByText('Is the migration safe to run while the app is live, or does it need a maintenance window?')).toBeInTheDocument()
+
+      expect(within(tabPanel).getByText('awaiting orchestrator')).toBeInTheDocument()
+      expect(within(tabPanel).getByText('awaiting you')).toBeInTheDocument()
+    })
+
+    it('the user can Answer & close a user-opened thread', async () => {
+      renderTask('billing', 13)
+      await screen.findByText('Migrate billing schema')
+      await userEvent.click(screen.getByRole('tab', { name: /^Questions/ }))
+
+      const question = await screen.findByText('Is the migration safe to run while the app is live, or does it need a maintenance window?')
+      const card = question.closest('.question-thread') as HTMLElement
+      await userEvent.type(within(card).getByRole('textbox'), 'Go ahead, run it live.')
+      await userEvent.click(within(card).getByRole('button', { name: 'Answer & close' }))
+
+      await waitFor(() => expect(document.querySelectorAll('.question-thread')).toHaveLength(1))
+      expect(document.querySelector('.questions-tab__resolved-row')).toBeInTheDocument()
+    })
+  })
 })
