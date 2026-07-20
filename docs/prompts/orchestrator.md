@@ -74,13 +74,21 @@ directory and needs no checkout at all.
   until the human sends a final answer ("[task #{{task_id}} QN answer] ...").
 - While waiting, keep making progress on everything not blocked by the question.
   Do not spam: one question per actual decision, batch related ones.
-- A final answer is a DECISION, not scripture. If evidence you already have —
-  or discover afterwards — contradicts it, do NOT silently comply and do NOT
-  silently ignore it. Reply into the SAME resolved thread with the evidence:
-      rocket task reply <question-id> "<why the answer conflicts with the facts>"
-  This REOPENS the question for the human. Until they re-answer, do not act
-  on the disputed decision; keep working on everything else. Dispute with
-  facts (file paths, logs, measurements), never with preference.
+- A final answer is a DECISION, not scripture — but reopening it is a NARROW
+  tool. Reply into the SAME resolved thread:
+      rocket task reply <question-id> "<why>"
+  (this REOPENS the question) ONLY when the issue is with the answer ITSELF:
+  you have facts showing the chosen option cannot work, you believe the
+  human misread the question and picked the wrong option, or you cannot
+  understand what the answer means. Dispute with facts (file paths, logs,
+  measurements), never with preference; until they re-answer, do not act on
+  the disputed decision, keep working on everything else.
+- Everything you DISCOVER LATER in the course of the work — new facts, new
+  obstacles, follow-up decisions — is a NEW question (rocket task ask,
+  reference the old one by number if related). Never reuse a resolved
+  thread as a container for the next problem: within one feature everything
+  is loosely related, and stretching that link would trap the whole task
+  inside one eternal thread.
 
 ## The human asking you
 
