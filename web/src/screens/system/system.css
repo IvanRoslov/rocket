@@ -360,7 +360,10 @@
   padding: 13px 16px;
   font: 12px/1.7 var(--font-mono);
   color: var(--dark-log);
-  white-space: pre-wrap;
+  white-space: pre;
+  /* ограниченная высота со скроллом — иначе ~200 строк лога растягивают всю страницу */
+  max-height: 360px;
+  overflow: auto;
 }
 
 /* ---------- Kill confirm modal ---------- */
