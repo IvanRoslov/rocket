@@ -59,12 +59,26 @@
 }
 
 /* ---------- Layout ---------- */
+/* Worktrees (flexible, main) on the left, Message queue + Daemon stacked in
+   a narrower fixed column on the right. `minmax(0, ...)` on both tracks lets
+   panels shrink below their content's min-content width (grid items default
+   to min-width: auto and otherwise refuse to shrink, which is what pushed
+   the Daemon panel off the right edge before). */
 .system-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 280px);
   gap: 16px;
   align-items: start;
   margin-top: 16px;
+}
+.system-grid__side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.panel {
+  min-width: 0;
 }
 .panel__title {
   font: 650 14px var(--font-ui);
@@ -259,21 +273,29 @@
   display: flex;
   flex-direction: column;
   gap: 9px;
+  min-width: 0;
+  /* Belt-and-suspenders: if a single path is still wider than the panel
+     (e.g. a very narrow viewport), scroll it inside the panel instead of
+     pushing the grid wider. */
+  overflow-x: auto;
 }
 .worktree-row {
   display: flex;
   align-items: center;
   gap: 9px;
+  min-width: 0;
 }
 .worktree-row__path {
   font: 11.5px var(--font-mono);
   color: var(--text-2);
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .worktree-row__size {
+  flex: none;
   font: 11.5px var(--font-mono);
   color: var(--text-4);
 }
@@ -284,15 +306,25 @@
   flex-direction: column;
   gap: 8px;
   font: 12.5px var(--font-ui);
+  min-width: 0;
 }
 .daemon-kv__row {
   display: flex;
   justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
 }
 .daemon-kv__key {
+  flex: none;
   color: var(--text-3);
 }
 .daemon-kv__val {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
   font-family: var(--font-mono);
 }
 .daemon-kv__status {
@@ -357,7 +389,7 @@
     grid-template-columns: repeat(2, 1fr);
   }
   .system-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .session-cards {
     grid-template-columns: 1fr;

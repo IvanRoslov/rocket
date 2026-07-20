@@ -272,6 +272,24 @@ export function SystemScreen() {
       </div>
 
       <div className="system-grid">
+        <Card className="panel panel--worktrees">
+          <div className="worktrees-head">
+            <span className="panel__title">Worktrees on disk</span>
+            <span className="worktrees-total">{formatBytes(totalWorktreeBytes)}</span>
+          </div>
+          <div className="worktree-list">
+            {system?.worktrees.map((w) => (
+              <div className="worktree-row" key={w.path}>
+                <span className="worktree-row__path" title={w.path}>
+                  {w.path}
+                </span>
+                <span className="worktree-row__size">{formatBytes(w.size_bytes)}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <div className="system-grid__side">
           <Card className="panel">
             <div className="panel__title">Message queue</div>
             <div className="queue-tiles">
@@ -296,21 +314,6 @@ export function SystemScreen() {
           </Card>
 
           <Card className="panel">
-            <div className="worktrees-head">
-              <span className="panel__title">Worktrees on disk</span>
-              <span className="worktrees-total">{formatBytes(totalWorktreeBytes)}</span>
-            </div>
-            <div className="worktree-list">
-              {system?.worktrees.map((w) => (
-                <div className="worktree-row" key={w.path}>
-                  <span className="worktree-row__path">{w.path}</span>
-                  <span className="worktree-row__size">{formatBytes(w.size_bytes)}</span>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          <Card className="panel">
             <div className="panel__title">Daemon</div>
             <div className="daemon-kv">
               <div className="daemon-kv__row">
@@ -323,7 +326,9 @@ export function SystemScreen() {
               </div>
               <div className="daemon-kv__row">
                 <span className="daemon-kv__key">socket</span>
-                <span className="daemon-kv__val">{system?.daemon.socket}</span>
+                <span className="daemon-kv__val" title={system?.daemon.socket}>
+                  {system?.daemon.socket}
+                </span>
               </div>
               <div className="daemon-kv__row">
                 <span className="daemon-kv__key">uptime</span>
@@ -333,6 +338,7 @@ export function SystemScreen() {
               </div>
             </div>
           </Card>
+        </div>
       </div>
 
       <div className="log-tail">
