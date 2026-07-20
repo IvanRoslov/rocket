@@ -205,6 +205,17 @@ export function useStartTask() {
   })
 }
 
+/** Opens a user-initiated question thread on a root task (asked_by=""). */
+export function useCreateQuestion() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { taskId: number; body: string; context?: string }) =>
+      api.post<Question>(baseUrl, `/v1/tasks/${p.taskId}/questions`, { body: p.body, context: p.context }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'task'] }),
+  })
+}
+
 export function useQuestionReply() {
   const baseUrl = useBaseUrl()
   const qc = useQueryClient()

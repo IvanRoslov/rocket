@@ -16,6 +16,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
   useCancelTask,
+  useCreateQuestion,
   useKillSession,
   useMessages,
   useMoveTask,
@@ -63,11 +64,23 @@ function QuestionCard({ q }: { q: Question }) {
   const busy = reply.isPending || answer.isPending || dismiss.isPending
   const toast = useToast()
 
+  // Threads opened by the user (asked_by === "") flip the roles: the
+  // orchestrator owes the answer, and closing the thread is the user's call.
+  const mine = !q.asked_by
+
   const confirmDismiss = () =>
-    Alert.alert('Dismiss question', `Close Q${q.ordinal} without an answer?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Dismiss', style: 'destructive', onPress: () => dismiss.mutate(q.id) },
-    ])
+    Alert.alert(
+      mine ? 'Resolve thread' : 'Dismiss question',
+      mine ? `Close Q${q.ordinal} — got what you needed?` : `Close Q${q.ordinal} without an answer?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: mine ? 'Resolve' : 'Dismiss',
+          style: mine ? 'default' : 'destructive',
+          onPress: () => dismiss.mutate(q.id),
+        },
+      ],
+    )
 
   const send = (final: boolean) => {
     const body = text.trim()
@@ -89,7 +102,7 @@ function QuestionCard({ q }: { q: Question }) {
           bg={colors.amberBg}
         />
         <View style={{ flex: 1 }} />
-        <MonoText style={{ fontSize: 11, color: '#a1621a' }}>orch</MonoText>
+        <MonoText style={{ fontSize: 11, color: '#a1621a' }}>{mine ? 'you asked' : 'orch'}</MonoText>
       </View>
       <View style={{ padding: 16 }}>
         <Text style={styles.qText}>{q.body}</Text>
@@ -145,29 +158,107 @@ function QuestionCard({ q }: { q: Question }) {
         <View style={styles.replyBox}>
           <TextInput
             style={styles.replyInput}
-            placeholder="Write a reply or give your final answer…"
+            placeholder={mine ? 'Ask a follow-up…' : 'Write a reply or give your final answer…'}
             placeholderTextColor={colors.textFaint}
             value={text}
             onChangeText={setText}
             multiline
           />
-          <View style={{ flexDirection: 'row', gap: 9 }}>
-            <GhostButton label="Clarify" onPress={() => send(false)} style={{ flex: 1 }} />
-            <PrimaryButton
-              label={busy ? 'Sending…' : 'Answer & close'}
-              disabled={busy || !text.trim()}
-              onPress={() => send(true)}
-              style={{ flex: 1 }}
-            />
-          </View>
-          <Pressable onPress={confirmDismiss} style={{ alignSelf: 'center', marginTop: 12 }}>
-            <Text style={{ fontSize: 12.5, fontWeight: '600', color: colors.textFaint }}>
-              Dismiss without answer
-            </Text>
-          </Pressable>
+          {mine ? (
+            <View style={{ flexDirection: 'row', gap: 9 }}>
+              <GhostButton
+                label={busy ? 'Sending…' : 'Ask follow-up'}
+                onPress={() => send(false)}
+                style={{ flex: 1 }}
+              />
+              <PrimaryButton label="Resolve thread" disabled={busy} onPress={confirmDismiss} style={{ flex: 1 }} />
+            </View>
+          ) : (
+            <>
+              <View style={{ flexDirection: 'row', gap: 9 }}>
+                <GhostButton label="Clarify" onPress={() => send(false)} style={{ flex: 1 }} />
+                <PrimaryButton
+                  label={busy ? 'Sending…' : 'Answer & close'}
+                  disabled={busy || !text.trim()}
+                  onPress={() => send(true)}
+                  style={{ flex: 1 }}
+                />
+              </View>
+              <Pressable onPress={confirmDismiss} style={{ alignSelf: 'center', marginTop: 12 }}>
+                <Text style={{ fontSize: 12.5, fontWeight: '600', color: colors.textFaint }}>
+                  Dismiss without answer
+                </Text>
+              </Pressable>
+            </>
+          )}
         </View>
       </View>
     </View>
+  )
+}
+
+/** Composer for a user-initiated question thread (docs: reverse Q&A). */
+function AskQuestionSheet({
+  visible,
+  taskId,
+  onClose,
+}: {
+  visible: boolean
+  taskId: number
+  onClose: () => void
+}) {
+  const create = useCreateQuestion()
+  const toast = useToast()
+  const [body, setBody] = useState('')
+  const [context, setContext] = useState('')
+
+  return (
+    <BottomSheet visible={visible} onClose={onClose}>
+      <View>
+        <Text style={{ fontSize: 15, fontWeight: '700', marginBottom: 4 }}>Ask the orchestrator</Text>
+        <Text style={{ fontSize: 12.5, color: colors.textDim, marginBottom: 14 }}>
+          Opens a thread on this task — the orchestrator replies, you can follow up and resolve it.
+        </Text>
+        <TextInput
+          style={styles.askInput}
+          placeholder="Your question"
+          placeholderTextColor={colors.textFaint}
+          value={body}
+          onChangeText={setBody}
+          multiline
+          autoFocus
+        />
+        <TextInput
+          style={[styles.askInput, { minHeight: 70 }]}
+          placeholder="Context (optional)"
+          placeholderTextColor={colors.textFaint}
+          value={context}
+          onChangeText={setContext}
+          multiline
+        />
+        <View style={{ flexDirection: 'row', gap: 9 }}>
+          <GhostButton label="Cancel" onPress={onClose} style={{ flex: 1 }} />
+          <PrimaryButton
+            label={create.isPending ? 'Asking…' : 'Ask'}
+            disabled={!body.trim() || create.isPending}
+            onPress={() =>
+              create.mutate(
+                { taskId, body: body.trim(), context: context.trim() || undefined },
+                {
+                  onSuccess: () => {
+                    setBody('')
+                    setContext('')
+                    onClose()
+                  },
+                  onError: (e) => toast.show((e as Error).message),
+                },
+              )
+            }
+            style={{ flex: 1 }}
+          />
+        </View>
+      </View>
+    </BottomSheet>
   )
 }
 
@@ -332,6 +423,7 @@ export default function TaskScreen() {
   const [msgText, setMsgText] = useState('')
   const [sheetOpen, setSheetOpen] = useState(false)
   const [taskMenu, setTaskMenu] = useState(false)
+  const [asking, setAsking] = useState(false)
   const insets = useSafeAreaInsets()
   const move = useMoveTask()
   const cancel = useCancelTask()
@@ -445,6 +537,9 @@ export default function TaskScreen() {
           <View style={{ paddingHorizontal: 16 }}>
             {tab === 'questions' ? (
               <View style={{ gap: 14 }}>
+                {!t.parent_id ? (
+                  <GhostButton label="＋ Ask the orchestrator" onPress={() => setAsking(true)} />
+                ) : null}
                 {open.map((q) => (
                   <QuestionCard key={q.id} q={q} />
                 ))}
@@ -608,6 +703,7 @@ export default function TaskScreen() {
         </Pressable>
       ) : null}
       <SessionsSheet visible={sheetOpen} orch={orch} workers={workers} onClose={() => setSheetOpen(false)} />
+      <AskQuestionSheet visible={asking} taskId={t.id} onClose={() => setAsking(false)} />
     </SafeAreaView>
   )
 }
@@ -684,6 +780,19 @@ const styles = StyleSheet.create({
   threadMsg: { paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#f4f4f2' },
   avatar: { width: 24, height: 24, borderRadius: 7, alignItems: 'center', justifyContent: 'center' },
   replyBox: { marginTop: 8, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 16 },
+  askInput: {
+    minHeight: 90,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.text,
+    backgroundColor: colors.card,
+    marginBottom: 11,
+    textAlignVertical: 'top',
+  },
   replyInput: {
     minHeight: 84,
     padding: 12,
