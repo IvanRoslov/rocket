@@ -645,3 +645,71 @@ func TestQuestionReply_WorkerReplyToResolvedGets403NotConflict(t *testing.T) {
 		t.Errorf("code = %q, want forbidden", eb.Error.Code)
 	}
 }
+
+// TestQuestionReply_OrchestratorReopensResolved: the task's own orchestrator
+// disputing a final answer reopens the thread in place — status back to
+// open, task.question_reopened published, open_questions counter counts it
+// again. The human's reply to a resolved question stays 409 (covered by
+// TestQuestionReply_ResolvedConflict above).
+func TestQuestionReply_OrchestratorReopensResolved(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	askResp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1", map[string]any{"body": "Which DB?"})
+	q := decodeQuestion(t, askResp)
+	askResp.Body.Close()
+
+	ansResp := postJSON(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/answer", map[string]any{"body": "sqlite"})
+	ansResp.Body.Close()
+
+	ch, cancel := d.Bus.Subscribe()
+	defer cancel()
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/reply", "orch-1",
+		map[string]any{"body": "Evidence says sqlite cannot work here: no concurrent writers."})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (orchestrator reply must reopen)", resp.StatusCode)
+	}
+	reopened := decodeQuestion(t, resp)
+	if reopened.Status != "open" {
+		t.Errorf("status after dispute = %q, want open", reopened.Status)
+	}
+
+	sawReopened := false
+	deadline := time.Now().Add(2 * time.Second)
+	for !sawReopened && time.Now().Before(deadline) {
+		select {
+		case e := <-ch:
+			if e.Type == "task.question_reopened" {
+				sawReopened = true
+			}
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	if !sawReopened {
+		t.Errorf("task.question_reopened event not published")
+	}
+
+	// The reopened question counts as open again (dashboard badge).
+	taskCardResp, err := http.Get(srv.URL + "/v1/tasks/" + itoa(taskID))
+	if err != nil {
+		t.Fatalf("GET task: %v", err)
+	}
+	defer taskCardResp.Body.Close()
+	var card taskDetailResponse
+	if err := json.NewDecoder(taskCardResp.Body).Decode(&card); err != nil {
+		t.Fatalf("decode task card: %v", err)
+	}
+	if card.OpenQuestions != 1 {
+		t.Errorf("OpenQuestions = %d, want 1 after reopen", card.OpenQuestions)
+	}
+
+	// And the human can now answer again, closing the loop.
+	ans2 := postJSON(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/answer", map[string]any{"body": "ок, бери postgres"})
+	defer ans2.Body.Close()
+	if ans2.StatusCode != http.StatusOK {
+		t.Errorf("second answer status = %d, want 200", ans2.StatusCode)
+	}
+}
