@@ -129,6 +129,13 @@ Task #{{task_id}} is the durable record of this feature. Keep it current:
 
 1. For each worker, as soon as its PR is merged and verified:
        rocket task move <subtask-id> done, then rocket kill <worker-id> --cleanup
+   Do NOT send the worker a farewell / "merged, well done" / status message
+   before killing it: it did its job and is about to be gone, so the message
+   either bounces (recipient_gone) or races the kill (delivery_failed) — pure
+   noise in the failed queue, never delivered, never useful. Just move and
+   kill. (If the worker still has to DO something — fix a conflict, redo a
+   review — then it is NOT finished: send that instruction and do not kill
+   it yet.)
 2. When all subtasks are done and no workers remain
    (check: rocket status {{feature_slug}} shows only you):
    upload the final report (task doc put --kind report)
