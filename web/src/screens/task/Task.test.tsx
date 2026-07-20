@@ -75,6 +75,33 @@ describe('TaskScreen', () => {
     expect(await screen.findByText(/Orchestrator spawned/)).toBeInTheDocument()
   })
 
+  it('shows the merged PR on a done subtask whose worker session has been auto-cleaned', async () => {
+    renderTask()
+    expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+
+    // Subtask #16 "Retire legacy billing cron" is done; its worker session
+    // s-billing-v2-w4 is state 'done' (auto-cleaned after PR #400 merged)
+    // and only resolves via the Overview tab's all:true sessions query.
+    const row = (await screen.findByText('Retire legacy billing cron')).closest('a') as HTMLElement
+    expect(within(row).getByText('PR #400 merged')).toBeInTheDocument()
+  })
+
+  it('still shows the PR for an in-progress subtask with a live worker', async () => {
+    renderTask()
+    expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+
+    const row = (await screen.findByText('New billing UI')).closest('a') as HTMLElement
+    expect(within(row).getByText('PR #14 ✔')).toBeInTheDocument()
+  })
+
+  it('shows "PR —" for a subtask whose worker has no PR', async () => {
+    renderTask()
+    expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+
+    const row = (await screen.findByText('Migrate billing schema')).closest('a') as HTMLElement
+    expect(within(row).getByText('PR —')).toBeInTheDocument()
+  })
+
   it('the question banner jumps to the Questions tab', async () => {
     renderTask()
     await userEvent.click(await screen.findByText('? awaiting you'))

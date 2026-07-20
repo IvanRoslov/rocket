@@ -47,7 +47,7 @@ describe('useTask', () => {
 
     const task = result.current.data!
     expect(task.id).toBe(12)
-    expect(task.subtasks.map((t) => t.id).sort()).toEqual([13, 14, 15])
+    expect(task.subtasks.map((t) => t.id).sort()).toEqual([13, 14, 15, 16])
     expect(task.open_questions).toBe(1)
     expect(task.session).toEqual({
       id: 's-billing-v2-orch',

@@ -30,7 +30,10 @@ function renderKanban(projectId = 'billing') {
 }
 
 // Fixture distribution (web/src/mocks/fixtures.ts), billing project:
-// #10 backlog, #12 in_progress (session s-billing-v2-orch, 2 workers), #11 review, #9 done.
+// #10 backlog, #12 in_progress (session s-billing-v2-orch, 4 workers —
+// w1/w2/w3 live plus done w4 whose PR merged), #11 review, #9 done.
+// The kanban board fetches sessions with `all: true` so a done worker (PR
+// merged) still counts toward the worker total and PR badges.
 
 test('renders columns with fixtures distributed by status', async () => {
   renderKanban()
@@ -41,19 +44,19 @@ test('renders columns with fixtures distributed by status', async () => {
   expect(screen.getByText('Webhook retry backoff')).toBeInTheDocument()
   expect(screen.getByText('Legacy invoice migration')).toBeInTheDocument()
 
-  // #12 shows orchestrator liveness with 3 workers (s-billing-v2-w1/w2/w3).
+  // #12 shows orchestrator liveness with 4 workers (s-billing-v2-w1/w2/w3/w4).
   expect(screen.getByText(/orch:/)).toBeInTheDocument()
-  expect(screen.getByText(/3 workers/)).toBeInTheDocument()
+  expect(screen.getByText(/4 workers/)).toBeInTheDocument()
 })
 
-test('PR badges aggregate worker sessions: 1 PR open + CI ✔ for #12 (s-billing-v2-w2)', async () => {
+test('PR badges aggregate worker sessions: 1 PR open + 1 merged + CI ✔ for #12', async () => {
   renderKanban()
   await waitFor(() => expect(screen.getByText('Billing v2')).toBeInTheDocument())
 
   const card = screen.getByText('Billing v2').closest('.kanban-card') as HTMLElement
   expect(within(card).getByText('1 PR open')).toBeInTheDocument()
+  expect(within(card).getByText(/1.*merged/)).toBeInTheDocument()
   expect(within(card).getByText('CI ✔')).toBeInTheDocument()
-  expect(within(card).queryByText(/merged/)).not.toBeInTheDocument()
 })
 
 test('cancelled column hidden by default, shown via checkbox', async () => {

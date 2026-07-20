@@ -34,6 +34,10 @@ export interface SessionFilter {
   kind?: string
   state?: string
   feature?: string
+  /** Include non-live sessions (e.g. `done` workers whose PR merged) instead
+   * of the default spawning/running-only view. Mirrors the daemon's
+   * `?all=true` on `GET /v1/sessions`. */
+  all?: boolean
 }
 
 function sessionsQueryString(filter?: SessionFilter): string {
@@ -43,6 +47,7 @@ function sessionsQueryString(filter?: SessionFilter): string {
   if (filter.kind) params.set('kind', filter.kind)
   if (filter.state) params.set('state', filter.state)
   if (filter.feature) params.set('feature', filter.feature)
+  if (filter.all) params.set('all', 'true')
   const qs = params.toString()
   return qs ? `?${qs}` : ''
 }

@@ -56,7 +56,10 @@ export function KanbanScreen() {
   const queryClient = useQueryClient()
   const { data: projects } = useProjects()
   const { data: board } = useTasksBoard(projectId)
-  const { data: sessions } = useSessions({ project: projectId })
+  // `all: true` — a task card's PR badges need to see done workers (merged
+  // PRs) too, not just live spawning/running ones. No session rail lives on
+  // this screen, so unlike TaskScreen there's no live-only view to protect.
+  const { data: sessions } = useSessions({ project: projectId, all: true })
   const moveTask = useMoveTask()
 
   const [search, setSearch] = useState('')

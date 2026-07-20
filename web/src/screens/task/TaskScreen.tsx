@@ -49,6 +49,11 @@ export function TaskScreen() {
   const { data: log } = useTaskLog(taskId)
   const { data: questions } = useTaskQuestions(taskId)
   const { data: sessions } = useSessions(projectId ? { project: projectId } : undefined)
+  // Separate query, scoped to the Overview tab's subtask→PR join: a done
+  // worker (PR merged) drops out of the live-only `sessions` above, so the
+  // join needs `all: true` to still resolve its pr_number/pr_state. The
+  // rail/orchestrator/workers above intentionally stay live-only.
+  const { data: allSessions } = useSessions(projectId ? { project: projectId, all: true } : undefined)
   const { data: messages } = useMessages(task?.session?.id)
 
   const orchestrator = useMemo(
@@ -151,7 +156,7 @@ export function TaskScreen() {
               projectId={projectId}
               task={task}
               subtasks={task.subtasks}
-              sessions={sessions}
+              sessions={allSessions}
               docs={docs}
             />
           )}

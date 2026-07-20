@@ -162,10 +162,16 @@ function taskDetailFor(task: Task) {
 export const handlers = [
   http.get('/v1/projects', () => HttpResponse.json(projectsState)),
 
+  // Mirrors internal/api/sessions.go handleListSessions + store.ListSessions:
+  // without `all=true`, only live sessions (state spawning/running) are
+  // returned — a `done` worker (e.g. after its PR merges and the daemon
+  // auto-cleans it) is only visible with `all=true`.
   http.get('/v1/sessions', ({ request }) => {
     const url = new URL(request.url)
     const project = url.searchParams.get('project')
-    const result = project ? sessionsState.filter((s) => s.project_id === project) : sessionsState
+    const all = url.searchParams.get('all') === 'true'
+    let result = project ? sessionsState.filter((s) => s.project_id === project) : sessionsState
+    if (!all) result = result.filter((s) => s.state === 'spawning' || s.state === 'running')
     return HttpResponse.json(result)
   }),
 
