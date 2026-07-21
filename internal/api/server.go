@@ -69,6 +69,7 @@ func NewHandler(d Deps) http.Handler {
 
 	registerRepoRoutes(mux, d)
 	registerGithubCatalogRoutes(mux, d)
+	registerGithubIssuesRoutes(mux, d)
 	registerProjectRoutes(mux, d)
 	registerSessionRoutes(mux, d)
 	registerChatRoutes(mux, d)

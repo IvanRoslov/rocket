@@ -265,6 +265,64 @@ func (c *Client) ListRepos(ctx context.Context) ([]Repo, error) {
 	return repos, nil
 }
 
+// Issue is a subset of the GitHub issue resource, as returned by the
+// repository issues list endpoint. Note that GitHub's issues endpoint also
+// returns pull requests; callers should skip any entry with a non-nil
+// PullRequest field (ListIssues already does this).
+type Issue struct {
+	Number    int    `json:"number"`
+	Title     string `json:"title"`
+	Body      string `json:"body"`
+	HTMLURL   string `json:"html_url"`
+	State     string `json:"state"`
+	UpdatedAt string `json:"updated_at"`
+	Labels    []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+	// PullRequest is present (non-nil) when this entry is actually a pull
+	// request rather than a plain issue; GitHub's issues list endpoint
+	// returns both.
+	PullRequest *json.RawMessage `json:"pull_request,omitempty"`
+}
+
+// issueStates is the set of valid values for the ListIssues state parameter.
+var issueStates = map[string]bool{"open": true, "closed": true, "all": true}
+
+// ListIssues returns issues for owner/repo in the given state ("open",
+// "closed" or "all"; empty defaults to "open", and any other value is
+// rejected as invalid). Pull requests are filtered out, since GitHub's
+// issues list endpoint returns both issues and pull requests.
+func (c *Client) ListIssues(ctx context.Context, owner, repo, state string) ([]Issue, error) {
+	if state == "" {
+		state = "open"
+	}
+	if !issueStates[state] {
+		return nil, fmt.Errorf("github: ListIssues: invalid state %q", state)
+	}
+
+	reqURL := fmt.Sprintf("%s/repos/%s/%s/issues?state=%s&per_page=100",
+		c.baseURL, owner, repo, url.QueryEscape(state))
+
+	var issues []Issue
+	err := c.getPaginated(ctx, reqURL, func(body []byte) error {
+		var page []Issue
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		for _, issue := range page {
+			if issue.PullRequest != nil {
+				continue
+			}
+			issues = append(issues, issue)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("github: ListIssues: %w", err)
+	}
+	return issues, nil
+}
+
 // FindPRByBranch finds the pull request whose head is owner:branch in
 // owner/repo. Returns (nil, nil) if none exists.
 func (c *Client) FindPRByBranch(ctx context.Context, owner, repo, branch string) (*PR, error) {

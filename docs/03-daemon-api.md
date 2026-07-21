@@ -18,6 +18,7 @@ HTTP+JSON, префикс `/v1`. Листенеры: Unix-сокет `~/.rocket/
 | GET | `/v1/settings` | Настройки (секреты замаскированы) |
 | PUT | `/v1/settings` | `{github_token?: "..."}` — валидирует токен запросом к GitHub |
 | GET | `/v1/github/repos?q=` | Репозитории, доступные токену (для UI выбора), с кэшем |
+| GET | `/v1/github/issues` | Issues репозитория (PR отфильтрованы) — для создания тасков из issue, см. `docs/09-github.md` |
 
 ## Репозитории
 

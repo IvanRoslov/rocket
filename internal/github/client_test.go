@@ -548,3 +548,66 @@ func TestCheckRollup(t *testing.T) {
 		})
 	}
 }
+
+func TestListIssues_FiltersPullRequestsAndMapsFields(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/acme/widgets/issues" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("state"); got != "open" {
+			t.Fatalf("state = %q, want open", got)
+		}
+		w.Write([]byte(`[
+			{"number":1,"title":"bug one","body":"repro steps","html_url":"https://github.com/acme/widgets/issues/1","state":"open","updated_at":"2026-01-01T00:00:00Z","labels":[{"name":"bug"},{"name":"p1"}]},
+			{"number":2,"title":"a pull request","html_url":"https://github.com/acme/widgets/pull/2","state":"open","pull_request":{"url":"https://api.example.com/pulls/2"}}
+		]`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "tok")
+	issues, err := c.ListIssues(context.Background(), "acme", "widgets", "open")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("len(issues) = %d, want 1 (PR entry should be dropped)", len(issues))
+	}
+	got := issues[0]
+	if got.Number != 1 || got.Title != "bug one" || got.Body != "repro steps" ||
+		got.HTMLURL != "https://github.com/acme/widgets/issues/1" || got.State != "open" ||
+		got.UpdatedAt != "2026-01-01T00:00:00Z" {
+		t.Fatalf("unexpected issue: %+v", got)
+	}
+	if len(got.Labels) != 2 || got.Labels[0].Name != "bug" || got.Labels[1].Name != "p1" {
+		t.Fatalf("unexpected labels: %+v", got.Labels)
+	}
+}
+
+func TestListIssues_DefaultsStateToOpen(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("state"); got != "open" {
+			t.Fatalf("state = %q, want open", got)
+		}
+		w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "tok")
+	if _, err := c.ListIssues(context.Background(), "acme", "widgets", ""); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestListIssues_InvalidState(t *testing.T) {
+	c := New("https://api.example.com", "tok")
+	if _, err := c.ListIssues(context.Background(), "acme", "widgets", "bogus"); err == nil {
+		t.Fatalf("expected error for invalid state")
+	}
+}
+
+func TestListIssues_NoToken(t *testing.T) {
+	c := New("https://api.example.com", "")
+	if _, err := c.ListIssues(context.Background(), "acme", "widgets", "open"); !errors.Is(err, ErrNoToken) {
+		t.Fatalf("expected ErrNoToken, got %v", err)
+	}
+}
