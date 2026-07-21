@@ -255,9 +255,8 @@
 }
 .question-thread__context-body {
   padding: 15px 18px;
-  font: 13.5px/1.7 var(--font-mono);
+  font: 13.5px/1.6 var(--font-ui);
   color: var(--text-2);
-  white-space: pre-wrap;
 }
 .question-thread__context-toggle {
   display: block;
@@ -320,10 +319,9 @@
   color: var(--text-4);
 }
 .question-thread__message-body {
-  font: 14.5px/1.75 var(--font-ui);
+  font: 14.5px/1.65 var(--font-ui);
   color: var(--text-2-alt);
   padding-left: 33px;
-  white-space: pre-wrap;
 }
 
 .question-thread__form {
