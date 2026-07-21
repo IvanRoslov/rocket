@@ -423,6 +423,8 @@ export const handlers = [
       created_by: 'user',
       created_at: now,
       updated_at: now,
+      open_questions: 0,
+      questions_awaiting_user: 0,
     }
     tasksState.push(task)
     return HttpResponse.json(task, { status: 201 })
@@ -548,6 +550,24 @@ export const handlers = [
     }
     logState.push(entry)
     return HttpResponse.json(entry, { status: 201 })
+  }),
+
+  // Global open-questions list (internal/api/questions.go
+  // handleGetAllQuestions): open only, enriched with task/project context.
+  http.get('/v1/questions', () => {
+    const open = questionsState.filter((q) => q.status === 'open')
+    return HttpResponse.json({
+      questions: open.map((q) => {
+        const task = tasksState.find((t) => t.id === q.task_id)
+        return {
+          ...q,
+          task_title: task?.title ?? '',
+          project_id: task?.project_id ?? 'demo',
+          project_name: 'Demo',
+          orchestrator_name: 'demo-orch',
+        }
+      }),
+    })
   }),
 
   http.get('/v1/tasks/:id/questions', ({ params, request }) => {
@@ -819,6 +839,11 @@ export const handlers = [
 
   // The real daemon (internal/api/projects.go) blocks DELETE only when
   // live_sessions>0 -> 409 project_busy. It does NOT check tasks.
+  // Attachment upload (internal/api/attachments.go): raw image body -> id+url.
+  http.post('/v1/attachments', () =>
+    HttpResponse.json({ id: 1, url: '/v1/attachments/1' }, { status: 201 }),
+  ),
+
   http.delete('/v1/projects/:id', ({ params }) => {
     const id = params.id as string
     const project = projectsState.find((p) => p.id === id)

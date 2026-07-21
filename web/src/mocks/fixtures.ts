@@ -235,6 +235,11 @@ export const tasks: Task[] = [
     created_at: NOW - 60 * DAY,
     updated_at: NOW - 40 * DAY,
     completed_at: NOW - 40 * DAY,
+    // Neutral-badge showcase (task-4): questions were raised but none are
+    // currently awaiting the user, so the card shows "? N open" instead of
+    // the warn-toned "awaiting you" badge.
+    open_questions: 1,
+    questions_awaiting_user: 0,
   },
   {
     id: 10,
@@ -245,6 +250,8 @@ export const tasks: Task[] = [
     created_by: 'user',
     created_at: NOW - 10 * DAY,
     updated_at: NOW - 10 * DAY,
+    open_questions: 0,
+    questions_awaiting_user: 0,
   },
   {
     id: 11,
@@ -256,6 +263,8 @@ export const tasks: Task[] = [
     created_by: 'orchestrator',
     created_at: NOW - 8 * DAY,
     updated_at: NOW - 1 * DAY,
+    open_questions: 0,
+    questions_awaiting_user: 0,
   },
   {
     id: 12,
@@ -270,6 +279,10 @@ export const tasks: Task[] = [
     created_by: 'user',
     created_at: NOW - 3 * DAY,
     updated_at: NOW - 2 * MIN,
+    // Showcase task for the kanban question badge (task-4): one open
+    // question (Q3, see `questions` below) is awaiting the user's reply.
+    open_questions: 2,
+    questions_awaiting_user: 1,
   },
 ]
 
@@ -287,6 +300,8 @@ export const subtasks: Task[] = [
     created_by: 'orchestrator',
     created_at: NOW - 2 * DAY,
     updated_at: NOW - 20 * MIN,
+    open_questions: 0,
+    questions_awaiting_user: 0,
   },
   {
     id: 14,
@@ -301,6 +316,8 @@ export const subtasks: Task[] = [
     created_by: 'orchestrator',
     created_at: NOW - 2 * DAY,
     updated_at: NOW - 40 * MIN,
+    open_questions: 0,
+    questions_awaiting_user: 0,
   },
   {
     id: 15,
@@ -315,6 +332,8 @@ export const subtasks: Task[] = [
     created_by: 'orchestrator',
     created_at: NOW - 2 * DAY,
     updated_at: NOW - 90 * MIN,
+    open_questions: 0,
+    questions_awaiting_user: 0,
   },
   {
     id: 16,
@@ -330,6 +349,8 @@ export const subtasks: Task[] = [
     created_at: NOW - 2 * DAY,
     updated_at: NOW - 3 * HOUR,
     completed_at: NOW - 3 * HOUR,
+    open_questions: 0,
+    questions_awaiting_user: 0,
   },
 ]
 

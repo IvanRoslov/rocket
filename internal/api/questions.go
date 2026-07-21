@@ -109,12 +109,86 @@ func buildQuestionResponse(d Deps, q store.Question) (questionResponse, error) {
 // /v1/tasks/{id}/questions routes are wired by registerTaskRoutes in
 // tasks.go, since they share that path prefix.
 func registerQuestionRoutes(mux *http.ServeMux, d Deps) {
+	mux.HandleFunc("GET /v1/questions", func(w http.ResponseWriter, r *http.Request) {
+		handleGetAllQuestions(w, r, d)
+	})
 	mux.HandleFunc("POST /v1/questions/{id}/reply", func(w http.ResponseWriter, r *http.Request) {
 		handlePostQuestionReply(w, r, d)
 	})
 	mux.HandleFunc("POST /v1/questions/{id}/answer", func(w http.ResponseWriter, r *http.Request) {
 		handlePostQuestionAnswer(w, r, d)
 	})
+}
+
+// globalQuestionResponse is one entry of GET /v1/questions: a full question
+// thread plus the task/project context the per-task endpoints get for free
+// from their URL.
+type globalQuestionResponse struct {
+	questionResponse
+	TaskTitle        string `json:"task_title"`
+	ProjectID        string `json:"project_id"`
+	ProjectName      string `json:"project_name"`
+	OrchestratorName string `json:"orchestrator_name,omitempty"`
+}
+
+// handleGetAllQuestions serves GET /v1/questions: every open question across
+// all tasks, enriched with task title, project and orchestrator name for the
+// dashboard's global Questions page. Questions whose task has vanished are
+// skipped rather than failing the whole listing.
+func handleGetAllQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
+	qs, err := d.Store.ListAllOpenQuestions()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	tasks := map[int64]store.Task{}
+	projectNames := map[string]string{}
+	orchNames := map[string]string{}
+
+	out := make([]globalQuestionResponse, 0, len(qs))
+	for _, q := range qs {
+		task, ok := tasks[q.TaskID]
+		if !ok {
+			task, err = d.Store.GetTask(q.TaskID)
+			if errors.Is(err, store.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+				return
+			}
+			tasks[q.TaskID] = task
+		}
+
+		resp, err := buildQuestionResponse(d, q)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+
+		g := globalQuestionResponse{
+			questionResponse: resp,
+			TaskTitle:        task.Title,
+			ProjectID:        task.ProjectID,
+		}
+		if name, ok := projectNames[task.ProjectID]; ok {
+			g.ProjectName = name
+		} else if p, err := d.Store.GetProject(task.ProjectID); err == nil {
+			projectNames[task.ProjectID] = p.Name
+			g.ProjectName = p.Name
+		}
+		if task.SessionID != "" {
+			if name, ok := orchNames[task.SessionID]; ok {
+				g.OrchestratorName = name
+			} else if sess, err := d.Store.GetSession(task.SessionID); err == nil {
+				orchNames[task.SessionID] = sess.TmuxName
+				g.OrchestratorName = sess.TmuxName
+			}
+		}
+		out = append(out, g)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"questions": out})
 }
 
 // parseQuestionID extracts and parses the {id} path value, writing a 404
@@ -150,6 +224,7 @@ func getQuestionOr404(w http.ResponseWriter, d Deps, id int64) (store.Question, 
 // task has no attached session, or that session is no longer active, delivery
 // is skipped (logged) — the Q&A record itself still updates regardless.
 func deliverToOrchestrator(d Deps, task store.Task, body string) error {
+	body = rewriteAttachmentLinks(d, body)
 	if task.SessionID == "" {
 		return nil
 	}

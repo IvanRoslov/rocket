@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
 import { NavLink, Outlet, useParams, useLocation } from 'react-router-dom'
+import { useOpenQuestions } from '../lib/queries'
 import { ProjectSwitcher } from './ProjectSwitcher'
 
 const navLinkStyle = ({ isActive }: { isActive: boolean }): CSSProperties => ({
@@ -13,6 +14,8 @@ const navLinkStyle = ({ isActive }: { isActive: boolean }): CSSProperties => ({
 export function AppShell() {
   const { projectId } = useParams()
   const location = useLocation()
+  const { data: questions } = useOpenQuestions()
+  const awaitingCount = (questions ?? []).filter((q) => q.whose_turn === 'user').length
 
   return (
     <div style={{ minHeight: '100vh' }}>
@@ -62,6 +65,23 @@ export function AppShell() {
             style={({ isActive }) => navLinkStyle({ isActive: isActive && location.pathname.startsWith('/p/') })}
           >
             Kanban
+          </NavLink>
+          <NavLink to="/questions" style={navLinkStyle}>
+            Questions
+            {awaitingCount > 0 && (
+              <span
+                style={{
+                  marginLeft: 6,
+                  padding: '1px 7px',
+                  borderRadius: 999,
+                  background: 'var(--warn-bg)',
+                  color: 'var(--warn-text-2)',
+                  font: '600 11px var(--font-ui)',
+                }}
+              >
+                {awaitingCount}
+              </span>
+            )}
           </NavLink>
           <NavLink to="/system" style={navLinkStyle}>
             System

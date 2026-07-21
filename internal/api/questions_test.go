@@ -713,3 +713,53 @@ func TestQuestionReply_OrchestratorReopensResolved(t *testing.T) {
 		t.Errorf("second answer status = %d, want 200", ans2.StatusCode)
 	}
 }
+
+// TestGetAllQuestions: the global list enriches each open question with its
+// task title, project and orchestrator tmux name.
+func TestGetAllQuestions(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	if _, err := d.Store.AddQuestion(store.Question{TaskID: taskID, AskedBy: "orch-1", Body: "open q"}); err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+	qid, err := d.Store.AddQuestion(store.Question{TaskID: taskID, AskedBy: "orch-1", Body: "resolved q"})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+	if err := d.Store.ResolveQuestion(qid, "answered"); err != nil {
+		t.Fatalf("ResolveQuestion: %v", err)
+	}
+
+	resp := getJSON(t, srv.URL+"/v1/questions")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body struct {
+		Questions []struct {
+			questionResponse
+			TaskTitle        string `json:"task_title"`
+			ProjectID        string `json:"project_id"`
+			ProjectName      string `json:"project_name"`
+			OrchestratorName string `json:"orchestrator_name"`
+		} `json:"questions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Questions) != 1 {
+		t.Fatalf("len = %d, want 1 (resolved excluded)", len(body.Questions))
+	}
+	got := body.Questions[0]
+	if got.Body != "open q" || got.TaskID != taskID {
+		t.Errorf("question mismatch: %+v", got.questionResponse)
+	}
+	if got.TaskTitle != "Root" || got.ProjectID != "proj1" {
+		t.Errorf("task enrichment = %q/%q, want Root/proj1", got.TaskTitle, got.ProjectID)
+	}
+	if got.OrchestratorName == "" {
+		t.Errorf("orchestrator_name empty, want the orch-1 session tmux name")
+	}
+}

@@ -68,4 +68,11 @@ describe('Markdown', () => {
     const { container } = render(<Markdown compact>{'text'}</Markdown>)
     expect(container.querySelector('.markdown--compact')).toBeInTheDocument()
   })
+
+  it('renders just the alt text for an image with an empty src, no img/link', () => {
+    const { container } = render(<Markdown>{'![x]()'}</Markdown>)
+    expect(container.querySelector('img')).not.toBeInTheDocument()
+    expect(container.querySelector('a[href=""]')).not.toBeInTheDocument()
+    expect(screen.getByText('x')).toBeInTheDocument()
+  })
 })

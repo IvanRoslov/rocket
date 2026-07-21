@@ -26,6 +26,7 @@ type Config struct {
 	DefaultAgent         string        `yaml:"default_agent"`
 	ReposDir             string        `yaml:"repos_dir"`
 	WorktreesDir         string        `yaml:"worktrees_dir"`
+	AttachmentsDir       string        `yaml:"attachments_dir"`
 	ActivityPollInterval time.Duration `yaml:"activity_poll_interval"`
 	ReadyToIdle          time.Duration `yaml:"ready_to_idle"`
 	QueueTimeout         time.Duration `yaml:"queue_timeout"`
@@ -86,6 +87,7 @@ func Load(home string) (*Config, error) {
 		DefaultAgent:              "claude-code",
 		ReposDir:                  filepath.Join(home, "repos"),
 		WorktreesDir:              filepath.Join(home, "worktrees"),
+		AttachmentsDir:            filepath.Join(home, "attachments"),
 		ActivityPollInterval:      5 * time.Second,
 		ReadyToIdle:               5 * time.Minute,
 		QueueTimeout:              30 * time.Minute,
@@ -126,6 +128,13 @@ func Load(home string) (*Config, error) {
 		cfg.WorktreesDir = expandTilde(cfg.WorktreesDir, home)
 	} else {
 		cfg.WorktreesDir = filepath.Join(home, "worktrees")
+	}
+
+	// Expand ~ in AttachmentsDir
+	if cfg.AttachmentsDir != "" {
+		cfg.AttachmentsDir = expandTilde(cfg.AttachmentsDir, home)
+	} else {
+		cfg.AttachmentsDir = filepath.Join(home, "attachments")
 	}
 
 	// An explicit empty host would bind all interfaces; keep the safe default.

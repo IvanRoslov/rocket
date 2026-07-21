@@ -1676,6 +1676,48 @@ func TestPostTaskStartConcurrentStartsSerializedCorrectly(t *testing.T) {
 	}
 }
 
+// TestListTasks_QuestionCounts: board and list responses annotate each task
+// with open_questions / questions_awaiting_user from a single counts query.
+func TestListTasks_QuestionCounts(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	// One open orchestrator-asked question (awaiting user), one resolved.
+	if _, err := d.Store.AddQuestion(store.Question{TaskID: taskID, AskedBy: "orch-1", Body: "open q"}); err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+	qid, err := d.Store.AddQuestion(store.Question{TaskID: taskID, AskedBy: "orch-1", Body: "done q"})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+	if err := d.Store.ResolveQuestion(qid, "answered"); err != nil {
+		t.Fatalf("ResolveQuestion: %v", err)
+	}
+
+	resp := getJSON(t, srv.URL+"/v1/tasks?board=true")
+	defer resp.Body.Close()
+	var boardResp struct {
+		Board struct {
+			Backlog []struct {
+				ID                    int64 `json:"id"`
+				OpenQuestions         int   `json:"open_questions"`
+				QuestionsAwaitingUser int   `json:"questions_awaiting_user"`
+			} `json:"backlog"`
+		} `json:"board"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&boardResp); err != nil {
+		t.Fatalf("decode board: %v", err)
+	}
+	if len(boardResp.Board.Backlog) != 1 {
+		t.Fatalf("backlog len = %d, want 1", len(boardResp.Board.Backlog))
+	}
+	got := boardResp.Board.Backlog[0]
+	if got.OpenQuestions != 1 || got.QuestionsAwaitingUser != 1 {
+		t.Errorf("counts = %d/%d, want 1/1", got.OpenQuestions, got.QuestionsAwaitingUser)
+	}
+}
+
 // itoa is a tiny helper to avoid importing strconv in every test that needs
 // to interpolate a task id into a URL.
 func itoa(n int64) string {

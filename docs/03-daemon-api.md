@@ -92,6 +92,7 @@ tmux рендерит окно ровно в **одном** размере; пр
 | PUT | `/v1/tasks/{id}/docs` | `{kind, title, body}` — создаёт новую версию |
 | GET | `/v1/tasks/{id}/log` | Журнал; `?kind=` |
 | POST | `/v1/tasks/{id}/log` | `{kind, body}` |
+| GET | `/v1/questions` | Все открытые вопросы по всем задачам (для глобальной страницы Questions дашборда): элемент = вопрос (та же форма, что и в `/v1/tasks/{id}/questions`) + `task_title`, `project_id`, `project_name`, `orchestrator_name?` |
 | GET | `/v1/tasks/{id}/questions` | Вопросы задачи с тредами; `?status=open` |
 | POST | `/v1/tasks/{id}/questions` | `{body, context?}` — только на корневой задаче. Оркестратор задачи открывает вопрос пользователю (`asked_by` = его session id), без доставки. Пользователь (запрос без `X-Rocket-Session`) открывает вопрос оркестратору (`asked_by = ""`), и тело сразу доставляется в очередь оркестратора как `[task #N QM question] ...` (+ `context`, если есть); свежий такой тред имеет `whose_turn = "orchestrator"`. Воркер получает `403`. Событие `task.question_asked` |
 | POST | `/v1/questions/{id}/reply` | `{body}` — реплика в тред. В open-вопрос — от любой стороны (вопрос остаётся open; реплика пользователя доставляется оркестратору через очередь `[task #N QM reply] ...`; реплика оркестратора поднимает бейдж). В resolved-вопрос: пользователь → `409 question_resolved`; оркестратор задачи → **переоткрывает** вопрос (оспаривание финального ответа доказательствами; статус снова open, события `task.question_reopened` + `task.question_replied`) |
@@ -106,6 +107,15 @@ tmux рендерит окно ровно в **одном** размере; пр
 | POST | `/v1/messages` | `{from?, to, body}` → ставит в очередь, ответ `{id, status:"queued"}` |
 | GET | `/v1/messages?session={id}&limit=N` | История сообщений сессии (в обе стороны) |
 | GET | `/v1/messages/{id}` | Статус конкретного сообщения |
+
+## Вложения
+
+| Метод | Путь | Описание |
+|---|---|---|
+| POST | `/v1/attachments` | Тело запроса — сырые байты картинки (не multipart), тип берётся из `Content-Type`: `image/png`, `image/jpeg` или `image/webp` (иначе `415`); лимит 10 MiB (иначе `413`) → `201 {id, url}` |
+| GET | `/v1/attachments/{id}` | Отдаёт файл с исходным `Content-Type` и агрессивным `Cache-Control` (immutable — id никогда не переписывается) |
+
+Вставляются в markdown как `![...](/v1/attachments/{id})` (так их вставляет `usePasteImage` при Ctrl+V в дашборде). При постановке сообщения в очередь агенту (`POST /v1/messages`, доставка вопроса) такие ссылки переписываются в `[screenshot: <абсолютный путь к файлу>]`, чтобы агент мог открыть картинку через Read — см. [05-state.md](05-state.md) и `internal/api/attachments.go`.
 
 ## События
 

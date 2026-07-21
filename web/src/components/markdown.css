@@ -125,6 +125,15 @@
   margin: 0 0 10px;
 }
 
+.markdown__img {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  margin: 2px 0 8px;
+}
+
 .markdown table {
   border-collapse: collapse;
   width: max-content;

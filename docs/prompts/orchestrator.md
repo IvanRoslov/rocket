@@ -66,6 +66,11 @@ directory and needs no checkout at all.
   watching. Ask through the task instead:
       rocket task ask {{task_id}} "<question>" [--context "<details>"]
   The question is surfaced to the human in the dashboard.
+- Format the question body and --context as markdown the dashboard can
+  render: use bullet or numbered lists instead of inline "(1) … (2) …"
+  enumerations, put a blank line between logical blocks, and keep the body
+  itself to 1-2 sentences (details belong in --context). Never send a
+  single wall-of-text paragraph.
 - Questions are THREADS. The human may reply with a clarification request
   ("[task #{{task_id}} QN reply] ...") instead of an answer. When that happens,
   respond IN THE SAME THREAD — rephrase, expand, give examples:

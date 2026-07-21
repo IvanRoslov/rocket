@@ -171,18 +171,6 @@ func (s *Store) ListQuestionMessages(questionID int64) ([]QuestionMessage, error
 	return out, nil
 }
 
-// CountOpenQuestions returns the number of open questions for taskID.
-func (s *Store) CountOpenQuestions(taskID int64) (int, error) {
-	var n int
-	err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM task_questions WHERE task_id = ? AND status = 'open'`, taskID,
-	).Scan(&n)
-	if err != nil {
-		return 0, fmt.Errorf("count open questions: %w", err)
-	}
-	return n, nil
-}
-
 // QuestionOrdinal returns q's 1-based position among all questions asked on
 // its task, ordered by id (e.g. for "Q3" numbering).
 func (s *Store) QuestionOrdinal(q Question) (int, error) {
@@ -194,6 +182,81 @@ func (s *Store) QuestionOrdinal(q Question) (int, error) {
 		return 0, fmt.Errorf("compute question ordinal: %w", err)
 	}
 	return n, nil
+}
+
+// QuestionCounts summarizes a task's open questions for board/list views.
+type QuestionCounts struct {
+	Open         int
+	AwaitingUser int
+}
+
+// OpenQuestionCounts returns, per task with at least one open question, how
+// many questions are open and how many of those await the human. "Awaiting
+// the human" mirrors the whoseTurn derivation in internal/api/questions.go:
+// with no thread messages the question itself counts as the last entry (so
+// an orchestrator-opened question awaits the human, a user-opened one
+// doesn't); otherwise the last message's author decides (orchestrator
+// author -> human's turn). Computed in one query so list/board handlers can
+// annotate every task without an N+1.
+func (s *Store) OpenQuestionCounts() (map[int64]QuestionCounts, error) {
+	rows, err := s.db.Query(`
+		SELECT task_id, COUNT(*), SUM(turn_user) FROM (
+			SELECT q.task_id AS task_id,
+				CASE
+					WHEN m.id IS NULL THEN (CASE WHEN q.asked_by != '' THEN 1 ELSE 0 END)
+					WHEN m.author IS NOT NULL AND m.author != '' THEN 1
+					ELSE 0
+				END AS turn_user
+			FROM task_questions q
+			LEFT JOIN question_messages m
+				ON m.question_id = q.id
+				AND m.id = (SELECT MAX(id) FROM question_messages WHERE question_id = q.id)
+			WHERE q.status = 'open'
+		) GROUP BY task_id`)
+	if err != nil {
+		return nil, fmt.Errorf("query open question counts: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[int64]QuestionCounts)
+	for rows.Next() {
+		var taskID int64
+		var c QuestionCounts
+		if err := rows.Scan(&taskID, &c.Open, &c.AwaitingUser); err != nil {
+			return nil, fmt.Errorf("scan open question counts: %w", err)
+		}
+		out[taskID] = c
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListAllOpenQuestions returns every open question across all tasks,
+// ascending by id — the backing query for the dashboard's global
+// Questions page.
+func (s *Store) ListAllOpenQuestions() ([]Question, error) {
+	rows, err := s.db.Query(
+		`SELECT id, task_id, asked_by, body, context, status, resolution, asked_at, resolved_at
+		 FROM task_questions WHERE status = 'open' ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("query all open questions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Question
+	for rows.Next() {
+		q, err := scanQuestion(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, q)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func scanQuestion(row interface{ Scan(...any) error }) (Question, error) {

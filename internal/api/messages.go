@@ -107,6 +107,11 @@ func handlePostMessage(w http.ResponseWriter, r *http.Request, d Deps) {
 		}
 	}
 
+	// Attachment links pasted in the dashboard are rewritten to on-disk
+	// paths here, at enqueue time, so the injected copy (and the transcript
+	// echo) is what the agent can actually open.
+	req.Body = rewriteAttachmentLinks(d, req.Body)
+
 	id, err := d.Store.AddMessage(store.Message{
 		FromSession: req.From,
 		ToSession:   req.To,
@@ -131,9 +136,15 @@ func handlePostMessage(w http.ResponseWriter, r *http.Request, d Deps) {
 		slog.Warn("api: message queued with nil Queue, will not be delivered until daemon restart", "id", id, "to", req.To)
 	}
 
+	// Echo the stored (rewritten) body so the web client can reconcile its
+	// optimistic copy against what actually lands in the transcript: the
+	// client sent the pre-rewrite text, but rewriteAttachmentLinks above may
+	// have altered it before storage, so an exact-text dedupe against the
+	// transcript echo needs this, not the original request body.
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"id":     id,
 		"status": "queued",
+		"body":   req.Body,
 	})
 }
 

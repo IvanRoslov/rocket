@@ -83,6 +83,7 @@ func NewHandler(d Deps) http.Handler {
 	registerMessageRoutes(mux, d)
 	registerSystemRoutes(mux, d)
 	registerQuestionRoutes(mux, d)
+	registerAttachmentRoutes(mux, d)
 	registerSettingsRoutes(mux, d)
 
 	// Any /v1 path not matched by a more specific route above is a 404,

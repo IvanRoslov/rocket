@@ -45,6 +45,14 @@ export function Markdown({ children, compact }: MarkdownProps) {
             ) : (
               <input type={type} {...rest} />
             ),
+          img: ({ src, alt }) =>
+            src ? (
+              <a href={src} target="_blank" rel="noopener noreferrer">
+                <img src={src} alt={alt ?? ''} className="markdown__img" />
+              </a>
+            ) : (
+              <span>{alt ?? ''}</span>
+            ),
         }}
       >
         {children}

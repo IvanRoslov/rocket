@@ -14,6 +14,7 @@ import { api } from './api'
 import type {
   GithubIssue,
   GithubRepo,
+  GlobalQuestion,
   Message,
   Project,
   Question,
@@ -210,6 +211,18 @@ export function useTaskQuestions(id: number | undefined): UseQueryResult<Questio
   })
 }
 
+/** `GET /v1/questions` — all open questions across all projects, for the
+ * global Questions page and the AppShell nav counter. */
+export function useOpenQuestions(): UseQueryResult<GlobalQuestion[]> {
+  return useQuery({
+    queryKey: ['questions', 'open'],
+    queryFn: async () => {
+      const res = await api.get<{ questions: GlobalQuestion[] }>('/v1/questions')
+      return res.questions
+    },
+  })
+}
+
 /**
  * `GET /v1/system` (internal/api/system.go): daemon status, message queue
  * depth, reconciled tmux sessions/worktrees (with orphan/state info) and a
@@ -288,7 +301,7 @@ export function useGithubIssues(
 // ---------------------------------------------------------------------------
 
 export function useSendMessage(): UseMutationResult<
-  { id: number; status: string },
+  { id: number; status: string; body: string },
   Error,
   { to: string; body: string; from?: string }
 > {
@@ -442,6 +455,7 @@ export function useReplyQuestion(): UseMutationResult<
     onSuccess: (_data, { taskId }) => {
       queryClient.invalidateQueries({ queryKey: ['task', taskId, 'questions'] })
       queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+      queryClient.invalidateQueries({ queryKey: ['questions'] })
     },
   })
 }
@@ -462,6 +476,7 @@ export function useAnswerQuestion(): UseMutationResult<
     onSuccess: (_data, { taskId }) => {
       queryClient.invalidateQueries({ queryKey: ['task', taskId, 'questions'] })
       queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+      queryClient.invalidateQueries({ queryKey: ['questions'] })
     },
   })
 }
@@ -617,6 +632,7 @@ export function wireInvalidation(queryClient: QueryClient) {
     } else if (event.type.startsWith('task.')) {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
       queryClient.invalidateQueries({ queryKey: ['task'] })
+      queryClient.invalidateQueries({ queryKey: ['questions'] })
     } else if (event.type === 'orchestrator.heartbeat_sent') {
       // High-frequency event; keep invalidation minimal — only the task
       // detail view (which shows session/heartbeat state) needs to refresh.

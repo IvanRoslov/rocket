@@ -72,6 +72,29 @@ test('PR badges aggregate worker sessions: 1 PR open + 1 merged + CI ✔ for #12
   expect(within(card).getByText('CI ✔')).toBeInTheDocument()
 })
 
+test('question badge: warn "awaiting you" when questions_awaiting_user > 0', async () => {
+  renderKanban()
+  await waitFor(() => expect(screen.getByText('Billing v2')).toBeInTheDocument())
+
+  // #12 "Billing v2" (fixtures.ts) is the showcase task with
+  // open_questions: 2, questions_awaiting_user: 1 — the warn badge should
+  // win over the neutral "open" badge.
+  const card = screen.getByText('Billing v2').closest('.kanban-card') as HTMLElement
+  expect(within(card).getByText('? 1 awaiting you')).toBeInTheDocument()
+  expect(within(card).queryByText('? 2 open')).not.toBeInTheDocument()
+})
+
+test('question badge: neutral "open" when open_questions > 0 but nothing awaiting the user', async () => {
+  renderKanban()
+  await waitFor(() => expect(screen.getByText('Legacy invoice migration')).toBeInTheDocument())
+
+  // #9 "Legacy invoice migration" (fixtures.ts) has open_questions: 1,
+  // questions_awaiting_user: 0 — the neutral "open" badge, not the warn one.
+  const card = screen.getByText('Legacy invoice migration').closest('.kanban-card') as HTMLElement
+  expect(within(card).getByText('? 1 open')).toBeInTheDocument()
+  expect(within(card).queryByText(/awaiting you/)).not.toBeInTheDocument()
+})
+
 test('cancelled column hidden by default, shown via checkbox', async () => {
   renderKanban()
   await waitFor(() => expect(screen.getByText('Invoice PDF export')).toBeInTheDocument())
