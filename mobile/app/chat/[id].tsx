@@ -1,7 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router'
 import { useMemo, useRef, useState } from 'react'
 import {
-  FlatList,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -25,6 +24,9 @@ import { ago, sessionBadge, sessionDot } from '../../src/lib/format'
 import { colors, mono, radius } from '../../src/theme'
 
 type Row = ChatRow
+
+/** Rows rendered at once; "Show earlier" extends the window by this much. */
+const WINDOW_STEP = 80
 
 function SystemRow({ label, body }: { label: string; body: string }) {
   const [expanded, setExpanded] = useState(false)
@@ -96,7 +98,8 @@ export default function ChatScreen() {
   const [text, setText] = useState('')
   const [outgoing, setOutgoing] = useState<OutgoingMsg[]>([])
   const [showTools, setShowTools] = useState(false)
-  const listRef = useRef<FlatList<Row>>(null)
+  const [windowSize, setWindowSize] = useState(WINDOW_STEP)
+  const listRef = useRef<ScrollView>(null)
   const atBottom = useRef(true)
 
   const pendingQuiz = session?.pending_quiz
@@ -145,15 +148,13 @@ export default function ChatScreen() {
       </View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
-        <FlatList
+        {/* A ScrollView, not a FlatList: virtualization renders from the top,
+            so scrollToEnd on open lands mid-list. A fully laid-out ScrollView
+            makes "start at the bottom" exact; the visible window is capped
+            and older rows load on demand. */}
+        <ScrollView
           ref={listRef}
-          data={rows}
-          keyExtractor={(r) => r.key}
           contentContainerStyle={{ padding: 14, paddingBottom: 18 }}
-          // A plain (non-inverted) list: `inverted` flips every cell with a
-          // scaleY transform, which misplaces variable-height markdown and
-          // leaves big blank gaps. We keep the view pinned to the bottom
-          // ourselves unless the user has scrolled up to read history.
           onContentSizeChange={() => {
             if (atBottom.current) listRef.current?.scrollToEnd({ animated: false })
           }}
@@ -162,11 +163,22 @@ export default function ChatScreen() {
             atBottom.current = contentOffset.y + layoutMeasurement.height >= contentSize.height - 60
           }}
           scrollEventThrottle={100}
-          renderItem={({ item }) =>
+        >
+          {rows.length > windowSize ? (
+            <Pressable
+              style={styles.earlierBtn}
+              onPress={() => setWindowSize((w) => w + WINDOW_STEP)}
+            >
+              <Text style={{ fontSize: 12.5, fontWeight: '600', color: colors.accent }}>
+                ↑ Show earlier messages ({rows.length - windowSize} more)
+              </Text>
+            </Pressable>
+          ) : null}
+          {rows.slice(-windowSize).map((item) =>
             item.kind === 'entry' ? (
-              <EntryBubble entry={item.entry} />
+              <EntryBubble key={item.key} entry={item.entry} />
             ) : (
-              <View style={{ alignItems: 'flex-end', marginVertical: 3 }}>
+              <View key={item.key} style={{ alignItems: 'flex-end', marginVertical: 3 }}>
                 <View style={[styles.bubble, { backgroundColor: colors.indigoBg, borderColor: colors.indigoBorder }]}>
                   <Text style={styles.bubbleText}>{item.body}</Text>
                   <Text
@@ -184,16 +196,16 @@ export default function ChatScreen() {
                   </Text>
                 </View>
               </View>
-            )
-          }
-          ListEmptyComponent={
+            ),
+          )}
+          {rows.length === 0 ? (
             <View style={{ padding: 30, alignItems: 'center' }}>
               <Text style={{ color: colors.textFaint, fontSize: 13.5 }}>
                 {loading ? 'Loading transcript…' : error ? `Error: ${error}` : 'No transcript yet.'}
               </Text>
             </View>
-          }
-        />
+          ) : null}
+        </ScrollView>
 
         {pendingQuiz ? (
           <ScrollView style={styles.quizHost} contentContainerStyle={{ padding: 12 }}>
@@ -281,6 +293,16 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     color: colors.text,
     backgroundColor: colors.page,
+  },
+  earlierBtn: {
+    alignSelf: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.chip,
+    backgroundColor: colors.card,
+    marginBottom: 10,
   },
   quizHost: {
     maxHeight: '62%',
