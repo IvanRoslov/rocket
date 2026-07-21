@@ -686,6 +686,7 @@ export function ChatScreen() {
 
   function handleSend() {
     if (!session || !canCompose) return
+    if (paste.uploading) return
     const text = body.trim()
     if (!text) return
     setBody('')
@@ -789,7 +790,7 @@ export function ChatScreen() {
                 }
               }}
             />
-            <button type="button" onClick={handleSend} disabled={send.isPending || !body.trim()}>
+            <button type="button" onClick={handleSend} disabled={send.isPending || paste.uploading || !body.trim()}>
               Send
             </button>
             {paste.error && <div className="chat-screen__paste-error">Upload failed: {paste.error}</div>}

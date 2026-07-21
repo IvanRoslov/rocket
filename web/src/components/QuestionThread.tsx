@@ -150,10 +150,20 @@ export function QuestionThread({ taskId, question, orchestratorName }: QuestionT
           />
           {paste.error && <div className="question-thread__paste-error">Upload failed: {paste.error}</div>}
           <div className="question-thread__actions">
-            <button type="button" className="question-thread__clarify" onClick={handleClarify} disabled={busy || !body.trim()}>
+            <button
+              type="button"
+              className="question-thread__clarify"
+              onClick={handleClarify}
+              disabled={busy || paste.uploading || !body.trim()}
+            >
               Clarify — keep open
             </button>
-            <button type="button" className="question-thread__answer" onClick={handleAnswer} disabled={busy || !body.trim()}>
+            <button
+              type="button"
+              className="question-thread__answer"
+              onClick={handleAnswer}
+              disabled={busy || paste.uploading || !body.trim()}
+            >
               Answer &amp; close
             </button>
             <div className="question-thread__spacer" />

@@ -89,7 +89,12 @@ function AskOrchestratorForm({ taskId, disabled }: AskOrchestratorFormProps) {
         </button>
       )}
       <div className="questions-tab__ask-actions">
-        <button type="button" className="questions-tab__ask-submit" onClick={handleSubmit} disabled={ask.isPending || !body.trim()}>
+        <button
+          type="button"
+          className="questions-tab__ask-submit"
+          onClick={handleSubmit}
+          disabled={ask.isPending || pasteBody.uploading || pasteContext.uploading || !body.trim()}
+        >
           Ask
         </button>
         <button type="button" className="questions-tab__ask-cancel" onClick={reset} disabled={ask.isPending}>
