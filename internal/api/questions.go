@@ -224,6 +224,7 @@ func getQuestionOr404(w http.ResponseWriter, d Deps, id int64) (store.Question, 
 // task has no attached session, or that session is no longer active, delivery
 // is skipped (logged) — the Q&A record itself still updates regardless.
 func deliverToOrchestrator(d Deps, task store.Task, body string) error {
+	body = rewriteAttachmentLinks(d, body)
 	if task.SessionID == "" {
 		return nil
 	}

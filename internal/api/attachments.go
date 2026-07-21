@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -106,4 +107,29 @@ func handleGetAttachment(w http.ResponseWriter, r *http.Request, d Deps) {
 	w.Header().Set("Content-Type", a.MIME)
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	http.ServeFile(w, r, attachmentFilePath(d.Cfg, a))
+}
+
+// attachmentLinkRe matches markdown image links pointing at the attachments
+// API, as inserted by the dashboard's paste handler.
+var attachmentLinkRe = regexp.MustCompile(`!\[[^\]]*\]\(/v1/attachments/(\d+)\)`)
+
+// rewriteAttachmentLinks replaces dashboard attachment links in body with
+// bracketed absolute file paths so the receiving agent can open the image
+// from disk (agents get text injected into a TUI — a URL is useless there,
+// a path is Read-able). Called at message-enqueue time only; question
+// threads keep the original markdown for the web to render. Unknown ids
+// pass through untouched.
+func rewriteAttachmentLinks(d Deps, body string) string {
+	return attachmentLinkRe.ReplaceAllStringFunc(body, func(link string) string {
+		idStr := attachmentLinkRe.FindStringSubmatch(link)[1]
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			return link
+		}
+		a, err := d.Store.GetAttachment(id)
+		if err != nil {
+			return link
+		}
+		return "[screenshot: " + attachmentFilePath(d.Cfg, a) + "]"
+	})
 }
