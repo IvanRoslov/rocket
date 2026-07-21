@@ -301,3 +301,60 @@ func TestReopenQuestion(t *testing.T) {
 		t.Errorf("reopen unknown: err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestOpenQuestionCounts(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+
+	// No questions at all: task absent from the map.
+	counts, err := s.OpenQuestionCounts()
+	if err != nil {
+		t.Fatalf("OpenQuestionCounts: %v", err)
+	}
+	if _, ok := counts[taskID]; ok {
+		t.Errorf("counts[%d] present, want absent", taskID)
+	}
+
+	// Q1: orchestrator-opened, no messages -> awaiting user.
+	q1, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch-1", Body: "Q1"})
+	if err != nil {
+		t.Fatalf("AddQuestion q1: %v", err)
+	}
+	// Q2: orchestrator-opened, last message from human -> awaiting orchestrator.
+	q2, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch-1", Body: "Q2"})
+	if err != nil {
+		t.Fatalf("AddQuestion q2: %v", err)
+	}
+	if _, err := s.AddQuestionMessage(QuestionMessage{QuestionID: q2, Author: "", Body: "human reply"}); err != nil {
+		t.Fatalf("AddQuestionMessage q2: %v", err)
+	}
+	// Q3: user-opened, last message from orchestrator -> awaiting user.
+	q3, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "", Body: "Q3"})
+	if err != nil {
+		t.Fatalf("AddQuestion q3: %v", err)
+	}
+	if _, err := s.AddQuestionMessage(QuestionMessage{QuestionID: q3, Author: "orch-1", Body: "orch reply"}); err != nil {
+		t.Fatalf("AddQuestionMessage q3: %v", err)
+	}
+	// Q4: resolved -> excluded entirely.
+	q4, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch-1", Body: "Q4"})
+	if err != nil {
+		t.Fatalf("AddQuestion q4: %v", err)
+	}
+	if err := s.ResolveQuestion(q4, "answered"); err != nil {
+		t.Fatalf("ResolveQuestion q4: %v", err)
+	}
+	_ = q1
+
+	counts, err = s.OpenQuestionCounts()
+	if err != nil {
+		t.Fatalf("OpenQuestionCounts: %v", err)
+	}
+	got := counts[taskID]
+	if got.Open != 3 {
+		t.Errorf("Open = %d, want 3", got.Open)
+	}
+	if got.AwaitingUser != 2 {
+		t.Errorf("AwaitingUser = %d, want 2 (q1 no-messages + q3 orch-last)", got.AwaitingUser)
+	}
+}
