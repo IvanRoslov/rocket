@@ -173,7 +173,10 @@ describe('ChatScreen sending', () => {
     server.use(
       http.post('/v1/messages', async ({ request }) => {
         posted = await request.json()
-        return HttpResponse.json({ id: 999, status: 'queued' }, { status: 201 })
+        const { body } = posted as { to: string; body: string }
+        // Echo the (unmodified, for this test) body, mirroring the real
+        // handler's `body` field in the 201 response.
+        return HttpResponse.json({ id: 999, status: 'queued', body }, { status: 201 })
       }),
     )
 

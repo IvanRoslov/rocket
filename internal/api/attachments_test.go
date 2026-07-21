@@ -109,6 +109,62 @@ func TestGetAttachment_NotFound(t *testing.T) {
 	}
 }
 
+// TestPostMessage_ResponseBodyIsRewritten covers the chat duplicate-bubble
+// fix: handlePostMessage rewrites attachment links before storing (see
+// rewriteAttachmentLinks), so the stored body differs from the body the web
+// client sent. The 201 response must carry the STORED (rewritten) body, not
+// the original request body, so the client can reconcile its optimistic
+// bubble against the transcript echo.
+func TestPostMessage_ResponseBodyIsRewritten(t *testing.T) {
+	d := attachmentsTestDeps(t)
+	srv := newTestServer(t, d)
+
+	addMsgTestSession(t, d, "recv", "running")
+
+	id, err := d.Store.AddAttachment(store.Attachment{MIME: "image/png", Size: 3})
+	if err != nil {
+		t.Fatalf("AddAttachment: %v", err)
+	}
+
+	sentBody := "see ![screenshot](/v1/attachments/" + itoa(id) + ")"
+	resp := postJSON(t, srv.URL+"/v1/messages", map[string]any{
+		"to":   "recv",
+		"body": sentBody,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+
+	var got struct {
+		ID     int64  `json:"id"`
+		Status string `json:"status"`
+		Body   string `json:"body"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	wantPath := filepath.Join(d.Cfg.AttachmentsDir, itoa(id)+".png")
+	if !strings.Contains(got.Body, "[screenshot: "+wantPath+"]") {
+		t.Errorf("response body not rewritten: %q", got.Body)
+	}
+	if got.Body == sentBody {
+		t.Errorf("response body equals the original request body, want the rewritten form")
+	}
+
+	// The stored message must match what was echoed back, exactly — that's
+	// what the transcript echo will show, and what the client's optimistic
+	// dedupe compares against.
+	stored, err := d.Store.GetMessage(got.ID)
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if stored.Body != got.Body {
+		t.Errorf("stored body = %q, want equal to response body %q", stored.Body, got.Body)
+	}
+}
+
 func TestRewriteAttachmentLinks(t *testing.T) {
 	d := attachmentsTestDeps(t)
 	id, err := d.Store.AddAttachment(store.Attachment{MIME: "image/png", Size: 3})

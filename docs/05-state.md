@@ -11,8 +11,10 @@
 ├── logs/rocketd.log   # ротация по размеру
 ├── repos/             # чекауты, склонированные самим rocket'ом
 │   └── <owner>__<name>/
-└── worktrees/
-    └── <repo-id>/<session-id>/
+├── worktrees/
+│   └── <repo-id>/<session-id>/
+└── attachments/        # картинки, вставленные Ctrl+V в дашборде
+    └── <id>.<ext>
 ```
 
 Принцип: **вся модель данных — в rocket.db, единственный писатель — демон.** Репозитории и проекты тоже живут в базе и управляются через CLI/API/дашборд, а не редактированием файлов. config.yaml — только настройки демона, опционален (без него — дефолты).
@@ -28,6 +30,10 @@
 
 Обе базовые директории переопределяются в config.yaml (`repos_dir`, `worktrees_dir`) — например, чтобы вынести worktree на быстрый диск.
 
+## Куда rocket кладёт вложения (скриншоты из дашборда)
+
+`POST /v1/attachments` (см. [03-daemon-api.md](03-daemon-api.md)) сохраняет присланные байты под `<attachments_dir>/<id>.<ext>` — `id` это `attachments.id`, `ext` выводится из MIME (`image/png`→`.png`, `image/jpeg`→`.jpg`, `image/webp`→`.webp`). Директория переопределяется в config.yaml (`attachments_dir`, по умолчанию `~/.rocket/attachments`).
+
 ## config.yaml (опционально)
 
 ```yaml
@@ -37,6 +43,7 @@ github_poll_interval: 2m
 default_agent: claude-code
 repos_dir: ~/.rocket/repos          # куда клонировать репо из GitHub
 worktrees_dir: ~/.rocket/worktrees  # где создавать worktree сессий
+attachments_dir: ~/.rocket/attachments  # куда сохранять вложения (POST /v1/attachments)
 ```
 
 ## Схема SQLite
@@ -158,6 +165,13 @@ CREATE TABLE question_messages (             -- тред вопроса
   created_at  INTEGER NOT NULL
 );
 -- чья очередь отвечать — производное от автора последней записи треда
+
+CREATE TABLE attachments (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  mime       TEXT NOT NULL,             -- image/png|image/jpeg|image/webp
+  size       INTEGER NOT NULL,          -- байт
+  created_at INTEGER NOT NULL
+);                                       -- файл лежит на диске: <attachments_dir>/<id>.<ext>
 
 CREATE TABLE events (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

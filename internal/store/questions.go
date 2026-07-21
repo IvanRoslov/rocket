@@ -171,18 +171,6 @@ func (s *Store) ListQuestionMessages(questionID int64) ([]QuestionMessage, error
 	return out, nil
 }
 
-// CountOpenQuestions returns the number of open questions for taskID.
-func (s *Store) CountOpenQuestions(taskID int64) (int, error) {
-	var n int
-	err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM task_questions WHERE task_id = ? AND status = 'open'`, taskID,
-	).Scan(&n)
-	if err != nil {
-		return 0, fmt.Errorf("count open questions: %w", err)
-	}
-	return n, nil
-}
-
 // QuestionOrdinal returns q's 1-based position among all questions asked on
 // its task, ordered by id (e.g. for "Q3" numbering).
 func (s *Store) QuestionOrdinal(q Question) (int, error) {

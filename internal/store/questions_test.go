@@ -195,46 +195,6 @@ func TestAddQuestionMessage_AndList(t *testing.T) {
 	}
 }
 
-func TestCountOpenQuestions(t *testing.T) {
-	s := openTestStore(t)
-	taskID := mustAddQuestionTask(t, s)
-
-	n, err := s.CountOpenQuestions(taskID)
-	if err != nil {
-		t.Fatalf("CountOpenQuestions: %v", err)
-	}
-	if n != 0 {
-		t.Fatalf("n = %d, want 0", n)
-	}
-
-	id1, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch-1", Body: "Q1"})
-	if err != nil {
-		t.Fatalf("AddQuestion 1: %v", err)
-	}
-	if _, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch-1", Body: "Q2"}); err != nil {
-		t.Fatalf("AddQuestion 2: %v", err)
-	}
-
-	n, err = s.CountOpenQuestions(taskID)
-	if err != nil {
-		t.Fatalf("CountOpenQuestions: %v", err)
-	}
-	if n != 2 {
-		t.Fatalf("n = %d, want 2", n)
-	}
-
-	if err := s.ResolveQuestion(id1, "answered"); err != nil {
-		t.Fatalf("ResolveQuestion: %v", err)
-	}
-	n, err = s.CountOpenQuestions(taskID)
-	if err != nil {
-		t.Fatalf("CountOpenQuestions: %v", err)
-	}
-	if n != 1 {
-		t.Fatalf("n = %d, want 1", n)
-	}
-}
-
 func TestQuestionOrdinal(t *testing.T) {
 	s := openTestStore(t)
 	taskID := mustAddQuestionTask(t, s)

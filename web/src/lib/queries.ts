@@ -301,7 +301,7 @@ export function useGithubIssues(
 // ---------------------------------------------------------------------------
 
 export function useSendMessage(): UseMutationResult<
-  { id: number; status: string },
+  { id: number; status: string; body: string },
   Error,
   { to: string; body: string; from?: string }
 > {

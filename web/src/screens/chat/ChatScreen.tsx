@@ -701,8 +701,12 @@ export function ChatScreen() {
       { to: session.id, body: text },
       {
         onSuccess: (res) => {
+          // `res.body` is the STORED (possibly rewritten, e.g. attachment
+          // links) body, which is what the transcript echo will actually
+          // contain — update the optimistic entry's `body` to match so
+          // buildFeed's exact-text dedupe against `entries` still fires.
           setOptimistic((prev) =>
-            prev.map((o) => (o.localId === localId ? { ...o, serverId: res.id } : o)),
+            prev.map((o) => (o.localId === localId ? { ...o, serverId: res.id, body: res.body } : o)),
           )
         },
         onError: (err) => {
