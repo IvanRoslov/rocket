@@ -46,6 +46,11 @@ type taskResponse struct {
 	CreatedAt   int64  `json:"created_at"`
 	UpdatedAt   int64  `json:"updated_at"`
 	CompletedAt int64  `json:"completed_at,omitempty"`
+	// Open-question annotations (docs/superpowers/specs/2026-07-21-questions-
+	// visibility-design.md §1): populated by list/board/detail handlers from
+	// one Store.OpenQuestionCounts() call, not per-task queries.
+	OpenQuestions         int `json:"open_questions"`
+	QuestionsAwaitingUser int `json:"questions_awaiting_user"`
 }
 
 func toTaskResponse(t store.Task) taskResponse {
@@ -105,14 +110,8 @@ func toTaskSessionResponse(d Deps, sessionID string) (*taskSessionResponse, erro
 // taskDetailResponse is the JSON shape of GET /v1/tasks/{id}.
 type taskDetailResponse struct {
 	taskResponse
-	Subtasks      []subtaskResponse    `json:"subtasks"`
-	Session       *taskSessionResponse `json:"session,omitempty"`
-	OpenQuestions int                  `json:"open_questions"`
-}
-
-// countOpenQuestions returns the number of open questions for a task.
-func countOpenQuestions(d Deps, taskID int64) (int, error) {
-	return d.Store.CountOpenQuestions(taskID)
+	Subtasks []subtaskResponse    `json:"subtasks"`
+	Session  *taskSessionResponse `json:"session,omitempty"`
 }
 
 // taskBoard is the JSON shape of the "board" grouping returned by GET
@@ -125,7 +124,14 @@ type taskBoard struct {
 	Cancelled  []taskResponse `json:"cancelled"`
 }
 
-func toTaskBoard(tasks []store.Task) taskBoard {
+// annotateQuestionCounts fills the open-question fields on tr from counts.
+func annotateQuestionCounts(tr *taskResponse, counts map[int64]store.QuestionCounts) {
+	c := counts[tr.ID]
+	tr.OpenQuestions = c.Open
+	tr.QuestionsAwaitingUser = c.AwaitingUser
+}
+
+func toTaskBoard(tasks []store.Task, counts map[int64]store.QuestionCounts) taskBoard {
 	b := taskBoard{
 		Backlog:    []taskResponse{},
 		InProgress: []taskResponse{},
@@ -135,6 +141,7 @@ func toTaskBoard(tasks []store.Task) taskBoard {
 	}
 	for _, t := range tasks {
 		tr := toTaskResponse(t)
+		annotateQuestionCounts(&tr, counts)
 		switch t.Status {
 		case "backlog":
 			b.Backlog = append(b.Backlog, tr)
@@ -247,14 +254,21 @@ func handleListTasks(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
+	counts, err := d.Store.OpenQuestionCounts()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
 	if q.Get("board") == "true" {
-		writeJSON(w, http.StatusOK, map[string]any{"board": toTaskBoard(tasks)})
+		writeJSON(w, http.StatusOK, map[string]any{"board": toTaskBoard(tasks, counts)})
 		return
 	}
 
 	out := make([]taskResponse, len(tasks))
 	for i, t := range tasks {
 		out[i] = toTaskResponse(t)
+		annotateQuestionCounts(&out[i], counts)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": out})
 }
@@ -393,17 +407,18 @@ func handleGetTask(w http.ResponseWriter, r *http.Request, d Deps) {
 		}
 	}
 
-	openQ, err := countOpenQuestions(d, id)
+	counts, err := d.Store.OpenQuestionCounts()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
+	tr := toTaskResponse(t)
+	annotateQuestionCounts(&tr, counts)
 
 	writeJSON(w, http.StatusOK, taskDetailResponse{
-		taskResponse:  toTaskResponse(t),
-		Subtasks:      subOut,
-		Session:       sessResp,
-		OpenQuestions: openQ,
+		taskResponse: tr,
+		Subtasks:     subOut,
+		Session:      sessResp,
 	})
 }
 
