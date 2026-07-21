@@ -294,6 +294,9 @@ export interface Task {
   created_at: number
   updated_at: number
   completed_at?: number
+  /** Open-question annotations (list/board/detail all carry them). */
+  open_questions: number
+  questions_awaiting_user: number
 }
 
 /**

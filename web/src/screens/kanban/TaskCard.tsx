@@ -121,9 +121,15 @@ export function TaskCard({
         </div>
       )}
 
-      {/* Signals (open_questions): not on the list/board taskResponse, only
-          per-task detail — skipping to avoid an N+1 fetch per card. Will
-          show up once the task's own screen is open. */}
+      {task.questions_awaiting_user > 0 ? (
+        <div className="kanban-card__questions">
+          <Badge tone="warn">? {task.questions_awaiting_user} awaiting you</Badge>
+        </div>
+      ) : task.open_questions > 0 ? (
+        <div className="kanban-card__questions">
+          <Badge tone="neutral">? {task.open_questions} open</Badge>
+        </div>
+      ) : null}
 
       {task.status === 'backlog' && (
         <button type="button" className="kanban-card__start" onClick={onStart}>

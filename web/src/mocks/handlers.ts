@@ -423,6 +423,8 @@ export const handlers = [
       created_by: 'user',
       created_at: now,
       updated_at: now,
+      open_questions: 0,
+      questions_awaiting_user: 0,
     }
     tasksState.push(task)
     return HttpResponse.json(task, { status: 201 })

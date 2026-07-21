@@ -202,6 +202,12 @@
   margin-bottom: 8px;
 }
 
+.kanban-card__questions {
+  display: flex;
+  gap: 6px;
+  margin-top: 7px;
+}
+
 .kanban-card__start {
   width: 100%;
   margin-top: 2px;
