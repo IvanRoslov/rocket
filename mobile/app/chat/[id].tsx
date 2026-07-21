@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   KeyboardAvoidingView,
   Platform,
@@ -106,6 +106,21 @@ export default function ChatScreen() {
   // "scroll to end" gets cancelled and the chat opens at the top.
   const userScrolled = useRef(false)
 
+  // Android may run scrollToEnd before the new content size is committed,
+  // so pin in several ticks: now, next frame, and after layout settles.
+  const pinToBottom = () => {
+    if (userScrolled.current && !atBottom.current) return
+    const scroll = () => listRef.current?.scrollToEnd({ animated: false })
+    scroll()
+    requestAnimationFrame(scroll)
+    setTimeout(scroll, 120)
+  }
+
+  useEffect(() => {
+    if (!loading) pinToBottom()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading])
+
   const pendingQuiz = session?.pending_quiz
   const canWrite = session?.kind === 'orchestrator' && session.state === 'running' && !pendingQuiz
 
@@ -159,16 +174,8 @@ export default function ChatScreen() {
         <ScrollView
           ref={listRef}
           contentContainerStyle={{ padding: 14, paddingBottom: 18 }}
-          onContentSizeChange={() => {
-            if (!userScrolled.current || atBottom.current) {
-              listRef.current?.scrollToEnd({ animated: false })
-            }
-          }}
-          onLayout={() => {
-            if (!userScrolled.current || atBottom.current) {
-              listRef.current?.scrollToEnd({ animated: false })
-            }
-          }}
+          onContentSizeChange={pinToBottom}
+          onLayout={pinToBottom}
           onScrollBeginDrag={() => {
             userScrolled.current = true
           }}
