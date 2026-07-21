@@ -245,6 +245,32 @@ func (s *Store) OpenQuestionCounts() (map[int64]QuestionCounts, error) {
 	return out, nil
 }
 
+// ListAllOpenQuestions returns every open question across all tasks,
+// ascending by id — the backing query for the dashboard's global
+// Questions page.
+func (s *Store) ListAllOpenQuestions() ([]Question, error) {
+	rows, err := s.db.Query(
+		`SELECT id, task_id, asked_by, body, context, status, resolution, asked_at, resolved_at
+		 FROM task_questions WHERE status = 'open' ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("query all open questions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Question
+	for rows.Next() {
+		q, err := scanQuestion(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, q)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func scanQuestion(row interface{ Scan(...any) error }) (Question, error) {
 	var q Question
 	var context, resolution sql.NullString

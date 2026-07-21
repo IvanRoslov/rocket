@@ -358,3 +358,28 @@ func TestOpenQuestionCounts(t *testing.T) {
 		t.Errorf("AwaitingUser = %d, want 2 (q1 no-messages + q3 orch-last)", got.AwaitingUser)
 	}
 }
+
+func TestListAllOpenQuestions(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+
+	q1, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch-1", Body: "open"})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+	q2, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch-1", Body: "closed"})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+	if err := s.ResolveQuestion(q2, "answered"); err != nil {
+		t.Fatalf("ResolveQuestion: %v", err)
+	}
+
+	got, err := s.ListAllOpenQuestions()
+	if err != nil {
+		t.Fatalf("ListAllOpenQuestions: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != q1 {
+		t.Fatalf("got %+v, want exactly q1(%d)", got, q1)
+	}
+}
