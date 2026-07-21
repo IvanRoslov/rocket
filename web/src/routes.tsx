@@ -3,6 +3,7 @@ import { AppShell } from './components/AppShell'
 import { ChatScreen } from './screens/chat/ChatScreen'
 import { KanbanScreen } from './screens/kanban/KanbanScreen'
 import { ProjectsScreen } from './screens/projects/ProjectsScreen'
+import { QuestionsScreen } from './screens/questions/QuestionsScreen'
 import { SettingsScreen } from './screens/settings/SettingsScreen'
 import { SystemScreen } from './screens/system/SystemScreen'
 import { TaskScreen } from './screens/task/TaskScreen'
@@ -24,6 +25,7 @@ export const router = createBrowserRouter([
       { path: '/projects/new', element: <WizardScreen /> },
       { path: '/p/:projectId', element: <KanbanScreen /> },
       { path: '/p/:projectId/tasks/:taskId', element: <TaskScreen /> },
+      { path: '/questions', element: <QuestionsScreen /> },
       { path: '/system', element: <SystemScreen /> },
       { path: '/settings', element: <SettingsScreen /> },
     ],

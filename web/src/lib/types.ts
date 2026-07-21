@@ -363,6 +363,17 @@ export interface Question {
   messages: QuestionMessage[]
 }
 
+/**
+ * `globalQuestionResponse` — GET /v1/questions entry: a question plus the
+ * task/project context the global Questions page needs to label and link it.
+ */
+export interface GlobalQuestion extends Question {
+  task_title: string
+  project_id: string
+  project_name: string
+  orchestrator_name?: string
+}
+
 export type QuestionMessageKind = 'reply' | 'answer'
 
 /**

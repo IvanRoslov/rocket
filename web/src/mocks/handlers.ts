@@ -552,6 +552,24 @@ export const handlers = [
     return HttpResponse.json(entry, { status: 201 })
   }),
 
+  // Global open-questions list (internal/api/questions.go
+  // handleGetAllQuestions): open only, enriched with task/project context.
+  http.get('/v1/questions', () => {
+    const open = questionsState.filter((q) => q.status === 'open')
+    return HttpResponse.json({
+      questions: open.map((q) => {
+        const task = tasksState.find((t) => t.id === q.task_id)
+        return {
+          ...q,
+          task_title: task?.title ?? '',
+          project_id: task?.project_id ?? 'demo',
+          project_name: 'Demo',
+          orchestrator_name: 'demo-orch',
+        }
+      }),
+    })
+  }),
+
   http.get('/v1/tasks/:id/questions', ({ params, request }) => {
     const id = Number(params.id)
     const url = new URL(request.url)
