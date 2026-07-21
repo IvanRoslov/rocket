@@ -101,6 +101,10 @@ export default function ChatScreen() {
   const [windowSize, setWindowSize] = useState(WINDOW_STEP)
   const listRef = useRef<ScrollView>(null)
   const atBottom = useRef(true)
+  // Layout fires scroll events on its own while content settles; only a
+  // real drag may unpin the feed from the bottom, otherwise the initial
+  // "scroll to end" gets cancelled and the chat opens at the top.
+  const userScrolled = useRef(false)
 
   const pendingQuiz = session?.pending_quiz
   const canWrite = session?.kind === 'orchestrator' && session.state === 'running' && !pendingQuiz
@@ -156,9 +160,20 @@ export default function ChatScreen() {
           ref={listRef}
           contentContainerStyle={{ padding: 14, paddingBottom: 18 }}
           onContentSizeChange={() => {
-            if (atBottom.current) listRef.current?.scrollToEnd({ animated: false })
+            if (!userScrolled.current || atBottom.current) {
+              listRef.current?.scrollToEnd({ animated: false })
+            }
+          }}
+          onLayout={() => {
+            if (!userScrolled.current || atBottom.current) {
+              listRef.current?.scrollToEnd({ animated: false })
+            }
+          }}
+          onScrollBeginDrag={() => {
+            userScrolled.current = true
           }}
           onScroll={(e) => {
+            if (!userScrolled.current) return
             const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent
             atBottom.current = contentOffset.y + layoutMeasurement.height >= contentSize.height - 60
           }}
