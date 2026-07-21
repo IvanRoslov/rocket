@@ -7,6 +7,7 @@
 
 import type {
   ChatEntry,
+  GithubIssue,
   GithubRepo,
   Message,
   PendingQuiz,
@@ -660,6 +661,54 @@ export const githubRepos: GithubRepo[] = [
   { full_name: 'acme/billing-sdk', private: true, default_branch: 'main' },
   { full_name: 'acme/notifications', private: true, default_branch: 'develop' },
 ]
+
+// GitHub issues — internal/api/github_issues.go, keyed by registered repo id
+// (not owner/name — see `GithubIssue` doc comment). `api` and `web` (both
+// project "billing" repos) carry a few open issues each with labels and
+// varying `updated_at`; `infra` is used by tests to exercise the
+// `not_a_github_repo` branch (see mocks/handlers.ts GET /v1/github/issues).
+export const githubIssues: Record<string, GithubIssue[]> = {
+  api: [
+    {
+      number: 241,
+      title: 'Rate limit billing webhooks',
+      body: 'Webhook retries currently have no backoff — a flaky downstream can hammer us.',
+      html_url: 'https://github.com/acme/api/issues/241',
+      state: 'open',
+      updated_at: new Date((NOW - 2 * DAY) * 1000).toISOString(),
+      labels: ['bug', 'billing'],
+    },
+    {
+      number: 238,
+      title: 'Add prorated refund support',
+      body: 'Finance wants mid-cycle downgrades to prorate a refund, not just credit next cycle.',
+      html_url: 'https://github.com/acme/api/issues/238',
+      state: 'open',
+      updated_at: new Date((NOW - 5 * DAY) * 1000).toISOString(),
+      labels: ['enhancement'],
+    },
+    {
+      number: 190,
+      title: 'Flaky billing_test.go',
+      body: '',
+      html_url: 'https://github.com/acme/api/issues/190',
+      state: 'open',
+      updated_at: new Date((NOW - 30 * DAY) * 1000).toISOString(),
+      labels: [],
+    },
+  ],
+  web: [
+    {
+      number: 55,
+      title: 'Billing settings UI polish',
+      body: 'Spacing is off on the plan-change modal at 1280px.',
+      html_url: 'https://github.com/acme/web/issues/55',
+      state: 'open',
+      updated_at: new Date((NOW - 1 * DAY) * 1000).toISOString(),
+      labels: ['design'],
+    },
+  ],
+}
 
 // Settings — internal/api/settings.go. No GitHub token configured by
 // default (`github_token: ""`), so the GitHub tab in the New Project wizard

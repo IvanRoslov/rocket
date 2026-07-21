@@ -278,3 +278,86 @@
   gap: 8px;
   margin-top: 16px;
 }
+
+/* ---------- NewTaskModal "From GitHub issue" mode ---------- */
+
+.new-task-issue-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.new-task-issue-picker__search {
+  margin-top: 2px;
+}
+
+.new-task-issue-picker__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.new-task-issue-picker__retry {
+  border: 1px solid var(--border-hover);
+  background: var(--surface);
+  border-radius: var(--radius-btn-sm);
+  color: var(--text-2);
+  font: 600 11.5px var(--font-ui);
+  padding: 3px 9px;
+  cursor: pointer;
+}
+
+.new-task-issue-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn-sm);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.new-task-issue-row:hover {
+  border-color: var(--border-hover);
+}
+
+.new-task-issue-row--selected {
+  border-color: var(--accent-selected-border);
+  background: var(--accent-selected-bg);
+}
+
+.new-task-issue-row__title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.new-task-issue-row__number {
+  font: 600 12px var(--font-mono);
+  color: var(--text-4);
+  flex: none;
+}
+
+.new-task-issue-row__title {
+  font: 600 13px var(--font-ui);
+  color: var(--text);
+}
+
+.new-task-issue-row__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font: 11.5px var(--font-ui);
+  color: var(--text-3);
+}

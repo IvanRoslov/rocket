@@ -20,6 +20,7 @@ import type {
 } from '../lib/types'
 import {
   chatEntries,
+  githubIssues,
   githubRepos,
   messages,
   projects,
@@ -669,6 +670,45 @@ export const handlers = [
     const q = (url.searchParams.get('q') ?? '').toLowerCase()
     const result = q ? githubRepos.filter((r) => r.full_name.toLowerCase().includes(q)) : githubRepos
     return HttpResponse.json({ repos: result })
+  }),
+
+  // GET /v1/github/issues — internal/api/github_issues.go. `repo_id` is a
+  // registered repo id, resolved server-side to owner/name via that repo's
+  // git remote origin; the fixture keys `githubIssues` by that same repo id
+  // rather than modeling owner/name resolution. `infra` (no fixture entry)
+  // stands in for "repo has no GitHub origin" -> not_a_github_repo, matching
+  // its use as a project-linked repo in tests.
+  http.get('/v1/github/issues', ({ request }) => {
+    if (!settingsState.github_token) {
+      return HttpResponse.json({ error: { code: 'no_token', message: 'no GitHub token configured' } }, { status: 400 })
+    }
+    const url = new URL(request.url)
+    const repoId = url.searchParams.get('repo_id')
+    const repoParam = url.searchParams.get('repo')
+    const state = url.searchParams.get('state') || 'open'
+    if (!repoId && !repoParam) {
+      return HttpResponse.json(
+        { error: { code: 'bad_request', message: 'either repo or repo_id is required' } },
+        { status: 400 },
+      )
+    }
+    if (repoId) {
+      if (!reposState.some((r) => r.id === repoId)) {
+        return HttpResponse.json(
+          { error: { code: 'repo_not_found', message: `no repo registered with id ${repoId}` } },
+          { status: 404 },
+        )
+      }
+      if (repoId === 'infra') {
+        return HttpResponse.json(
+          { error: { code: 'not_a_github_repo', message: "repo's remote origin is not a GitHub URL" } },
+          { status: 400 },
+        )
+      }
+    }
+    const issues = repoId ? (githubIssues[repoId] ?? []) : []
+    const result = state === 'all' ? issues : issues.filter((i) => i.state === state)
+    return HttpResponse.json({ issues: result })
   }),
 
   // --------------------------------------------------------------------

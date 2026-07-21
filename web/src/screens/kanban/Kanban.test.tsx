@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { setupServer } from 'msw/node'
 import { http, HttpResponse } from 'msw'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { handlers, resetTasks } from '../../mocks/handlers'
+import { handlers, resetSettings, resetTasks } from '../../mocks/handlers'
 import { KanbanScreen } from './KanbanScreen'
 
 const server = setupServer(...handlers)
@@ -13,8 +13,21 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(() => {
   server.resetHandlers()
   resetTasks()
+  resetSettings()
 })
 afterAll(() => server.close())
+
+/** Sets the fixture-backed GitHub token via the real PUT /v1/settings handler
+ * (mocks/handlers.ts), so the GET /v1/github/issues no_token branch reflects
+ * it — overriding just the GET /v1/settings response wouldn't touch the
+ * module-level settingsState the issues handler actually checks. */
+async function connectGithub() {
+  await fetch('/v1/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ github_token: 'ghp_1234567890' }),
+  })
+}
 
 function renderKanban(projectId = 'billing') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -218,4 +231,102 @@ test('creating a task posts title/description/project', async () => {
   await waitFor(() =>
     expect(capturedBody).toEqual({ title: 'New thing', description: '# details', project: 'billing' }),
   )
+})
+
+// "From GitHub issue" mode (mocks/handlers.ts GET /v1/github/issues, fixture
+// githubIssues in mocks/fixtures.ts). billing project: main `api` (3 open
+// issues, #241/#238/#190), linked `web` (1 open issue, #55) + `infra` (no
+// GitHub origin -> not_a_github_repo). Settings fixture starts with no
+// GitHub token, so `no_token` is the default state until a test sets one.
+
+test('switching to From GitHub issue shows the repo picker with the project\'s repos, defaulting to main', async () => {
+  await connectGithub()
+
+  renderKanban()
+  await waitFor(() => expect(screen.getByText('Invoice PDF export')).toBeInTheDocument())
+  await userEvent.click(screen.getByRole('button', { name: 'Add task to Backlog' }))
+  const dialog = await screen.findByRole('dialog')
+
+  await userEvent.click(within(dialog).getByRole('button', { name: 'From GitHub issue' }))
+
+  const repoSelect = within(dialog).getByLabelText('Repository') as HTMLSelectElement
+  expect(repoSelect.value).toBe('api')
+  const optionValues = Array.from(repoSelect.options).map((o) => o.value)
+  expect(optionValues).toEqual(['api', 'web', 'infra'])
+
+  await waitFor(() => expect(within(dialog).getByText('Rate limit billing webhooks')).toBeInTheDocument())
+  expect(within(dialog).getByText('#241')).toBeInTheDocument()
+  expect(within(dialog).getByText('bug')).toBeInTheDocument()
+})
+
+test('search filters the issue list by number/title/label', async () => {
+  await connectGithub()
+
+  renderKanban()
+  await waitFor(() => expect(screen.getByText('Invoice PDF export')).toBeInTheDocument())
+  await userEvent.click(screen.getByRole('button', { name: 'Add task to Backlog' }))
+  const dialog = await screen.findByRole('dialog')
+  await userEvent.click(within(dialog).getByRole('button', { name: 'From GitHub issue' }))
+
+  await waitFor(() => expect(within(dialog).getByText('Rate limit billing webhooks')).toBeInTheDocument())
+  expect(within(dialog).getByText('Add prorated refund support')).toBeInTheDocument()
+
+  await userEvent.type(within(dialog).getByPlaceholderText(/search issues/i), 'refund')
+
+  expect(within(dialog).getByText('Add prorated refund support')).toBeInTheDocument()
+  expect(within(dialog).queryByText('Rate limit billing webhooks')).not.toBeInTheDocument()
+})
+
+test('selecting an issue prefills title/description with a Source line, and Create posts it', async () => {
+  await connectGithub()
+  let capturedBody: unknown
+  server.use(
+    http.post('/v1/tasks', async ({ request }) => {
+      capturedBody = await request.json().catch(() => undefined)
+      return HttpResponse.json(
+        { id: 999, title: 'x', project_id: 'billing', status: 'backlog', created_by: 'user', created_at: 0, updated_at: 0 },
+        { status: 201 },
+      )
+    }),
+  )
+
+  renderKanban()
+  await waitFor(() => expect(screen.getByText('Invoice PDF export')).toBeInTheDocument())
+  await userEvent.click(screen.getByRole('button', { name: 'Add task to Backlog' }))
+  const dialog = await screen.findByRole('dialog')
+  await userEvent.click(within(dialog).getByRole('button', { name: 'From GitHub issue' }))
+
+  await waitFor(() => expect(within(dialog).getByText('Rate limit billing webhooks')).toBeInTheDocument())
+  await userEvent.click(within(dialog).getByText('Rate limit billing webhooks'))
+
+  expect(within(dialog).getByText('#241', { selector: 'strong' })).toBeInTheDocument()
+  const titleInput = within(dialog).getByLabelText('Title') as HTMLInputElement
+  const descriptionInput = within(dialog).getByLabelText('Description') as HTMLTextAreaElement
+  expect(titleInput.value).toBe('Rate limit billing webhooks')
+  expect(descriptionInput.value).toContain('https://github.com/acme/api/issues/241')
+  expect(descriptionInput.value).toMatch(/Source: https:\/\/github\.com\/acme\/api\/issues\/241$/)
+
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Create task' }))
+
+  await waitFor(() =>
+    expect(capturedBody).toMatchObject({
+      title: 'Rate limit billing webhooks',
+      project: 'billing',
+    }),
+  )
+  expect((capturedBody as { description: string }).description).toContain(
+    'Source: https://github.com/acme/api/issues/241',
+  )
+})
+
+test('no GitHub token configured shows the Settings hint', async () => {
+  // Default settings fixture has no token — no override needed.
+  renderKanban()
+  await waitFor(() => expect(screen.getByText('Invoice PDF export')).toBeInTheDocument())
+  await userEvent.click(screen.getByRole('button', { name: 'Add task to Backlog' }))
+  const dialog = await screen.findByRole('dialog')
+  await userEvent.click(within(dialog).getByRole('button', { name: 'From GitHub issue' }))
+
+  await waitFor(() => expect(within(dialog).getByText(/Settings/)).toBeInTheDocument())
+  expect(within(dialog).getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/settings')
 })

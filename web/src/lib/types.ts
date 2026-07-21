@@ -384,6 +384,21 @@ export interface GithubRepo {
 }
 
 /**
+ * `issueResponse` — internal/api/github_issues.go. `GET /v1/github/issues`
+ * wraps these as `{"issues":[...]}`. `labels` is flattened to label names
+ * (the daemon does the same on the Go side).
+ */
+export interface GithubIssue {
+  number: number
+  title: string
+  body: string
+  html_url: string
+  state: string
+  updated_at: string
+  labels: string[]
+}
+
+/**
  * internal/api/settings.go. `GET /v1/settings` returns `{github_token}`
  * only — `github_token` is always present (masked, or "" when unset) and
  * `login` is never included. `PUT /v1/settings` returns the same shape plus

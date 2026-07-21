@@ -12,6 +12,7 @@ import {
 } from '@tanstack/react-query'
 import { api } from './api'
 import type {
+  GithubIssue,
   GithubRepo,
   Message,
   Project,
@@ -250,6 +251,34 @@ export function useGithubRepos(q: string, enabled: boolean): UseQueryResult<Gith
       return res.repos
     },
     enabled,
+    retry: false,
+  })
+}
+
+/**
+ * `GET /v1/github/issues?repo_id=&state=` (internal/api/github_issues.go),
+ * unwrapped from its `{"issues":[...]}` envelope. Used by NewTaskModal's
+ * "from GitHub issue" mode — `repoId` is a registered repo id (the daemon
+ * resolves owner/name from that repo's git remote origin), not an
+ * `owner/name` string. `state` defaults to `"open"`. Errors mirror
+ * `useGithubRepos`: branch on `error.code` — `no_token` ("Connect GitHub"),
+ * `not_a_github_repo` (repo has no GitHub origin), `github_unreachable`
+ * (retryable). Only enabled when `enabled` is true and `repoId` is set.
+ */
+export function useGithubIssues(
+  repoId: string | undefined,
+  state: 'open' | 'closed' | 'all' = 'open',
+  enabled: boolean,
+): UseQueryResult<GithubIssue[]> {
+  return useQuery({
+    queryKey: ['github-issues', repoId, state],
+    queryFn: async () => {
+      const res = await api.get<{ issues: GithubIssue[] }>(
+        `/v1/github/issues?repo_id=${encodeURIComponent(repoId ?? '')}&state=${state}`,
+      )
+      return res.issues
+    },
+    enabled: enabled && repoId !== undefined,
     retry: false,
   })
 }
