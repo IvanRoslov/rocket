@@ -35,10 +35,30 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
   return res.status === 204 ? (undefined as T) : res.json()
 }
 
+/** Raw-body upload to POST /v1/attachments (the body IS the file; no JSON,
+ * no multipart). Same error-envelope handling as `req`. */
+async function upload(file: Blob): Promise<{ id: number; url: string }> {
+  const res = await fetch('/v1/attachments', {
+    method: 'POST',
+    headers: { 'Content-Type': file.type },
+    body: file,
+  })
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => null)) as ErrorEnvelope | null
+    throw new ApiError(
+      res.status,
+      payload?.error?.code ?? 'unknown',
+      payload?.error?.message ?? res.statusText,
+    )
+  }
+  return res.json()
+}
+
 export const api = {
   get: <T>(p: string) => req<T>('GET', p),
   post: <T>(p: string, b?: unknown) => req<T>('POST', p, b),
   patch: <T>(p: string, b: unknown) => req<T>('PATCH', p, b),
   put: <T>(p: string, b: unknown) => req<T>('PUT', p, b),
   del: <T>(p: string) => req<T>('DELETE', p),
+  upload,
 }

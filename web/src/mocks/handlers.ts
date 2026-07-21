@@ -839,6 +839,11 @@ export const handlers = [
 
   // The real daemon (internal/api/projects.go) blocks DELETE only when
   // live_sessions>0 -> 409 project_busy. It does NOT check tasks.
+  // Attachment upload (internal/api/attachments.go): raw image body -> id+url.
+  http.post('/v1/attachments', () =>
+    HttpResponse.json({ id: 1, url: '/v1/attachments/1' }, { status: 201 }),
+  ),
+
   http.delete('/v1/projects/:id', ({ params }) => {
     const id = params.id as string
     const project = projectsState.find((p) => p.id === id)

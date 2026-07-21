@@ -171,6 +171,11 @@
   background: var(--surface);
   margin-bottom: 13px;
 }
+.question-thread__paste-error {
+  font: 12px var(--font-ui);
+  color: var(--err-text, #c0392b);
+  margin-bottom: 8px;
+}
 .question-thread__actions {
   display: flex;
   align-items: center;

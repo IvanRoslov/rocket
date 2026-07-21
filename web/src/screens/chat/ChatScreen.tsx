@@ -20,6 +20,7 @@ import { timeAgo } from '../../lib/format'
 import { useMessages, useSendMessage, useSession } from '../../lib/queries'
 import { groupChatEntries, summarizeToolEntry, type GroupableEntry, type ToolGroup } from '../../lib/toolDigest'
 import { useSessionChat } from '../../lib/useSessionChat'
+import { usePasteImage } from '../../lib/usePasteImage'
 import type {
   ChatEntry,
   ChatSessionRef,
@@ -564,6 +565,7 @@ export function ChatScreen() {
   const send = useSendMessage()
 
   const [body, setBody] = useState('')
+  const paste = usePasteImage(setBody)
   const [copied, setCopied] = useState(false)
   const [optimistic, setOptimistic] = useState<OptimisticMessage[]>([])
   const lastSentIdRef = useRef<number | null>(null)
@@ -779,6 +781,7 @@ export function ChatScreen() {
               rows={1}
               value={body}
               onChange={(e) => setBody(e.target.value)}
+              onPaste={paste.onPaste}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
@@ -789,6 +792,7 @@ export function ChatScreen() {
             <button type="button" onClick={handleSend} disabled={send.isPending || !body.trim()}>
               Send
             </button>
+            {paste.error && <div className="chat-screen__paste-error">Upload failed: {paste.error}</div>}
           </>
         ) : (
           <div className="chat-screen__readonly">

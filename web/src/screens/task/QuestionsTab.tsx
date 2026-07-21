@@ -7,6 +7,7 @@ import { Markdown } from '../../components/Markdown'
 import { QuestionThread, authorLabel } from '../../components/QuestionThread'
 import { timeAgo } from '../../lib/format'
 import { useAskOrchestrator } from '../../lib/queries'
+import { usePasteImage } from '../../lib/usePasteImage'
 import type { Question } from '../../lib/types'
 import './QuestionsTab.css'
 
@@ -34,6 +35,8 @@ function AskOrchestratorForm({ taskId, disabled }: AskOrchestratorFormProps) {
   const [context, setContext] = useState('')
   const [ctxOpen, setCtxOpen] = useState(false)
   const ask = useAskOrchestrator(taskId)
+  const pasteBody = usePasteImage(setBody)
+  const pasteContext = usePasteImage(setContext)
 
   function reset() {
     setOpen(false)
@@ -69,6 +72,7 @@ function AskOrchestratorForm({ taskId, disabled }: AskOrchestratorFormProps) {
         rows={3}
         value={body}
         onChange={(e) => setBody(e.target.value)}
+        onPaste={pasteBody.onPaste}
       />
       {ctxOpen ? (
         <textarea
@@ -77,6 +81,7 @@ function AskOrchestratorForm({ taskId, disabled }: AskOrchestratorFormProps) {
           rows={3}
           value={context}
           onChange={(e) => setContext(e.target.value)}
+          onPaste={pasteContext.onPaste}
         />
       ) : (
         <button type="button" className="questions-tab__ask-context-toggle" onClick={() => setCtxOpen(true)}>
@@ -91,6 +96,9 @@ function AskOrchestratorForm({ taskId, disabled }: AskOrchestratorFormProps) {
           Cancel
         </button>
       </div>
+      {(pasteBody.error ?? pasteContext.error) && (
+        <div className="question-thread__paste-error">Upload failed: {pasteBody.error ?? pasteContext.error}</div>
+      )}
     </div>
   )
 }

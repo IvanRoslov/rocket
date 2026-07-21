@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { Markdown } from './Markdown'
 import { timeAgo } from '../lib/format'
 import { useAnswerQuestion, useReplyQuestion } from '../lib/queries'
+import { usePasteImage } from '../lib/usePasteImage'
 import type { Question } from '../lib/types'
 import './questionthread.css'
 
@@ -42,6 +43,7 @@ export function QuestionThread({ taskId, question, orchestratorName }: QuestionT
   const [body, setBody] = useState('')
   const reply = useReplyQuestion()
   const answer = useAnswerQuestion()
+  const paste = usePasteImage(setBody)
 
   const busy = reply.isPending || answer.isPending
   const turnLabel = whoseTurnLabel(question)
@@ -144,7 +146,9 @@ export function QuestionThread({ taskId, question, orchestratorName }: QuestionT
             rows={4}
             value={body}
             onChange={(e) => setBody(e.target.value)}
+            onPaste={paste.onPaste}
           />
+          {paste.error && <div className="question-thread__paste-error">Upload failed: {paste.error}</div>}
           <div className="question-thread__actions">
             <button type="button" className="question-thread__clarify" onClick={handleClarify} disabled={busy || !body.trim()}>
               Clarify — keep open

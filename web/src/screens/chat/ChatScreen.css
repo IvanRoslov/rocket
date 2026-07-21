@@ -405,6 +405,7 @@
 
 .chat-screen__composer {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: flex-end;
   flex: none;
@@ -436,6 +437,13 @@
 .chat-screen__composer button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.chat-screen__paste-error {
+  flex-basis: 100%;
+  order: 1;
+  font: 12px var(--font-ui);
+  color: var(--err-text, #c0392b);
+  padding: 2px 4px;
 }
 .chat-screen__readonly {
   flex: 1;
