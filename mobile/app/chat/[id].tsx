@@ -20,17 +20,11 @@ import { ClosedQuizCard, PendingQuizCard } from '../../src/components/QuizCard'
 import { useToast } from '../../src/components/Toast'
 import { BackButton, Badge, Dot, MonoText, PrimaryButton } from '../../src/components/ui'
 import { classifyUserEntry } from '../../src/lib/chatDisplay'
+import { buildChatRows, isNoise, type ChatRow, type OutgoingMsg } from '../../src/lib/chatRows'
 import { ago, sessionBadge, sessionDot } from '../../src/lib/format'
 import { colors, mono, radius } from '../../src/theme'
 
-interface OutgoingMsg {
-  msgId: number
-  body: string
-}
-
-type Row =
-  | { kind: 'entry'; key: string; entry: ChatEntry }
-  | { kind: 'outgoing'; key: string; body: string; status: string; reason?: string }
+type Row = ChatRow
 
 function SystemRow({ label, body }: { label: string; body: string }) {
   const [expanded, setExpanded] = useState(false)
@@ -103,40 +97,17 @@ export default function ChatScreen() {
   const [outgoing, setOutgoing] = useState<OutgoingMsg[]>([])
   const [showTools, setShowTools] = useState(false)
   const listRef = useRef<FlatList<Row>>(null)
+  const atBottom = useRef(true)
 
   const pendingQuiz = session?.pending_quiz
   const canWrite = session?.kind === 'orchestrator' && session.state === 'running' && !pendingQuiz
 
-  // Tool calls and system-injected user entries (task notifications,
-  // reminders, heartbeats) are noise for the phone view — hidden unless
-  // the header toggle is on.
-  const isNoise = (e: ChatEntry) =>
-    e.role === 'tool' || (e.role === 'user' && classifyUserEntry(e.text).kind === 'system')
   const hiddenCount = useMemo(() => entries.filter(isNoise).length, [entries])
 
-  const rows = useMemo<Row[]>(() => {
-    const transcriptUserTexts = new Set(
-      entries.filter((e) => e.role === 'user').map((e) => e.text),
-    )
-    const items: Row[] = entries
-      .map((e, i) => ({ e, i }))
-      .filter(({ e }) => showTools || !isNoise(e))
-      .map(({ e, i }) => ({ kind: 'entry' as const, key: `e${i}`, entry: e }))
-    for (const o of outgoing) {
-      // Once the reply shows up in the transcript, the optimistic bubble is
-      // redundant — unless it was delivered as a file (pointer hidden above).
-      if (transcriptUserTexts.has(o.body)) continue
-      const m = queueMessages?.find((qm) => qm.id === o.msgId)
-      items.push({
-        kind: 'outgoing',
-        key: `o${o.msgId}`,
-        body: o.body,
-        status: m?.status ?? 'queued',
-        reason: m?.reason,
-      })
-    }
-    return items.reverse() // FlatList is inverted
-  }, [entries, outgoing, queueMessages, showTools])
+  const rows = useMemo<Row[]>(
+    () => buildChatRows({ entries, outgoing, queueMessages, showNoise: showTools }),
+    [entries, outgoing, queueMessages, showTools],
+  )
 
   const submit = () => {
     const body = text.trim()
@@ -145,7 +116,7 @@ export default function ChatScreen() {
       { to: id, body },
       {
         onSuccess: (m) => {
-          setOutgoing((prev) => [...prev, { msgId: m.id, body }])
+          setOutgoing((prev) => [...prev, { msgId: m.id, body, sentAt: Math.floor(Date.now() / 1000) }])
           setText('')
         },
         onError: (e) => toast.show((e as Error).message),
@@ -176,10 +147,21 @@ export default function ChatScreen() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <FlatList
           ref={listRef}
-          inverted
           data={rows}
           keyExtractor={(r) => r.key}
           contentContainerStyle={{ padding: 14, paddingBottom: 18 }}
+          // A plain (non-inverted) list: `inverted` flips every cell with a
+          // scaleY transform, which misplaces variable-height markdown and
+          // leaves big blank gaps. We keep the view pinned to the bottom
+          // ourselves unless the user has scrolled up to read history.
+          onContentSizeChange={() => {
+            if (atBottom.current) listRef.current?.scrollToEnd({ animated: false })
+          }}
+          onScroll={(e) => {
+            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent
+            atBottom.current = contentOffset.y + layoutMeasurement.height >= contentSize.height - 60
+          }}
+          scrollEventThrottle={100}
           renderItem={({ item }) =>
             item.kind === 'entry' ? (
               <EntryBubble entry={item.entry} />
@@ -205,7 +187,7 @@ export default function ChatScreen() {
             )
           }
           ListEmptyComponent={
-            <View style={{ transform: [{ scaleY: -1 }], padding: 30, alignItems: 'center' }}>
+            <View style={{ padding: 30, alignItems: 'center' }}>
               <Text style={{ color: colors.textFaint, fontSize: 13.5 }}>
                 {loading ? 'Loading transcript…' : error ? `Error: ${error}` : 'No transcript yet.'}
               </Text>

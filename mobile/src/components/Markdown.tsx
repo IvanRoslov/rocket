@@ -1,4 +1,4 @@
-import { ScrollView, View } from 'react-native'
+import { Dimensions, ScrollView, View } from 'react-native'
 import MarkdownDisplay from 'react-native-markdown-display'
 import { colors, mono } from '../theme'
 
@@ -80,13 +80,43 @@ const mdStyles = {
   td: { padding: 6, paddingHorizontal: 9, fontSize: 12.5 },
 }
 
+// Table cells are laid out with `flex: 1` (library default), so the table
+// needs a bounded width — inside an unbounded horizontal ScrollView the
+// flex children collapse and leave a huge blank area. Give it a concrete
+// width: the screen for narrow tables, wider (scrollable) for many columns.
+const SCREEN_W = Dimensions.get('window').width
+const MIN_COL_W = 110
+
+function columnCount(node: { children?: { children?: unknown[] }[] }): number {
+  const firstRow = node.children?.[0]?.children?.[0] as { children?: unknown[] } | undefined
+  return firstRow?.children?.length ?? 0
+}
+
 const rules = {
-  // Let wide tables scroll instead of crushing columns on a phone screen.
-  table: (node: { key: string }, children: React.ReactNode) => (
-    <ScrollView key={node.key} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
-      <View style={[mdStyles.table, { marginBottom: 0 }]}>{children}</View>
-    </ScrollView>
-  ),
+  table: (node: { key: string; children?: { children?: unknown[] }[] }, children: React.ReactNode) => {
+    const cols = columnCount(node)
+    const available = SCREEN_W - 90 // screen minus bubble padding/margins
+    const width = Math.max(available, cols * MIN_COL_W)
+    const table = <View style={[mdStyles.table, { width, marginBottom: 0 }]}>{children}</View>
+    if (width <= available) {
+      return (
+        <View key={node.key} style={{ marginBottom: 8 }}>
+          {table}
+        </View>
+      )
+    }
+    return (
+      <ScrollView
+        key={node.key}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ marginBottom: 8 }}
+        contentContainerStyle={{ flexGrow: 0 }}
+      >
+        {table}
+      </ScrollView>
+    )
+  },
 }
 
 export function Markdown({ children }: { children: string }) {
