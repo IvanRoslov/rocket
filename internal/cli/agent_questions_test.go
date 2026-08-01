@@ -127,3 +127,19 @@ func TestAgentQuestionCommandsRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestQuestionsCell(t *testing.T) {
+	cases := []struct {
+		open, awaiting any
+		want           string
+	}{
+		{float64(0), float64(0), "-"},
+		{float64(3), float64(0), "3"},
+		{float64(3), float64(2), "3 (2 ждут)"},
+	}
+	for _, tc := range cases {
+		if got := questionsCell(tc.open, tc.awaiting); got != tc.want {
+			t.Errorf("questionsCell(%v, %v) = %q, want %q", tc.open, tc.awaiting, got, tc.want)
+		}
+	}
+}

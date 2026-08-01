@@ -82,7 +82,7 @@ rocket agent add <id> --project <p> --prompt-file <f>
                       [--cron "0 * * * *"] [--agent claude-code]
     Регистрирует роль и создаёт её домашнюю директорию
     ~/.rocket/agents/<id>/ (role.md — копия промпта, memory/MEMORY.md).
-rocket agent ls [--project <p>]         # id, проект, enabled, очередь инбокса, досье
+rocket agent ls [--project <p>]         # id, проект, enabled, инбокс, досье, открытые треды
 rocket agent show <id>                  # определение + очередь событий + досье
 rocket agent enable|disable <id>
 rocket agent rm <id>                    # из реестра; файлы роли остаются на диске

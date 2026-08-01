@@ -192,11 +192,13 @@ func newAgentLsCmd() *cobra.Command {
 			}
 
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-			_, _ = tw.Write([]byte("ID\tPROJECT\tENABLED\tINBOX\tITEMS\tCRON\n"))
+			_, _ = tw.Write([]byte("ID\tPROJECT\tENABLED\tINBOX\tITEMS\tQUESTIONS\tCRON\n"))
 			for _, a := range agents {
-				_, _ = tw.Write([]byte(fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s\n",
+				_, _ = tw.Write([]byte(fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					toString(a["id"]), toString(a["project"]), toString(a["enabled"]),
-					toString(a["inbox_queued"]), toString(a["items"]), dashIfEmpty(toString(a["cron"])))))
+					toString(a["inbox_queued"]), toString(a["items"]),
+					questionsCell(a["open_questions"], a["awaiting_user"]),
+					dashIfEmpty(toString(a["cron"])))))
 			}
 			return tw.Flush()
 		},
@@ -504,6 +506,19 @@ func newAgentStateLsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&state, "state", "", "фильтр по состоянию (например deferred)")
 	cmd.Flags().StringVar(&agent, "agent", "", "роль (по умолчанию — роль текущего инстанса)")
 	return cmd
+}
+
+// questionsCell renders a role's open-thread counters as "open" or, when some
+// of them wait on the human, "open (N ждут)".
+func questionsCell(open, awaiting any) string {
+	o := dashIfZero(open)
+	if o == "-" {
+		return "-"
+	}
+	if a := dashIfZero(awaiting); a != "-" {
+		return o + " (" + a + " ждут)"
+	}
+	return o
 }
 
 func dashIfEmpty(s string) string {
