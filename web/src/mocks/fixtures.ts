@@ -6,6 +6,11 @@
 // a journal, and a message thread.
 
 import type {
+  Agent,
+  AgentInboxEvent,
+  AgentItem,
+  AgentMemory,
+  AgentQuestion,
   ChatEntry,
   GithubIssue,
   GithubRepo,
@@ -736,3 +741,175 @@ export const githubIssues: Record<string, GithubIssue[]> = {
 // shows the "Connect GitHub" placeholder (GET /v1/github/repos 400 no_token)
 // unless a test explicitly sets one via PUT /v1/settings.
 export const settings: Settings = { github_token: '' }
+
+// ---------------------------------------------------------------------------
+// Agent roles (docs/10-agents.md): role "sre" of project billing — enabled,
+// one live run, a queued inbox, a dossier with a taken issue and a deferred
+// one, memory, and a thread the role opened and is waiting on you for. Role
+// "triage" is the disabled/empty counterpart.
+// ---------------------------------------------------------------------------
+
+export const agents: Agent[] = [
+  {
+    id: 'sre',
+    project: 'billing',
+    prompt_path: '/home/dev/.rocket/agents/sre/role.md',
+    subscriptions: [{ repo: 'acme/platform', labels: ['bug'], mention_only: false }],
+    cron: '0 * * * *',
+    agent: 'claude',
+    enabled: true,
+    inbox_queued: 2,
+    items: 2,
+    open_questions: 1,
+    awaiting_user: 1,
+    created_at: NOW - 5 * DAY,
+    updated_at: NOW - 4 * MIN,
+  },
+  {
+    id: 'triage',
+    project: 'billing',
+    prompt_path: '/home/dev/.rocket/agents/triage/role.md',
+    subscriptions: [],
+    cron: '',
+    agent: 'claude',
+    enabled: false,
+    inbox_queued: 0,
+    items: 0,
+    open_questions: 0,
+    awaiting_user: 0,
+    created_at: NOW - 2 * DAY,
+    updated_at: NOW - 2 * DAY,
+  },
+]
+
+export const agentPrompt = '# SRE\n\nTriage platform issues, escalate what you cannot take.\n'
+
+export const agentInbox: AgentInboxEvent[] = [
+  {
+    id: 1,
+    kind: 'message',
+    payload: { text: 'blocked by the platform migration', from: 'billing-v2-orch' },
+    status: 'queued',
+    created_at: NOW - 6 * MIN,
+    updated_at: NOW - 6 * MIN,
+  },
+  {
+    id: 2,
+    kind: 'issue_opened',
+    payload: { repo: 'acme/platform', number: 42, title: 'DB migration stuck' },
+    status: 'done',
+    created_at: NOW - 2 * HOUR,
+    updated_at: NOW - 100 * MIN,
+  },
+  {
+    id: 3,
+    kind: 'task_update',
+    payload: { task_id: 12, title: 'Billing v2', from: 'in_progress', to: 'review' },
+    status: 'delivered',
+    created_at: NOW - 30 * MIN,
+    updated_at: NOW - 30 * MIN,
+  },
+]
+
+export const agentItems: AgentItem[] = [
+  {
+    id: 1,
+    kind: 'issue',
+    ref: 'acme/platform#42',
+    state: 'taken',
+    note: 'task #12 created',
+    task_id: 12,
+    snooze_until: 0,
+    created_at: NOW - 2 * HOUR,
+    updated_at: NOW - 90 * MIN,
+  },
+  {
+    id: 2,
+    kind: 'issue',
+    ref: 'acme/platform#43',
+    state: 'deferred',
+    note: 'waiting for the DB migration',
+    task_id: 0,
+    snooze_until: NOW + 2 * DAY,
+    created_at: NOW - 3 * HOUR,
+    updated_at: NOW - 3 * HOUR,
+  },
+]
+
+export const agentMemory: AgentMemory = {
+  path: '/home/dev/.rocket/agents/sre/memory',
+  index: '- [Platform](platform.md) — how the platform deploys\n',
+  files: [
+    {
+      name: 'platform.md',
+      size: 14,
+      updated_at: NOW - DAY,
+      body: 'how it deploys',
+    },
+  ],
+}
+
+export const agentQuestions: AgentQuestion[] = [
+  {
+    id: 91,
+    role_id: 'sre',
+    ordinal: 1,
+    asked_by: 'sre-run-3',
+    body: 'Should I close acme/platform#42 now?',
+    context: 'The task is in review and the team has not confirmed yet.',
+    status: 'open',
+    whose_turn: 'user',
+    asked_at: NOW - 10 * MIN,
+    messages: [],
+  },
+  {
+    id: 90,
+    role_id: 'sre',
+    ordinal: 2,
+    asked_by: '',
+    body: 'What is blocking acme/platform#43?',
+    status: 'resolved',
+    resolution: 'answered',
+    asked_at: NOW - 2 * DAY,
+    resolved_at: NOW - 2 * DAY + HOUR,
+    messages: [
+      { id: 1, author: 'sre-run-2', kind: 'reply', body: 'the DB migration', created_at: NOW - 2 * DAY + MIN },
+      { id: 2, author: '', kind: 'answer', body: 'thanks, keep it deferred', created_at: NOW - 2 * DAY + HOUR },
+    ],
+  },
+]
+
+/** Role instances (`<role>-run-<n>`, kind `agent`) served by
+ * `GET /v1/sessions?kind=agent`: one live run and one finished. */
+export const agentRuns: Session[] = [
+  {
+    id: 'sre-run-3',
+    kind: 'agent',
+    project_id: 'billing',
+    repo_id: 'api',
+    feature_slug: '',
+    agent: 'claude',
+    branch: 'agent/sre',
+    worktree_path: '/home/dev/.rocket/worktrees/api/sre-agent',
+    tmux_name: 'sre-run-3',
+    state: 'running',
+    activity: 'active',
+    activity_ts: NOW - MIN,
+    created_at: NOW - 8 * MIN,
+    updated_at: NOW - MIN,
+  },
+  {
+    id: 'sre-run-2',
+    kind: 'agent',
+    project_id: 'billing',
+    repo_id: 'api',
+    feature_slug: '',
+    agent: 'claude',
+    branch: 'agent/sre',
+    worktree_path: '/home/dev/.rocket/worktrees/api/sre-agent',
+    tmux_name: 'sre-run-2',
+    state: 'done',
+    created_at: NOW - 2 * DAY,
+    updated_at: NOW - 2 * DAY + 20 * MIN,
+  },
+]

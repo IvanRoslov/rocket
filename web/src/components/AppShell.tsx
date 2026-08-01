@@ -62,9 +62,24 @@ export function AppShell() {
           </NavLink>
           <NavLink
             to={projectId ? `/p/${projectId}` : '/'}
-            style={({ isActive }) => navLinkStyle({ isActive: isActive && location.pathname.startsWith('/p/') })}
+            style={({ isActive }) =>
+              navLinkStyle({
+                isActive:
+                  isActive &&
+                  location.pathname.startsWith('/p/') &&
+                  !location.pathname.includes('/agents'),
+              })
+            }
           >
             Kanban
+          </NavLink>
+          <NavLink
+            to={projectId ? `/p/${projectId}/agents` : '/'}
+            style={({ isActive }) =>
+              navLinkStyle({ isActive: isActive && location.pathname.includes('/agents') })
+            }
+          >
+            Agents
           </NavLink>
           <NavLink to="/questions" style={navLinkStyle}>
             Questions

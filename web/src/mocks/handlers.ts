@@ -7,6 +7,8 @@
 
 import { http, HttpResponse } from 'msw'
 import type {
+  Agent,
+  AgentMemory,
   ChatEntry,
   Project,
   Question,
@@ -19,6 +21,13 @@ import type {
   TaskStatus,
 } from '../lib/types'
 import {
+  agentInbox,
+  agentItems,
+  agentMemory,
+  agentPrompt,
+  agentQuestions,
+  agentRuns,
+  agents,
   chatEntries,
   githubIssues,
   githubRepos,
@@ -66,6 +75,17 @@ let sessionsState = sessions.map((s) => ({ ...s }))
 
 export function resetSessions(): void {
   sessionsState = sessions.map((s) => ({ ...s }))
+}
+
+// Mutable copies of the agent-role fixtures, written by POST/PATCH/DELETE
+// /v1/agents, enable/disable and PUT /v1/agents/{id}/memory. Tests that mutate
+// these should call `resetAgents()` in `afterEach`.
+let agentsState: Agent[] = agents.map((a) => ({ ...a, subscriptions: [...a.subscriptions] }))
+let agentMemoryState: AgentMemory = { ...agentMemory, files: agentMemory.files.map((f) => ({ ...f })) }
+
+export function resetAgents(): void {
+  agentsState = agents.map((a) => ({ ...a, subscriptions: [...a.subscriptions] }))
+  agentMemoryState = { ...agentMemory, files: agentMemory.files.map((f) => ({ ...f })) }
 }
 
 /**
@@ -170,8 +190,13 @@ export const handlers = [
   http.get('/v1/sessions', ({ request }) => {
     const url = new URL(request.url)
     const project = url.searchParams.get('project')
+    const kind = url.searchParams.get('kind')
     const all = url.searchParams.get('all') === 'true'
-    let result = project ? sessionsState.filter((s) => s.project_id === project) : sessionsState
+    // Role instances (kind `agent`) live in their own fixture but are served
+    // by the same endpoint — that is where the Agents screen reads them from.
+    let result = [...sessionsState, ...agentRuns]
+    if (project) result = result.filter((s) => s.project_id === project)
+    if (kind) result = result.filter((s) => s.kind === kind)
     if (!all) result = result.filter((s) => s.state === 'spawning' || s.state === 'running')
     return HttpResponse.json(result)
   }),
@@ -864,4 +889,169 @@ export const handlers = [
     projectsState = projectsState.filter((p) => p.id !== id)
     return new HttpResponse(null, { status: 204 })
   }),
+
+  // --- Agent roles (internal/api/agents.go, agent_questions.go) ------------
+
+  http.get('/v1/agents', ({ request }) => {
+    const project = new URL(request.url).searchParams.get('project')
+    return HttpResponse.json(project ? agentsState.filter((a) => a.project === project) : agentsState)
+  }),
+
+  http.post('/v1/agents', async ({ request }) => {
+    const body = (await request.json()) as {
+      id: string
+      project: string
+      prompt?: string
+      subscriptions?: Agent['subscriptions']
+      cron?: string
+      agent?: string
+    }
+    if (agentsState.some((a) => a.id === body.id)) {
+      return HttpResponse.json(
+        { error: { code: 'agent_exists', message: 'agent id already exists' } },
+        { status: 409 },
+      )
+    }
+    const created: Agent = {
+      id: body.id,
+      project: body.project,
+      prompt_path: `/home/dev/.rocket/agents/${body.id}/role.md`,
+      subscriptions: body.subscriptions ?? [],
+      cron: body.cron ?? '',
+      agent: body.agent || 'claude',
+      enabled: true,
+      inbox_queued: 0,
+      items: 0,
+      open_questions: 0,
+      awaiting_user: 0,
+      created_at: 1_800_000_000,
+      updated_at: 1_800_000_000,
+    }
+    agentsState = [...agentsState, created]
+    return HttpResponse.json(created, { status: 201 })
+  }),
+
+  http.get('/v1/agents/:id', ({ params }) => {
+    const found = agentsState.find((a) => a.id === params.id)
+    if (!found) {
+      return HttpResponse.json(
+        { error: { code: 'agent_not_found', message: 'agent not found' } },
+        { status: 404 },
+      )
+    }
+    return HttpResponse.json({ ...found, prompt: agentPrompt })
+  }),
+
+  http.patch('/v1/agents/:id', async ({ params, request }) => {
+    const patch = (await request.json()) as Partial<Agent>
+    agentsState = agentsState.map((a) => (a.id === params.id ? { ...a, ...patch } : a))
+    const updated = agentsState.find((a) => a.id === params.id)
+    if (!updated) {
+      return HttpResponse.json(
+        { error: { code: 'agent_not_found', message: 'agent not found' } },
+        { status: 404 },
+      )
+    }
+    return HttpResponse.json({ ...updated, prompt: agentPrompt })
+  }),
+
+  http.delete('/v1/agents/:id', ({ params }) => {
+    agentsState = agentsState.filter((a) => a.id !== params.id)
+    return HttpResponse.json({ status: 'deleted' })
+  }),
+
+  http.post('/v1/agents/:id/enable', ({ params }) => {
+    agentsState = agentsState.map((a) => (a.id === params.id ? { ...a, enabled: true } : a))
+    return HttpResponse.json(agentsState.find((a) => a.id === params.id))
+  }),
+
+  http.post('/v1/agents/:id/disable', ({ params }) => {
+    agentsState = agentsState.map((a) => (a.id === params.id ? { ...a, enabled: false } : a))
+    return HttpResponse.json(agentsState.find((a) => a.id === params.id))
+  }),
+
+  http.post('/v1/agents/:id/wake', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { kind?: string }
+    return HttpResponse.json({ event_id: 7, kind: body.kind ?? 'message' }, { status: 202 })
+  }),
+
+  http.get('/v1/agents/:id/inbox', ({ request }) => {
+    const status = new URL(request.url).searchParams.get('status')
+    return HttpResponse.json(status ? agentInbox.filter((e) => e.status === status) : agentInbox)
+  }),
+
+  http.get('/v1/agents/:id/items', ({ request }) => {
+    const state = new URL(request.url).searchParams.get('state')
+    return HttpResponse.json(state ? agentItems.filter((i) => i.state === state) : agentItems)
+  }),
+
+  http.get('/v1/agents/:id/memory', () => HttpResponse.json(agentMemoryState)),
+
+  http.put('/v1/agents/:id/memory', async ({ request }) => {
+    const req = (await request.json()) as { file?: string; body: string }
+    const file = req.file ?? 'MEMORY.md'
+    if (!/^[A-Za-z0-9._-]+\.md$/.test(file) || file.includes('..')) {
+      return HttpResponse.json(
+        { error: { code: 'invalid_file', message: 'memory file must be a plain .md name' } },
+        { status: 400 },
+      )
+    }
+    if (file === 'MEMORY.md') {
+      agentMemoryState = { ...agentMemoryState, index: req.body }
+    } else {
+      const rest = agentMemoryState.files.filter((f) => f.name !== file)
+      agentMemoryState = {
+        ...agentMemoryState,
+        files: [
+          ...rest,
+          { name: file, size: req.body.length, updated_at: 1_800_000_000, body: req.body },
+        ].sort((a, b) => a.name.localeCompare(b.name)),
+      }
+    }
+    return HttpResponse.json(agentMemoryState)
+  }),
+
+  http.get('/v1/agents/:id/questions', ({ params, request }) => {
+    const openOnly = new URL(request.url).searchParams.get('status') === 'open'
+    const all = agentQuestions.filter((q) => q.role_id === params.id)
+    return HttpResponse.json({ questions: openOnly ? all.filter((q) => q.status === 'open') : all })
+  }),
+
+  http.post('/v1/agents/:id/questions', async ({ params, request }) => {
+    const body = (await request.json()) as { body: string; context?: string }
+    return HttpResponse.json(
+      {
+        id: 92,
+        role_id: params.id as string,
+        ordinal: 3,
+        asked_by: '',
+        body: body.body,
+        context: body.context,
+        status: 'open',
+        whose_turn: 'role',
+        asked_at: 1_800_000_000,
+        messages: [],
+      },
+      { status: 201 },
+    )
+  }),
+
+  http.post('/v1/agent-questions/:id/reply', async ({ request }) => {
+    const body = (await request.json()) as { body: string }
+    return HttpResponse.json(
+      {
+        ...agentQuestions[0],
+        whose_turn: 'role',
+        messages: [
+          ...agentQuestions[0].messages,
+          { id: 99, author: '', kind: 'reply', body: body.body, created_at: 1_800_000_000 },
+        ],
+      },
+      { status: 201 },
+    )
+  }),
+
+  http.post('/v1/agent-questions/:id/answer', () =>
+    HttpResponse.json({ ...agentQuestions[0], status: 'resolved', whose_turn: undefined }),
+  ),
 ]

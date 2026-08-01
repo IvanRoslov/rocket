@@ -49,6 +49,17 @@ export const EVENT_TYPES = [
   'task.question_resolved',
   // Orchestrator disputed a final answer — the thread is open again.
   'task.question_reopened',
+  // Role lifecycle and role Q&A (docs/10-agents.md). `agent.issue_opened` /
+  // `agent.issue_comment` come from the GitHub poller's role subscriptions.
+  'agent.instance_spawned',
+  'agent.run_done',
+  'agent.run_timeout',
+  'agent.issue_opened',
+  'agent.issue_comment',
+  'agent.question_asked',
+  'agent.question_replied',
+  'agent.question_reopened',
+  'agent.question_resolved',
   'orchestrator.heartbeat_sent',
   'pr.opened',
   'pr.ci_changed',

@@ -547,3 +547,107 @@ func TestAgentDoneRequiresASession(t *testing.T) {
 	}
 	resp.Body.Close()
 }
+
+func TestGetAgentMemoryReturnsIndexAndFiles(t *testing.T) {
+	d := agentsTestDeps(t)
+	srv := newTestServer(t, d)
+	createTestAgent(t, srv, "sre")
+
+	if err := os.WriteFile(filepath.Join(roles.MemoryDir(d.Cfg.Home, "sre"), "platform.md"), []byte("how it deploys"), 0600); err != nil {
+		t.Fatalf("write fact file: %v", err)
+	}
+
+	resp := getJSON(t, srv.URL+"/v1/agents/sre/memory")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET memory status = %d, want 200", resp.StatusCode)
+	}
+	body := decodeMap(t, resp)
+
+	if body["path"] != roles.MemoryDir(d.Cfg.Home, "sre") {
+		t.Errorf("path = %v", body["path"])
+	}
+	if index, _ := body["index"].(string); index == "" {
+		t.Error("index is empty, want the seeded MEMORY.md")
+	}
+	files, ok := body["files"].([]any)
+	if !ok || len(files) != 1 {
+		t.Fatalf("files = %v, want one fact file", body["files"])
+	}
+	file := files[0].(map[string]any)
+	if file["name"] != "platform.md" || file["body"] != "how it deploys" {
+		t.Errorf("file = %+v", file)
+	}
+}
+
+func TestPutAgentMemoryWritesIndexAndFactFiles(t *testing.T) {
+	d := agentsTestDeps(t)
+	srv := newTestServer(t, d)
+	createTestAgent(t, srv, "sre")
+
+	// No "file" — the index is the default target.
+	resp := putJSON(t, srv.URL+"/v1/agents/sre/memory", map[string]any{"body": "- [Platform](platform.md)\n"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT index status = %d, want 200", resp.StatusCode)
+	}
+	if body := decodeMap(t, resp); body["index"] != "- [Platform](platform.md)\n" {
+		t.Errorf("index = %v", body["index"])
+	}
+
+	resp = putJSON(t, srv.URL+"/v1/agents/sre/memory", map[string]any{"file": "platform.md", "body": "how it deploys"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT fact status = %d, want 200", resp.StatusCode)
+	}
+	body := decodeMap(t, resp)
+	files, ok := body["files"].([]any)
+	if !ok || len(files) != 1 {
+		t.Fatalf("files = %v, want the new fact file", body["files"])
+	}
+	if file := files[0].(map[string]any); file["name"] != "platform.md" || file["body"] != "how it deploys" {
+		t.Errorf("file = %+v", file)
+	}
+
+	// The write really landed on disk, not just in the response.
+	onDisk, err := os.ReadFile(filepath.Join(roles.MemoryDir(d.Cfg.Home, "sre"), "platform.md"))
+	if err != nil {
+		t.Fatalf("read fact file: %v", err)
+	}
+	if string(onDisk) != "how it deploys" {
+		t.Errorf("fact file on disk = %q", onDisk)
+	}
+}
+
+func TestPutAgentMemoryRejectsPathTraversal(t *testing.T) {
+	d := agentsTestDeps(t)
+	srv := newTestServer(t, d)
+	createTestAgent(t, srv, "sre")
+
+	for _, name := range []string{"../role.md", "sub/dir.md", "notes.txt", ".."} {
+		resp := putJSON(t, srv.URL+"/v1/agents/sre/memory", map[string]any{"file": name, "body": "x"})
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("PUT %q status = %d, want 400", name, resp.StatusCode)
+		}
+		if body := decodeMap(t, resp); body["error"].(map[string]any)["code"] != "invalid_file" {
+			t.Errorf("PUT %q error = %v, want invalid_file", name, body["error"])
+		}
+	}
+
+	prompt, err := os.ReadFile(roles.PromptPath(d.Cfg.Home, "sre"))
+	if err != nil {
+		t.Fatalf("read role prompt: %v", err)
+	}
+	if string(prompt) != "you are the sre role" {
+		t.Errorf("role prompt was overwritten by a rejected memory write: %q", prompt)
+	}
+}
+
+func TestAgentMemoryUnknownRole404(t *testing.T) {
+	d := agentsTestDeps(t)
+	srv := newTestServer(t, d)
+
+	if resp := getJSON(t, srv.URL+"/v1/agents/nope/memory"); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("GET status = %d, want 404", resp.StatusCode)
+	}
+	if resp := putJSON(t, srv.URL+"/v1/agents/nope/memory", map[string]any{"body": "x"}); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("PUT status = %d, want 404", resp.StatusCode)
+	}
+}

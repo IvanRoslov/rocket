@@ -12,6 +12,13 @@ import {
 } from '@tanstack/react-query'
 import { api } from './api'
 import type {
+  Agent,
+  AgentInboxEvent,
+  AgentInboxKind,
+  AgentItem,
+  AgentMemory,
+  AgentQuestion,
+  AgentSubscription,
   GithubIssue,
   GithubRepo,
   GlobalQuestion,
@@ -606,6 +613,244 @@ export function useDeleteProject(): UseMutationResult<void, Error, string> {
   })
 }
 
+
+// ---------------------------------------------------------------------------
+// Agent roles (docs/10-agents.md «Роли (постоянные агенты)»)
+// ---------------------------------------------------------------------------
+
+/** `GET /v1/agents[?project=]` — bare array of roles, prompt body omitted. */
+export function useAgents(projectId?: string): UseQueryResult<Agent[]> {
+  return useQuery({
+    queryKey: ['agents', projectId ?? 'all'],
+    queryFn: () =>
+      api.get<Agent[]>(`/v1/agents${projectId ? `?project=${encodeURIComponent(projectId)}` : ''}`),
+  })
+}
+
+/** `GET /v1/agents/{id}` — the role WITH its `prompt` body (the list omits it). */
+export function useAgent(id?: string): UseQueryResult<Agent> {
+  return useQuery({
+    queryKey: ['agent', id],
+    queryFn: () => api.get<Agent>(`/v1/agents/${id}`),
+    enabled: !!id,
+  })
+}
+
+/** `GET /v1/agents/{id}/inbox[?status=]` — the role's event queue, oldest first. */
+export function useAgentInbox(id?: string, status?: string): UseQueryResult<AgentInboxEvent[]> {
+  return useQuery({
+    queryKey: ['agent', id, 'inbox', status ?? 'all'],
+    queryFn: () =>
+      api.get<AgentInboxEvent[]>(
+        `/v1/agents/${id}/inbox${status ? `?status=${encodeURIComponent(status)}` : ''}`,
+      ),
+    enabled: !!id,
+  })
+}
+
+/** `GET /v1/agents/{id}/items[?state=]` — the role's dossier. */
+export function useAgentItems(id?: string, state?: string): UseQueryResult<AgentItem[]> {
+  return useQuery({
+    queryKey: ['agent', id, 'items', state ?? 'all'],
+    queryFn: () =>
+      api.get<AgentItem[]>(
+        `/v1/agents/${id}/items${state ? `?state=${encodeURIComponent(state)}` : ''}`,
+      ),
+    enabled: !!id,
+  })
+}
+
+/** `GET /v1/agents/{id}/memory` — MEMORY.md plus the fact files beside it. */
+export function useAgentMemory(id?: string): UseQueryResult<AgentMemory> {
+  return useQuery({
+    queryKey: ['agent', id, 'memory'],
+    queryFn: () => api.get<AgentMemory>(`/v1/agents/${id}/memory`),
+    enabled: !!id,
+  })
+}
+
+/** `GET /v1/agents/{id}/questions` — role Q&A threads (open and resolved). */
+export function useAgentQuestions(id?: string): UseQueryResult<AgentQuestion[]> {
+  return useQuery({
+    queryKey: ['agent', id, 'questions'],
+    queryFn: async () => {
+      const res = await api.get<{ questions: AgentQuestion[] }>(`/v1/agents/${id}/questions`)
+      return res.questions
+    },
+    enabled: !!id,
+  })
+}
+
+export interface AgentFormValues {
+  id: string
+  project: string
+  prompt: string
+  subscriptions: AgentSubscription[]
+  cron: string
+  agent: string
+}
+
+/** `POST /v1/agents` -> bare agentResponse (201). A duplicate id comes back as
+ * `409 {code:"agent_exists"}`. */
+export function useCreateAgent(): UseMutationResult<Agent, Error, AgentFormValues> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (payload) => api.post<Agent>('/v1/agents', payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agents'] })
+    },
+  })
+}
+
+/** `PATCH /v1/agents/{id}` — every field optional; `prompt` rewrites role.md,
+ * which the role re-reads on its next wake (no restart needed). */
+export function useUpdateAgent(): UseMutationResult<
+  Agent,
+  Error,
+  { id: string } & Partial<Omit<AgentFormValues, 'id' | 'project'>> & { enabled?: boolean }
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...body }) => api.patch<Agent>(`/v1/agents/${id}`, body),
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ['agents'] })
+      queryClient.invalidateQueries({ queryKey: ['agent', id] })
+    },
+  })
+}
+
+/** `DELETE /v1/agents/{id}` — drops the role with its inbox and dossier; the
+ * role's files on disk stay. */
+export function useDeleteAgent(): UseMutationResult<{ status: string }, Error, string> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.del<{ status: string }>(`/v1/agents/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agents'] })
+    },
+  })
+}
+
+/** `POST /v1/agents/{id}/enable|disable` -> bare agentResponse. */
+export function useSetAgentEnabled(): UseMutationResult<
+  Agent,
+  Error,
+  { id: string; enabled: boolean }
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, enabled }) =>
+      api.post<Agent>(`/v1/agents/${id}/${enabled ? 'enable' : 'disable'}`),
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ['agents'] })
+      queryClient.invalidateQueries({ queryKey: ['agent', id] })
+    },
+  })
+}
+
+/**
+ * `POST /v1/agents/{id}/wake` `{kind?, text?}` -> `{event_id, kind}` (202).
+ * Enqueues an inbox event and notifies the wake engine: a live instance gets
+ * it as a message, otherwise one is spawned after the daemon's debounce
+ * window (`agent_wake_debounce`, 30s by default — docs/10-agents.md), so the
+ * caller must not expect a session to exist right after this resolves.
+ */
+export function useWakeAgent(): UseMutationResult<
+  { event_id: number; kind: string },
+  Error,
+  { id: string; kind?: AgentInboxKind; text?: string }
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, kind, text }) =>
+      api.post<{ event_id: number; kind: string }>(`/v1/agents/${id}/wake`, { kind, text }),
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ['agent', id] })
+      queryClient.invalidateQueries({ queryKey: ['agents'] })
+    },
+  })
+}
+
+/**
+ * `PUT /v1/agents/{id}/memory` `{file?, body}` — writes ONE memory file;
+ * `file` defaults to `MEMORY.md`. The daemon validates the name (plain `.md`
+ * base name, no separators) and answers `400 {code:"invalid_file"}` otherwise.
+ */
+export function useUpdateAgentMemory(): UseMutationResult<
+  AgentMemory,
+  Error,
+  { id: string; file?: string; body: string }
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, file, body }) =>
+      api.put<AgentMemory>(`/v1/agents/${id}/memory`, { file, body }),
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ['agent', id, 'memory'] })
+    },
+  })
+}
+
+/**
+ * `POST /v1/agents/{id}/questions` `{body, context?}` -> bare
+ * agentQuestionResponse (201). Opens a thread FROM you TO the role (the api
+ * client never sends `X-Rocket-Session`, so the daemon treats the caller as
+ * the human) and wakes the role with a `question` inbox event.
+ */
+export function useAskAgent(
+  roleId: string | undefined,
+): UseMutationResult<AgentQuestion, Error, { body: string; context?: string }> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (payload) => api.post<AgentQuestion>(`/v1/agents/${roleId}/questions`, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agent', roleId, 'questions'] })
+      queryClient.invalidateQueries({ queryKey: ['agent', roleId] })
+    },
+  })
+}
+
+/** `POST /v1/agent-questions/{id}/reply` `{body}` -> the thread (201). */
+export function useReplyAgentQuestion(): UseMutationResult<
+  AgentQuestion,
+  Error,
+  { id: number; body: string; roleId: string }
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }) =>
+      api.post<AgentQuestion>(`/v1/agent-questions/${id}/reply`, { body }),
+    onSuccess: (_data, { roleId }) => {
+      queryClient.invalidateQueries({ queryKey: ['agent', roleId, 'questions'] })
+      queryClient.invalidateQueries({ queryKey: ['agent', roleId] })
+    },
+  })
+}
+
+/** `POST /v1/agent-questions/{id}/answer` `{body}` | `{dismiss:true}` — human
+ * only; resolves the thread. */
+export function useAnswerAgentQuestion(): UseMutationResult<
+  AgentQuestion,
+  Error,
+  { id: number; roleId: string } & (
+    | { body: string; dismiss?: never }
+    | { dismiss: true; body?: never }
+  )
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body, dismiss }) =>
+      api.post<AgentQuestion>(
+        `/v1/agent-questions/${id}/answer`,
+        dismiss ? { dismiss: true } : { body },
+      ),
+    onSuccess: (_data, { roleId }) => {
+      queryClient.invalidateQueries({ queryKey: ['agent', roleId, 'questions'] })
+      queryClient.invalidateQueries({ queryKey: ['agent', roleId] })
+    },
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Live invalidation
 // ---------------------------------------------------------------------------
@@ -637,6 +882,13 @@ export function wireInvalidation(queryClient: QueryClient) {
       // High-frequency event; keep invalidation minimal — only the task
       // detail view (which shows session/heartbeat state) needs to refresh.
       queryClient.invalidateQueries({ queryKey: ['task'] })
+    } else if (event.type.startsWith('agent.')) {
+      // Role lifecycle, GitHub-sourced inbox events and Q&A threads all move
+      // the roles list and the open role card; instance spawn/exit also moves
+      // the session list the runs journal reads.
+      queryClient.invalidateQueries({ queryKey: ['agents'] })
+      queryClient.invalidateQueries({ queryKey: ['agent'] })
+      queryClient.invalidateQueries({ queryKey: ['sessions'] })
     } else if (event.type.startsWith('repo.clone_')) {
       queryClient.invalidateQueries({ queryKey: ['repos'] })
     } else if (event.type.startsWith('pr.')) {

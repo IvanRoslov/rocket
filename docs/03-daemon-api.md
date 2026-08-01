@@ -117,6 +117,8 @@ tmux рендерит окно ровно в **одном** размере; пр
 | GET | `/v1/agents/{id}/inbox` | События роли, старые первыми; фильтр `?status=queued&#124;delivered&#124;done` |
 | GET | `/v1/agents/{id}/items` | Досье; фильтр `?state=` |
 | PUT | `/v1/agents/{id}/items` | `{kind, ref, state, note?, task_id?, snooze_until?}` — upsert по (роль, kind, ref) |
+| GET | `/v1/agents/{id}/memory` | Файловая память роли: `{path, index, files:[{name, size, updated_at, body}]}` — `index` это полный текст `MEMORY.md`, `files` — файлы-факты рядом с ним (тела включены, сортировка по имени, поддиректории игнорируются) |
+| PUT | `/v1/agents/{id}/memory` | `{file?, body}` — записывает **один** файл памяти (`file` по умолчанию `MEMORY.md`) и возвращает ту же схему, что GET. Имя валидируется: базовое имя без разделителей пути, `^[A-Za-z0-9._-]+\.md$`, без `..` — иначе `400 invalid_file` |
 | GET | `/v1/agents/{id}/questions` | Q&A-треды роли; фильтр `?status=open` |
 | POST | `/v1/agents/{id}/questions` | `{body, context?}` → 201. Направление — по вызывающему: человек (без заголовка сессии) спрашивает роль, инстанс роли эскалирует человеку |
 | POST | `/v1/agent-questions/{qid}/reply` | `{body}` → 201. Человек или инстанс роли; reply инстанса в закрытый тред переоткрывает его |
