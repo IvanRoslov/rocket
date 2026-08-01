@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -275,8 +276,12 @@ type Issue struct {
 	Body      string `json:"body"`
 	HTMLURL   string `json:"html_url"`
 	State     string `json:"state"`
+	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
-	Labels    []struct {
+	User      struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	Labels []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
 	// PullRequest is present (non-nil) when this entry is actually a pull
@@ -293,6 +298,15 @@ var issueStates = map[string]bool{"open": true, "closed": true, "all": true}
 // rejected as invalid). Pull requests are filtered out, since GitHub's
 // issues list endpoint returns both issues and pull requests.
 func (c *Client) ListIssues(ctx context.Context, owner, repo, state string) ([]Issue, error) {
+	return c.ListIssuesSince(ctx, owner, repo, state, time.Time{})
+}
+
+// ListIssuesSince is ListIssues restricted to issues updated at or after
+// `since`. A zero `since` omits the parameter entirely (i.e. no time filter).
+// Note that GitHub filters on the *update* time, so the caller still has to
+// look at CreatedAt to tell a genuinely new issue from an old one that was
+// merely touched.
+func (c *Client) ListIssuesSince(ctx context.Context, owner, repo, state string, since time.Time) ([]Issue, error) {
 	if state == "" {
 		state = "open"
 	}
@@ -302,6 +316,9 @@ func (c *Client) ListIssues(ctx context.Context, owner, repo, state string) ([]I
 
 	reqURL := fmt.Sprintf("%s/repos/%s/%s/issues?state=%s&per_page=100",
 		c.baseURL, owner, repo, url.QueryEscape(state))
+	if !since.IsZero() {
+		reqURL += "&since=" + url.QueryEscape(since.UTC().Format(time.RFC3339))
+	}
 
 	var issues []Issue
 	err := c.getPaginated(ctx, reqURL, func(body []byte) error {
@@ -321,6 +338,90 @@ func (c *Client) ListIssues(ctx context.Context, owner, repo, state string) ([]I
 		return nil, fmt.Errorf("github: ListIssues: %w", err)
 	}
 	return issues, nil
+}
+
+// IssueComment is a subset of the GitHub issue-comment resource. IssueNumber
+// is derived from the API `issue_url` rather than being a field of its own:
+// the repository-wide comments endpoint (one call for the whole repo, instead
+// of one per issue) does not carry the issue number explicitly.
+type IssueComment struct {
+	ID          int64
+	IssueNumber int
+	Body        string
+	HTMLURL     string
+	CreatedAt   string
+	User        struct {
+		Login string
+	}
+}
+
+// issueCommentAPI is the wire shape of an issue comment.
+type issueCommentAPI struct {
+	ID        int64  `json:"id"`
+	Body      string `json:"body"`
+	HTMLURL   string `json:"html_url"`
+	CreatedAt string `json:"created_at"`
+	IssueURL  string `json:"issue_url"`
+	User      struct {
+		Login string `json:"login"`
+	} `json:"user"`
+}
+
+var issueURLRE = regexp.MustCompile(`/issues/(\d+)$`)
+
+// issueNumberFromURL extracts the issue number from an issue API URL such as
+// https://api.github.com/repos/o/r/issues/11. Returns 0 when the URL does not
+// have that shape.
+func issueNumberFromURL(issueURL string) int {
+	m := issueURLRE.FindStringSubmatch(issueURL)
+	if len(m) != 2 {
+		return 0
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// ListIssueCommentsSince returns every issue comment in owner/repo created or
+// updated at or after `since`, oldest first — one repository-wide call rather
+// than one call per issue. Comments whose issue number cannot be derived are
+// skipped. A zero `since` omits the parameter.
+func (c *Client) ListIssueCommentsSince(ctx context.Context, owner, repo string, since time.Time) ([]IssueComment, error) {
+	reqURL := fmt.Sprintf("%s/repos/%s/%s/issues/comments?per_page=100&sort=created&direction=asc",
+		c.baseURL, owner, repo)
+	if !since.IsZero() {
+		reqURL += "&since=" + url.QueryEscape(since.UTC().Format(time.RFC3339))
+	}
+
+	var comments []IssueComment
+	err := c.getPaginated(ctx, reqURL, func(body []byte) error {
+		var page []issueCommentAPI
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		for _, cm := range page {
+			number := issueNumberFromURL(cm.IssueURL)
+			if number == 0 {
+				continue
+			}
+			out := IssueComment{
+				ID:          cm.ID,
+				IssueNumber: number,
+				Body:        cm.Body,
+				HTMLURL:     cm.HTMLURL,
+				CreatedAt:   cm.CreatedAt,
+			}
+			out.User.Login = cm.User.Login
+			comments = append(comments, out)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("github: ListIssueComments: %w", err)
+	}
+	return comments, nil
 }
 
 // FindPRByBranch finds the pull request whose head is owner:branch in
