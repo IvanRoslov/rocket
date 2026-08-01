@@ -4,9 +4,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { agentRuns } from '../../mocks/fixtures'
 import { handlers, resetAgents } from '../../mocks/handlers'
 import { AgentScreen } from './AgentScreen'
 
@@ -65,6 +67,29 @@ describe('AgentScreen header', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Terminal' }))
 
     expect(await screen.findByText('term:sre-run-3')).toBeInTheDocument()
+  })
+
+  it('keeps waiting while the spawned instance is not running yet', async () => {
+    // A `spawning` row exists before its tmux session does; attaching then
+    // gets the socket closed by the daemon, so the pending state must hold.
+    server.use(
+      http.get('/v1/sessions', () =>
+        HttpResponse.json([
+          {
+            ...agentRuns[0],
+            id: 'triage-run-1',
+            tmux_name: 'triage-run-1',
+            state: 'spawning',
+          },
+        ]),
+      ),
+    )
+    renderScreen('triage')
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Wake & open terminal' }))
+
+    expect(await screen.findByText(/waking…/)).toBeInTheDocument()
+    expect(screen.queryByText(/^term:/)).not.toBeInTheDocument()
   })
 
   it('offers wake-and-open when no instance is live', async () => {

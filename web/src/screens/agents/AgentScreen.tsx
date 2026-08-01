@@ -51,16 +51,21 @@ export function AgentScreen() {
   const remove = useDeleteAgent()
 
   const instance = roleId ? liveInstance(sessions, roleId) : undefined
+  // A `spawning` row exists before its tmux session does — attaching then gets
+  // the terminal socket closed by the daemon with "can't find session"
+  // (observed end-to-end), so only a `running` instance is attachable.
+  const attachable = instance?.state === 'running' ? instance : undefined
 
   // The wake engine spawns the instance asynchronously; `agent.instance_
   // spawned` invalidates the sessions query (lib/queries.ts), so the instance
   // simply shows up here and the pending terminal opens on it.
+  //
   useEffect(() => {
-    if (waking && instance) {
-      setTermSession({ id: instance.id, tmux_name: instance.tmux_name })
+    if (waking && attachable) {
+      setTermSession({ id: attachable.id, tmux_name: attachable.tmux_name })
       setWaking(false)
     }
-  }, [waking, instance])
+  }, [waking, attachable])
 
   if (!projectId || !roleId || !agent) return null
 
@@ -75,11 +80,13 @@ export function AgentScreen() {
   }
 
   function handleTerminal() {
-    if (instance) {
-      setTermSession({ id: instance.id, tmux_name: instance.tmux_name })
+    if (attachable) {
+      setTermSession({ id: attachable.id, tmux_name: attachable.tmux_name })
       return
     }
     setWaking(true)
+    // An instance already on its way needs no second wake event.
+    if (instance) return
     wake.mutate({ id: roleId!, kind: 'terminal_opened' }, { onError: () => setWaking(false) })
   }
 
@@ -151,7 +158,7 @@ export function AgentScreen() {
           Wake
         </Button>
         <Button variant="secondary" size="sm" onClick={handleTerminal} disabled={waking}>
-          {instance ? 'Terminal' : 'Wake & open terminal'}
+          {attachable ? 'Terminal' : 'Wake & open terminal'}
         </Button>
         {waking && (
           <>
