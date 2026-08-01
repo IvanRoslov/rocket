@@ -426,3 +426,31 @@ func TestAgentStoreItemRoundtrip(t *testing.T) {
 		t.Errorf("items = %+v", items)
 	}
 }
+
+func TestListAgentsCarriesOpenQuestionCounts(t *testing.T) {
+	d := agentsTestDeps(t)
+	srv := newTestServer(t, d)
+	createTestAgent(t, srv, "sre")
+
+	// Human-opened thread: open, but awaiting the role, not the user.
+	if _, err := d.Store.AddAgentQuestion(store.AgentQuestion{RoleID: "sre", Body: "q1"}); err != nil {
+		t.Fatalf("AddAgentQuestion: %v", err)
+	}
+	// Role-opened thread: awaits the user.
+	if _, err := d.Store.AddAgentQuestion(store.AgentQuestion{RoleID: "sre", AskedBy: "sre-run-1", Body: "q2"}); err != nil {
+		t.Fatalf("AddAgentQuestion: %v", err)
+	}
+
+	list := decodeList(t, getJSON(t, srv.URL+"/v1/agents"))
+	if len(list) != 1 {
+		t.Fatalf("list = %+v", list)
+	}
+	if list[0]["open_questions"] != float64(2) || list[0]["awaiting_user"] != float64(1) {
+		t.Errorf("list entry = %+v", list[0])
+	}
+
+	one := decodeMap(t, getJSON(t, srv.URL+"/v1/agents/sre"))
+	if one["open_questions"] != float64(2) || one["awaiting_user"] != float64(1) {
+		t.Errorf("get = %+v", one)
+	}
+}

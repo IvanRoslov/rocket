@@ -40,6 +40,8 @@ type agentResponse struct {
 	Enabled       bool                      `json:"enabled"`
 	InboxQueued   int                       `json:"inbox_queued"`
 	Items         int                       `json:"items"`
+	OpenQuestions int                       `json:"open_questions"`
+	AwaitingUser  int                       `json:"awaiting_user"`
 	CreatedAt     int64                     `json:"created_at"`
 	UpdatedAt     int64                     `json:"updated_at"`
 }
@@ -76,7 +78,9 @@ func roleFromSessionID(sessionID string) string {
 	return sessionID[:i]
 }
 
-func toAgentResponse(d Deps, a store.Agent, withPrompt bool) (agentResponse, error) {
+// toAgentResponse renders a role. counts is the OpenAgentQuestionCounts map,
+// passed in so the list handler fetches it once instead of per role.
+func toAgentResponse(d Deps, a store.Agent, withPrompt bool, counts map[string]store.QuestionCounts) (agentResponse, error) {
 	queued, err := d.Store.CountQueuedInboxEvents(a.ID)
 	if err != nil {
 		return agentResponse{}, err
@@ -91,6 +95,8 @@ func toAgentResponse(d Deps, a store.Agent, withPrompt bool) (agentResponse, err
 		subs = []store.AgentSubscription{}
 	}
 
+	qc := counts[a.ID]
+
 	resp := agentResponse{
 		ID:            a.ID,
 		Project:       a.ProjectID,
@@ -101,6 +107,8 @@ func toAgentResponse(d Deps, a store.Agent, withPrompt bool) (agentResponse, err
 		Enabled:       a.Enabled,
 		InboxQueued:   queued,
 		Items:         len(items),
+		OpenQuestions: qc.Open,
+		AwaitingUser:  qc.AwaitingUser,
 		CreatedAt:     a.CreatedAt,
 		UpdatedAt:     a.UpdatedAt,
 	}
@@ -122,9 +130,14 @@ func registerAgentRoutes(mux *http.ServeMux, d Deps) {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
+		counts, err := d.Store.OpenAgentQuestionCounts()
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
 		out := make([]agentResponse, 0, len(agents))
 		for _, a := range agents {
-			ar, err := toAgentResponse(d, a, false)
+			ar, err := toAgentResponse(d, a, false, counts)
 			if err != nil {
 				writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 				return
@@ -164,6 +177,8 @@ func registerAgentRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("PUT /v1/agents/{id}/items", func(w http.ResponseWriter, r *http.Request) {
 		handlePutAgentItem(w, r, d)
 	})
+
+	registerAgentQuestionRoutes(mux, d)
 }
 
 // lookupAgent resolves the {id} path value, writing a 404 and returning
@@ -187,7 +202,12 @@ func writeAgent(w http.ResponseWriter, d Deps, id string, status int, withPrompt
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	ar, err := toAgentResponse(d, a, withPrompt)
+	counts, err := d.Store.OpenAgentQuestionCounts()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	ar, err := toAgentResponse(d, a, withPrompt, counts)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
