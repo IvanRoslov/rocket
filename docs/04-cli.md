@@ -88,6 +88,16 @@ rocket agent enable|disable <id>
 rocket agent rm <id>                    # из реестра; файлы роли остаются на диске
 rocket agent wake <id> ["текст"] [--kind message]
     Кладёт событие в инбокс роли (спавн инстанса делает runtime-слой).
+
+rocket agent ask <role> "<вопрос>" [--context <md>]
+    Открыть тред-вопрос роли. Вопрос человека будит роль (событие question
+    в инбоксе); тот же вызов изнутри инстанса роли открывает тред человеку.
+rocket agent questions [<role>] [--open]
+    Треды роли (без аргумента — роль текущего инстанса).
+rocket agent reply <qid> "<текст>"      # ответ в тред (обе стороны)
+rocket agent answer <qid> "<ответ>" | --dismiss
+    Закрыть тред; только человек. Инстанс роли может оспорить закрытый тред
+    своим reply — тред переоткроется.
 ```
 
 ## Для агентов (вызываются оркестратором/воркером из своей сессии)
@@ -125,6 +135,11 @@ rocket agent state set <kind>:<ref> <state> [--note "..."] [--until 2026-08-15]
 rocket agent state ls [--state deferred] [--agent <role>]
     Досье роли (kind: issue|task|ping). Роль определяется по ROCKET_SESSION_ID
     инстанса (<role>-run-<n>); вне инстанса нужен --agent.
+
+rocket agent ask <role> "<вопрос>" / rocket agent reply <qid> "<текст>"
+    Q&A-треды роли. Изнутри инстанса ask эскалирует вопрос человеку,
+    reply отвечает в тред, открытый человеком (сообщения приходят
+    как "[role <id> Q<n> question|reply|answer] ...").
 ```
 
 ## Коды выхода

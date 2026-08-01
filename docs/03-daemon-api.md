@@ -106,7 +106,7 @@ tmux рендерит окно ровно в **одном** размере; пр
 
 | Метод | Путь | Описание |
 |---|---|---|
-| GET | `/v1/agents` | Список ролей; фильтр `?project=`; у элемента `inbox_queued` (событий в очереди) и `items` (размер досье) |
+| GET | `/v1/agents` | Список ролей; фильтр `?project=`; у элемента `inbox_queued` (событий в очереди), `items` (размер досье), `open_questions` и `awaiting_user` (открытые треды и из них ждущие человека) |
 | POST | `/v1/agents` | `{id, project, prompt?, subscriptions?, cron?, agent?}` → 201. Создаёт домашнюю директорию роли (`<home>/agents/<id>/role.md` + `memory/MEMORY.md`), `agent` по умолчанию — `default_agent` конфига |
 | GET | `/v1/agents/{id}` | Карточка роли + тело роль-промпта в поле `prompt` |
 | PATCH | `/v1/agents/{id}` | `{prompt?, subscriptions?, cron?, agent?, enabled?}`; `prompt` перезаписывает `role.md` |
@@ -116,10 +116,16 @@ tmux рендерит окно ровно в **одном** размере; пр
 | GET | `/v1/agents/{id}/inbox` | События роли, старые первыми; фильтр `?status=queued&#124;delivered&#124;done` |
 | GET | `/v1/agents/{id}/items` | Досье; фильтр `?state=` |
 | PUT | `/v1/agents/{id}/items` | `{kind, ref, state, note?, task_id?, snooze_until?}` — upsert по (роль, kind, ref) |
+| GET | `/v1/agents/{id}/questions` | Q&A-треды роли; фильтр `?status=open` |
+| POST | `/v1/agents/{id}/questions` | `{body, context?}` → 201. Направление — по вызывающему: человек (без заголовка сессии) спрашивает роль, инстанс роли эскалирует человеку |
+| POST | `/v1/agent-questions/{qid}/reply` | `{body}` → 201. Человек или инстанс роли; reply инстанса в закрытый тред переоткрывает его |
+| POST | `/v1/agent-questions/{qid}/answer` | `{body}` &#124; `{dismiss:true}` → 200. Закрывает тред; только человек |
 
 Виды событий инбокса: `message`, `issue_opened`, `issue_comment`, `task_update`, `snooze_expired`, `cron`, `question`, `terminal_opened`. Виды элементов досье: `issue`, `task`, `ping`; состояния — свободные строки (канонический набор `new|triaged|taken|deferred|waiting_team|in_work|resolved|closed`), это записная книжка роли, а не state-machine демона.
 
-Права: `PUT /v1/agents/{id}/items` от сессии (`X-Rocket-Session`) разрешён только инстансу этой же роли — сессия должна быть `kind=agent` с id вида `<role>-run-<n>`; иначе `403 forbidden`. Пользовательский вызов (без заголовка) разрешён всегда.
+Q&A-треды роли (`agent_questions`/`agent_question_messages`) — тот же механизм, что у задач: `whose_turn` (`user`&#124;`role`) выводится из автора последней записи треда. **Любое** сообщение человека в тред (открытие, уточнение, финальный ответ) кладёт в инбокс роли событие `question` c payload `{question_id, role_id, ordinal, entry: question|reply|answer, text}`; если инстанс роли жив, тот же текст доезжает ему сообщением с префиксом `[role <id> Q<n> <entry>] ...`. Записи самой роли — только тред, человек читает их через API/CLI.
+
+Права: `PUT /v1/agents/{id}/items` и Q&A-треды роли от сессии (`X-Rocket-Session`) разрешены только инстансу этой же роли — сессия должна быть `kind=agent` с id вида `<role>-run-<n>`; иначе `403 forbidden`. Пользовательский вызов (без заголовка) разрешён всегда.
 
 ## Сообщения
 
