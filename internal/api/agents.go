@@ -181,6 +181,12 @@ func registerAgentRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("PUT /v1/agents/{id}/items", func(w http.ResponseWriter, r *http.Request) {
 		handlePutAgentItem(w, r, d)
 	})
+	mux.HandleFunc("GET /v1/agents/{id}/memory", func(w http.ResponseWriter, r *http.Request) {
+		handleGetAgentMemory(w, r, d)
+	})
+	mux.HandleFunc("PUT /v1/agents/{id}/memory", func(w http.ResponseWriter, r *http.Request) {
+		handlePutAgentMemory(w, r, d)
+	})
 
 	registerAgentQuestionRoutes(mux, d)
 }
@@ -598,4 +604,74 @@ func toAgentItemResponse(it store.AgentItem) agentItemResponse {
 		CreatedAt:   it.CreatedAt,
 		UpdatedAt:   it.UpdatedAt,
 	}
+}
+
+// agentMemoryResponse is the JSON shape of a role's file memory: the MEMORY.md
+// index plus the fact files beside it, bodies inlined (role memory is a handful
+// of short notes, and both the dashboard and the mobile app render all of them
+// at once).
+type agentMemoryResponse struct {
+	Path  string             `json:"path"`
+	Index string             `json:"index"`
+	Files []roles.MemoryFile `json:"files"`
+}
+
+func writeAgentMemory(w http.ResponseWriter, d Deps, id string) {
+	index, files, err := roles.ReadMemory(d.Cfg.Home, id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, agentMemoryResponse{
+		Path:  roles.MemoryDir(d.Cfg.Home, id),
+		Index: index,
+		Files: files,
+	})
+}
+
+func handleGetAgentMemory(w http.ResponseWriter, r *http.Request, d Deps) {
+	a, ok := lookupAgent(w, r, d)
+	if !ok {
+		return
+	}
+	writeAgentMemory(w, d, a.ID)
+}
+
+type putAgentMemoryRequest struct {
+	// File names the memory file to write; empty means the MEMORY.md index.
+	File string `json:"file"`
+	Body string `json:"body"`
+}
+
+// handlePutAgentMemory writes one file of the role's memory. Only plain
+// markdown base names are accepted (roles.ValidMemoryFileName): the name comes
+// straight from a request body and the memory directory sits next to the role
+// prompt, so a traversing name must never reach the filesystem.
+func handlePutAgentMemory(w http.ResponseWriter, r *http.Request, d Deps) {
+	a, ok := lookupAgent(w, r, d)
+	if !ok {
+		return
+	}
+
+	var req putAgentMemoryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+	name := req.File
+	if name == "" {
+		name = "MEMORY.md"
+	}
+
+	if err := roles.WriteMemoryFile(d.Cfg.Home, a.ID, name, req.Body); err != nil {
+		if errors.Is(err, roles.ErrInvalidMemoryFile) {
+			writeErr(w, http.StatusBadRequest, "invalid_file",
+				"memory file must be a plain .md name inside the role memory directory")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	writeAgentMemory(w, d, a.ID)
 }

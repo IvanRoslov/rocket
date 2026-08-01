@@ -51,6 +51,7 @@ type LaunchSpec struct {
 - **Инбокс** (`agent_inbox`): очередь событий роли (`message`, `issue_opened`, `issue_comment`, `task_update`, `snooze_expired`, `cron`, `question`, `terminal_opened`) со статусами `queued|delivered|done`.
 - **Досье** (`agent_items`): что роль ведёт и в каком состоянии — issue/задача/пинг, `external_ref`, состояние, заметка, связанная задача, `snooze_until`.
 - **Домашняя директория роли**: `~/.rocket/agents/<id>/role.md` (роль-промпт с политикой триажа, читается на каждом пробуждении — правки не требуют перезапуска) и `~/.rocket/agents/<id>/memory/MEMORY.md` (индекс файловой памяти).
+- **API памяти для UI**: `GET /v1/agents/{id}/memory` → `{path, index, files:[{name, size, updated_at, body}]}`; `PUT` с `{file?, body}` пишет один файл (по умолчанию `MEMORY.md`) — имя ограничено базовым `.md`-именем внутри директории памяти. Дашборд и мобильное приложение читают память только через них.
 - **Инстанс роли** — сессия `kind=agent` с id `<role>-run-<n>`. Связь запуска с ролью — только через это имя (отдельной колонки нет): по нему демон проверяет, что `rocket agent state set` пишет в своё досье.
 
 Источники событий (уже в демоне):
