@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { EmptyState } from '../../components/EmptyState'
-import { useProjects, useSessions } from '../../lib/queries'
+import { useAgents, useProjects, useSessions } from '../../lib/queries'
 import type { Project, Session } from '../../lib/types'
 import { ProjectCard } from './ProjectCard'
 import './projects.css'
@@ -18,6 +18,8 @@ function lastActivity(project: Project, sessions: Session[] | undefined): number
 export function ProjectsScreen() {
   const { data: projects } = useProjects()
   const { data: sessions } = useSessions()
+  // One request for the whole grid; each card gets its own project's roles.
+  const { data: agents } = useAgents()
 
   return (
     <main className="projects-screen">
@@ -50,6 +52,7 @@ export function ProjectsScreen() {
               key={project.id}
               project={project}
               updatedAt={lastActivity(project, sessions)}
+              agents={agents?.filter((a) => a.project === project.id)}
             />
           ))}
           <Link to="/projects/new" className="projects-grid__create">

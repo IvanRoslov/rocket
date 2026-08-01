@@ -129,4 +129,11 @@ describe('ProjectsScreen', () => {
     const action = screen.getByRole('link', { name: /Create project/ })
     expect(action).toHaveAttribute('href', '/projects/new')
   })
+
+  it('flags roles of the project that are waiting on your answer', async () => {
+    renderScreen()
+
+    // Fixture role "sre" (project billing) has awaiting_user = 1.
+    expect(await screen.findByText('？1 role awaiting you')).toBeInTheDocument()
+  })
 })
