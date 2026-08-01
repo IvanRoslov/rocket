@@ -74,6 +74,22 @@ rocket daemon start|stop|status|run     # run — foreground (для отлад�
 rocket doctor                           # проверка окружения: tmux, git, gh, агенты
 ```
 
+### Роли (постоянные агенты)
+
+```
+rocket agent add <id> --project <p> --prompt-file <f>
+                      [--watch owner/repo[,label=bug][,mention-only]]...
+                      [--cron "0 * * * *"] [--agent claude-code]
+    Регистрирует роль и создаёт её домашнюю директорию
+    ~/.rocket/agents/<id>/ (role.md — копия промпта, memory/MEMORY.md).
+rocket agent ls [--project <p>]         # id, проект, enabled, очередь инбокса, досье
+rocket agent show <id>                  # определение + очередь событий + досье
+rocket agent enable|disable <id>
+rocket agent rm <id>                    # из реестра; файлы роли остаются на диске
+rocket agent wake <id> ["текст"] [--kind message]
+    Кладёт событие в инбокс роли (спавн инстанса делает runtime-слой).
+```
+
 ## Для агентов (вызываются оркестратором/воркером из своей сессии)
 
 ```
@@ -103,6 +119,12 @@ rocket ls / rocket status <slug>
 
 rocket kill <session>
     Оркестратор может убивать только своих воркеров.
+
+rocket agent state set <kind>:<ref> <state> [--note "..."] [--until 2026-08-15]
+                       [--task <id>] [--agent <role>]
+rocket agent state ls [--state deferred] [--agent <role>]
+    Досье роли (kind: issue|task|ping). Роль определяется по ROCKET_SESSION_ID
+    инстанса (<role>-run-<n>); вне инстанса нужен --agent.
 ```
 
 ## Коды выхода
