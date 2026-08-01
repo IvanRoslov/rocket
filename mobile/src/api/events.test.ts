@@ -17,6 +17,10 @@ describe('parseEventType', () => {
   it('chat pings do not invalidate anything', () => {
     expect(parseEventType('session.chat_updated')).toEqual([])
   })
+  it('agent events touch the roles list and role detail', () => {
+    expect(parseEventType('agent.question_asked')).toEqual(['agents', 'agent'])
+    expect(parseEventType('agent.instance_spawned')).toEqual(['agents', 'agent'])
+  })
   it('unknown events map to nothing', () => {
     expect(parseEventType('weird.thing')).toEqual([])
     expect(parseEventType('')).toEqual([])

@@ -3,6 +3,11 @@ import { api } from './client'
 import { useConnection } from './events'
 import { useServers } from '../servers/ServerContext'
 import type {
+  Agent,
+  AgentInboxEvent,
+  AgentItem,
+  AgentMemory,
+  AgentQuestion,
   GithubRepo,
   Health,
   Message,
@@ -127,6 +132,79 @@ export function useTaskQuestions(id: number) {
     queryKey: [baseUrl, 'task', id, 'questions'],
     queryFn: async () =>
       (await api.get<{ questions: Question[] }>(baseUrl, `/v1/tasks/${id}/questions`)).questions ?? [],
+    refetchInterval,
+  })
+}
+
+// --- Agent roles (docs/10-agents.md) ---------------------------------------
+
+export function useAgents(project?: string) {
+  const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(5000)
+  const qs = project ? `?project=${encodeURIComponent(project)}` : ''
+  return useQuery({
+    queryKey: [baseUrl, 'agents', project ?? 'all'],
+    queryFn: async () => (await api.get<Agent[]>(baseUrl, `/v1/agents${qs}`)) ?? [],
+    refetchInterval,
+  })
+}
+
+export function useAgent(id: string) {
+  const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(5000)
+  return useQuery({
+    queryKey: [baseUrl, 'agent', id],
+    queryFn: () => api.get<Agent>(baseUrl, `/v1/agents/${id}`),
+    refetchInterval,
+  })
+}
+
+export function useAgentInbox(id: string, enabled: boolean) {
+  const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(5000)
+  return useQuery({
+    queryKey: [baseUrl, 'agent', id, 'inbox'],
+    queryFn: async () => (await api.get<AgentInboxEvent[]>(baseUrl, `/v1/agents/${id}/inbox`)) ?? [],
+    enabled,
+    refetchInterval,
+  })
+}
+
+export function useAgentItems(id: string, enabled: boolean) {
+  const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(5000)
+  return useQuery({
+    queryKey: [baseUrl, 'agent', id, 'items'],
+    queryFn: async () => (await api.get<AgentItem[]>(baseUrl, `/v1/agents/${id}/items`)) ?? [],
+    enabled,
+    refetchInterval,
+  })
+}
+
+/**
+ * The role's file memory, read-only. The endpoint ships with the dashboard
+ * work; a daemon without it answers 404, so failures must not retry — the role
+ * screen drops the memory tab when this query errors.
+ */
+export function useAgentMemory(id: string, enabled: boolean) {
+  const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(15000, 60000)
+  return useQuery({
+    queryKey: [baseUrl, 'agent', id, 'memory'],
+    queryFn: () => api.get<AgentMemory>(baseUrl, `/v1/agents/${id}/memory`),
+    enabled,
+    retry: false,
+    refetchInterval,
+  })
+}
+
+export function useAgentQuestions(id: string) {
+  const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(3000)
+  return useQuery({
+    queryKey: [baseUrl, 'agent', id, 'questions'],
+    queryFn: async () =>
+      (await api.get<{ questions: AgentQuestion[] }>(baseUrl, `/v1/agents/${id}/questions`)).questions ?? [],
     refetchInterval,
   })
 }
@@ -393,5 +471,74 @@ export function useSaveSettings() {
   return useMutation({
     mutationFn: (p: { github_token: string }) => api.put<Settings>(baseUrl, '/v1/settings', p),
     onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'settings'] }),
+  })
+}
+
+// --- Agent role mutations --------------------------------------------------
+
+/** Pings a role: enqueues a `message` inbox event, which wakes an instance. */
+export function useWakeAgent() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { id: string; text: string }) =>
+      api.post(baseUrl, `/v1/agents/${p.id}/wake`, { kind: 'message', text: p.text }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'agents'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] })
+    },
+  })
+}
+
+export function useSetAgentEnabled() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { id: string; enabled: boolean }) =>
+      api.post<Agent>(baseUrl, `/v1/agents/${p.id}/${p.enabled ? 'enable' : 'disable'}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'agents'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] })
+    },
+  })
+}
+
+/** Opens a user-initiated thread on a role (asked_by=""), which wakes it. */
+export function useCreateAgentQuestion() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { roleId: string; body: string; context?: string }) =>
+      api.post<AgentQuestion>(baseUrl, `/v1/agents/${p.roleId}/questions`, { body: p.body, context: p.context }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] }),
+  })
+}
+
+export function useAgentQuestionReply() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { id: number; body: string }) =>
+      api.post(baseUrl, `/v1/agent-questions/${p.id}/reply`, { body: p.body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] }),
+  })
+}
+
+export function useAgentQuestionAnswer() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { id: number; body: string }) =>
+      api.post(baseUrl, `/v1/agent-questions/${p.id}/answer`, { body: p.body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] }),
+  })
+}
+
+export function useAgentQuestionDismiss() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.post(baseUrl, `/v1/agent-questions/${id}/answer`, { dismiss: true }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] }),
   })
 }
