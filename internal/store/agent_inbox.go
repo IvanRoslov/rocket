@@ -144,3 +144,30 @@ func (s *Store) setInboxStatus(ids []int64, status string) error {
 	}
 	return nil
 }
+
+// RolesWithQueuedInbox returns the ids of roles that have at least one
+// queued inbox event, ordered by role id. The wake engine uses it on daemon
+// startup to pick up events enqueued while the daemon was down.
+func (s *Store) RolesWithQueuedInbox() ([]string, error) {
+	rows, err := s.db.Query(
+		`SELECT DISTINCT role_id FROM agent_inbox WHERE status = ? ORDER BY role_id`,
+		InboxStatusQueued,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query roles with queued inbox: %w", err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan role id: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

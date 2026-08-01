@@ -115,3 +115,47 @@ func scanAgentItem(row interface{ Scan(...any) error }) (AgentItem, error) {
 	it.SnoozeUntil = snooze.Int64
 	return it, nil
 }
+
+// DueSnoozedItems returns dossier entries whose snooze_until has come due at
+// or before now, oldest deadline first. The scheduler turns each into a
+// snooze_expired inbox event and then clears the deadline with
+// ClearAgentItemSnooze so it fires exactly once.
+func (s *Store) DueSnoozedItems(now int64) ([]AgentItem, error) {
+	rows, err := s.db.Query(
+		`SELECT `+agentItemColumns+` FROM agent_items
+		 WHERE snooze_until IS NOT NULL AND snooze_until > 0 AND snooze_until <= ?
+		 ORDER BY snooze_until, id`,
+		now,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query due snoozed items: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AgentItem
+	for rows.Next() {
+		it, err := scanAgentItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ClearAgentItemSnooze drops an entry's snooze deadline (leaving its state
+// and note untouched) and stamps updated_at. Returns ErrNotFound if the entry
+// doesn't exist.
+func (s *Store) ClearAgentItemSnooze(id int64) error {
+	res, err := s.db.Exec(
+		`UPDATE agent_items SET snooze_until = NULL, updated_at = ? WHERE id = ?`,
+		time.Now().Unix(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("clear agent item snooze: %w", err)
+	}
+	return checkRowsAffected(res)
+}
