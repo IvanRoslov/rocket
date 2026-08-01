@@ -28,6 +28,7 @@ func completeVars() Vars {
 		"branch":           "feature/test-feature/task",
 		"parent_id":        "sess-002",
 		"role_id":          "sre",
+		"project_id":       "platform",
 		"memory_dir":       "/home/agents/sre/memory",
 		"role_prompt":      "ROLE POLICY BODY",
 	}

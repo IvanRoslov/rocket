@@ -174,6 +174,7 @@ func (m *Manager) SpawnRole(ctx context.Context, role store.Agent, briefing stri
 
 	sysPrompt, err := prompts.Render(m.cfg.Home, "agent", prompts.Vars{
 		"role_id":        role.ID,
+		"project_id":     project.ID,
 		"project_name":   project.Name,
 		"main_repo":      project.MainRepo,
 		"main_repo_path": repo.Path,
