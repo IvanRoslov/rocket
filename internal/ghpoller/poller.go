@@ -164,6 +164,17 @@ func (p *Poller) Tick(ctx context.Context) error {
 		return nil
 	}
 
+	// Role subscriptions are polled first: they are independent of live
+	// sessions, so a store error in the session pass below must not silently
+	// starve the agent inboxes. Backoff aborts the whole tick.
+	if err := p.tickRoles(ctx, client); err != nil {
+		if errors.Is(err, github.ErrBackoff) {
+			slog.Warn("ghpoller: backoff, aborting tick early", "error", err)
+			return nil
+		}
+		slog.Error("ghpoller: role subscriptions", "error", err)
+	}
+
 	sessions, err := p.st.ListSessions(store.SessionFilter{Kind: "worker"})
 	if err != nil {
 		return err
