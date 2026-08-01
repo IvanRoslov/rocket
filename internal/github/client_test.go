@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestNew_TrimsTrailingSlash(t *testing.T) {
@@ -609,5 +610,80 @@ func TestListIssues_NoToken(t *testing.T) {
 	c := New("https://api.example.com", "")
 	if _, err := c.ListIssues(context.Background(), "acme", "widgets", "open"); !errors.Is(err, ErrNoToken) {
 		t.Fatalf("expected ErrNoToken, got %v", err)
+	}
+}
+
+func TestListIssuesSince_PassesSinceAndMapsAuthor(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/acme/widgets/issues" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("since"); got != "2026-08-02T00:00:00Z" {
+			t.Fatalf("since = %q, want 2026-08-02T00:00:00Z", got)
+		}
+		w.Write([]byte(`[
+			{"number":11,"title":"disk full","body":"@sre help","html_url":"https://github.com/acme/widgets/issues/11","state":"open","created_at":"2026-08-02T10:00:00Z","updated_at":"2026-08-02T10:00:00Z","user":{"login":"alice"},"labels":[{"name":"ops"}]},
+			{"number":12,"title":"a pull request","state":"open","pull_request":{"url":"https://api.example.com/pulls/12"}}
+		]`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "tok")
+	since := time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
+	issues, err := c.ListIssuesSince(context.Background(), "acme", "widgets", "open", since)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("len(issues) = %d, want 1 (PR entry should be dropped)", len(issues))
+	}
+	got := issues[0]
+	if got.Number != 11 || got.User.Login != "alice" || got.CreatedAt != "2026-08-02T10:00:00Z" {
+		t.Fatalf("unexpected issue: %+v", got)
+	}
+}
+
+func TestListIssuesSince_ZeroTimeOmitsSince(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := r.URL.Query()["since"]; ok {
+			t.Fatalf("since must be omitted for a zero time, got %s", r.URL.RawQuery)
+		}
+		w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "tok")
+	if _, err := c.ListIssuesSince(context.Background(), "acme", "widgets", "open", time.Time{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestListIssueCommentsSince_MapsIssueNumber(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/acme/widgets/issues/comments" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("since"); got != "2026-08-02T00:00:00Z" {
+			t.Fatalf("since = %q", got)
+		}
+		w.Write([]byte(`[
+			{"id":900,"body":"still broken","html_url":"https://github.com/acme/widgets/issues/11#issuecomment-900","created_at":"2026-08-02T11:00:00Z","user":{"login":"bob"},"issue_url":"https://api.github.com/repos/acme/widgets/issues/11"},
+			{"id":901,"body":"orphan","created_at":"2026-08-02T11:05:00Z","user":{"login":"bob"},"issue_url":"nonsense"}
+		]`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "tok")
+	since := time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
+	comments, err := c.ListIssueCommentsSince(context.Background(), "acme", "widgets", since)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(comments) != 1 {
+		t.Fatalf("len(comments) = %d, want 1 (unparseable issue_url dropped)", len(comments))
+	}
+	got := comments[0]
+	if got.ID != 900 || got.IssueNumber != 11 || got.User.Login != "bob" || got.Body != "still broken" {
+		t.Fatalf("unexpected comment: %+v", got)
 	}
 }
