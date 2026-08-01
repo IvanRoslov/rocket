@@ -181,6 +181,94 @@ export interface Question {
   messages: QuestionMessage[]
 }
 
+// Agent roles — docs/10-agents.md. A role is a durable definition (prompt,
+// subscriptions, cron); its runs are ephemeral sessions named "<role>-run-<n>".
+
+export interface AgentSubscription {
+  repo: string
+  labels?: string[]
+  mention_only?: boolean
+}
+
+export interface Agent {
+  id: string
+  project: string
+  prompt_path: string
+  /** Only present on GET /v1/agents/{id}; the list omits it. */
+  prompt?: string
+  subscriptions: AgentSubscription[]
+  cron: string
+  agent: string
+  enabled: boolean
+  inbox_queued: number
+  items: number
+  open_questions: number
+  awaiting_user: number
+  created_at: number
+  updated_at: number
+}
+
+export type AgentInboxKind =
+  | 'message'
+  | 'issue_opened'
+  | 'issue_comment'
+  | 'task_update'
+  | 'snooze_expired'
+  | 'cron'
+  | 'question'
+  | 'terminal_opened'
+
+export type AgentInboxStatus = 'queued' | 'delivered' | 'done'
+
+export interface AgentInboxEvent {
+  id: number
+  kind: AgentInboxKind
+  payload: Record<string, unknown>
+  status: AgentInboxStatus
+  created_at: number
+  updated_at: number
+}
+
+export type AgentItemKind = 'issue' | 'task' | 'ping'
+
+export interface AgentItem {
+  id: number
+  kind: AgentItemKind
+  ref: string
+  state: string
+  note: string
+  task_id: number
+  snooze_until: number
+  created_at: number
+  updated_at: number
+}
+
+/** Role Q&A thread — mirrors `Question` with the role in place of the task. */
+export interface AgentQuestion {
+  id: number
+  role_id: string
+  ordinal: number
+  asked_by: string
+  body: string
+  context?: string
+  status: QuestionStatus
+  resolution?: 'answered' | 'dismissed'
+  whose_turn?: 'user' | 'role' | ''
+  asked_at: number
+  resolved_at?: number
+  messages: QuestionMessage[]
+}
+
+/**
+ * Read-only view of the role's file memory. Served by
+ * `GET /v1/agents/{id}/memory`, which ships with the dashboard work — a daemon
+ * without it answers 404 and the app hides the memory tab.
+ */
+export interface AgentMemory {
+  index: string
+  files: string[]
+}
+
 export interface GithubRepo {
   full_name: string
   private: boolean
