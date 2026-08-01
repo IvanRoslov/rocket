@@ -1,5 +1,7 @@
 import { Tabs } from 'expo-router'
 import { View } from 'react-native'
+import { useAgents } from '../../src/api/queries'
+import { awaitingUser } from '../../src/lib/agents'
 import { colors } from '../../src/theme'
 
 // Tab icons rebuilt from the mockup SVGs with plain Views (no svg dep).
@@ -67,7 +69,33 @@ function SettingsIcon({ color }: { color: import("react-native").ColorValue }) {
   )
 }
 
+/** A role: a head over a body, echoing the role cards' avatar. */
+function AgentsIcon({ color }: { color: import('react-native').ColorValue }) {
+  return (
+    <View style={{ width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ width: 7.5, height: 7.5, borderRadius: 4, borderWidth: 1.7, borderColor: color }} />
+      <View
+        style={{
+          width: 15,
+          height: 8,
+          marginTop: 2,
+          borderTopLeftRadius: 7.5,
+          borderTopRightRadius: 7.5,
+          borderWidth: 1.7,
+          borderBottomWidth: 0,
+          borderColor: color,
+        }}
+      />
+    </View>
+  )
+}
+
 export default function TabsLayout() {
+  // Roles that owe the user nothing still matter, but a thread waiting on the
+  // user is the one thing worth a badge — same rule as task questions.
+  const agents = useAgents()
+  const awaiting = awaitingUser(agents.data ?? [])
+
   return (
     <Tabs
       screenOptions={{
@@ -89,6 +117,14 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="kanban"
         options={{ title: 'Kanban', tabBarIcon: ({ color }) => <KanbanIcon color={color} /> }}
+      />
+      <Tabs.Screen
+        name="agents"
+        options={{
+          title: 'Agents',
+          tabBarIcon: ({ color }) => <AgentsIcon color={color} />,
+          ...(awaiting > 0 ? { tabBarBadge: awaiting } : {}),
+        }}
       />
       <Tabs.Screen
         name="system"
