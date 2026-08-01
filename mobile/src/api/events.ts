@@ -23,6 +23,8 @@ export function parseEventType(type: string): string[] {
       return ['tasks', 'task', 'sessions']
     case 'orchestrator':
       return ['sessions']
+    case 'agent':
+      return ['agents', 'agent']
     case 'repo':
       return ['repos', 'system']
     case 'workspace':
