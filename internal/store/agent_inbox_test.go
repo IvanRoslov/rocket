@@ -196,3 +196,78 @@ func TestGetAgentItemNotFound(t *testing.T) {
 		t.Fatalf("GetAgentItem = %v, want ErrNotFound", err)
 	}
 }
+
+func TestRolesWithQueuedInbox(t *testing.T) {
+	s := openStoreWithAgent(t)
+	if err := s.AddAgent(testAgent("triage")); err != nil {
+		t.Fatalf("AddAgent: %v", err)
+	}
+
+	id, err := s.EnqueueInboxEvent(AgentInboxEvent{RoleID: "sre", Kind: "message"})
+	if err != nil {
+		t.Fatalf("enqueue sre: %v", err)
+	}
+	if _, err := s.EnqueueInboxEvent(AgentInboxEvent{RoleID: "triage", Kind: "cron"}); err != nil {
+		t.Fatalf("enqueue triage: %v", err)
+	}
+	if err := s.MarkInboxDone([]int64{id}); err != nil {
+		t.Fatalf("MarkInboxDone: %v", err)
+	}
+
+	got, err := s.RolesWithQueuedInbox()
+	if err != nil {
+		t.Fatalf("RolesWithQueuedInbox: %v", err)
+	}
+	if len(got) != 1 || got[0] != "triage" {
+		t.Fatalf("RolesWithQueuedInbox = %v, want [triage]", got)
+	}
+}
+
+func TestDueSnoozedItemsAndClear(t *testing.T) {
+	s := openStoreWithAgent(t)
+
+	due, err := s.UpsertAgentItem(AgentItem{
+		RoleID: "sre", Kind: "issue", ExternalRef: "a/b#1", State: "deferred", SnoozeUntil: 100,
+	})
+	if err != nil {
+		t.Fatalf("upsert due item: %v", err)
+	}
+	if _, err := s.UpsertAgentItem(AgentItem{
+		RoleID: "sre", Kind: "issue", ExternalRef: "a/b#2", State: "deferred", SnoozeUntil: 5000,
+	}); err != nil {
+		t.Fatalf("upsert future item: %v", err)
+	}
+	if _, err := s.UpsertAgentItem(AgentItem{
+		RoleID: "sre", Kind: "issue", ExternalRef: "a/b#3", State: "taken",
+	}); err != nil {
+		t.Fatalf("upsert unsnoozed item: %v", err)
+	}
+
+	items, err := s.DueSnoozedItems(1000)
+	if err != nil {
+		t.Fatalf("DueSnoozedItems: %v", err)
+	}
+	if len(items) != 1 || items[0].ExternalRef != "a/b#1" {
+		t.Fatalf("DueSnoozedItems = %+v, want only a/b#1", items)
+	}
+
+	if err := s.ClearAgentItemSnooze(due.ID); err != nil {
+		t.Fatalf("ClearAgentItemSnooze: %v", err)
+	}
+
+	items, err = s.DueSnoozedItems(1000)
+	if err != nil {
+		t.Fatalf("DueSnoozedItems after clear: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("DueSnoozedItems after clear = %+v, want none", items)
+	}
+
+	cleared, err := s.GetAgentItem("sre", "issue", "a/b#1")
+	if err != nil {
+		t.Fatalf("GetAgentItem: %v", err)
+	}
+	if cleared.SnoozeUntil != 0 || cleared.State != "deferred" {
+		t.Fatalf("cleared item = %+v, want snooze 0 and state kept", cleared)
+	}
+}

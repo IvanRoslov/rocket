@@ -85,6 +85,13 @@ func handlePostMessage(w http.ResponseWriter, r *http.Request, d Deps) {
 	toSess, err := d.Store.GetSession(req.To)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
+			// A role is an addressable recipient too: `rocket send sre "..."`
+			// lands in its inbox, which wakes it (or reaches its live
+			// instance through the engine). Roles and sessions share one
+			// namespace, and a live session always wins the lookup above.
+			if handled := postMessageToRole(w, d, req); handled {
+				return
+			}
 			writeErr(w, http.StatusNotFound, "session_not_found", "recipient session not found")
 			return
 		}
@@ -201,4 +208,55 @@ func handleGetMessage(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toMessageResponse(m))
+}
+
+// postMessageToRole handles POST /v1/messages addressed to an agent role: the
+// body becomes a `message` inbox event and the wake engine takes it from
+// there. It reports whether it wrote a response (false means "not a role",
+// and the caller falls through to its 404).
+func postMessageToRole(w http.ResponseWriter, d Deps, req postMessageRequest) bool {
+	role, err := d.Store.GetAgent(req.To)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return false
+		}
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return true
+	}
+
+	if req.From != "" {
+		if _, err := d.Store.GetSession(req.From); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeErr(w, http.StatusBadRequest, "from_unknown", "sender session not found")
+				return true
+			}
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return true
+		}
+	}
+
+	payload, err := json.Marshal(map[string]string{"text": req.Body, "from": req.From})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return true
+	}
+
+	id, err := d.Store.EnqueueInboxEvent(store.AgentInboxEvent{
+		RoleID:  role.ID,
+		Kind:    "message",
+		Payload: string(payload),
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return true
+	}
+
+	NotifyRole(d, role.ID)
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"event_id": id,
+		"to":       role.ID,
+		"queued":   "inbox",
+	})
+	return true
 }

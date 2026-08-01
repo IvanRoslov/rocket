@@ -282,3 +282,35 @@ invalid: [unclosed bracket
 		t.Error("expected error for malformed YAML, got nil")
 	}
 }
+
+func TestAgentRuntimeDefaults(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.AgentIdleTimeout != 15*time.Minute {
+		t.Errorf("AgentIdleTimeout = %v, want 15m", cfg.AgentIdleTimeout)
+	}
+	if cfg.AgentWakeDebounce != 30*time.Second {
+		t.Errorf("AgentWakeDebounce = %v, want 30s", cfg.AgentWakeDebounce)
+	}
+}
+
+func TestAgentRuntimeOverrides(t *testing.T) {
+	home := t.TempDir()
+	yaml := "agent_idle_timeout: 5m\nagent_wake_debounce: 2s\n"
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(yaml), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(home)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.AgentIdleTimeout != 5*time.Minute {
+		t.Errorf("AgentIdleTimeout = %v, want 5m", cfg.AgentIdleTimeout)
+	}
+	if cfg.AgentWakeDebounce != 2*time.Second {
+		t.Errorf("AgentWakeDebounce = %v, want 2s", cfg.AgentWakeDebounce)
+	}
+}

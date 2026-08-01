@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -109,8 +110,15 @@ type fakeWorkspace struct {
 	createStarted chan struct{}
 	createBlock   chan struct{}
 
-	restorePath string
-	restoreErr  error
+	restorePath  string
+	restoreErr   error
+	restoreCalls int
+
+	// createMkdir makes Create materialize the directory it reports, the
+	// way the real workspace does. Role tests need it: whether a role's
+	// persistent worktree is created or reused is decided by that
+	// directory's existence.
+	createMkdir bool
 
 	destroyed []string
 
@@ -135,10 +143,16 @@ func (f *fakeWorkspace) Create(ctx context.Context, repo store.Repo, sessionID, 
 	if res.Path == "" {
 		res.Path = "/fake/wt/" + sessionID
 	}
+	if f.createMkdir {
+		if err := os.MkdirAll(res.Path, 0o755); err != nil {
+			return workspace.CreateResult{}, err
+		}
+	}
 	return res, nil
 }
 
 func (f *fakeWorkspace) Restore(ctx context.Context, repo store.Repo, sessionID, branch string) (string, error) {
+	f.restoreCalls++
 	if f.restoreErr != nil {
 		return "", f.restoreErr
 	}
@@ -216,6 +230,12 @@ func init() {
 // --- test scaffolding ------------------------------------------------------
 
 func testManager(t *testing.T) (*Manager, *store.Store, *bus.Bus, *fakeRuntime, *fakeWorkspace) {
+	m, st, b, rt, ws, _ := testManagerWithConfig(t)
+	return m, st, b, rt, ws
+}
+
+// testManagerWithConfig is testManager plus the config it was built with.
+func testManagerWithConfig(t *testing.T) (*Manager, *store.Store, *bus.Bus, *fakeRuntime, *fakeWorkspace, *config.Config) {
 	t.Helper()
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "rocket.db"))
@@ -227,12 +247,16 @@ func testManager(t *testing.T) (*Manager, *store.Store, *bus.Bus, *fakeRuntime, 
 	b := bus.New(st)
 	rt := &fakeRuntime{}
 	ws := &fakeWorkspace{}
-	cfg := &config.Config{Home: dir, DefaultAgent: "fake"}
+	cfg := &config.Config{
+		Home:         dir,
+		DefaultAgent: "fake",
+		WorktreesDir: filepath.Join(dir, "worktrees"),
+	}
 
 	testFakeAgent = &fakeAgent{}
 
 	m := NewManager(st, b, rt, ws, cfg)
-	return m, st, b, rt, ws
+	return m, st, b, rt, ws, cfg
 }
 
 func seedProjectRepo(t *testing.T, st *store.Store, projectID, repoID string) {

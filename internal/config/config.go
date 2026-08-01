@@ -42,7 +42,15 @@ type Config struct {
 	GithubAPIBase             string        `yaml:"github_api_base"`
 	GithubCloneBase           string        `yaml:"github_clone_base"`
 	MergeGrace                time.Duration `yaml:"merge_grace"`
-	Home                      string        `yaml:"-"`
+	// AgentIdleTimeout bounds how long a role instance (session kind=agent)
+	// may sit without activity before the wake engine kills it. It is the
+	// safety net behind `rocket agent done`.
+	AgentIdleTimeout time.Duration `yaml:"agent_idle_timeout"`
+	// AgentWakeDebounce is the window the wake engine waits after the first
+	// queued inbox event of a role before spawning an instance, so a burst
+	// of events becomes one run.
+	AgentWakeDebounce time.Duration `yaml:"agent_wake_debounce"`
+	Home              string        `yaml:"-"`
 
 	// SocketOverride, when non-empty, takes precedence over the default
 	// <home>/rocket.sock path returned by SocketPath. It is populated from
@@ -97,6 +105,8 @@ func Load(home string) (*Config, error) {
 		GithubAPIBase:             "https://api.github.com",
 		GithubCloneBase:           "",
 		MergeGrace:                5 * time.Minute,
+		AgentIdleTimeout:          15 * time.Minute,
+		AgentWakeDebounce:         30 * time.Second,
 		Home:                      home,
 	}
 

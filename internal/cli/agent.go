@@ -28,6 +28,7 @@ func newAgentCmd() *cobra.Command {
 	cmd.AddCommand(newAgentQuestionsCmd())
 	cmd.AddCommand(newAgentReplyCmd())
 	cmd.AddCommand(newAgentAnswerCmd())
+	cmd.AddCommand(newAgentDoneCmd())
 	return cmd
 }
 
@@ -374,6 +375,39 @@ func newAgentWakeCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&kind, "kind", "", "вид события инбокса (по умолчанию message)")
 	return cmd
+}
+
+func newAgentDoneCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "done",
+		Short: "Инстанс роли: инбокс разобран, запуск можно завершать",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 0 {
+				return &usageError{message: "usage: rocket agent done"}
+			}
+
+			sessionID := os.Getenv("ROCKET_SESSION_ID")
+			role := roleFromSessionID(sessionID)
+			if role == "" {
+				return &usageError{message: "rocket agent done can only be called from a role instance (session <role>-run-<n>)"}
+			}
+
+			c, _, err := connect(true)
+			if err != nil {
+				return err
+			}
+
+			var resp map[string]any
+			if err := c.Post(apiPath("v1", "agents", role, "done"), nil, &resp); err != nil {
+				return err
+			}
+			if flags.JSON {
+				return printJSON(cmd, resp)
+			}
+			cmd.Printf("run %s finished\n", sessionID)
+			return nil
+		},
+	}
 }
 
 func newAgentStateCmd() *cobra.Command {

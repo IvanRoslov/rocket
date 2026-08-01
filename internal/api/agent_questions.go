@@ -3,8 +3,6 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
-	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -121,34 +119,22 @@ func writeAgentQuestionForbidden(w http.ResponseWriter, roleID string) {
 		"only the human user or an instance of role "+roleID+" may use its question threads")
 }
 
-// liveRoleInstance returns the session id of a live instance of roleID, or ""
-// when the role isn't running. Only one instance lives at a time (see
-// docs/10-agents.md), so the first match is the one.
-func liveRoleInstance(d Deps, roleID string) (string, error) {
-	sessions, err := d.Store.ListSessions(store.SessionFilter{Kind: "agent"})
-	if err != nil {
-		return "", err
-	}
-	for _, s := range sessions {
-		if roleFromSessionID(s.ID) == roleID {
-			return s.ID, nil
-		}
-	}
-	return "", nil
-}
-
 // deliverHumanEntry records a human entry into a role's thread as an inbox
-// event (kind "question"), so the runtime layer wakes the role for it — the
-// opening question and every follow-up alike. When an instance is already
-// live, the same text is additionally queued into its session, prefixed like
-// task threads ("[role sre Q2 reply] ...").
+// event (kind "question"), so the role is woken for it — the opening question
+// and every follow-up alike.
+//
+// Delivery itself belongs to the wake engine (internal/agentrun): it decides
+// between briefing a fresh instance and queueing the text into a live one
+// (where it lands prefixed like task threads, "[role sre Q2 reply] ..."), and
+// it is what marks the event delivered. Injecting here as well would deliver
+// every human entry twice to a live instance.
 func deliverHumanEntry(d Deps, roleID string, questionID int64, ordinal int, entry, text string) error {
 	payload, err := json.Marshal(map[string]any{
 		"question_id": questionID,
 		"role_id":     roleID,
 		"ordinal":     ordinal,
 		"entry":       entry,
-		"text":        text,
+		"text":        rewriteAttachmentLinks(d, text),
 	})
 	if err != nil {
 		return err
@@ -161,30 +147,7 @@ func deliverHumanEntry(d Deps, roleID string, questionID int64, ordinal int, ent
 		return err
 	}
 
-	instance, err := liveRoleInstance(d, roleID)
-	if err != nil {
-		return err
-	}
-	if instance == "" {
-		return nil
-	}
-
-	body := rewriteAttachmentLinks(d, fmt.Sprintf("[role %s Q%d %s] %s", roleID, ordinal, entry, text))
-	id, err := d.Store.AddMessage(store.Message{ToSession: instance, Body: body})
-	if err != nil {
-		return err
-	}
-	if d.Bus != nil {
-		d.Bus.Publish("message.queued", instance, map[string]any{
-			"id": id, "from": "", "to": instance,
-		})
-	}
-	if d.Queue != nil {
-		d.Queue.Wake(instance)
-	} else {
-		slog.Warn("api: role question message queued with nil Queue, will not be delivered until daemon restart",
-			"id", id, "to", instance)
-	}
+	NotifyRole(d, roleID)
 	return nil
 }
 

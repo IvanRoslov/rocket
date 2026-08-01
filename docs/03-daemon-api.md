@@ -112,7 +112,8 @@ tmux рендерит окно ровно в **одном** размере; пр
 | PATCH | `/v1/agents/{id}` | `{prompt?, subscriptions?, cron?, agent?, enabled?}`; `prompt` перезаписывает `role.md` |
 | DELETE | `/v1/agents/{id}` | Удаляет роль вместе с инбоксом и досье; файлы роли на диске остаются |
 | POST | `/v1/agents/{id}/enable`&#124;`disable` | Включить/выключить роль |
-| POST | `/v1/agents/{id}/wake` | `{text?, from?, kind?, payload?}` → `202 {event_id, kind}`. **Только кладёт событие в инбокс**; спавн инстанса — задача runtime-слоя (он же поллит очередь) |
+| POST | `/v1/agents/{id}/wake` | `{text?, from?, kind?, payload?}` → `202 {event_id, kind}`. Кладёт событие в инбокс и уведомляет движок пробуждений (debounce `agent_wake_debounce`, затем спавн инстанса либо доставка в живой) |
+| POST | `/v1/agents/{id}/done` | Инстанс завершает свой запуск: события `delivered` → `done`, сессия убивается (worktree роли сохраняется) → `200 {status, session, agent}` |
 | GET | `/v1/agents/{id}/inbox` | События роли, старые первыми; фильтр `?status=queued&#124;delivered&#124;done` |
 | GET | `/v1/agents/{id}/items` | Досье; фильтр `?state=` |
 | PUT | `/v1/agents/{id}/items` | `{kind, ref, state, note?, task_id?, snooze_until?}` — upsert по (роль, kind, ref) |
@@ -125,7 +126,9 @@ tmux рендерит окно ровно в **одном** размере; пр
 
 Q&A-треды роли (`agent_questions`/`agent_question_messages`) — тот же механизм, что у задач: `whose_turn` (`user`&#124;`role`) выводится из автора последней записи треда. **Любое** сообщение человека в тред (открытие, уточнение, финальный ответ) кладёт в инбокс роли событие `question` c payload `{question_id, role_id, ordinal, entry: question|reply|answer, text}`; если инстанс роли жив, тот же текст доезжает ему сообщением с префиксом `[role <id> Q<n> <entry>] ...`. Записи самой роли — только тред, человек читает их через API/CLI.
 
-Права: `PUT /v1/agents/{id}/items` и Q&A-треды роли от сессии (`X-Rocket-Session`) разрешены только инстансу этой же роли — сессия должна быть `kind=agent` с id вида `<role>-run-<n>`; иначе `403 forbidden`. Пользовательский вызов (без заголовка) разрешён всегда.
+`POST /v1/messages` с `to`, не принадлежащим сессии, но совпадающим с id роли, кладёт тело в инбокс роли: `202 {event_id, to, queued:"inbox"}` (живая сессия при совпадении имён всегда выигрывает).
+
+Права: `POST /v1/agents/{id}/done` разрешён только инстансу этой же роли. `PUT /v1/agents/{id}/items` и Q&A-треды роли от сессии (`X-Rocket-Session`) разрешены только инстансу этой же роли — сессия должна быть `kind=agent` с id вида `<role>-run-<n>`; иначе `403 forbidden`. Пользовательский вызов (без заголовка) разрешён всегда.
 
 ## Сообщения
 

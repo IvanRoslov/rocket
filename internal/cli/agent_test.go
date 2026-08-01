@@ -190,3 +190,27 @@ func TestFormatHelpers(t *testing.T) {
 		t.Errorf("mentionSuffix(false) = %q", got)
 	}
 }
+
+func TestAgentDoneOutsideAnInstanceIsAUsageError(t *testing.T) {
+	t.Setenv("ROCKET_SESSION_ID", "myfeat-mytask")
+
+	cmd := newAgentDoneCmd()
+	cmd.SetArgs(nil)
+	err := cmd.Execute()
+	var usageErr *usageError
+	if !errors.As(err, &usageErr) {
+		t.Fatalf("error = %v, want a usage error (done is instance-only)", err)
+	}
+}
+
+func TestAgentDoneRejectsArguments(t *testing.T) {
+	t.Setenv("ROCKET_SESSION_ID", "sre-run-3")
+
+	cmd := newAgentDoneCmd()
+	cmd.SetArgs([]string{"sre"})
+	err := cmd.Execute()
+	var usageErr *usageError
+	if !errors.As(err, &usageErr) {
+		t.Fatalf("error = %v, want a usage error", err)
+	}
+}

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -453,4 +454,96 @@ func TestListAgentsCarriesOpenQuestionCounts(t *testing.T) {
 	if one["open_questions"] != float64(2) || one["awaiting_user"] != float64(1) {
 		t.Errorf("get = %+v", one)
 	}
+}
+
+// fakeAgentEngine records the wake engine calls the API makes.
+type fakeAgentEngine struct {
+	notified []string
+	done     []string
+	doneErr  error
+}
+
+func (f *fakeAgentEngine) Notify(roleID string) { f.notified = append(f.notified, roleID) }
+
+func (f *fakeAgentEngine) Done(ctx context.Context, sessionID string) error {
+	f.done = append(f.done, sessionID)
+	return f.doneErr
+}
+
+// agentsTestDepsWithEngine is agentsTestDeps plus a fake wake engine and a
+// registered role.
+func agentsTestDepsWithEngine(t *testing.T) (Deps, *fakeAgentEngine) {
+	t.Helper()
+	d := agentsTestDeps(t)
+	eng := &fakeAgentEngine{}
+	d.Agents = eng
+
+	promptPath, err := roles.Ensure(d.Cfg.Home, "sre", "POLICY", true)
+	if err != nil {
+		t.Fatalf("roles.Ensure: %v", err)
+	}
+	if err := d.Store.AddAgent(store.Agent{
+		ID: "sre", ProjectID: "platform", PromptPath: promptPath, Enabled: true,
+	}); err != nil {
+		t.Fatalf("AddAgent: %v", err)
+	}
+	return d, eng
+}
+
+func TestWakeAgentNotifiesEngine(t *testing.T) {
+	d, eng := agentsTestDepsWithEngine(t)
+	srv := newTestServer(t, d)
+
+	resp := postJSON(t, srv.URL+"/v1/agents/sre/wake", map[string]any{"text": "hi"})
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	if len(eng.notified) != 1 || eng.notified[0] != "sre" {
+		t.Fatalf("engine notifications = %v, want [sre]", eng.notified)
+	}
+}
+
+func TestAgentDoneFromOwnInstance(t *testing.T) {
+	d, eng := agentsTestDepsWithEngine(t)
+	addTestSession(t, d, "sre-run-1", "agent", "platform")
+	srv := newTestServer(t, d)
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/agents/sre/done", "sre-run-1", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	if len(eng.done) != 1 || eng.done[0] != "sre-run-1" {
+		t.Fatalf("engine Done calls = %v, want [sre-run-1]", eng.done)
+	}
+}
+
+func TestAgentDoneRejectsForeignCaller(t *testing.T) {
+	d, eng := agentsTestDepsWithEngine(t)
+	addTestSession(t, d, "other-run-1", "agent", "platform")
+	srv := newTestServer(t, d)
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/agents/sre/done", "other-run-1", nil)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	if len(eng.done) != 0 {
+		t.Fatalf("engine Done called for a foreign session: %v", eng.done)
+	}
+}
+
+func TestAgentDoneRequiresASession(t *testing.T) {
+	d, _ := agentsTestDepsWithEngine(t)
+	srv := newTestServer(t, d)
+
+	resp := postJSON(t, srv.URL+"/v1/agents/sre/done", nil)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	resp.Body.Close()
 }

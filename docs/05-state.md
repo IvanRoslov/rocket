@@ -49,6 +49,8 @@ default_agent: claude-code
 repos_dir: ~/.rocket/repos          # куда клонировать репо из GitHub
 worktrees_dir: ~/.rocket/worktrees  # где создавать worktree сессий
 attachments_dir: ~/.rocket/attachments  # куда сохранять вложения (POST /v1/attachments)
+agent_wake_debounce: 30s  # окно, в котором события инбокса роли сгребаются в один запуск
+agent_idle_timeout: 15m   # инстанс роли без активности дольше — убивается (agent.run_timeout)
 ```
 
 ## Схема SQLite

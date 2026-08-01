@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -364,4 +365,62 @@ func TestGetMessageByID_NotFound(t *testing.T) {
 	if eb.Error.Code != "message_not_found" {
 		t.Errorf("code = %q, want message_not_found", eb.Error.Code)
 	}
+}
+
+func TestPostMessage_ToRoleEnqueuesInboxEvent(t *testing.T) {
+	d := messagesTestDeps(t)
+	eng := &fakeAgentEngine{}
+	d.Agents = eng
+
+	if err := d.Store.AddRepo(store.Repo{ID: "platform-repo", Path: "/tmp/p"}); err != nil {
+		t.Fatalf("AddRepo: %v", err)
+	}
+	if err := d.Store.AddProject(store.Project{ID: "platform", Name: "Platform", MainRepo: "platform-repo"}); err != nil {
+		t.Fatalf("AddProject: %v", err)
+	}
+	if err := d.Store.AddAgent(store.Agent{
+		ID: "sre", ProjectID: "platform", PromptPath: "/tmp/role.md", Enabled: true,
+	}); err != nil {
+		t.Fatalf("AddAgent: %v", err)
+	}
+	addMsgTestSession(t, d, "feat-orch", "running")
+
+	srv := newTestServer(t, d)
+	resp := postJSON(t, srv.URL+"/v1/messages", map[string]any{
+		"from": "feat-orch", "to": "sre", "body": "blocked by X",
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	body := decodeMap(t, resp)
+	if body["to"] != "sre" || body["queued"] != "inbox" {
+		t.Fatalf("response = %v, want the role inbox shape", body)
+	}
+
+	events, err := d.Store.ListInboxEvents("sre", "", 0)
+	if err != nil {
+		t.Fatalf("ListInboxEvents: %v", err)
+	}
+	if len(events) != 1 || events[0].Kind != "message" {
+		t.Fatalf("inbox = %+v, want one message event", events)
+	}
+	if !strings.Contains(events[0].Payload, "blocked by X") || !strings.Contains(events[0].Payload, "feat-orch") {
+		t.Errorf("payload = %q, want the body and the sender", events[0].Payload)
+	}
+
+	if len(eng.notified) != 1 || eng.notified[0] != "sre" {
+		t.Fatalf("engine notifications = %v, want [sre]", eng.notified)
+	}
+}
+
+func TestPostMessage_UnknownRecipientStill404(t *testing.T) {
+	d := messagesTestDeps(t)
+	d.Agents = &fakeAgentEngine{}
+	srv := newTestServer(t, d)
+
+	resp := postJSON(t, srv.URL+"/v1/messages", map[string]any{"to": "nobody", "body": "hi"})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+	resp.Body.Close()
 }

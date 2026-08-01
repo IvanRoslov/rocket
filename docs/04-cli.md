@@ -87,6 +87,9 @@ rocket agent show <id>                  # определение + очеред�
 rocket agent enable|disable <id>
 rocket agent rm <id>                    # из реестра; файлы роли остаются на диске
 rocket agent wake <id> ["текст"] [--kind message]
+                                        # событие в инбокс + пробуждение роли
+rocket agent done                       # изнутри инстанса: инбокс разобран,
+                                        # запуск завершается (worktree роли остаётся)
     Кладёт событие в инбокс роли (спавн инстанса делает runtime-слой).
 
 rocket agent ask <role> "<вопрос>" [--context <md>]
@@ -120,9 +123,11 @@ rocket task ask <id> "<вопрос>" [--context <md>]
     как "[task #N QM reply] ..." (отвечать rocket task reply в тот же тред),
     финальный ответ — "[task #N QM answer] ...".
 
-rocket send <session> "<текст>"
+rocket send <session|role> "<текст>"
     То же, что у пользователя; from заполняется из ROCKET_SESSION_ID,
     получателю текст приходит с префиксом "[from <id>] ".
+    Если адресат — не сессия, а роль (см. rocket agent), сообщение ложится
+    в её инбокс и будит её; --wait в этом случае неприменим.
 
 rocket ls / rocket status <slug>
     Оркестратор проверяет своих воркеров.
