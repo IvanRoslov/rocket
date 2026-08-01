@@ -164,6 +164,8 @@ func registerAgentRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("PUT /v1/agents/{id}/items", func(w http.ResponseWriter, r *http.Request) {
 		handlePutAgentItem(w, r, d)
 	})
+
+	registerAgentQuestionRoutes(mux, d)
 }
 
 // lookupAgent resolves the {id} path value, writing a 404 and returning
