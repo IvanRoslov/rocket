@@ -433,3 +433,45 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+func TestQuestionEventsKeepTheThreadPrefix(t *testing.T) {
+	f := newEngineFixture(t)
+	live := store.Session{
+		ID: "sre-run-1", Kind: "agent", ProjectID: "platform", RepoID: "repo1",
+		FeatureSlug: "sre", Agent: "fake", Branch: "agent/sre", TmuxName: "sre-run-1",
+		State: "running",
+	}
+	if err := f.st.AddSession(live); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+	f.sp.setLive("sre", live)
+
+	f.enqueue(t, "question", `{"question_id":7,"role_id":"sre","ordinal":2,"entry":"reply","text":"уточняю: только прод"}`)
+	f.engine.Tick(context.Background())
+
+	msgs, err := f.st.ListMessages("sre-run-1", 10)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("messages = %+v, want 1", msgs)
+	}
+	want := "[role sre Q2 reply] уточняю: только прод"
+	if msgs[0].Body != want {
+		t.Fatalf("body = %q, want %q", msgs[0].Body, want)
+	}
+}
+
+func TestQuestionEventsInBriefingKeepTheThreadPrefix(t *testing.T) {
+	f := newEngineFixture(t)
+	f.enqueue(t, "question", `{"question_id":7,"role_id":"sre","ordinal":1,"entry":"question","text":"почему упал деплой?"}`)
+	f.engine.Tick(context.Background())
+
+	if len(f.sp.briefings()) != 1 {
+		t.Fatalf("spawns = %d, want 1", len(f.sp.briefings()))
+	}
+	if !strings.Contains(f.sp.briefings()[0], "Q1 question") ||
+		!strings.Contains(f.sp.briefings()[0], "почему упал деплой?") {
+		t.Fatalf("briefing does not carry the thread entry:\n%s", f.sp.briefings()[0])
+	}
+}

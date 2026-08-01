@@ -131,6 +131,9 @@ func senderSuffix(payload map[string]any) string {
 // when there is one, the raw payload otherwise (task_update, cron and future
 // sources carry structured data the role reads as JSON).
 func eventBody(e store.AgentInboxEvent, payload map[string]any) string {
+	if e.Kind == "question" {
+		return questionEntry(payload)
+	}
 	for _, field := range []string{"text", "body", "title"} {
 		if v := stringField(payload, field); v != "" {
 			return v
@@ -144,6 +147,20 @@ func eventBody(e store.AgentInboxEvent, payload map[string]any) string {
 		return strings.TrimSpace(e.Payload)
 	}
 	return string(compact)
+}
+
+// questionEntry renders a Q&A thread entry the way task threads render
+// theirs — "[role sre Q2 reply] ..." — so a role sees the same shape whether
+// the entry reached it in a briefing or as a message into a live run.
+func questionEntry(payload map[string]any) string {
+	text := stringField(payload, "text")
+	role := stringField(payload, "role_id")
+	entry := stringField(payload, "entry")
+	ordinal, _ := payload["ordinal"].(float64)
+	if role == "" || entry == "" || ordinal == 0 {
+		return text
+	}
+	return fmt.Sprintf("[role %s Q%d %s] %s", role, int(ordinal), entry, text)
 }
 
 func decodePayload(raw string) map[string]any {

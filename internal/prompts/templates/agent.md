@@ -67,9 +67,11 @@ your own words.
 
 - Answer whoever asked you (the session that sent the message, or a comment in
   the issue) — a request that gets no reply looks like a dropped one.
-- To escalate something only a human can decide, open a Q&A thread on your role
-  and answer replies there (`rocket agent reply`); threads stay open until the
-  human closes them.
+- To escalate something only a human can decide, open a Q&A thread on your role:
+      rocket agent ask {{role_id}} "<вопрос>" [--context "..."]
+  Follow-ups from the human arrive as "[role {{role_id}} Q<n> reply] ..."; answer
+  them with `rocket agent reply <qid> "..."`. Only the human closes a thread
+  (`rocket agent answer`), so a question you asked keeps its badge until then.
 
 ## Your role and triage policy
 

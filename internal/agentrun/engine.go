@@ -277,8 +277,15 @@ func (e *Engine) injectIntoInstance(live store.Session, events []store.AgentInbo
 // returns the sender it should be attributed to (empty for system events).
 func inboxMessage(ev store.AgentInboxEvent) (from, body string) {
 	payload := decodePayload(ev.Payload)
+	rendered := eventBody(ev, payload)
+	if ev.Kind == "question" {
+		// Q&A entries already carry their own "[role sre Q2 reply]" prefix
+		// (the same one task threads use); a second frame would only add
+		// noise.
+		return "", rendered
+	}
 	return stringField(payload, "from"),
-		fmt.Sprintf("[inbox #%d %s] %s", ev.ID, ev.Kind, eventBody(ev, payload))
+		fmt.Sprintf("[inbox #%d %s] %s", ev.ID, ev.Kind, rendered)
 }
 
 func (e *Engine) markDelivered(events []store.AgentInboxEvent) error {

@@ -336,8 +336,10 @@ func TestAgentQuestion_NotFound(t *testing.T) {
 
 // --- delivery into a live instance ---------------------------------------
 
-func TestAgentQuestion_DeliversToLiveInstance(t *testing.T) {
+func TestAgentQuestion_EnqueuesInboxEventsAndWakesTheRole(t *testing.T) {
 	d := agentQuestionsTestDeps(t)
+	eng := &fakeAgentEngine{}
+	d.Agents = eng
 	srv := setupRoleForQuestions(t, d)
 	addTestSession(t, d, "sre-run-1", "agent", "platform")
 
@@ -346,18 +348,34 @@ func TestAgentQuestion_DeliversToLiveInstance(t *testing.T) {
 	postJSON(t, srv.URL+"/v1/agent-questions/"+itoa(q.ID)+"/answer",
 		map[string]any{"body": "перезапусти воркер"}).Body.Close()
 
+	events, err := d.Store.ListInboxEvents("sre", "", 0)
+	if err != nil {
+		t.Fatalf("ListInboxEvents: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("inbox = %+v, want two question events", events)
+	}
+	for _, e := range events {
+		if e.Kind != "question" {
+			t.Errorf("event kind = %q, want question", e.Kind)
+		}
+	}
+	if !strings.Contains(events[0].Payload, `"entry":"question"`) ||
+		!strings.Contains(events[1].Payload, `"entry":"answer"`) {
+		t.Errorf("payloads = %q / %q", events[0].Payload, events[1].Payload)
+	}
+
+	// Delivery into a live instance is the wake engine's job (it also marks
+	// the events delivered); the API only enqueues and wakes.
+	if len(eng.notified) != 2 {
+		t.Fatalf("engine notifications = %v, want one per human entry", eng.notified)
+	}
 	msgs, err := d.Store.ListMessages("sre-run-1", 0)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
 	}
-	if len(msgs) != 2 {
-		t.Fatalf("messages = %+v, want 2", msgs)
-	}
-	if !strings.HasPrefix(msgs[0].Body, "[role sre Q1 question] ") {
-		t.Errorf("question message = %q", msgs[0].Body)
-	}
-	if !strings.HasPrefix(msgs[1].Body, "[role sre Q1 answer] ") {
-		t.Errorf("answer message = %q", msgs[1].Body)
+	if len(msgs) != 0 {
+		t.Fatalf("the API must not inject into the instance itself: %+v", msgs)
 	}
 }
 
