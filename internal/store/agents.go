@@ -137,6 +137,14 @@ func (s *Store) DeleteAgent(id string) error {
 	if _, err := tx.Exec(`DELETE FROM agent_items WHERE role_id = ?`, id); err != nil {
 		return fmt.Errorf("delete agent items: %w", err)
 	}
+	if _, err := tx.Exec(
+		`DELETE FROM agent_question_messages WHERE question_id IN
+		 (SELECT id FROM agent_questions WHERE role_id = ?)`, id); err != nil {
+		return fmt.Errorf("delete agent question messages: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM agent_questions WHERE role_id = ?`, id); err != nil {
+		return fmt.Errorf("delete agent questions: %w", err)
+	}
 	res, err := tx.Exec(`DELETE FROM agents WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete agent: %w", err)
