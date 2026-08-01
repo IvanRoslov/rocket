@@ -110,5 +110,5 @@ func StripMarkers(text string) string {
 
 // Names returns the sorted list of available template names.
 func Names() []string {
-	return []string{"kickoff", "orchestrator", "worker"}
+	return []string{"agent", "kickoff", "orchestrator", "worker"}
 }
