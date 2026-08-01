@@ -2,6 +2,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"errors"
@@ -67,8 +68,31 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// migrate applies pending migrations on a single dedicated connection with
+// foreign key enforcement disabled. Both details matter: PRAGMA foreign_keys
+// is per-connection (so it must not be set through the pool) and is a no-op
+// inside a transaction, and table rebuilds — the standard SQLite recipe for
+// changing a CHECK constraint, see 0005_agents.sql — drop a table other tables
+// reference, which would fail with enforcement on. The pragma is restored
+// before the connection returns to the pool.
 func (s *Store) migrate() error {
-	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)`); err != nil {
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire migration conn: %w", err)
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return fmt.Errorf("disable foreign keys: %w", err)
+	}
+	defer conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
+
+	return s.migrateOn(ctx, conn)
+}
+
+func (s *Store) migrateOn(ctx context.Context, conn *sql.Conn) error {
+	if _, err := conn.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)`); err != nil {
 		return fmt.Errorf("create schema_migrations: %w", err)
 	}
 
@@ -88,7 +112,7 @@ func (s *Store) migrate() error {
 		version := i + 1
 
 		var exists int
-		err := s.db.QueryRow(`SELECT 1 FROM schema_migrations WHERE version = ?`, version).Scan(&exists)
+		err := conn.QueryRowContext(ctx, `SELECT 1 FROM schema_migrations WHERE version = ?`, version).Scan(&exists)
 		if err == nil {
 			// already applied
 			continue
@@ -102,7 +126,7 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
 
-		tx, err := s.db.Begin()
+		tx, err := conn.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("begin tx for migration %s: %w", name, err)
 		}
