@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -167,6 +168,9 @@ func registerAgentRoutes(mux *http.ServeMux, d Deps) {
 	})
 	mux.HandleFunc("POST /v1/agents/{id}/wake", func(w http.ResponseWriter, r *http.Request) {
 		handleWakeAgent(w, r, d)
+	})
+	mux.HandleFunc("POST /v1/agents/{id}/done", func(w http.ResponseWriter, r *http.Request) {
+		handleAgentDone(w, r, d)
 	})
 	mux.HandleFunc("GET /v1/agents/{id}/inbox", func(w http.ResponseWriter, r *http.Request) {
 		handleGetAgentInbox(w, r, d)
@@ -384,9 +388,9 @@ type wakeAgentRequest struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-// handleWakeAgent enqueues an inbox event. Spawning the role instance is the
-// runtime layer's job (task #642): it watches the inbox and picks queued
-// events up, so this endpoint stays enqueue-only.
+// handleWakeAgent enqueues an inbox event and notifies the wake engine, which
+// decides whether the role's live instance receives it or a fresh one is
+// spawned (after the debounce window).
 func handleWakeAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 	a, ok := lookupAgent(w, r, d)
 	if !ok {
@@ -430,7 +434,51 @@ func handleWakeAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
+	NotifyRole(d, a.ID)
+
 	writeJSON(w, http.StatusAccepted, map[string]any{"event_id": id, "kind": kind})
+}
+
+// NotifyRole tells the wake engine about a new inbox event, if a runtime is
+// wired in. Enqueuing without a runtime is not an error: the events are
+// durable and the engine picks them up on its next start.
+func NotifyRole(d Deps, roleID string) {
+	if d.Agents == nil {
+		slog.Warn("api: inbox event enqueued with no wake engine, the role will not be woken until the daemon restarts", "role", roleID)
+		return
+	}
+	d.Agents.Notify(roleID)
+}
+
+// handleAgentDone ends the calling instance's run: the daemon closes the
+// events it was briefed with and kills the session (its worktree is kept).
+// Only an instance of the role may call it — a run ends itself, nobody ends
+// it for it.
+func handleAgentDone(w http.ResponseWriter, r *http.Request, d Deps) {
+	a, ok := lookupAgent(w, r, d)
+	if !ok {
+		return
+	}
+
+	caller, err := callerSession(r, d.Store)
+	if writeCallerErr(w, err) {
+		return
+	}
+	if caller == nil || caller.Kind != "agent" || roleFromSessionID(caller.ID) != a.ID {
+		writeErr(w, http.StatusForbidden, "forbidden", "only an instance of role "+a.ID+" may end its run")
+		return
+	}
+
+	if d.Agents == nil {
+		writeErr(w, http.StatusServiceUnavailable, "runtime_unavailable", "the wake engine is not running")
+		return
+	}
+	if err := d.Agents.Done(r.Context(), caller.ID); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"status": "done", "session": caller.ID, "agent": a.ID})
 }
 
 func handleGetAgentInbox(w http.ResponseWriter, r *http.Request, d Deps) {

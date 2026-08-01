@@ -101,11 +101,28 @@ func newSendCmd() *cobra.Command {
 			}
 
 			var resp struct {
-				ID     int64  `json:"id"`
-				Status string `json:"status"`
+				ID      int64  `json:"id"`
+				Status  string `json:"status"`
+				EventID int64  `json:"event_id"`
+				To      string `json:"to"`
+				Queued  string `json:"queued"`
 			}
 			if err := c.Post("/v1/messages", reqBody, &resp); err != nil {
 				return err
+			}
+
+			// A role recipient is not a session: the message lands in its
+			// inbox, which wakes it. There is no per-message delivery status
+			// to poll, so --wait has nothing to wait for.
+			if resp.Queued == "inbox" {
+				if flags.JSON {
+					return printJSON(cmd, resp)
+				}
+				cmd.Printf("queued inbox event %d for role %s\n", resp.EventID, resp.To)
+				if wait {
+					cmd.Println("--wait is ignored for roles: the role is woken asynchronously")
+				}
+				return nil
 			}
 
 			if !wait {
