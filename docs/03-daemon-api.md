@@ -100,6 +100,27 @@ tmux рендерит окно ровно в **одном** размере; пр
 
 Права: вызовы от агентов (определяются по `from`/env сессии) ограничены — оркестратор пишет только в свою задачу и её подзадачи, воркер — только в свою подзадачу. Автопереходы статусов (spawn → подзадача `in_progress`, PR open → `review`, merged → `done`) делает демон и записывает в `task_log` с `kind=status`.
 
+## Роли (постоянные агенты)
+
+Роль — зарегистрированный агент с ролью («SRE платформы», «разборщик issues»), к которому обращаются люди и другие агенты; запуски эфемерные, durable — реестр, инбокс и досье (см. [10-agents.md](10-agents.md) и спеку задачи #639).
+
+| Метод | Путь | Описание |
+|---|---|---|
+| GET | `/v1/agents` | Список ролей; фильтр `?project=`; у элемента `inbox_queued` (событий в очереди) и `items` (размер досье) |
+| POST | `/v1/agents` | `{id, project, prompt?, subscriptions?, cron?, agent?}` → 201. Создаёт домашнюю директорию роли (`<home>/agents/<id>/role.md` + `memory/MEMORY.md`), `agent` по умолчанию — `default_agent` конфига |
+| GET | `/v1/agents/{id}` | Карточка роли + тело роль-промпта в поле `prompt` |
+| PATCH | `/v1/agents/{id}` | `{prompt?, subscriptions?, cron?, agent?, enabled?}`; `prompt` перезаписывает `role.md` |
+| DELETE | `/v1/agents/{id}` | Удаляет роль вместе с инбоксом и досье; файлы роли на диске остаются |
+| POST | `/v1/agents/{id}/enable`&#124;`disable` | Включить/выключить роль |
+| POST | `/v1/agents/{id}/wake` | `{text?, from?, kind?, payload?}` → `202 {event_id, kind}`. **Только кладёт событие в инбокс**; спавн инстанса — задача runtime-слоя (он же поллит очередь) |
+| GET | `/v1/agents/{id}/inbox` | События роли, старые первыми; фильтр `?status=queued&#124;delivered&#124;done` |
+| GET | `/v1/agents/{id}/items` | Досье; фильтр `?state=` |
+| PUT | `/v1/agents/{id}/items` | `{kind, ref, state, note?, task_id?, snooze_until?}` — upsert по (роль, kind, ref) |
+
+Виды событий инбокса: `message`, `issue_opened`, `issue_comment`, `task_update`, `snooze_expired`, `cron`, `question`, `terminal_opened`. Виды элементов досье: `issue`, `task`, `ping`; состояния — свободные строки (канонический набор `new|triaged|taken|deferred|waiting_team|in_work|resolved|closed`), это записная книжка роли, а не state-machine демона.
+
+Права: `PUT /v1/agents/{id}/items` от сессии (`X-Rocket-Session`) разрешён только инстансу этой же роли — сессия должна быть `kind=agent` с id вида `<role>-run-<n>`; иначе `403 forbidden`. Пользовательский вызов (без заголовка) разрешён всегда.
+
 ## Сообщения
 
 | Метод | Путь | Описание |
