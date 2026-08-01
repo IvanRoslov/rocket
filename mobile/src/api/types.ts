@@ -264,9 +264,20 @@ export interface AgentQuestion {
  * `GET /v1/agents/{id}/memory`, which ships with the dashboard work — a daemon
  * without it answers 404 and the app hides the memory tab.
  */
+export interface AgentMemoryFile {
+  name: string
+  size: number
+  /** Unix seconds. */
+  updated_at: number
+  body: string
+}
+
 export interface AgentMemory {
+  path: string
+  /** Full text of MEMORY.md; empty when the file does not exist. */
   index: string
-  files: string[]
+  /** Sorted by name, MEMORY.md excluded, top-level regular files only. */
+  files: AgentMemoryFile[]
 }
 
 export interface GithubRepo {
