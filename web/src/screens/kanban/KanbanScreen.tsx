@@ -117,6 +117,9 @@ export function KanbanScreen() {
           />
           Show cancelled
         </label>
+        <Link to={`/p/${projectId}/agents`} className="kanban-screen__cancelled-toggle">
+          Agents
+        </Link>
         <Link to="/settings" className="kanban-screen__settings-link" aria-label="Settings">
           ⚙
         </Link>

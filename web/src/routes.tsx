@@ -1,4 +1,6 @@
 import { createBrowserRouter } from 'react-router-dom'
+import { AgentScreen } from './screens/agents/AgentScreen'
+import { AgentsScreen } from './screens/agents/AgentsScreen'
 import { AppShell } from './components/AppShell'
 import { ChatScreen } from './screens/chat/ChatScreen'
 import { KanbanScreen } from './screens/kanban/KanbanScreen'
@@ -25,6 +27,8 @@ export const router = createBrowserRouter([
       { path: '/projects/new', element: <WizardScreen /> },
       { path: '/p/:projectId', element: <KanbanScreen /> },
       { path: '/p/:projectId/tasks/:taskId', element: <TaskScreen /> },
+      { path: '/p/:projectId/agents', element: <AgentsScreen /> },
+      { path: '/p/:projectId/agents/:roleId', element: <AgentScreen /> },
       { path: '/questions', element: <QuestionsScreen /> },
       { path: '/system', element: <SystemScreen /> },
       { path: '/settings', element: <SettingsScreen /> },
