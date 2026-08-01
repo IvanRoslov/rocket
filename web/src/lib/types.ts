@@ -425,3 +425,107 @@ export interface Settings {
   github_token: string
   login?: string
 }
+
+// ---------------------------------------------------------------------------
+// Agent roles — internal/api/agents.go, internal/api/agent_questions.go
+// (docs/10-agents.md «Роли (постоянные агенты)»)
+// ---------------------------------------------------------------------------
+
+/** A GitHub subscription of a role: which repo feeds its inbox, and how it is
+ * filtered (`store.AgentSubscription`). */
+export interface AgentSubscription {
+  repo: string
+  labels?: string[]
+  mention_only?: boolean
+}
+
+/** A registered role. `prompt` (the role prompt body) is only present on
+ * `GET /v1/agents/{id}` — the list omits it. */
+export interface Agent {
+  id: string
+  project: string
+  prompt_path: string
+  prompt?: string
+  subscriptions: AgentSubscription[]
+  cron: string
+  agent: string
+  enabled: boolean
+  inbox_queued: number
+  items: number
+  open_questions: number
+  awaiting_user: number
+  created_at: number
+  updated_at: number
+}
+
+export type AgentInboxKind =
+  | 'message'
+  | 'issue_opened'
+  | 'issue_comment'
+  | 'task_update'
+  | 'snooze_expired'
+  | 'cron'
+  | 'question'
+  | 'terminal_opened'
+
+export interface AgentInboxEvent {
+  id: number
+  kind: AgentInboxKind
+  /** Kind-specific JSON from the event's producer: `{text, from}` for
+   * `message`, `{repo, number, title}` for issue events, `{task_id, title,
+   * from, to}` for `task_update`, `{question_id, ordinal, entry, text}` for
+   * `question`. */
+  payload: Record<string, unknown>
+  status: 'queued' | 'delivered' | 'done'
+  created_at: number
+  updated_at: number
+}
+
+/** A dossier row — what the role is tracking and in which state. `state` is
+ * free text the role writes (`new`, `triaged`, `taken`, `deferred`,
+ * `waiting_team`, `in_work`, `resolved`, `closed`), not a daemon-enforced
+ * state machine. */
+export interface AgentItem {
+  id: number
+  kind: 'issue' | 'task' | 'ping'
+  ref: string
+  state: string
+  note: string
+  task_id: number
+  snooze_until: number
+  created_at: number
+  updated_at: number
+}
+
+/** A role Q&A thread. Mirrors `Question` with `role_id` in place of the task
+ * and `whose_turn: 'user' | 'role'`; thread entries share `QuestionMessage`. */
+export interface AgentQuestion {
+  id: number
+  role_id: string
+  ordinal: number
+  asked_by: string
+  body: string
+  context?: string
+  status: 'open' | 'resolved'
+  resolution?: string
+  whose_turn?: 'user' | 'role'
+  asked_at: number
+  resolved_at?: number
+  messages: QuestionMessage[]
+}
+
+/** One fact file of a role's file memory (body inlined). */
+export interface AgentMemoryFile {
+  name: string
+  size: number
+  updated_at: number
+  body: string
+}
+
+/** `GET /v1/agents/{id}/memory`: the MEMORY.md index plus the fact files
+ * beside it. `PUT` writes one file at a time (`file` defaults to MEMORY.md). */
+export interface AgentMemory {
+  path: string
+  index: string
+  files: AgentMemoryFile[]
+}
