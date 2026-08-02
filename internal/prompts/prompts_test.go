@@ -518,4 +518,3 @@ func TestStripMarkersOnlyRemovesMarkerLines(t *testing.T) {
 		t.Errorf("StripMarkers() = %q, want %q", got, want)
 	}
 }
-

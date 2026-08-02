@@ -18,7 +18,7 @@ import (
 // unread inbox row the agent pulls itself with `rocket inbox next`.
 //
 // live reports which of the two happened, so callers can tell the sender.
-func deliverToAgent(d Deps, agentID, from, body string) (live bool, err error) {
+func deliverToAgent(d Deps, agentID, from, body string) (live bool, msgID int64, err error) {
 	body = rewriteAttachmentLinks(d, body)
 
 	sess, err := d.Store.GetSession(agentID)
@@ -26,10 +26,10 @@ func deliverToAgent(d Deps, agentID, from, body string) (live bool, err error) {
 	case errors.Is(err, store.ErrNotFound):
 		// No session row at all: the agent has never been started.
 	case err != nil:
-		return false, err
+		return false, 0, err
 	case sess.Kind != session.AgentSessionKind:
 		// An id collision with a real session: never inject into it.
-		return false, errors.New("session " + agentID + " is not an agent session")
+		return false, 0, errors.New("session " + agentID + " is not an agent session")
 	case sess.State == "spawning" || sess.State == "running":
 		id, err := d.Store.AddMessage(store.Message{
 			FromSession: senderIfSession(d, from),
@@ -37,7 +37,7 @@ func deliverToAgent(d Deps, agentID, from, body string) (live bool, err error) {
 			Body:        deliveryBody(d, from, body),
 		})
 		if err != nil {
-			return false, err
+			return false, 0, err
 		}
 		if d.Bus != nil {
 			d.Bus.Publish("message.queued", agentID, map[string]any{
@@ -49,17 +49,18 @@ func deliverToAgent(d Deps, agentID, from, body string) (live bool, err error) {
 		} else {
 			slog.Warn("api: message to agent queued with nil Queue", "id", id, "to", agentID)
 		}
-		return true, nil
+		return true, id, nil
 	}
 
-	if _, err := d.Store.AddInboxMessage(store.InboxMessage{
+	inboxID, err := d.Store.AddInboxMessage(store.InboxMessage{
 		AgentID: agentID,
 		From:    from,
 		Body:    body,
-	}); err != nil {
-		return false, err
+	})
+	if err != nil {
+		return false, 0, err
 	}
-	return false, nil
+	return false, inboxID, nil
 }
 
 // senderIfSession returns from only when it names a session the store knows:

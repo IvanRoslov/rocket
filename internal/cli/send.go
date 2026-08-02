@@ -101,26 +101,25 @@ func newSendCmd() *cobra.Command {
 			}
 
 			var resp struct {
-				ID      int64  `json:"id"`
-				Status  string `json:"status"`
-				EventID int64  `json:"event_id"`
-				To      string `json:"to"`
-				Queued  string `json:"queued"`
+				ID     int64  `json:"id"`
+				Status string `json:"status"`
+				To     string `json:"to"`
+				Live   bool   `json:"live"`
 			}
 			if err := c.Post("/v1/messages", reqBody, &resp); err != nil {
 				return err
 			}
 
-			// A role recipient is not a session: the message lands in its
-			// inbox, which wakes it. There is no per-message delivery status
-			// to poll, so --wait has nothing to wait for.
-			if resp.Queued == "inbox" {
+			// An agent whose tmux session is not up has no session to
+			// deliver into: the message waits unread in its inbox until the
+			// agent pulls it, so there is no delivery status to poll.
+			if resp.Status == "inbox" {
 				if flags.JSON {
 					return printJSON(cmd, resp)
 				}
-				cmd.Printf("queued inbox event %d for role %s\n", resp.EventID, resp.To)
+				cmd.Printf("queued in the inbox of %s (its session is not running)\n", resp.To)
 				if wait {
-					cmd.Println("--wait is ignored for roles: the role is woken asynchronously")
+					cmd.Println("--wait is ignored: the agent reads its inbox itself")
 				}
 				return nil
 			}

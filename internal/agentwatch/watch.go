@@ -30,7 +30,9 @@ import (
 // interface documents what the watcher is allowed to do with sessions and lets
 // its tests run without tmux or git.
 type Sessions interface {
-	AdoptAgentSession(a store.Agent) (store.Session, error)
+	// AdoptAgentSession registers an agent's live tmux session, reporting
+	// whether this call is what brought it up (see session.Manager).
+	AdoptAgentSession(a store.Agent) (sess store.Session, fresh bool, err error)
 	RetireAgentSession(id string) error
 }
 
@@ -134,11 +136,20 @@ func (w *Watcher) Tick(ctx context.Context) {
 			// tracks nor notifies it.
 			continue
 		}
-		if _, err := w.sess.AdoptAgentSession(a); err != nil {
+		_, fresh, err := w.sess.AdoptAgentSession(a)
+		if err != nil {
 			w.warnCollision(a.ID, err)
 			continue
 		}
 		w.clearCollisionWarning(a.ID)
+		if fresh {
+			// A session rocket had not seen up until now: whatever it was
+			// told in a previous life does not count, so the anti-spam
+			// bookkeeping starts over. Without this, an agent restarted
+			// between two ticks would never hear about the mail waiting for
+			// it.
+			w.forget(a.ID)
+		}
 		w.notifyUnread(a.ID)
 	}
 }
@@ -193,7 +204,7 @@ func (w *Watcher) notifyUnread(agentID string) {
 }
 
 // forget drops an agent's notification bookkeeping, so the next session it
-// comes up in is told about the mail waiting for it even if the pile hasn't
+// comes up in is told about the mail waiting for it even if the pile has not
 // grown since.
 func (w *Watcher) forget(agentID string) {
 	w.mu.Lock()

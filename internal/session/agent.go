@@ -90,23 +90,29 @@ func (m *Manager) StopAgent(ctx context.Context, id string) error {
 // rocket started it or a human created it by hand. It is idempotent: an
 // already-live row is left alone.
 //
+// fresh reports that this call brought the session up (the row was created or
+// revived from a dead state) rather than finding it already live. Callers use
+// it to tell one continuous session from a new one — the unread notifier owes
+// a fresh session its notification even when no new mail has arrived.
+//
 // It refuses to touch a session row of any other kind: an orchestrator or
 // worker whose id happens to equal an agent id is not this agent's session,
 // and overwriting it would corrupt a real session's bookkeeping.
-func (m *Manager) AdoptAgentSession(a store.Agent) (store.Session, error) {
+func (m *Manager) AdoptAgentSession(a store.Agent) (sess store.Session, fresh bool, err error) {
 	existing, err := m.st.GetSession(a.ID)
 	if err == nil && existing.Kind != AgentSessionKind {
-		return store.Session{}, fmt.Errorf(
+		return store.Session{}, false, fmt.Errorf(
 			"session %s is a %s session, refusing to adopt it as an agent session",
 			a.ID, existing.Kind)
 	}
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return store.Session{}, err
+		return store.Session{}, false, err
 	}
 	if err == nil && (existing.State == "spawning" || existing.State == "running") {
-		return existing, nil
+		return existing, false, nil
 	}
-	return m.upsertAgentSession(a)
+	adopted, err := m.upsertAgentSession(a)
+	return adopted, err == nil, err
 }
 
 // RetireAgentSession marks an agent's session row dead once its tmux session

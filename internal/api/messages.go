@@ -241,12 +241,12 @@ func postMessageToAgent(w http.ResponseWriter, d Deps, req postMessageRequest) b
 		}
 	}
 
-	live, err := deliverToAgent(d, agent.ID, req.From, req.Body)
+	live, id, err := deliverToAgent(d, agent.ID, req.From, req.Body)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return true
 	}
 
-	writeJSON(w, http.StatusAccepted, agentDeliveryResult(agent.ID, live))
+	writeJSON(w, http.StatusAccepted, agentDeliveryResult(agent.ID, live, id))
 	return true
 }

@@ -41,22 +41,29 @@ type fakeSessions struct {
 	retired   []string
 	adoptErr  error
 	adoptedOK map[string]bool
+	// live mirrors the session rows the real manager would hold, so
+	// AdoptAgentSession can report "fresh" the same way it does.
+	live map[string]bool
 }
 
-func (f *fakeSessions) AdoptAgentSession(a store.Agent) (store.Session, error) {
+func (f *fakeSessions) AdoptAgentSession(a store.Agent) (store.Session, bool, error) {
 	if f.adoptErr != nil {
-		return store.Session{}, f.adoptErr
+		return store.Session{}, false, f.adoptErr
 	}
 	f.adopted = append(f.adopted, a.ID)
 	if f.adoptedOK == nil {
 		f.adoptedOK = map[string]bool{}
 	}
-	f.adoptedOK[a.ID] = true
-	return store.Session{ID: a.ID, Kind: "agent", State: "running"}, nil
+	// A session already recorded as live is not a fresh one, exactly as the
+	// real manager reports it.
+	fresh := !f.live[a.ID]
+	f.live[a.ID] = true
+	return store.Session{ID: a.ID, Kind: "agent", State: "running"}, fresh, nil
 }
 
 func (f *fakeSessions) RetireAgentSession(id string) error {
 	f.retired = append(f.retired, id)
+	delete(f.live, id)
 	return nil
 }
 
@@ -88,7 +95,7 @@ func newHarness(t *testing.T, agents ...string) *harness {
 	h := &harness{
 		st:   st,
 		rt:   &fakeRuntime{},
-		sess: &fakeSessions{},
+		sess: &fakeSessions{live: map[string]bool{}},
 		now:  time.Unix(1_800_000_000, 0),
 	}
 	cfg := &config.Config{
@@ -257,6 +264,29 @@ func TestSessionRestartNotifiesAgain(t *testing.T) {
 	h.rt.names = nil
 	h.w.Tick(context.Background())
 	h.rt.names = []string{"sre"}
+	h.now = h.now.Add(time.Second)
+	h.w.Tick(context.Background())
+
+	if notices := h.notices(t, "sre"); len(notices) != 2 {
+		t.Fatalf("notices = %v, want one per session", notices)
+	}
+}
+
+// TestRestartBetweenTicksNotifiesAgain guards the case the anti-spam window
+// would otherwise swallow: the agent is stopped and started again quickly
+// enough that no tick ever saw its session missing. The new session is still a
+// new session and has not been told about the waiting mail.
+func TestRestartBetweenTicksNotifiesAgain(t *testing.T) {
+	h := newHarness(t, "sre")
+	h.rt.names = []string{"sre"}
+	h.unread(t, "sre", "one")
+	h.w.Tick(context.Background())
+
+	// stop + start, entirely between two ticks: the session row is retired
+	// and adopted again without the watcher observing the gap.
+	if err := h.sess.RetireAgentSession("sre"); err != nil {
+		t.Fatalf("RetireAgentSession: %v", err)
+	}
 	h.now = h.now.Add(time.Second)
 	h.w.Tick(context.Background())
 

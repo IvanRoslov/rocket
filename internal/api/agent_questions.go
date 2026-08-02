@@ -128,7 +128,7 @@ func writeAgentQuestionForbidden(w http.ResponseWriter, roleID string) {
 // can tell a thread entry from a plain message at a glance.
 func deliverHumanEntry(d Deps, roleID string, questionID int64, ordinal int, entry, text string) error {
 	body := fmt.Sprintf("[role %s Q%d %s] %s", roleID, ordinal, entry, text)
-	_, err := deliverToAgent(d, roleID, "", body)
+	_, _, err := deliverToAgent(d, roleID, "", body)
 	return err
 }
 

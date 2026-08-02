@@ -140,15 +140,19 @@ func TestAdoptAgentSessionIsIdempotentAndRefusesCollisions(t *testing.T) {
 	m, st, _, _, _ := testManager(t)
 	a := testAgentRow(t, "sre")
 
-	sess, err := m.AdoptAgentSession(a)
+	sess, fresh, err := m.AdoptAgentSession(a)
 	if err != nil {
 		t.Fatalf("AdoptAgentSession: %v", err)
 	}
-	if sess.State != "running" {
-		t.Fatalf("adopted session = %+v", sess)
+	if sess.State != "running" || !fresh {
+		t.Fatalf("adopted session = %+v, fresh = %v", sess, fresh)
 	}
-	if _, err := m.AdoptAgentSession(a); err != nil {
+	_, fresh, err = m.AdoptAgentSession(a)
+	if err != nil {
 		t.Fatalf("second AdoptAgentSession: %v", err)
+	}
+	if fresh {
+		t.Error("fresh = true on an already-live session, want false")
 	}
 
 	// A session of another kind under the same name is never overwritten.
@@ -159,7 +163,7 @@ func TestAdoptAgentSessionIsIdempotentAndRefusesCollisions(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AddSession: %v", err)
 	}
-	if _, err := m.AdoptAgentSession(other); err == nil {
+	if _, _, err := m.AdoptAgentSession(other); err == nil {
 		t.Fatal("AdoptAgentSession over an orchestrator session: want an error")
 	}
 	stored, err := st.GetSession("billing-orch")
@@ -175,7 +179,7 @@ func TestAdoptAgentSessionRevivesADeadRow(t *testing.T) {
 	m, st, _, _, _ := testManager(t)
 	a := testAgentRow(t, "sre")
 
-	if _, err := m.AdoptAgentSession(a); err != nil {
+	if _, _, err := m.AdoptAgentSession(a); err != nil {
 		t.Fatalf("AdoptAgentSession: %v", err)
 	}
 	if err := m.RetireAgentSession("sre"); err != nil {
@@ -185,8 +189,12 @@ func TestAdoptAgentSessionRevivesADeadRow(t *testing.T) {
 		t.Fatalf("state after retire = %q, want done", sess.State)
 	}
 
-	if _, err := m.AdoptAgentSession(a); err != nil {
+	_, fresh, err := m.AdoptAgentSession(a)
+	if err != nil {
 		t.Fatalf("re-adopt: %v", err)
+	}
+	if !fresh {
+		t.Error("fresh = false on a revived session, want true")
 	}
 	sess, err := st.GetSession("sre")
 	if err != nil {

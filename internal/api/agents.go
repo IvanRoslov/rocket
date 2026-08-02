@@ -366,22 +366,23 @@ func handlePostAgentMessage(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
-	live, err := deliverToAgent(d, a.ID, req.From, req.Body)
+	live, id, err := deliverToAgent(d, a.ID, req.From, req.Body)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusAccepted, agentDeliveryResult(a.ID, live))
+	writeJSON(w, http.StatusAccepted, agentDeliveryResult(a.ID, live, id))
 }
 
 // agentDeliveryResult is the response body every "message to an agent" path
-// returns, so senders can tell an injected message from an inboxed one.
-func agentDeliveryResult(agentID string, live bool) map[string]any {
+// returns, so senders can tell an injected message from an inboxed one. id is
+// the queued message's id when live, and the inbox row's id otherwise.
+func agentDeliveryResult(agentID string, live bool, id int64) map[string]any {
 	status := "inbox"
 	if live {
 		status = "queued"
 	}
-	return map[string]any{"to": agentID, "status": status, "live": live}
+	return map[string]any{"id": id, "to": agentID, "status": status, "live": live}
 }
 
 func handleGetAgentInbox(w http.ResponseWriter, r *http.Request, d Deps) {
