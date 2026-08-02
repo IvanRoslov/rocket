@@ -87,16 +87,14 @@
   font: 650 16px var(--font-mono);
   letter-spacing: -0.01em;
 }
-.agent-card__subs {
-  font: 12.5px var(--font-mono);
+.agent-card__desc {
+  font: 12.5px var(--font-ui);
   color: var(--text-2);
   margin-bottom: 14px;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-}
-.agent-card__cron {
-  color: var(--text-3);
 }
 .agent-card__stats {
   display: flex;
@@ -121,24 +119,11 @@
   display: flex;
   flex-direction: column;
 }
-.agent-form__label,
-.agent-form__label-row {
+.agent-form__label {
   margin-top: 14px;
   margin-bottom: 6px;
   font: 600 12px var(--font-ui);
   color: var(--text-2);
-}
-.agent-form__label-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.agent-form__label-row .agent-form__label {
-  margin: 0;
-}
-.agent-form__toggle {
-  font: 600 12px var(--font-ui);
-  color: var(--accent);
 }
 .agent-form__input,
 .agent-form__textarea {
@@ -167,13 +152,6 @@
   color: var(--text-3);
   background: var(--surface-2);
 }
-.agent-form__preview {
-  min-height: 180px;
-  padding: 11px 13px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-btn-sm);
-  background: var(--surface-2);
-}
 .agent-form__hint {
   margin: 6px 0 0;
   font: 11.5px var(--font-ui);
@@ -194,7 +172,7 @@
   margin-top: 20px;
 }
 
-/* ---------- AgentScreen (role card) ---------- */
+/* ---------- AgentScreen (agent card) ---------- */
 .agent-screen {
   max-width: 1180px;
   margin: 0 auto;
@@ -217,6 +195,12 @@
   margin: 0;
   font: 650 22px var(--font-mono);
   letter-spacing: -0.02em;
+}
+.agent-screen__desc {
+  margin: 0 0 10px;
+  max-width: 70ch;
+  font: 13px var(--font-ui);
+  color: var(--text-2);
 }
 .agent-screen__meta {
   display: flex;
@@ -250,10 +234,6 @@
   border-radius: var(--radius-btn-sm);
   color: var(--text);
   font: 13px var(--font-ui);
-}
-.agent-screen__waking {
-  font: 12px var(--font-ui);
-  color: var(--text-3);
 }
 .agent-screen__error {
   margin: 0 0 12px;
@@ -315,32 +295,6 @@
   border: 1px dashed var(--border);
   border-radius: var(--radius-panel);
 }
-.agent-tab__table {
-  width: 100%;
-  border-collapse: collapse;
-  font: 12.5px var(--font-ui);
-}
-.agent-tab__table th {
-  text-align: left;
-  padding: 8px 10px;
-  font: 600 11.5px var(--font-ui);
-  color: var(--text-3);
-  border-bottom: 1px solid var(--border);
-}
-.agent-tab__table td {
-  padding: 9px 10px;
-  border-bottom: 1px solid var(--divider);
-  vertical-align: top;
-  color: var(--text-2);
-}
-.agent-tab__mono {
-  font-family: var(--font-mono);
-  color: var(--text);
-}
-.agent-tab__note {
-  color: var(--text-3);
-}
-
 /* ---------- InboxTab ---------- */
 .agent-inbox__row {
   display: flex;
@@ -359,56 +313,6 @@
   font: 11.5px var(--font-ui);
   color: var(--text-4);
   white-space: nowrap;
-}
-
-/* ---------- MemoryTab ---------- */
-.agent-memory__path {
-  font: 11.5px var(--font-mono);
-  color: var(--text-4);
-  margin-bottom: 14px;
-}
-.agent-memory__file {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-  margin-bottom: 12px;
-}
-.agent-memory__file-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--divider);
-}
-.agent-memory__file-name {
-  font: 600 12.5px var(--font-mono);
-  color: var(--text);
-}
-.agent-memory__file-meta {
-  font: 11.5px var(--font-ui);
-  color: var(--text-4);
-}
-.agent-memory__spacer {
-  flex: 1;
-}
-.agent-memory__body {
-  padding: 12px 14px;
-}
-.agent-memory__editor {
-  width: 100%;
-  padding: 11px 13px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-btn-sm);
-  background: var(--surface-2);
-  color: var(--text);
-  font: 12.5px var(--font-mono);
-  line-height: 1.5;
-  resize: vertical;
-}
-.agent-memory__editor-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
 }
 
 /* ---------- Questions tab ---------- */
