@@ -459,7 +459,7 @@ func writeManagerErr(w http.ResponseWriter, err error) {
 		switch verr.Code {
 		case "session_not_found":
 			status = http.StatusNotFound
-		case "restore_not_allowed", "no_pending_quiz", "quiz_answer_in_flight":
+		case "restore_not_allowed", "no_pending_quiz", "quiz_answer_in_flight", "agent_live":
 			status = http.StatusConflict
 		}
 		writeErr(w, status, verr.Code, verr.Message)

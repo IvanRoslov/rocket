@@ -2,7 +2,6 @@ package store
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -159,12 +158,6 @@ func (s *Store) ListTasks(f TaskFilter) ([]Task, error) {
 // UpdateTaskStatus updates a task's status and refreshes updated_at. When
 // status is "done" or "cancelled", completed_at is set to now; otherwise it
 // is cleared. Returns ErrNotFound if the task doesn't exist.
-//
-// On an actual transition, every agent role whose dossier references this
-// task (agent_items.task_id) gets a task_update inbox event. The hook lives
-// here rather than in the API layer because this is the single choke point
-// all transitions go through — manual moves from the API, PR-driven moves
-// from the GitHub poller's reactions, and cancellation on session teardown.
 func (s *Store) UpdateTaskStatus(id int64, status string) error {
 	if !validTaskStatuses[status] {
 		return fmt.Errorf("invalid status %q", status)
@@ -174,13 +167,6 @@ func (s *Store) UpdateTaskStatus(id int64, status string) error {
 		completedAt = time.Now().Unix()
 	}
 
-	// Read the pre-transition task so the event can carry from/to and the
-	// title, and so a no-op save does not wake any role.
-	prev, err := s.GetTask(id)
-	if err != nil {
-		return err
-	}
-
 	res, err := s.db.Exec(
 		`UPDATE tasks SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
 		status, completedAt, time.Now().Unix(), id,
@@ -188,58 +174,7 @@ func (s *Store) UpdateTaskStatus(id int64, status string) error {
 	if err != nil {
 		return fmt.Errorf("update task status: %w", err)
 	}
-	if err := checkRowsAffected(res); err != nil {
-		return err
-	}
-
-	if prev.Status == status {
-		return nil
-	}
-	return s.notifyRolesOfTaskStatus(prev, status)
-}
-
-// notifyRolesOfTaskStatus enqueues one task_update event per distinct role
-// tracking the task in its dossier.
-func (s *Store) notifyRolesOfTaskStatus(prev Task, status string) error {
-	rows, err := s.db.Query(
-		`SELECT DISTINCT role_id FROM agent_items WHERE task_id = ?`, prev.ID)
-	if err != nil {
-		return fmt.Errorf("query dossier roles: %w", err)
-	}
-	defer rows.Close()
-
-	var roles []string
-	for rows.Next() {
-		var roleID string
-		if err := rows.Scan(&roleID); err != nil {
-			return fmt.Errorf("scan dossier role: %w", err)
-		}
-		roles = append(roles, roleID)
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	payload, err := json.Marshal(map[string]any{
-		"task_id": prev.ID,
-		"title":   prev.Title,
-		"from":    prev.Status,
-		"to":      status,
-	})
-	if err != nil {
-		return fmt.Errorf("marshal task_update payload: %w", err)
-	}
-
-	for _, roleID := range roles {
-		if _, err := s.EnqueueInboxEvent(AgentInboxEvent{
-			RoleID:  roleID,
-			Kind:    "task_update",
-			Payload: string(payload),
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
+	return checkRowsAffected(res)
 }
 
 // UpdateTask updates the title, description, feature_slug, session_id, and

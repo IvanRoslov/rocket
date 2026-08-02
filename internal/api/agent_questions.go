@@ -3,9 +3,11 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
+	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -106,10 +108,10 @@ func registerAgentQuestionRoutes(mux *http.ServeMux, d Deps) {
 	})
 }
 
-// callerIsRoleInstance reports whether caller is a live run of roleID. Role
-// instances are sessions of kind 'agent' named "<role>-run-<n>".
+// callerIsRoleInstance reports whether caller is the agent itself: its session
+// is registered under the agent's own id (docs/10-agents.md).
 func callerIsRoleInstance(caller *store.Session, roleID string) bool {
-	return caller != nil && caller.Kind == "agent" && roleFromSessionID(caller.ID) == roleID
+	return caller != nil && caller.Kind == session.AgentSessionKind && caller.ID == roleID
 }
 
 // writeAgentQuestionForbidden rejects a caller that is neither the human nor
@@ -119,36 +121,15 @@ func writeAgentQuestionForbidden(w http.ResponseWriter, roleID string) {
 		"only the human user or an instance of role "+roleID+" may use its question threads")
 }
 
-// deliverHumanEntry records a human entry into a role's thread as an inbox
-// event (kind "question"), so the role is woken for it — the opening question
-// and every follow-up alike.
-//
-// Delivery itself belongs to the wake engine (internal/agentrun): it decides
-// between briefing a fresh instance and queueing the text into a live one
-// (where it lands prefixed like task threads, "[role sre Q2 reply] ..."), and
-// it is what marks the event delivered. Injecting here as well would deliver
-// every human entry twice to a live instance.
+// deliverHumanEntry delivers a human entry in a role's thread to the agent,
+// through the very same live-or-inbox path an ordinary message takes: a live
+// agent session gets it injected, a dead one finds it in its inbox. The
+// "[role sre Q2 reply]" frame mirrors the one task threads use, so the agent
+// can tell a thread entry from a plain message at a glance.
 func deliverHumanEntry(d Deps, roleID string, questionID int64, ordinal int, entry, text string) error {
-	payload, err := json.Marshal(map[string]any{
-		"question_id": questionID,
-		"role_id":     roleID,
-		"ordinal":     ordinal,
-		"entry":       entry,
-		"text":        rewriteAttachmentLinks(d, text),
-	})
-	if err != nil {
-		return err
-	}
-	if _, err := d.Store.EnqueueInboxEvent(store.AgentInboxEvent{
-		RoleID:  roleID,
-		Kind:    "question",
-		Payload: string(payload),
-	}); err != nil {
-		return err
-	}
-
-	NotifyRole(d, roleID)
-	return nil
+	body := fmt.Sprintf("[role %s Q%d %s] %s", roleID, ordinal, entry, text)
+	_, _, err := deliverToAgent(d, roleID, "", body)
+	return err
 }
 
 // parseAgentQuestionID extracts and parses the {id} path value, writing a 404

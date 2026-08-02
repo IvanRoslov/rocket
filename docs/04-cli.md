@@ -74,34 +74,48 @@ rocket daemon start|stop|status|run     # run — foreground (для отлад�
 rocket doctor                           # проверка окружения: tmux, git, gh, агенты
 ```
 
-### Роли (постоянные агенты)
+### Постоянные агенты
 
 ```
-rocket agent add <id> --project <p> --prompt-file <f>
-                      [--watch owner/repo[,label=bug][,mention-only]]...
-                      [--cron "0 * * * *"] [--agent claude-code]
-    Регистрирует роль и создаёт её домашнюю директорию
-    ~/.rocket/agents/<id>/ (role.md — копия промпта, memory/MEMORY.md).
-rocket agent ls [--project <p>]         # id, проект, enabled, инбокс, досье, открытые треды
-rocket agent show <id>                  # определение + очередь событий + досье
+rocket agent add <id> [--description "..."] [--project <p>]
+                      [--dir <path>] [--command "<cmd>"]
+    Регистрирует агента. id — [a-z0-9-], он же имя его tmux-сессии.
+    dir/command нужны только для rocket agent start.
+rocket agent edit <id> [--description|--project|--dir|--command ...]
+rocket agent ls [--project <p>]   # id, проект, enabled, живость сессии,
+                                  # непрочитанные, открытые треды, описание
+rocket agent show <id>            # регистрация + непрочитанные сообщения
 rocket agent enable|disable <id>
-rocket agent rm <id>                    # из реестра; файлы роли остаются на диске
-rocket agent wake <id> ["текст"] [--kind message]
-                                        # событие в инбокс + пробуждение роли
-rocket agent done                       # изнутри инстанса: инбокс разобран,
-                                        # запуск завершается (worktree роли остаётся)
-    Кладёт событие в инбокс роли (спавн инстанса делает runtime-слой).
+rocket agent rm <id>              # из реестра; файлы агента остаются на диске
 
-rocket agent ask <role> "<вопрос>" [--context <md>]
-    Открыть тред-вопрос роли. Вопрос человека будит роль (событие question
-    в инбоксе); тот же вызов изнутри инстанса роли открывает тред человеку.
-rocket agent questions [<role>] [--open]
-    Треды роли (без аргумента — роль текущего инстанса).
+rocket agent start <id>           # tmux-сессия <id>: cwd=dir, команда command
+                                  # (нет command — shell; нет dir — ошибка)
+rocket agent attach <id>          # подключиться к сессии агента
+rocket agent stop <id>            # убить сессию; регистрация остаётся
+
+rocket agent ask <id> "<вопрос>" [--context <md>]
+    Открыть тред-вопрос агенту. Изнутри сессии агента тот же вызов
+    открывает тред человеку.
+rocket agent questions [<id>] [--open]
+    Треды агента (без аргумента — агент текущей сессии).
 rocket agent reply <qid> "<текст>"      # ответ в тред (обе стороны)
 rocket agent answer <qid> "<ответ>" | --dismiss
-    Закрыть тред; только человек. Инстанс роли может оспорить закрытый тред
+    Закрыть тред; только человек. Агент может оспорить закрытый тред
     своим reply — тред переоткроется.
 ```
+
+### Инбокс агента (изнутри его сессии)
+
+```
+rocket inbox [--agent <id>]       # счётчик + непрочитанные: id, from, возраст,
+                                  # первая строка
+rocket inbox next [--agent <id>]  # самое старое непрочитанное целиком,
+                                  # помечается прочитанным
+rocket inbox peek <msg-id>        # прочитать конкретное, не помечая
+```
+
+Id агента берётся из `--agent`, иначе из `ROCKET_SESSION_ID`, иначе из имени
+tmux-сессии — команды работают и в сессии, поднятой вручную.
 
 ## Для агентов (вызываются оркестратором/воркером из своей сессии)
 

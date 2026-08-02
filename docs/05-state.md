@@ -13,13 +13,8 @@
 │   └── <owner>__<name>/
 ├── worktrees/
 │   └── <repo-id>/<session-id>/
-├── attachments/        # картинки, вставленные Ctrl+V в дашборде
-│   └── <id>.<ext>
-└── agents/             # домашние директории ролей (постоянных агентов)
-    └── <role-id>/
-        ├── role.md     # роль-промпт: описание роли и политика триажа
-        └── memory/     # файловая память роли
-            └── MEMORY.md  # индекс: одна строка на факт
+└── attachments/        # картинки, вставленные Ctrl+V в дашборде
+    └── <id>.<ext>
 ```
 
 Принцип: **вся модель данных — в rocket.db, единственный писатель — демон.** Репозитории и проекты тоже живут в базе и управляются через CLI/API/дашборд, а не редактированием файлов. config.yaml — только настройки демона, опционален (без него — дефолты).
@@ -49,8 +44,7 @@ default_agent: claude-code
 repos_dir: ~/.rocket/repos          # куда клонировать репо из GitHub
 worktrees_dir: ~/.rocket/worktrees  # где создавать worktree сессий
 attachments_dir: ~/.rocket/attachments  # куда сохранять вложения (POST /v1/attachments)
-agent_wake_debounce: 30s  # окно, в котором события инбокса роли сгребаются в один запуск
-agent_idle_timeout: 15m   # инстанс роли без активности дольше — убивается (agent.run_timeout)
+agent_notify_interval: 5m # не чаще этого агенту повторно сообщают о непрочитанных
 ```
 
 ## Схема SQLite
@@ -84,7 +78,7 @@ CREATE TABLE projects (
 ```sql
 CREATE TABLE sessions (  -- продолжение схемы
   id            TEXT PRIMARY KEY,
-  kind          TEXT NOT NULL CHECK (kind IN ('orchestrator','worker','agent')),  -- agent = инстанс роли
+  kind          TEXT NOT NULL CHECK (kind IN ('orchestrator','worker','agent')),  -- agent = сессия постоянного агента
   project_id    TEXT NOT NULL,             -- проект (верхняя сущность)
   repo_id       TEXT NOT NULL,             -- репозиторий, где worktree
   feature_slug  TEXT NOT NULL,
@@ -180,43 +174,25 @@ CREATE TABLE attachments (
   created_at INTEGER NOT NULL
 );                                       -- файл лежит на диске: <attachments_dir>/<id>.<ext>
 
-CREATE TABLE agents (                          -- роль (постоянный агент)
-  id            TEXT PRIMARY KEY,              -- "sre", [a-z0-9-]
-  project_id    TEXT NOT NULL REFERENCES projects(id),
-  prompt_path   TEXT NOT NULL,                 -- <home>/agents/<id>/role.md
-  subscriptions TEXT NOT NULL DEFAULT '[]',    -- JSON [{repo,labels[],mention_only}]
-  cron          TEXT NOT NULL DEFAULT '',
-  agent         TEXT NOT NULL DEFAULT '',      -- underlying-агент (claude-code|codex)
-  enabled       INTEGER NOT NULL DEFAULT 1,
-  created_at    INTEGER NOT NULL,
-  updated_at    INTEGER NOT NULL
+CREATE TABLE agents (                          -- постоянный агент
+  id          TEXT PRIMARY KEY,              -- "sre", [a-z0-9-]; оно же имя tmux-сессии
+  description TEXT NOT NULL DEFAULT '',
+  project_id  TEXT NOT NULL DEFAULT '',      -- только группировка в UI; '' — вне проекта
+  dir         TEXT NOT NULL DEFAULT '',      -- рабочая директория для agent start
+  command     TEXT NOT NULL DEFAULT '',      -- команда запуска; '' — интерактивный shell
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
 );
 
-CREATE TABLE agent_inbox (                     -- очередь событий роли
+CREATE TABLE agent_inbox (                     -- сообщения, ждущие разбора агентом
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  role_id    TEXT NOT NULL REFERENCES agents(id),
-  kind       TEXT NOT NULL,                    -- message|issue_opened|issue_comment|
-                                               -- task_update|snooze_expired|cron|
-                                               -- question|terminal_opened
-  payload    TEXT NOT NULL DEFAULT '{}',       -- JSON
-  status     TEXT NOT NULL DEFAULT 'queued',   -- queued|delivered|done
+  agent_id   TEXT NOT NULL REFERENCES agents(id),
+  from_id    TEXT NOT NULL DEFAULT '',        -- id сессии отправителя; '' — человек/UI
+  body       TEXT NOT NULL,
+  status     TEXT NOT NULL DEFAULT 'unread',  -- unread|read
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-);
-
-CREATE TABLE agent_items (                     -- досье роли
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  role_id      TEXT NOT NULL REFERENCES agents(id),
-  kind         TEXT NOT NULL,                  -- issue|task|ping
-  external_ref TEXT NOT NULL,                  -- owner/repo#123 | task:45 | msg:<id>
-  state        TEXT NOT NULL DEFAULT 'new',    -- new|triaged|taken|deferred|
-                                               -- waiting_team|in_work|resolved|closed
-  note         TEXT NOT NULL DEFAULT '',
-  task_id      INTEGER,
-  snooze_until INTEGER,
-  created_at   INTEGER NOT NULL,
-  updated_at   INTEGER NOT NULL,
-  UNIQUE (role_id, kind, external_ref)
+  read_at    INTEGER
 );
 
 CREATE TABLE events (

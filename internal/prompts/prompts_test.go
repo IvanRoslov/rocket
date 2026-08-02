@@ -163,7 +163,7 @@ func TestRenderEmptyHome(t *testing.T) {
 func TestNames(t *testing.T) {
 	names := Names()
 
-	expected := []string{"agent", "kickoff", "orchestrator", "worker"}
+	expected := []string{"kickoff", "orchestrator", "worker"}
 	if len(names) != len(expected) {
 		t.Errorf("expected %d names, got %d", len(expected), len(names))
 	}
@@ -516,25 +516,5 @@ func TestStripMarkersOnlyRemovesMarkerLines(t *testing.T) {
 	want := "before\nkept content\nafter\n"
 	if got != want {
 		t.Errorf("StripMarkers() = %q, want %q", got, want)
-	}
-}
-
-func TestRenderAgentTemplate(t *testing.T) {
-	out, err := Render("", "agent", completeVars())
-	if err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-
-	for _, want := range []string{
-		"sre",                     // role_id
-		"ROLE POLICY BODY",        // role_prompt
-		"/home/agents/sre/memory", // memory_dir
-		"rocket agent done",
-		"rocket agent state set",
-		"<!-- rocket-agent:sre -->",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("rendered agent prompt is missing %q:\n%s", want, out)
-		}
 	}
 }

@@ -3,151 +3,106 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"io"
-	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
-	"github.com/IvanRoslov/rocket/internal/roles"
+	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
-// inboxEventKinds are the event kinds a role's inbox accepts. Sources beyond
-// `message` are produced by later layers (github poller, scheduler, Q&A
-// threads); the set is validated here so a typo never lands in the queue.
-var inboxEventKinds = map[string]bool{
-	"message":         true,
-	"issue_opened":    true,
-	"issue_comment":   true,
-	"task_update":     true,
-	"snooze_expired":  true,
-	"cron":            true,
-	"question":        true,
-	"terminal_opened": true,
-}
-
-// agentItemKinds are the dossier entry kinds.
-var agentItemKinds = map[string]bool{"issue": true, "task": true, "ping": true}
-
-// agentResponse is the JSON shape of a role.
+// agentResponse is the JSON shape of a registered agent. Everything past the
+// stored columns is derived: whether its tmux session is alive, how much is
+// waiting in its inbox, and its open Q&A threads.
 type agentResponse struct {
-	ID            string                    `json:"id"`
-	Project       string                    `json:"project"`
-	PromptPath    string                    `json:"prompt_path"`
-	Prompt        string                    `json:"prompt,omitempty"`
-	Subscriptions []store.AgentSubscription `json:"subscriptions"`
-	Cron          string                    `json:"cron"`
-	Agent         string                    `json:"agent"`
-	Enabled       bool                      `json:"enabled"`
-	InboxQueued   int                       `json:"inbox_queued"`
-	Items         int                       `json:"items"`
-	OpenQuestions int                       `json:"open_questions"`
-	AwaitingUser  int                       `json:"awaiting_user"`
-	CreatedAt     int64                     `json:"created_at"`
-	UpdatedAt     int64                     `json:"updated_at"`
+	ID           string `json:"id"`
+	Description  string `json:"description"`
+	Project      string `json:"project"`
+	Dir          string `json:"dir"`
+	Command      string `json:"command"`
+	Enabled      bool   `json:"enabled"`
+	SessionAlive bool   `json:"session_alive"`
+	Unread       int    `json:"unread"`
+	// OpenQuestions counts open Q&A threads; AwaitingUser counts the subset
+	// whose turn it is for the human to speak.
+	OpenQuestions int   `json:"open_questions"`
+	AwaitingUser  int   `json:"awaiting_user"`
+	CreatedAt     int64 `json:"created_at"`
+	UpdatedAt     int64 `json:"updated_at"`
 }
 
-type inboxEventResponse struct {
-	ID        int64           `json:"id"`
-	Kind      string          `json:"kind"`
-	Payload   json.RawMessage `json:"payload"`
-	Status    string          `json:"status"`
-	CreatedAt int64           `json:"created_at"`
-	UpdatedAt int64           `json:"updated_at"`
+// inboxMessageResponse is the JSON shape of one inbox message.
+type inboxMessageResponse struct {
+	ID        int64  `json:"id"`
+	From      string `json:"from"`
+	Body      string `json:"body"`
+	Status    string `json:"status"`
+	CreatedAt int64  `json:"created_at"`
+	ReadAt    int64  `json:"read_at,omitempty"`
 }
 
-type agentItemResponse struct {
-	ID          int64  `json:"id"`
-	Kind        string `json:"kind"`
-	Ref         string `json:"ref"`
-	State       string `json:"state"`
-	Note        string `json:"note"`
-	TaskID      int64  `json:"task_id"`
-	SnoozeUntil int64  `json:"snooze_until"`
-	CreatedAt   int64  `json:"created_at"`
-	UpdatedAt   int64  `json:"updated_at"`
-}
-
-// roleFromSessionID returns the role a session belongs to. Role instances are
-// named "<role>-run-<n>" (see docs/10-agents.md) — the session id is the only
-// link between a run and its role, so no column duplicates it.
-func roleFromSessionID(sessionID string) string {
-	i := strings.LastIndex(sessionID, "-run-")
-	if i <= 0 {
-		return ""
+func toInboxMessageResponse(m store.InboxMessage) inboxMessageResponse {
+	return inboxMessageResponse{
+		ID:        m.ID,
+		From:      m.From,
+		Body:      m.Body,
+		Status:    m.Status,
+		CreatedAt: m.CreatedAt,
+		ReadAt:    m.ReadAt,
 	}
-	return sessionID[:i]
 }
 
-// toAgentResponse renders a role. counts is the OpenAgentQuestionCounts map,
-// passed in so the list handler fetches it once instead of per role.
-func toAgentResponse(d Deps, a store.Agent, withPrompt bool, counts map[string]store.QuestionCounts) (agentResponse, error) {
-	queued, err := d.Store.CountQueuedInboxEvents(a.ID)
+// agentSessionAlive reports whether the tmux session named after the agent is
+// registered as live. Adoption of hand-made sessions happens in the daemon's
+// watcher (internal/agentwatch); this is only the read side.
+func agentSessionAlive(d Deps, id string) (bool, error) {
+	sess, err := d.Store.GetSession(id)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if sess.Kind != session.AgentSessionKind {
+		return false, nil
+	}
+	return sess.State == "spawning" || sess.State == "running", nil
+}
+
+// toAgentResponse renders an agent. counts is the OpenAgentQuestionCounts map,
+// passed in so the list handler fetches it once instead of per agent.
+func toAgentResponse(d Deps, a store.Agent, counts map[string]store.QuestionCounts) (agentResponse, error) {
+	unread, err := d.Store.CountUnreadInbox(a.ID)
 	if err != nil {
 		return agentResponse{}, err
 	}
-	items, err := d.Store.ListAgentItems(a.ID, "")
+	alive, err := agentSessionAlive(d, a.ID)
 	if err != nil {
 		return agentResponse{}, err
-	}
-
-	subs := a.Subscriptions
-	if subs == nil {
-		subs = []store.AgentSubscription{}
 	}
 
 	qc := counts[a.ID]
-
-	resp := agentResponse{
+	return agentResponse{
 		ID:            a.ID,
+		Description:   a.Description,
 		Project:       a.ProjectID,
-		PromptPath:    a.PromptPath,
-		Subscriptions: subs,
-		Cron:          a.Cron,
-		Agent:         a.Agent,
+		Dir:           a.Dir,
+		Command:       a.Command,
 		Enabled:       a.Enabled,
-		InboxQueued:   queued,
-		Items:         len(items),
+		SessionAlive:  alive,
+		Unread:        unread,
 		OpenQuestions: qc.Open,
 		AwaitingUser:  qc.AwaitingUser,
 		CreatedAt:     a.CreatedAt,
 		UpdatedAt:     a.UpdatedAt,
-	}
-	if withPrompt {
-		prompt, err := roles.ReadPrompt(a.PromptPath)
-		if err != nil {
-			return agentResponse{}, err
-		}
-		resp.Prompt = prompt
-	}
-	return resp, nil
+	}, nil
 }
 
 // registerAgentRoutes wires the /v1/agents routes onto mux.
 func registerAgentRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("GET /v1/agents", func(w http.ResponseWriter, r *http.Request) {
-		agents, err := d.Store.ListAgents(r.URL.Query().Get("project"))
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
-		}
-		counts, err := d.Store.OpenAgentQuestionCounts()
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
-		}
-		out := make([]agentResponse, 0, len(agents))
-		for _, a := range agents {
-			ar, err := toAgentResponse(d, a, false, counts)
-			if err != nil {
-				writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-				return
-			}
-			out = append(out, ar)
-		}
-		writeJSON(w, http.StatusOK, out)
+		handleListAgents(w, r, d)
 	})
-
 	mux.HandleFunc("POST /v1/agents", func(w http.ResponseWriter, r *http.Request) {
 		handlePostAgent(w, r, d)
 	})
@@ -166,33 +121,30 @@ func registerAgentRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("POST /v1/agents/{id}/disable", func(w http.ResponseWriter, r *http.Request) {
 		handleSetAgentEnabled(w, r, d, false)
 	})
-	mux.HandleFunc("POST /v1/agents/{id}/wake", func(w http.ResponseWriter, r *http.Request) {
-		handleWakeAgent(w, r, d)
-	})
-	mux.HandleFunc("POST /v1/agents/{id}/done", func(w http.ResponseWriter, r *http.Request) {
-		handleAgentDone(w, r, d)
+	mux.HandleFunc("POST /v1/agents/{id}/messages", func(w http.ResponseWriter, r *http.Request) {
+		handlePostAgentMessage(w, r, d)
 	})
 	mux.HandleFunc("GET /v1/agents/{id}/inbox", func(w http.ResponseWriter, r *http.Request) {
 		handleGetAgentInbox(w, r, d)
 	})
-	mux.HandleFunc("GET /v1/agents/{id}/items", func(w http.ResponseWriter, r *http.Request) {
-		handleGetAgentItems(w, r, d)
+	mux.HandleFunc("POST /v1/agents/{id}/inbox/next", func(w http.ResponseWriter, r *http.Request) {
+		handleAgentInboxNext(w, r, d)
 	})
-	mux.HandleFunc("PUT /v1/agents/{id}/items", func(w http.ResponseWriter, r *http.Request) {
-		handlePutAgentItem(w, r, d)
+	mux.HandleFunc("GET /v1/agents/{id}/inbox/{msg}", func(w http.ResponseWriter, r *http.Request) {
+		handleGetAgentInboxMessage(w, r, d)
 	})
-	mux.HandleFunc("GET /v1/agents/{id}/memory", func(w http.ResponseWriter, r *http.Request) {
-		handleGetAgentMemory(w, r, d)
+	mux.HandleFunc("POST /v1/agents/{id}/start", func(w http.ResponseWriter, r *http.Request) {
+		handleStartAgent(w, r, d)
 	})
-	mux.HandleFunc("PUT /v1/agents/{id}/memory", func(w http.ResponseWriter, r *http.Request) {
-		handlePutAgentMemory(w, r, d)
+	mux.HandleFunc("POST /v1/agents/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
+		handleStopAgent(w, r, d)
 	})
 
 	registerAgentQuestionRoutes(mux, d)
 }
 
 // lookupAgent resolves the {id} path value, writing a 404 and returning
-// ok == false when the role doesn't exist.
+// ok == false when the agent doesn't exist.
 func lookupAgent(w http.ResponseWriter, r *http.Request, d Deps) (store.Agent, bool) {
 	a, err := d.Store.GetAgent(r.PathValue("id"))
 	if err != nil {
@@ -206,7 +158,7 @@ func lookupAgent(w http.ResponseWriter, r *http.Request, d Deps) (store.Agent, b
 	return a, true
 }
 
-func writeAgent(w http.ResponseWriter, d Deps, id string, status int, withPrompt bool) {
+func writeAgent(w http.ResponseWriter, d Deps, id string, status int) {
 	a, err := d.Store.GetAgent(id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -217,7 +169,7 @@ func writeAgent(w http.ResponseWriter, d Deps, id string, status int, withPrompt
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	ar, err := toAgentResponse(d, a, withPrompt, counts)
+	ar, err := toAgentResponse(d, a, counts)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -225,15 +177,39 @@ func writeAgent(w http.ResponseWriter, d Deps, id string, status int, withPrompt
 	writeJSON(w, status, ar)
 }
 
-type postAgentRequest struct {
-	ID            string                    `json:"id"`
-	Project       string                    `json:"project"`
-	Prompt        string                    `json:"prompt"`
-	Subscriptions []store.AgentSubscription `json:"subscriptions"`
-	Cron          string                    `json:"cron"`
-	Agent         string                    `json:"agent"`
+func handleListAgents(w http.ResponseWriter, r *http.Request, d Deps) {
+	agents, err := d.Store.ListAgents(r.URL.Query().Get("project"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	counts, err := d.Store.OpenAgentQuestionCounts()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	out := make([]agentResponse, 0, len(agents))
+	for _, a := range agents {
+		ar, err := toAgentResponse(d, a, counts)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		out = append(out, ar)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
+type postAgentRequest struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	Project     string `json:"project"`
+	Dir         string `json:"dir"`
+	Command     string `json:"command"`
+}
+
+// handlePostAgent registers an agent: an id (which doubles as its tmux session
+// name) plus optional description, project grouping and launcher fields.
 func handlePostAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 	var req postAgentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -245,41 +221,24 @@ func handlePostAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 		writeErr(w, http.StatusBadRequest, "invalid_id", "id must match ^[a-z0-9-]+$")
 		return
 	}
-	if _, err := d.Store.GetProject(req.Project); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeErr(w, http.StatusBadRequest, "project_not_found", "project not found: "+req.Project)
+	if req.Project != "" {
+		if _, err := d.Store.GetProject(req.Project); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeErr(w, http.StatusBadRequest, "project_not_found", "project not found: "+req.Project)
+				return
+			}
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
-		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
-	}
-	if _, err := d.Store.GetAgent(req.ID); err == nil {
-		writeErr(w, http.StatusConflict, "agent_exists", "agent id already exists")
-		return
-	} else if !errors.Is(err, store.ErrNotFound) {
-		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
-	}
-
-	promptPath, err := roles.Ensure(d.Cfg.Home, req.ID, req.Prompt, true)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
-	}
-
-	underlying := req.Agent
-	if underlying == "" {
-		underlying = d.Cfg.DefaultAgent
 	}
 
 	a := store.Agent{
-		ID:            req.ID,
-		ProjectID:     req.Project,
-		PromptPath:    promptPath,
-		Subscriptions: req.Subscriptions,
-		Cron:          req.Cron,
-		Agent:         underlying,
-		Enabled:       true,
+		ID:          req.ID,
+		Description: req.Description,
+		ProjectID:   req.Project,
+		Dir:         req.Dir,
+		Command:     req.Command,
+		Enabled:     true,
 	}
 	if err := d.Store.AddAgent(a); err != nil {
 		if errors.Is(err, store.ErrExists) {
@@ -290,7 +249,7 @@ func handlePostAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
-	writeAgent(w, d, a.ID, http.StatusCreated, false)
+	writeAgent(w, d, a.ID, http.StatusCreated)
 }
 
 func handleGetAgent(w http.ResponseWriter, r *http.Request, d Deps) {
@@ -298,7 +257,7 @@ func handleGetAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 	if !ok {
 		return
 	}
-	writeAgent(w, d, a.ID, http.StatusOK, true)
+	writeAgent(w, d, a.ID, http.StatusOK)
 }
 
 func handlePatchAgent(w http.ResponseWriter, r *http.Request, d Deps) {
@@ -313,38 +272,37 @@ func handlePatchAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
-	if v, ok := raw["prompt"]; ok {
-		var prompt string
-		if err := json.Unmarshal(v, &prompt); err != nil {
-			writeErr(w, http.StatusBadRequest, "bad_request", "invalid prompt")
-			return
+	for field, target := range map[string]*string{
+		"description": &a.Description,
+		"dir":         &a.Dir,
+		"command":     &a.Command,
+	} {
+		v, ok := raw[field]
+		if !ok {
+			continue
 		}
-		promptPath, err := roles.Ensure(d.Cfg.Home, a.ID, prompt, true)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
-		}
-		a.PromptPath = promptPath
-	}
-	if v, ok := raw["subscriptions"]; ok {
-		var subs []store.AgentSubscription
-		if err := json.Unmarshal(v, &subs); err != nil {
-			writeErr(w, http.StatusBadRequest, "bad_request", "invalid subscriptions")
-			return
-		}
-		a.Subscriptions = subs
-	}
-	if v, ok := raw["cron"]; ok {
-		if err := json.Unmarshal(v, &a.Cron); err != nil {
-			writeErr(w, http.StatusBadRequest, "bad_request", "invalid cron")
+		if err := json.Unmarshal(v, target); err != nil {
+			writeErr(w, http.StatusBadRequest, "bad_request", "invalid "+field)
 			return
 		}
 	}
-	if v, ok := raw["agent"]; ok {
-		if err := json.Unmarshal(v, &a.Agent); err != nil {
-			writeErr(w, http.StatusBadRequest, "bad_request", "invalid agent")
+	if v, ok := raw["project"]; ok {
+		var project string
+		if err := json.Unmarshal(v, &project); err != nil {
+			writeErr(w, http.StatusBadRequest, "bad_request", "invalid project")
 			return
 		}
+		if project != "" {
+			if _, err := d.Store.GetProject(project); err != nil {
+				if errors.Is(err, store.ErrNotFound) {
+					writeErr(w, http.StatusBadRequest, "project_not_found", "project not found: "+project)
+					return
+				}
+				writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+				return
+			}
+		}
+		a.ProjectID = project
 	}
 	if v, ok := raw["enabled"]; ok {
 		if err := json.Unmarshal(v, &a.Enabled); err != nil {
@@ -357,7 +315,7 @@ func handlePatchAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	writeAgent(w, d, a.ID, http.StatusOK, true)
+	writeAgent(w, d, a.ID, http.StatusOK)
 }
 
 func handleSetAgentEnabled(w http.ResponseWriter, r *http.Request, d Deps, enabled bool) {
@@ -370,7 +328,7 @@ func handleSetAgentEnabled(w http.ResponseWriter, r *http.Request, d Deps, enabl
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	writeAgent(w, d, a.ID, http.StatusOK, false)
+	writeAgent(w, d, a.ID, http.StatusOK)
 }
 
 func handleDeleteAgent(w http.ResponseWriter, r *http.Request, d Deps) {
@@ -385,106 +343,46 @@ func handleDeleteAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-type wakeAgentRequest struct {
-	Kind string `json:"kind"`
-	Text string `json:"text"`
-	// From names the sender (session id or user) for message events.
+type postAgentMessageRequest struct {
+	Body string `json:"body"`
 	From string `json:"from"`
-	// Payload, when given, replaces the {text, from} payload built here.
-	Payload json.RawMessage `json:"payload"`
 }
 
-// handleWakeAgent enqueues an inbox event and notifies the wake engine, which
-// decides whether the role's live instance receives it or a fresh one is
-// spawned (after the debounce window).
-func handleWakeAgent(w http.ResponseWriter, r *http.Request, d Deps) {
+// handlePostAgentMessage is the dashboard's "send a message to this agent"
+// endpoint. It takes the same live-or-inbox path as `rocket send <agent>`.
+func handlePostAgentMessage(w http.ResponseWriter, r *http.Request, d Deps) {
 	a, ok := lookupAgent(w, r, d)
 	if !ok {
 		return
 	}
 
-	var req wakeAgentRequest
-	if r.Body != nil {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-			writeErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
-			return
-		}
+	var req postAgentMessageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
 	}
-
-	kind := req.Kind
-	if kind == "" {
-		kind = "message"
-	}
-	if !inboxEventKinds[kind] {
-		writeErr(w, http.StatusBadRequest, "invalid_kind", "unknown inbox event kind: "+kind)
+	if strings.TrimSpace(req.Body) == "" {
+		writeErr(w, http.StatusBadRequest, "empty_body", "body must not be empty")
 		return
 	}
 
-	payload := string(req.Payload)
-	if payload == "" {
-		b, err := json.Marshal(map[string]string{"text": req.Text, "from": req.From})
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
-		}
-		payload = string(b)
-	}
-
-	id, err := d.Store.EnqueueInboxEvent(store.AgentInboxEvent{
-		RoleID:  a.ID,
-		Kind:    kind,
-		Payload: payload,
-	})
+	live, id, err := deliverToAgent(d, a.ID, req.From, req.Body)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-
-	NotifyRole(d, a.ID)
-
-	writeJSON(w, http.StatusAccepted, map[string]any{"event_id": id, "kind": kind})
+	writeJSON(w, http.StatusAccepted, agentDeliveryResult(a.ID, live, id))
 }
 
-// NotifyRole tells the wake engine about a new inbox event, if a runtime is
-// wired in. Enqueuing without a runtime is not an error: the events are
-// durable and the engine picks them up on its next start.
-func NotifyRole(d Deps, roleID string) {
-	if d.Agents == nil {
-		slog.Warn("api: inbox event enqueued with no wake engine, the role will not be woken until the daemon restarts", "role", roleID)
-		return
+// agentDeliveryResult is the response body every "message to an agent" path
+// returns, so senders can tell an injected message from an inboxed one. id is
+// the queued message's id when live, and the inbox row's id otherwise.
+func agentDeliveryResult(agentID string, live bool, id int64) map[string]any {
+	status := "inbox"
+	if live {
+		status = "queued"
 	}
-	d.Agents.Notify(roleID)
-}
-
-// handleAgentDone ends the calling instance's run: the daemon closes the
-// events it was briefed with and kills the session (its worktree is kept).
-// Only an instance of the role may call it — a run ends itself, nobody ends
-// it for it.
-func handleAgentDone(w http.ResponseWriter, r *http.Request, d Deps) {
-	a, ok := lookupAgent(w, r, d)
-	if !ok {
-		return
-	}
-
-	caller, err := callerSession(r, d.Store)
-	if writeCallerErr(w, err) {
-		return
-	}
-	if caller == nil || caller.Kind != "agent" || roleFromSessionID(caller.ID) != a.ID {
-		writeErr(w, http.StatusForbidden, "forbidden", "only an instance of role "+a.ID+" may end its run")
-		return
-	}
-
-	if d.Agents == nil {
-		writeErr(w, http.StatusServiceUnavailable, "runtime_unavailable", "the wake engine is not running")
-		return
-	}
-	if err := d.Agents.Done(r.Context(), caller.ID); err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"status": "done", "session": caller.ID, "agent": a.ID})
+	return map[string]any{"id": id, "to": agentID, "status": status, "live": live}
 }
 
 func handleGetAgentInbox(w http.ResponseWriter, r *http.Request, d Deps) {
@@ -493,185 +391,111 @@ func handleGetAgentInbox(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
-	events, err := d.Store.ListInboxEvents(a.ID, r.URL.Query().Get("status"), 0)
+	status := r.URL.Query().Get("status")
+	if status != "" && status != store.InboxUnread && status != store.InboxRead {
+		writeErr(w, http.StatusBadRequest, "invalid_status", "status must be unread or read")
+		return
+	}
+
+	msgs, err := d.Store.ListInboxMessages(a.ID, status, 0)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 
-	out := make([]inboxEventResponse, 0, len(events))
-	for _, e := range events {
-		payload := json.RawMessage(e.Payload)
-		if !json.Valid(payload) {
-			payload = json.RawMessage(`{}`)
-		}
-		out = append(out, inboxEventResponse{
-			ID:        e.ID,
-			Kind:      e.Kind,
-			Payload:   payload,
-			Status:    e.Status,
-			CreatedAt: e.CreatedAt,
-			UpdatedAt: e.UpdatedAt,
-		})
+	out := make([]inboxMessageResponse, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, toInboxMessageResponse(m))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
-func handleGetAgentItems(w http.ResponseWriter, r *http.Request, d Deps) {
+// handleAgentInboxNext hands out the agent's oldest unread message and marks
+// it read — the pull half of the inbox. 204 means the inbox is drained.
+func handleAgentInboxNext(w http.ResponseWriter, r *http.Request, d Deps) {
 	a, ok := lookupAgent(w, r, d)
 	if !ok {
 		return
 	}
 
-	items, err := d.Store.ListAgentItems(a.ID, r.URL.Query().Get("state"))
+	m, found, err := d.Store.NextUnreadInboxMessage(a.ID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-
-	out := make([]agentItemResponse, 0, len(items))
-	for _, it := range items {
-		out = append(out, toAgentItemResponse(it))
+	if !found {
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, toInboxMessageResponse(m))
 }
 
-type putAgentItemRequest struct {
-	Kind        string `json:"kind"`
-	Ref         string `json:"ref"`
-	State       string `json:"state"`
-	Note        string `json:"note"`
-	TaskID      int64  `json:"task_id"`
-	SnoozeUntil int64  `json:"snooze_until"`
-}
-
-func handlePutAgentItem(w http.ResponseWriter, r *http.Request, d Deps) {
+// handleGetAgentInboxMessage reads one message without marking it read (peek).
+func handleGetAgentInboxMessage(w http.ResponseWriter, r *http.Request, d Deps) {
 	a, ok := lookupAgent(w, r, d)
 	if !ok {
 		return
 	}
 
-	caller, err := callerSession(r, d.Store)
-	if writeCallerErr(w, err) {
-		return
-	}
-	// A human caller (no session header) has full rights; a session caller
-	// must be an instance of this very role.
-	if caller != nil && (caller.Kind != "agent" || roleFromSessionID(caller.ID) != a.ID) {
-		writeErr(w, http.StatusForbidden, "forbidden", "only instances of role "+a.ID+" may write its dossier")
-		return
-	}
-
-	var req putAgentItemRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
-		return
-	}
-	if strings.TrimSpace(req.Ref) == "" {
-		writeErr(w, http.StatusBadRequest, "bad_request", "ref is required")
-		return
-	}
-	if !agentItemKinds[req.Kind] {
-		writeErr(w, http.StatusBadRequest, "invalid_kind", "kind must be one of issue|task|ping")
-		return
-	}
-
-	it, err := d.Store.UpsertAgentItem(store.AgentItem{
-		RoleID:      a.ID,
-		Kind:        req.Kind,
-		ExternalRef: req.Ref,
-		State:       req.State,
-		Note:        req.Note,
-		TaskID:      req.TaskID,
-		SnoozeUntil: req.SnoozeUntil,
-	})
+	id, err := strconv.ParseInt(r.PathValue("msg"), 10, 64)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		writeErr(w, http.StatusNotFound, "message_not_found", "message not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, toAgentItemResponse(it))
-}
 
-func toAgentItemResponse(it store.AgentItem) agentItemResponse {
-	return agentItemResponse{
-		ID:          it.ID,
-		Kind:        it.Kind,
-		Ref:         it.ExternalRef,
-		State:       it.State,
-		Note:        it.Note,
-		TaskID:      it.TaskID,
-		SnoozeUntil: it.SnoozeUntil,
-		CreatedAt:   it.CreatedAt,
-		UpdatedAt:   it.UpdatedAt,
-	}
-}
-
-// agentMemoryResponse is the JSON shape of a role's file memory: the MEMORY.md
-// index plus the fact files beside it, bodies inlined (role memory is a handful
-// of short notes, and both the dashboard and the mobile app render all of them
-// at once).
-type agentMemoryResponse struct {
-	Path  string             `json:"path"`
-	Index string             `json:"index"`
-	Files []roles.MemoryFile `json:"files"`
-}
-
-func writeAgentMemory(w http.ResponseWriter, d Deps, id string) {
-	index, files, err := roles.ReadMemory(d.Cfg.Home, id)
+	m, err := d.Store.GetInboxMessage(id)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, agentMemoryResponse{
-		Path:  roles.MemoryDir(d.Cfg.Home, id),
-		Index: index,
-		Files: files,
-	})
-}
-
-func handleGetAgentMemory(w http.ResponseWriter, r *http.Request, d Deps) {
-	a, ok := lookupAgent(w, r, d)
-	if !ok {
-		return
-	}
-	writeAgentMemory(w, d, a.ID)
-}
-
-type putAgentMemoryRequest struct {
-	// File names the memory file to write; empty means the MEMORY.md index.
-	File string `json:"file"`
-	Body string `json:"body"`
-}
-
-// handlePutAgentMemory writes one file of the role's memory. Only plain
-// markdown base names are accepted (roles.ValidMemoryFileName): the name comes
-// straight from a request body and the memory directory sits next to the role
-// prompt, so a traversing name must never reach the filesystem.
-func handlePutAgentMemory(w http.ResponseWriter, r *http.Request, d Deps) {
-	a, ok := lookupAgent(w, r, d)
-	if !ok {
-		return
-	}
-
-	var req putAgentMemoryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
-		return
-	}
-	name := req.File
-	if name == "" {
-		name = "MEMORY.md"
-	}
-
-	if err := roles.WriteMemoryFile(d.Cfg.Home, a.ID, name, req.Body); err != nil {
-		if errors.Is(err, roles.ErrInvalidMemoryFile) {
-			writeErr(w, http.StatusBadRequest, "invalid_file",
-				"memory file must be a plain .md name inside the role memory directory")
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "message_not_found", "message not found")
 			return
 		}
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
+	if m.AgentID != a.ID {
+		writeErr(w, http.StatusNotFound, "message_not_found", "message not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, toInboxMessageResponse(m))
+}
 
-	writeAgentMemory(w, d, a.ID)
+// handleStartAgent runs the thin launcher: a tmux session named after the
+// agent, running its command in its directory. Rocket does not manage what
+// happens inside.
+func handleStartAgent(w http.ResponseWriter, r *http.Request, d Deps) {
+	a, ok := lookupAgent(w, r, d)
+	if !ok {
+		return
+	}
+	if d.Manager == nil {
+		writeErr(w, http.StatusServiceUnavailable, "runtime_unavailable", "session manager is not running")
+		return
+	}
+
+	sess, err := d.Manager.StartAgent(r.Context(), a)
+	if err != nil {
+		writeManagerErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": a.ID, "status": "running", "dir": sess.WorktreePath,
+	})
+}
+
+// handleStopAgent kills the agent's tmux session; the registration stays.
+func handleStopAgent(w http.ResponseWriter, r *http.Request, d Deps) {
+	a, ok := lookupAgent(w, r, d)
+	if !ok {
+		return
+	}
+	if d.Manager == nil {
+		writeErr(w, http.StatusServiceUnavailable, "runtime_unavailable", "session manager is not running")
+		return
+	}
+
+	if err := d.Manager.StopAgent(r.Context(), a.ID); err != nil {
+		writeManagerErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": a.ID, "status": "stopped"})
 }

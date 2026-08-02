@@ -72,7 +72,7 @@ func newAgentQuestionsCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "questions [<role>]",
-		Short: "Показать треды роли",
+		Short: "Показать треды агента",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 1 {
 				return &usageError{message: "usage: rocket agent questions [<role>] [--open]"}
@@ -82,7 +82,7 @@ func newAgentQuestionsCmd() *cobra.Command {
 			if len(args) == 1 {
 				role = args[0]
 			}
-			role, err := resolveRole(role)
+			role, err := resolveAgentID(role)
 			if err != nil {
 				return err
 			}

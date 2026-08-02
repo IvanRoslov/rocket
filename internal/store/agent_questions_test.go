@@ -9,7 +9,7 @@ func seedAgentForQuestions(t *testing.T, s *Store, id string) {
 	if _, err := s.GetProject("platform"); err == ErrNotFound {
 		addAgentFixtures(t, s)
 	}
-	if err := s.AddAgent(Agent{ID: id, ProjectID: "platform", PromptPath: "/tmp/role.md", Enabled: true}); err != nil {
+	if err := s.AddAgent(Agent{ID: id, ProjectID: "platform", Enabled: true}); err != nil {
 		t.Fatalf("AddAgent: %v", err)
 	}
 }

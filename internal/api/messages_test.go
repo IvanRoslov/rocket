@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -367,22 +366,24 @@ func TestGetMessageByID_NotFound(t *testing.T) {
 	}
 }
 
-func TestPostMessage_ToRoleEnqueuesInboxEvent(t *testing.T) {
-	d := messagesTestDeps(t)
-	eng := &fakeAgentEngine{}
-	d.Agents = eng
-
+// seedMessagesAgent registers project "platform" and agent "sre" so messages
+// can be addressed to the agent by name.
+func seedMessagesAgent(t *testing.T, d Deps) {
+	t.Helper()
 	if err := d.Store.AddRepo(store.Repo{ID: "platform-repo", Path: "/tmp/p"}); err != nil {
 		t.Fatalf("AddRepo: %v", err)
 	}
 	if err := d.Store.AddProject(store.Project{ID: "platform", Name: "Platform", MainRepo: "platform-repo"}); err != nil {
 		t.Fatalf("AddProject: %v", err)
 	}
-	if err := d.Store.AddAgent(store.Agent{
-		ID: "sre", ProjectID: "platform", PromptPath: "/tmp/role.md", Enabled: true,
-	}); err != nil {
+	if err := d.Store.AddAgent(store.Agent{ID: "sre", ProjectID: "platform", Enabled: true}); err != nil {
 		t.Fatalf("AddAgent: %v", err)
 	}
+}
+
+func TestPostMessage_ToAgentWithoutSessionInboxesIt(t *testing.T) {
+	d := messagesTestDeps(t)
+	seedMessagesAgent(t, d)
 	addMsgTestSession(t, d, "feat-orch", "running")
 
 	srv := newTestServer(t, d)
@@ -393,29 +394,72 @@ func TestPostMessage_ToRoleEnqueuesInboxEvent(t *testing.T) {
 		t.Fatalf("status = %d, want 202", resp.StatusCode)
 	}
 	body := decodeMap(t, resp)
-	if body["to"] != "sre" || body["queued"] != "inbox" {
-		t.Fatalf("response = %v, want the role inbox shape", body)
+	if body["to"] != "sre" || body["status"] != "inbox" || body["live"] != false {
+		t.Fatalf("response = %v, want the agent inbox shape", body)
 	}
 
-	events, err := d.Store.ListInboxEvents("sre", "", 0)
+	msgs, err := d.Store.ListInboxMessages("sre", "", 0)
 	if err != nil {
-		t.Fatalf("ListInboxEvents: %v", err)
+		t.Fatalf("ListInboxMessages: %v", err)
 	}
-	if len(events) != 1 || events[0].Kind != "message" {
-		t.Fatalf("inbox = %+v, want one message event", events)
+	if len(msgs) != 1 || msgs[0].Body != "blocked by X" || msgs[0].From != "feat-orch" {
+		t.Fatalf("inbox = %+v, want one message from feat-orch", msgs)
 	}
-	if !strings.Contains(events[0].Payload, "blocked by X") || !strings.Contains(events[0].Payload, "feat-orch") {
-		t.Errorf("payload = %q, want the body and the sender", events[0].Payload)
+}
+
+func TestPostMessage_ToAgentWithLiveSessionQueuesIt(t *testing.T) {
+	d := messagesTestDeps(t)
+	seedMessagesAgent(t, d)
+	addMsgTestSession(t, d, "feat-orch", "running")
+	if err := d.Store.AddSession(store.Session{
+		ID: "sre", Kind: "agent", ProjectID: "platform", FeatureSlug: "sre",
+		Agent: "claude-code", TmuxName: "sre", State: "running",
+	}); err != nil {
+		t.Fatalf("AddSession: %v", err)
 	}
 
-	if len(eng.notified) != 1 || eng.notified[0] != "sre" {
-		t.Fatalf("engine notifications = %v, want [sre]", eng.notified)
+	srv := newTestServer(t, d)
+	body := decodeMap(t, postJSON(t, srv.URL+"/v1/messages", map[string]any{
+		"from": "feat-orch", "to": "sre", "body": "ping",
+	}))
+	if body["status"] != "queued" || body["live"] != true {
+		t.Fatalf("response = %v, want queued", body)
+	}
+
+	msgs, err := d.Store.ListMessages("sre", 0)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].FromSession != "feat-orch" || msgs[0].Body != "ping" {
+		t.Fatalf("messages = %+v", msgs)
+	}
+}
+
+// TestPostMessage_ToAgentWithDeadSessionInboxesIt guards the case a plain
+// session recipient would fail on: a retired agent session row must send the
+// message to the inbox rather than fail it as "recipient_terminal".
+func TestPostMessage_ToAgentWithDeadSessionInboxesIt(t *testing.T) {
+	d := messagesTestDeps(t)
+	seedMessagesAgent(t, d)
+	if err := d.Store.AddSession(store.Session{
+		ID: "sre", Kind: "agent", ProjectID: "platform", FeatureSlug: "sre",
+		Agent: "claude-code", TmuxName: "sre", State: "done",
+	}); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+
+	srv := newTestServer(t, d)
+	resp := postJSON(t, srv.URL+"/v1/messages", map[string]any{"to": "sre", "body": "later"})
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	if body := decodeMap(t, resp); body["status"] != "inbox" {
+		t.Fatalf("response = %v, want inbox", body)
 	}
 }
 
 func TestPostMessage_UnknownRecipientStill404(t *testing.T) {
 	d := messagesTestDeps(t)
-	d.Agents = &fakeAgentEngine{}
 	srv := newTestServer(t, d)
 
 	resp := postJSON(t, srv.URL+"/v1/messages", map[string]any{"to": "nobody", "body": "hi"})

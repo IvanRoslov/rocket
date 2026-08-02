@@ -378,6 +378,15 @@ func (m *Monitor) pollSession(ctx context.Context, sess store.Session, liveSet m
 		switch {
 		case haveLiveSet && !liveSet[sess.TmuxName]:
 			state, ts, exited = activity.Exited, time.Now(), true
+		case sess.Kind == "agent":
+			// A persistent agent's session is not rocket's to interpret: it
+			// runs whatever its author put there, and an agent registered
+			// without a command runs a bare shell on purpose. "Only a shell
+			// in the pane" means "the agent process died" for sessions rocket
+			// launched itself — for an agent session it would condemn a
+			// perfectly healthy one, and every message to it would then fail
+			// as recipient_unavailable. Only the tmux-dead check above
+			// applies here.
 		default:
 			if only, err := m.prober.onlyShellRunning(ctx, sess.TmuxName); err == nil && only {
 				state, ts, exited = activity.Exited, time.Now(), true

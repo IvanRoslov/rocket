@@ -16,7 +16,7 @@ import (
 	"github.com/IvanRoslov/rocket/internal/agent"
 	_ "github.com/IvanRoslov/rocket/internal/agent/claudecode" // register the claude-code agent
 	_ "github.com/IvanRoslov/rocket/internal/agent/codex"      // register the codex agent
-	"github.com/IvanRoslov/rocket/internal/agentrun"
+	"github.com/IvanRoslov/rocket/internal/agentwatch"
 	"github.com/IvanRoslov/rocket/internal/api"
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
@@ -74,7 +74,7 @@ func Run(cfg *config.Config) error {
 	mon := monitor.New(st, b, rt, cfg, agent.Get)
 	q := queue.New(st, b, rt, cfg, mon.Activity)
 	hb := heartbeat.New(st, b, cfg, mon.Activity, q.Wake)
-	agentEngine := agentrun.New(st, b, cfg, mgr, q.Wake)
+	agentWatch := agentwatch.New(st, rt, cfg, mgr, q.Wake)
 	reactions := ghpoller.NewReactions(st, b, q.Wake, mgr, mon.Activity, cfg)
 	defer reactions.Stop()
 	if err := reactions.RearmPending(); err != nil {
@@ -106,9 +106,10 @@ func Run(cfg *config.Config) error {
 	go q.Run(ctx)
 
 	go hb.Run(ctx)
-	// The engine's first tick picks up inbox events enqueued while the
-	// daemon was down (and arms role cron schedules).
-	go agentEngine.Run(ctx)
+	// Agents are not spawned by rocket: the watcher discovers their tmux
+	// sessions, keeps the session rows honest and tells a freshly appeared
+	// agent how much unread mail is waiting for it.
+	go agentWatch.Run(ctx)
 	go ghp.Run(ctx)
 
 	shutdownCalled := make(chan struct{})
@@ -130,7 +131,6 @@ func Run(cfg *config.Config) error {
 		Manager:   mgr,
 		Monitor:   mon,
 		Queue:     q,
-		Agents:    agentEngine,
 		Shutdown:  shutdownOnce,
 		StartedAt: time.Now(),
 		GH:        githubClientFactory(st, cfg),

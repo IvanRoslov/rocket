@@ -19,15 +19,12 @@ func addAgentFixtures(t *testing.T, s *Store) {
 
 func testAgent(id string) Agent {
 	return Agent{
-		ID:         id,
-		ProjectID:  "platform",
-		PromptPath: "/tmp/agents/" + id + "/role.md",
-		Subscriptions: []AgentSubscription{
-			{Repo: "acme/platform", Labels: []string{"bug"}, MentionOnly: true},
-		},
-		Cron:    "0 * * * *",
-		Agent:   "claude-code",
-		Enabled: true,
+		ID:          id,
+		Description: "agent " + id,
+		ProjectID:   "platform",
+		Dir:         "/tmp/agents/" + id,
+		Command:     "claude --dangerously-skip-permissions",
+		Enabled:     true,
 	}
 }
 
@@ -35,20 +32,20 @@ func TestSessionKindAgentAllowed(t *testing.T) {
 	s := openTestStore(t)
 
 	sess := Session{
-		ID:        "sre-run-1",
+		ID:        "sre",
 		Kind:      "agent",
 		ProjectID: "platform",
 		RepoID:    "platform-repo",
 		Agent:     "claude-code",
-		Branch:    "agent/sre",
-		TmuxName:  "sre-run-1",
+		Branch:    "",
+		TmuxName:  "sre",
 		State:     "running",
 	}
 	if err := s.AddSession(sess); err != nil {
 		t.Fatalf("AddSession kind=agent: %v", err)
 	}
 
-	got, err := s.GetSession("sre-run-1")
+	got, err := s.GetSession("sre")
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)
 	}
@@ -120,15 +117,12 @@ func TestAddGetAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAgent: %v", err)
 	}
-	if got.ProjectID != "platform" || got.Cron != "0 * * * *" || got.Agent != "claude-code" {
+	if got.ProjectID != "platform" || got.Description != "agent sre" ||
+		got.Dir != "/tmp/agents/sre" || got.Command != "claude --dangerously-skip-permissions" {
 		t.Errorf("agent = %+v", got)
 	}
 	if !got.Enabled {
 		t.Errorf("Enabled = false, want true")
-	}
-	if len(got.Subscriptions) != 1 || got.Subscriptions[0].Repo != "acme/platform" ||
-		!got.Subscriptions[0].MentionOnly || len(got.Subscriptions[0].Labels) != 1 {
-		t.Errorf("Subscriptions = %+v", got.Subscriptions)
 	}
 	if got.CreatedAt == 0 || got.UpdatedAt == 0 {
 		t.Errorf("timestamps not set: %+v", got)
@@ -202,8 +196,8 @@ func TestUpdateAgent(t *testing.T) {
 		t.Fatalf("GetAgent: %v", err)
 	}
 	a.Enabled = false
-	a.Cron = ""
-	a.Subscriptions = nil
+	a.Description = "on call"
+	a.Command = ""
 	if err := s.UpdateAgent(a); err != nil {
 		t.Fatalf("UpdateAgent: %v", err)
 	}
@@ -215,11 +209,11 @@ func TestUpdateAgent(t *testing.T) {
 	if got.Enabled {
 		t.Errorf("Enabled = true, want false")
 	}
-	if got.Cron != "" {
-		t.Errorf("Cron = %q, want empty", got.Cron)
+	if got.Command != "" {
+		t.Errorf("Command = %q, want empty", got.Command)
 	}
-	if len(got.Subscriptions) != 0 {
-		t.Errorf("Subscriptions = %+v, want empty", got.Subscriptions)
+	if got.Description != "on call" {
+		t.Errorf("Description = %q, want \"on call\"", got.Description)
 	}
 	if got.UpdatedAt < a.CreatedAt {
 		t.Errorf("UpdatedAt = %d, want >= CreatedAt %d", got.UpdatedAt, a.CreatedAt)
@@ -240,11 +234,8 @@ func TestDeleteAgentCascades(t *testing.T) {
 	if err := s.AddAgent(testAgent("sre")); err != nil {
 		t.Fatalf("AddAgent: %v", err)
 	}
-	if _, err := s.EnqueueInboxEvent(AgentInboxEvent{RoleID: "sre", Kind: "message"}); err != nil {
-		t.Fatalf("EnqueueInboxEvent: %v", err)
-	}
-	if _, err := s.UpsertAgentItem(AgentItem{RoleID: "sre", Kind: "issue", ExternalRef: "acme/platform#1"}); err != nil {
-		t.Fatalf("UpsertAgentItem: %v", err)
+	if _, err := s.AddInboxMessage(InboxMessage{AgentID: "sre", Body: "hi"}); err != nil {
+		t.Fatalf("AddInboxMessage: %v", err)
 	}
 
 	if err := s.DeleteAgent("sre"); err != nil {
@@ -253,19 +244,12 @@ func TestDeleteAgentCascades(t *testing.T) {
 	if _, err := s.GetAgent("sre"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetAgent after delete = %v, want ErrNotFound", err)
 	}
-	events, err := s.ListInboxEvents("sre", "", 0)
+	msgs, err := s.ListInboxMessages("sre", "", 0)
 	if err != nil {
-		t.Fatalf("ListInboxEvents: %v", err)
+		t.Fatalf("ListInboxMessages: %v", err)
 	}
-	if len(events) != 0 {
-		t.Errorf("inbox events after delete = %d, want 0", len(events))
-	}
-	items, err := s.ListAgentItems("sre", "")
-	if err != nil {
-		t.Fatalf("ListAgentItems: %v", err)
-	}
-	if len(items) != 0 {
-		t.Errorf("items after delete = %d, want 0", len(items))
+	if len(msgs) != 0 {
+		t.Errorf("inbox messages after delete = %d, want 0", len(msgs))
 	}
 }
 

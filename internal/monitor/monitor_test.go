@@ -435,6 +435,52 @@ func TestSweepPaneOnlyShellExited(t *testing.T) {
 	}
 }
 
+// TestSweepAgentSessionWithOnlyAShellIsNotExited guards the shell-probe
+// exemption for persistent agents: rocket does not know what runs inside an
+// agent's session, and a bare shell is a perfectly valid one (an agent
+// registered with no command gets exactly that). Treating it as "the agent
+// exited" would make every message to such an agent fail as
+// recipient_unavailable.
+func TestSweepAgentSessionWithOnlyAShellIsNotExited(t *testing.T) {
+	rt := &fakeRuntime{names: []string{"sre"}}
+	prober := &fakeProber{onlyShell: map[string]bool{"sre": true}}
+	agents := map[string]*fakeAgent{"fake": {state: activity.Ready, ts: time.Now()}}
+	m, st, _ := testMonitor(t, rt, prober, agents)
+
+	seedSession(t, st, store.Session{ID: "sre", Kind: "agent", Agent: "fake", TmuxName: "sre"})
+
+	m.sweep(context.Background())
+
+	sess, err := st.GetSession("sre")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.Activity == string(activity.Exited) {
+		t.Errorf("Activity = exited, want the agent's own signal to decide")
+	}
+}
+
+// TestSweepAgentSessionGoneFromTmuxIsExited verifies the one liveness check
+// that still applies to agent sessions: the tmux session itself is gone.
+func TestSweepAgentSessionGoneFromTmuxIsExited(t *testing.T) {
+	rt := &fakeRuntime{names: []string{}}
+	prober := &fakeProber{onlyShell: map[string]bool{}}
+	agents := map[string]*fakeAgent{"fake": {state: activity.Ready, ts: time.Now()}}
+	m, st, _ := testMonitor(t, rt, prober, agents)
+
+	seedSession(t, st, store.Session{ID: "sre", Kind: "agent", Agent: "fake", TmuxName: "sre"})
+
+	m.sweep(context.Background())
+
+	sess, err := st.GetSession("sre")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.Activity != string(activity.Exited) {
+		t.Errorf("Activity = %q, want exited", sess.Activity)
+	}
+}
+
 // TestPushNewerThanPollWins verifies that a push newer than the poll signal
 // takes precedence.
 func TestPushNewerThanPollWins(t *testing.T) {
