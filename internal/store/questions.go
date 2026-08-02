@@ -283,7 +283,7 @@ func (s *Store) OpenQuestionCounts() (map[int64]QuestionCounts, error) {
 // Questions page.
 func (s *Store) ListAllOpenQuestions() ([]Question, error) {
 	rows, err := s.db.Query(
-		`SELECT `+questionColumns+` FROM questions
+		`SELECT ` + questionColumns + ` FROM questions
 		 WHERE status = 'open' AND task_id IS NOT NULL ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("query all open questions: %w", err)

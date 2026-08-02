@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -611,5 +612,42 @@ func TestOpenQuestionCounts_CanonicalHumanAuthorIsNotAwaitingTheUser(t *testing.
 	}
 	if counts[taskID].AwaitingUser != 0 {
 		t.Errorf("AwaitingUser = %d, want 0 — the human spoke last", counts[taskID].AwaitingUser)
+	}
+}
+
+// Acceptance criterion 4: concurrent AddParticipants calls must not error and
+// must not duplicate rows. The UNIQUE constraint plus INSERT OR IGNORE is what
+// makes this safe; without them the racing inserts would double up.
+func TestAddParticipants_IsSafeUnderConcurrency(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+	qid, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch-1", Body: "Q"})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+
+	const writers = 8
+	errs := make(chan error, writers)
+	var start sync.WaitGroup
+	start.Add(1)
+	for i := 0; i < writers; i++ {
+		go func() {
+			start.Wait()
+			errs <- s.AddParticipants(qid, "human", "cto", "orch-1")
+		}()
+	}
+	start.Done()
+	for i := 0; i < writers; i++ {
+		if err := <-errs; err != nil {
+			t.Errorf("concurrent AddParticipants: %v", err)
+		}
+	}
+
+	got, err := s.ListParticipants(qid)
+	if err != nil {
+		t.Fatalf("ListParticipants: %v", err)
+	}
+	if strings.Join(got, ",") != "cto,human,orch-1" {
+		t.Errorf("participants = %v, want each exactly once", got)
 	}
 }
