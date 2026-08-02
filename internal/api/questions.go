@@ -21,10 +21,22 @@ type questionMessageResponse struct {
 	CreatedAt int64  `json:"created_at"`
 }
 
+// wireAuthor renders a stored participant id for the current API contract.
+// The store canonicalised the human to store.ParticipantHuman in migration
+// 0009, but web and mobile still read an empty author as "you"; flipping the
+// wire is deliberately left to subtask #731, which lands it together with the
+// clients. Until then this keeps the contract byte-identical.
+func wireAuthor(author string) string {
+	if store.IsHuman(author) {
+		return ""
+	}
+	return author
+}
+
 func toQuestionMessageResponse(m store.QuestionMessage) questionMessageResponse {
 	return questionMessageResponse{
 		ID:        m.ID,
-		Author:    m.Author,
+		Author:    wireAuthor(m.Author),
 		Kind:      m.Kind,
 		Body:      m.Body,
 		CreatedAt: m.CreatedAt,
@@ -65,7 +77,7 @@ func whoseTurn(q store.Question, msgs []store.QuestionMessage) string {
 		return "user"
 	}
 	last := msgs[len(msgs)-1]
-	if last.Author == "" {
+	if store.IsHuman(last.Author) {
 		// Last entry from the human.
 		return "orchestrator"
 	}
