@@ -12,7 +12,7 @@ import "fmt"
 // resolved.
 func (s *Store) ReopenQuestion(id int64) error {
 	res, err := s.db.Exec(
-		`UPDATE task_questions SET status = 'open', resolution = '', resolved_at = NULL
+		`UPDATE questions SET status = 'open', resolution = '', resolved_at = NULL
 		 WHERE id = ? AND status = 'resolved'`,
 		id,
 	)

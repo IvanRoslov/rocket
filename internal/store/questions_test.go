@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -341,5 +342,117 @@ func TestListAllOpenQuestions(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ID != q1 {
 		t.Fatalf("got %+v, want exactly q1(%d)", got, q1)
+	}
+}
+
+// --- unified threads (#722) -------------------------------------------------
+
+func TestAddQuestionMessage_RoundTripsAddressedTo(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+	qid, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch-1", Body: "Which approach?"})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+
+	if _, err := s.AddQuestionMessage(QuestionMessage{
+		QuestionID: qid, Author: "orch-1", Body: "addressed", AddressedTo: []string{"cto", "human"},
+	}); err != nil {
+		t.Fatalf("AddQuestionMessage addressed: %v", err)
+	}
+	if _, err := s.AddQuestionMessage(QuestionMessage{
+		QuestionID: qid, Author: "orch-1", Body: "broadcast",
+	}); err != nil {
+		t.Fatalf("AddQuestionMessage broadcast: %v", err)
+	}
+
+	msgs, err := s.ListQuestionMessages(qid)
+	if err != nil {
+		t.Fatalf("ListQuestionMessages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("len(msgs) = %d, want 2", len(msgs))
+	}
+	if got := strings.Join(msgs[0].AddressedTo, ","); got != "cto,human" {
+		t.Errorf("AddressedTo = %q, want \"cto,human\"", got)
+	}
+	if len(msgs[1].AddressedTo) != 0 {
+		t.Errorf("broadcast AddressedTo = %v, want empty", msgs[1].AddressedTo)
+	}
+}
+
+// A message written with the legacy empty author — the convention every
+// current caller in internal/api uses for the human — must read back as the
+// canonical participant id.
+func TestAddQuestionMessage_NormalisesTheHumanAuthor(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+	qid, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch-1", Body: "Which approach?"})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+	if _, err := s.AddQuestionMessage(QuestionMessage{QuestionID: qid, Author: "", Body: "from the human"}); err != nil {
+		t.Fatalf("AddQuestionMessage: %v", err)
+	}
+
+	msgs, err := s.ListQuestionMessages(qid)
+	if err != nil {
+		t.Fatalf("ListQuestionMessages: %v", err)
+	}
+	if msgs[0].Author != ParticipantHuman {
+		t.Errorf("Author = %q, want %q", msgs[0].Author, ParticipantHuman)
+	}
+	if !IsHuman(msgs[0].Author) {
+		t.Errorf("IsHuman(%q) = false, want true", msgs[0].Author)
+	}
+}
+
+func TestIsHuman_AcceptsBothTheLegacyAndCanonicalForms(t *testing.T) {
+	for _, id := range []string{"", ParticipantHuman} {
+		if !IsHuman(id) {
+			t.Errorf("IsHuman(%q) = false, want true", id)
+		}
+	}
+	for _, id := range []string{"cto", "orch-1"} {
+		if IsHuman(id) {
+			t.Errorf("IsHuman(%q) = true, want false", id)
+		}
+	}
+}
+
+// A thread may be bound to a role instead of a task, or to neither.
+func TestAddQuestion_RoleBoundThreadRoundTrips(t *testing.T) {
+	s := openTestStore(t)
+	seedAgentForQuestions(t, s, "cto")
+
+	id, err := s.AddQuestion(Question{RoleID: "cto", AskedBy: "cto-run-1", Body: "Role question"})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+	got, err := s.GetQuestion(id)
+	if err != nil {
+		t.Fatalf("GetQuestion: %v", err)
+	}
+	if got.RoleID != "cto" {
+		t.Errorf("RoleID = %q, want cto", got.RoleID)
+	}
+	if got.TaskID != 0 {
+		t.Errorf("TaskID = %d, want 0", got.TaskID)
+	}
+}
+
+func TestAddQuestion_UnboundThreadRoundTrips(t *testing.T) {
+	s := openTestStore(t)
+
+	id, err := s.AddQuestion(Question{AskedBy: "orch-1", Body: "Unbound"})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+	got, err := s.GetQuestion(id)
+	if err != nil {
+		t.Fatalf("GetQuestion: %v", err)
+	}
+	if got.TaskID != 0 || got.RoleID != "" {
+		t.Errorf("got %+v, want no task and no role", got)
 	}
 }
