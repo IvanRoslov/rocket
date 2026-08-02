@@ -277,7 +277,7 @@ export interface SystemCleanupResult {
 
 export type TaskStatus = 'backlog' | 'in_progress' | 'review' | 'done' | 'cancelled'
 
-export type TaskCreatedBy = 'user' | 'orchestrator'
+export type TaskCreatedBy = 'user' | 'orchestrator' | 'agent'
 
 /** `taskResponse` — internal/api/tasks.go. `parent_id` is omitted for root tasks. */
 export interface Task {

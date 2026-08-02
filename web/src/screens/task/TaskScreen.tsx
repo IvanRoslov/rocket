@@ -8,7 +8,7 @@ import { Link, useParams } from 'react-router-dom'
 import { Badge, type BadgeTone } from '../../components/Badge'
 import { timeAgo } from '../../lib/format'
 import { useProjects, useSessions, useTask, useTaskDocs, useTaskLog, useTaskQuestions, useMessages } from '../../lib/queries'
-import type { TaskStatus } from '../../lib/types'
+import type { TaskCreatedBy, TaskStatus } from '../../lib/types'
 import { DocsTab } from './DocsTab'
 import { JournalTab } from './JournalTab'
 import { MessagesTab } from './MessagesTab'
@@ -34,6 +34,12 @@ const STATUS_TONE: Record<TaskStatus, BadgeTone> = {
   review: 'review',
   done: 'ok',
   cancelled: 'neutral',
+}
+
+const CREATED_BY_LABEL: Record<TaskCreatedBy, string> = {
+  user: 'you',
+  orchestrator: 'orchestrator',
+  agent: 'agent',
 }
 
 export function TaskScreen() {
@@ -107,7 +113,7 @@ export function TaskScreen() {
           <div className="task-screen__meta">
             {task.feature_slug && <span className="task-screen__meta-mono">feature/{task.feature_slug}</span>}
             <span className="task-screen__meta-dot">·</span>
-            <span>created by {task.created_by === 'user' ? 'you' : 'orchestrator'} · {timeAgo(task.created_at)}</span>
+            <span>created by {CREATED_BY_LABEL[task.created_by] ?? task.created_by} · {timeAgo(task.created_at)}</span>
             <span className="task-screen__meta-dot">·</span>
             <span>updated {timeAgo(task.updated_at)}</span>
           </div>
