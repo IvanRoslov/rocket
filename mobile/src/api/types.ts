@@ -116,7 +116,7 @@ export interface Task {
   status: TaskStatus
   feature_slug?: string
   session_id?: string
-  created_by: 'user' | 'orchestrator'
+  created_by: 'user' | 'orchestrator' | 'agent'
   created_at: number
   updated_at: number
   completed_at?: number

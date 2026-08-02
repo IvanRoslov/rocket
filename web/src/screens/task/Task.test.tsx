@@ -61,6 +61,51 @@ describe('TaskScreen', () => {
     expect(screen.queryByText('? awaiting you')).not.toBeInTheDocument()
   })
 
+  describe('author label', () => {
+    function taskCreatedBy(createdBy: string) {
+      server.use(
+        http.get('/v1/tasks/:id', () =>
+          HttpResponse.json({
+            id: 12,
+            title: 'Billing v2',
+            project_id: 'billing',
+            feature_slug: 'billing-v2',
+            status: 'in_progress',
+            created_by: createdBy,
+            created_at: 1,
+            updated_at: 2,
+            subtasks: [],
+            open_questions: 0,
+          }),
+        ),
+      )
+    }
+
+    it('renders "you" for a task the user created', async () => {
+      taskCreatedBy('user')
+      renderTask()
+      expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+
+      expect(screen.getByText(/^created by you ·/)).toBeInTheDocument()
+    })
+
+    it('renders "orchestrator" for a task the orchestrator created', async () => {
+      taskCreatedBy('orchestrator')
+      renderTask()
+      expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+
+      expect(screen.getByText(/^created by orchestrator ·/)).toBeInTheDocument()
+    })
+
+    it('renders "agent" for a task a persistent agent created', async () => {
+      taskCreatedBy('agent')
+      renderTask()
+      expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+
+      expect(screen.getByText(/^created by agent ·/)).toBeInTheDocument()
+    })
+  })
+
   it('switches tabs on click', async () => {
     renderTask()
     expect(await screen.findByText('Billing v2')).toBeInTheDocument()
