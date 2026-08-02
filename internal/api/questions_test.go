@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -40,17 +42,108 @@ func decodeQuestion(t *testing.T, resp *http.Response) questionResponse {
 	return q
 }
 
-func TestWhoseTurn_UserOpenedNoMessages(t *testing.T) {
-	q := store.Question{Status: "open", AskedBy: ""}
-	if got := whoseTurn(q, nil); got != "orchestrator" {
-		t.Errorf("whoseTurn = %q, want orchestrator", got)
+// getQuestions GETs a task's threads as the given caller ("" = the human).
+func getQuestions(t *testing.T, srv *httptest.Server, taskID int64, sessionID string) []questionResponse {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if sessionID != "" {
+		req.Header.Set(sessionHeader, sessionID)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET questions: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET questions = %d, want 200", resp.StatusCode)
+	}
+	var body struct {
+		Questions []questionResponse `json:"questions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode questions: %v", err)
+	}
+	return body.Questions
+}
+
+// TestGetTaskQuestions_ParticipantFields covers the additive wire contract: an
+// orchestrator-opened thread has the human and the orchestrator as
+// participants, waits on the human, and reports your_turn for a human caller.
+func TestGetTaskQuestions_ParticipantFields(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
+		map[string]any{"body": "Which approach?"})
+	resp.Body.Close()
+
+	got := getQuestions(t, srv, taskID, "")
+	if len(got) != 1 {
+		t.Fatalf("got %d questions, want 1", len(got))
+	}
+	q := got[0]
+	if !reflect.DeepEqual(q.Participants, []string{"human", "orch-1"}) {
+		t.Errorf("participants = %v, want [human orch-1]", q.Participants)
+	}
+	if !reflect.DeepEqual(q.WaitingOn, []string{"human"}) {
+		t.Errorf("waiting_on = %v, want [human]", q.WaitingOn)
+	}
+	if !q.YourTurn {
+		t.Error("your_turn = false for a human caller, want true")
+	}
+	if q.WhoseTurn != "user" {
+		t.Errorf("whose_turn = %q, want user (compat)", q.WhoseTurn)
 	}
 }
 
-func TestWhoseTurn_OrchestratorOpenedNoMessages(t *testing.T) {
-	q := store.Question{Status: "open", AskedBy: "orch-1"}
-	if got := whoseTurn(q, nil); got != "user" {
-		t.Errorf("whoseTurn = %q, want user", got)
+// TestGetTaskQuestions_YourTurnIsCallerRelative: the same thread reads as
+// not-your-turn for the orchestrator that opened it.
+func TestGetTaskQuestions_YourTurnIsCallerRelative(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
+		map[string]any{"body": "Which approach?"})
+	resp.Body.Close()
+
+	got := getQuestions(t, srv, taskID, "orch-1")
+	if len(got) != 1 {
+		t.Fatalf("got %d questions, want 1", len(got))
+	}
+	if got[0].YourTurn {
+		t.Error("your_turn = true for the asker, want false")
+	}
+}
+
+// TestGetTaskQuestions_HumanOpenedWaitsOnOrchestrator is the no-message case
+// from the other side: asked_by is empty, so the human asked and the task's
+// orchestrator owes the reply.
+func TestGetTaskQuestions_HumanOpenedWaitsOnOrchestrator(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	resp := postJSON(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions",
+		map[string]any{"body": "Status?"})
+	resp.Body.Close()
+
+	got := getQuestions(t, srv, taskID, "")
+	if len(got) != 1 {
+		t.Fatalf("got %d questions, want 1", len(got))
+	}
+	if !reflect.DeepEqual(got[0].WaitingOn, []string{"orch-1"}) {
+		t.Errorf("waiting_on = %v, want [orch-1]", got[0].WaitingOn)
+	}
+	if got[0].WhoseTurn != "orchestrator" {
+		t.Errorf("whose_turn = %q, want orchestrator (compat)", got[0].WhoseTurn)
+	}
+	if got[0].YourTurn {
+		t.Error("your_turn = true for the human asker, want false")
 	}
 }
 

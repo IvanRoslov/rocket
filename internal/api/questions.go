@@ -14,11 +14,14 @@ import (
 // questionMessageResponse is the JSON shape of a single entry in a
 // question's thread.
 type questionMessageResponse struct {
-	ID        int64  `json:"id"`
-	Author    string `json:"author,omitempty"`
-	Kind      string `json:"kind"`
-	Body      string `json:"body"`
-	CreatedAt int64  `json:"created_at"`
+	ID     int64  `json:"id"`
+	Author string `json:"author,omitempty"`
+	Kind   string `json:"kind"`
+	Body   string `json:"body"`
+	// AddressedTo narrows who is expected to respond. Empty means every
+	// participant except the author.
+	AddressedTo []string `json:"addressed_to,omitempty"`
+	CreatedAt   int64    `json:"created_at"`
 }
 
 // wireAuthor renders a stored participant id for the current API contract.
@@ -35,59 +38,48 @@ func wireAuthor(author string) string {
 
 func toQuestionMessageResponse(m store.QuestionMessage) questionMessageResponse {
 	return questionMessageResponse{
-		ID:        m.ID,
-		Author:    wireAuthor(m.Author),
-		Kind:      m.Kind,
-		Body:      m.Body,
-		CreatedAt: m.CreatedAt,
+		ID:          m.ID,
+		Author:      wireAuthor(m.Author),
+		Kind:        m.Kind,
+		Body:        m.Body,
+		AddressedTo: m.AddressedTo,
+		CreatedAt:   m.CreatedAt,
 	}
 }
 
 // questionResponse is the JSON shape of a question and its thread as
 // returned by the API.
 type questionResponse struct {
-	ID         int64                     `json:"id"`
-	TaskID     int64                     `json:"task_id"`
-	Ordinal    int                       `json:"ordinal"`
-	AskedBy    string                    `json:"asked_by"`
-	Body       string                    `json:"body"`
-	Context    string                    `json:"context,omitempty"`
-	Status     string                    `json:"status"`
-	Resolution string                    `json:"resolution,omitempty"`
-	WhoseTurn  string                    `json:"whose_turn,omitempty"`
-	AskedAt    int64                     `json:"asked_at"`
-	ResolvedAt int64                     `json:"resolved_at,omitempty"`
-	Messages   []questionMessageResponse `json:"messages"`
+	ID         int64  `json:"id"`
+	TaskID     int64  `json:"task_id"`
+	Ordinal    int    `json:"ordinal"`
+	AskedBy    string `json:"asked_by"`
+	Body       string `json:"body"`
+	Context    string `json:"context,omitempty"`
+	Status     string `json:"status"`
+	Resolution string `json:"resolution,omitempty"`
+	// Participants is everyone taking part in the thread; WaitingOn is the
+	// subset expected to speak next; YourTurn says whether the caller is one
+	// of them. WhoseTurn is the pre-participant field the clients still read,
+	// derived from WaitingOn until subtask #736 retires it.
+	Participants []string                  `json:"participants"`
+	WaitingOn    []string                  `json:"waiting_on"`
+	YourTurn     bool                      `json:"your_turn"`
+	WhoseTurn    string                    `json:"whose_turn,omitempty"`
+	AskedAt      int64                     `json:"asked_at"`
+	ResolvedAt   int64                     `json:"resolved_at,omitempty"`
+	Messages     []questionMessageResponse `json:"messages"`
 }
 
-// whoseTurn derives whose turn it is to speak next in a question's thread
-// from the author of its last entry. The question itself (asked_by the
-// orchestrator) counts as the first entry when no messages exist yet. A
-// resolved question has no pending turn.
-func whoseTurn(q store.Question, msgs []store.QuestionMessage) string {
-	if q.Status == "resolved" {
-		return ""
-	}
-	if len(msgs) == 0 {
-		if q.AskedBy == "" {
-			// User-opened thread, no reply yet: the orchestrator owes a reply.
-			return "orchestrator"
-		}
-		// Last entry is the question itself, from the orchestrator.
-		return "user"
-	}
-	last := msgs[len(msgs)-1]
-	if store.IsHuman(last.Author) {
-		// Last entry from the human.
-		return "orchestrator"
-	}
-	return "user"
-}
-
-// buildQuestionResponse loads a question's thread and ordinal and assembles
-// the full API response shape.
-func buildQuestionResponse(d Deps, q store.Question) (questionResponse, error) {
+// buildQuestionResponse loads a thread's messages, participants and ordinal
+// and assembles the full API response. caller decides your_turn, the one
+// caller-relative field in the shape.
+func buildQuestionResponse(d Deps, caller *store.Session, q store.Question) (questionResponse, error) {
 	msgs, err := d.Store.ListQuestionMessages(q.ID)
+	if err != nil {
+		return questionResponse{}, err
+	}
+	participants, err := d.Store.ListParticipants(q.ID)
 	if err != nil {
 		return questionResponse{}, err
 	}
@@ -101,19 +93,23 @@ func buildQuestionResponse(d Deps, q store.Question) (questionResponse, error) {
 		msgOut[i] = toQuestionMessageResponse(m)
 	}
 
+	waiting := waitingOn(q, msgs, participants)
 	return questionResponse{
-		ID:         q.ID,
-		TaskID:     q.TaskID,
-		Ordinal:    ordinal,
-		AskedBy:    q.AskedBy,
-		Body:       q.Body,
-		Context:    q.Context,
-		Status:     q.Status,
-		Resolution: q.Resolution,
-		WhoseTurn:  whoseTurn(q, msgs),
-		AskedAt:    q.AskedAt,
-		ResolvedAt: q.ResolvedAt,
-		Messages:   msgOut,
+		ID:           q.ID,
+		TaskID:       q.TaskID,
+		Ordinal:      ordinal,
+		AskedBy:      q.AskedBy,
+		Body:         q.Body,
+		Context:      q.Context,
+		Status:       q.Status,
+		Resolution:   q.Resolution,
+		Participants: participants,
+		WaitingOn:    waiting,
+		YourTurn:     contains(waiting, callerParticipant(caller)),
+		WhoseTurn:    whoseTurnCompat(waiting, "orchestrator"),
+		AskedAt:      q.AskedAt,
+		ResolvedAt:   q.ResolvedAt,
+		Messages:     msgOut,
 	}, nil
 }
 
@@ -148,6 +144,11 @@ type globalQuestionResponse struct {
 // dashboard's global Questions page. Questions whose task has vanished are
 // skipped rather than failing the whole listing.
 func handleGetAllQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
+	caller, err := callerSession(r, d.Store)
+	if writeCallerErr(w, err) {
+		return
+	}
+
 	qs, err := d.Store.ListAllOpenQuestions()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -173,7 +174,7 @@ func handleGetAllQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 			tasks[q.TaskID] = task
 		}
 
-		resp, err := buildQuestionResponse(d, q)
+		resp, err := buildQuestionResponse(d, caller, q)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
@@ -332,6 +333,20 @@ func handlePostTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
+	// Every thread starts with the human and the subject's own counterpart in
+	// it, so a human-opened thread always has somebody to reach and the
+	// orchestrator never has to be added by hand. An unattached task has no
+	// counterpart to seed: seeding "" would be canonicalised to "human" and
+	// invent a participant that is not there.
+	seed := []string{store.ParticipantHuman, callerAuthor(caller)}
+	if task.SessionID != "" {
+		seed = append(seed, task.SessionID)
+	}
+	if err := d.Store.AddParticipants(qid, seed...); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
 	if caller == nil {
 		q, ok := getQuestionOr404(w, d, qid)
 		if !ok {
@@ -360,7 +375,7 @@ func handlePostTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 	if !ok {
 		return
 	}
-	resp, err := buildQuestionResponse(d, q)
+	resp, err := buildQuestionResponse(d, caller, q)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -378,6 +393,11 @@ func handleGetTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
+	caller, err := callerSession(r, d.Store)
+	if writeCallerErr(w, err) {
+		return
+	}
+
 	openOnly := r.URL.Query().Get("status") == "open"
 	questions, err := d.Store.ListQuestions(id, openOnly)
 	if err != nil {
@@ -387,7 +407,7 @@ func handleGetTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 
 	out := make([]questionResponse, len(questions))
 	for i, q := range questions {
-		resp, err := buildQuestionResponse(d, q)
+		resp, err := buildQuestionResponse(d, caller, q)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
@@ -500,7 +520,7 @@ func handlePostQuestionReply(w http.ResponseWriter, r *http.Request, d Deps) {
 	if !ok {
 		return
 	}
-	resp, err := buildQuestionResponse(d, updated)
+	resp, err := buildQuestionResponse(d, caller, updated)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -611,7 +631,7 @@ func handlePostQuestionAnswer(w http.ResponseWriter, r *http.Request, d Deps) {
 	if !ok {
 		return
 	}
-	resp, err := buildQuestionResponse(d, updated)
+	resp, err := buildQuestionResponse(d, caller, updated)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
