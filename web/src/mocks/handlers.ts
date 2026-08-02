@@ -8,7 +8,7 @@
 import { http, HttpResponse } from 'msw'
 import type {
   Agent,
-  AgentMemory,
+  AgentInboxMessage,
   ChatEntry,
   Project,
   Question,
@@ -22,11 +22,7 @@ import type {
 } from '../lib/types'
 import {
   agentInbox,
-  agentItems,
-  agentMemory,
-  agentPrompt,
   agentQuestions,
-  agentRuns,
   agents,
   chatEntries,
   githubIssues,
@@ -77,15 +73,15 @@ export function resetSessions(): void {
   sessionsState = sessions.map((s) => ({ ...s }))
 }
 
-// Mutable copies of the agent-role fixtures, written by POST/PATCH/DELETE
-// /v1/agents, enable/disable and PUT /v1/agents/{id}/memory. Tests that mutate
+// Mutable copies of the agent fixtures, written by POST/PATCH/DELETE
+// /v1/agents, enable/disable, start/stop and messages. Tests that mutate
 // these should call `resetAgents()` in `afterEach`.
-let agentsState: Agent[] = agents.map((a) => ({ ...a, subscriptions: [...a.subscriptions] }))
-let agentMemoryState: AgentMemory = { ...agentMemory, files: agentMemory.files.map((f) => ({ ...f })) }
+let agentsState: Agent[] = agents.map((a) => ({ ...a }))
+let agentInboxState: AgentInboxMessage[] = agentInbox.map((m) => ({ ...m }))
 
 export function resetAgents(): void {
-  agentsState = agents.map((a) => ({ ...a, subscriptions: [...a.subscriptions] }))
-  agentMemoryState = { ...agentMemory, files: agentMemory.files.map((f) => ({ ...f })) }
+  agentsState = agents.map((a) => ({ ...a }))
+  agentInboxState = agentInbox.map((m) => ({ ...m }))
 }
 
 /**
@@ -192,9 +188,7 @@ export const handlers = [
     const project = url.searchParams.get('project')
     const kind = url.searchParams.get('kind')
     const all = url.searchParams.get('all') === 'true'
-    // Role instances (kind `agent`) live in their own fixture but are served
-    // by the same endpoint — that is where the Agents screen reads them from.
-    let result = [...sessionsState, ...agentRuns]
+    let result = [...sessionsState]
     if (project) result = result.filter((s) => s.project_id === project)
     if (kind) result = result.filter((s) => s.kind === kind)
     if (!all) result = result.filter((s) => s.state === 'spawning' || s.state === 'running')
@@ -890,7 +884,7 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 })
   }),
 
-  // --- Agent roles (internal/api/agents.go, agent_questions.go) ------------
+  // --- Agents (internal/api/agents.go, agent_questions.go) ----------------
 
   http.get('/v1/agents', ({ request }) => {
     const project = new URL(request.url).searchParams.get('project')
@@ -901,10 +895,9 @@ export const handlers = [
     const body = (await request.json()) as {
       id: string
       project: string
-      prompt?: string
-      subscriptions?: Agent['subscriptions']
-      cron?: string
-      agent?: string
+      description?: string
+      dir?: string
+      command?: string
     }
     if (agentsState.some((a) => a.id === body.id)) {
       return HttpResponse.json(
@@ -914,14 +907,13 @@ export const handlers = [
     }
     const created: Agent = {
       id: body.id,
+      description: body.description ?? '',
       project: body.project,
-      prompt_path: `/home/dev/.rocket/agents/${body.id}/role.md`,
-      subscriptions: body.subscriptions ?? [],
-      cron: body.cron ?? '',
-      agent: body.agent || 'claude',
+      dir: body.dir ?? '',
+      command: body.command ?? '',
       enabled: true,
-      inbox_queued: 0,
-      items: 0,
+      session_alive: false,
+      unread: 0,
       open_questions: 0,
       awaiting_user: 0,
       created_at: 1_800_000_000,
@@ -939,7 +931,7 @@ export const handlers = [
         { status: 404 },
       )
     }
-    return HttpResponse.json({ ...found, prompt: agentPrompt })
+    return HttpResponse.json(found)
   }),
 
   http.patch('/v1/agents/:id', async ({ params, request }) => {
@@ -952,7 +944,7 @@ export const handlers = [
         { status: 404 },
       )
     }
-    return HttpResponse.json({ ...updated, prompt: agentPrompt })
+    return HttpResponse.json(updated)
   }),
 
   http.delete('/v1/agents/:id', ({ params }) => {
@@ -970,45 +962,50 @@ export const handlers = [
     return HttpResponse.json(agentsState.find((a) => a.id === params.id))
   }),
 
-  http.post('/v1/agents/:id/wake', async ({ request }) => {
-    const body = (await request.json().catch(() => ({}))) as { kind?: string }
-    return HttpResponse.json({ event_id: 7, kind: body.kind ?? 'message' }, { status: 202 })
+  // Live-or-inbox delivery, the daemon's single path: a running session takes
+  // the message through the queue, a dead one grows its inbox by one.
+  http.post('/v1/agents/:id/messages', async ({ params, request }) => {
+    const body = (await request.json()) as { body: string }
+    const id = params.id as string
+    const agent = agentsState.find((a) => a.id === id)
+    const live = agent?.session_alive === true
+    if (!live) {
+      agentInboxState = [
+        ...agentInboxState,
+        { id: agentInboxState.length + 1, from: '', body: body.body, status: 'unread', created_at: 1_800_000_000 },
+      ]
+      agentsState = agentsState.map((a) => (a.id === id ? { ...a, unread: a.unread + 1 } : a))
+    }
+    return HttpResponse.json(
+      { id: 7, to: id, status: live ? 'queued' : 'inbox', live },
+      { status: 202 },
+    )
   }),
 
   http.get('/v1/agents/:id/inbox', ({ request }) => {
     const status = new URL(request.url).searchParams.get('status')
-    return HttpResponse.json(status ? agentInbox.filter((e) => e.status === status) : agentInbox)
+    return HttpResponse.json(
+      status ? agentInboxState.filter((m) => m.status === status) : agentInboxState,
+    )
   }),
 
-  http.get('/v1/agents/:id/items', ({ request }) => {
-    const state = new URL(request.url).searchParams.get('state')
-    return HttpResponse.json(state ? agentItems.filter((i) => i.state === state) : agentItems)
-  }),
-
-  http.get('/v1/agents/:id/memory', () => HttpResponse.json(agentMemoryState)),
-
-  http.put('/v1/agents/:id/memory', async ({ request }) => {
-    const req = (await request.json()) as { file?: string; body: string }
-    const file = req.file ?? 'MEMORY.md'
-    if (!/^[A-Za-z0-9._-]+\.md$/.test(file) || file.includes('..')) {
+  http.post('/v1/agents/:id/start', ({ params }) => {
+    const id = params.id as string
+    const agent = agentsState.find((a) => a.id === id)
+    if (!agent) {
       return HttpResponse.json(
-        { error: { code: 'invalid_file', message: 'memory file must be a plain .md name' } },
-        { status: 400 },
+        { error: { code: 'agent_not_found', message: 'agent not found' } },
+        { status: 404 },
       )
     }
-    if (file === 'MEMORY.md') {
-      agentMemoryState = { ...agentMemoryState, index: req.body }
-    } else {
-      const rest = agentMemoryState.files.filter((f) => f.name !== file)
-      agentMemoryState = {
-        ...agentMemoryState,
-        files: [
-          ...rest,
-          { name: file, size: req.body.length, updated_at: 1_800_000_000, body: req.body },
-        ].sort((a, b) => a.name.localeCompare(b.name)),
-      }
-    }
-    return HttpResponse.json(agentMemoryState)
+    agentsState = agentsState.map((a) => (a.id === id ? { ...a, session_alive: true } : a))
+    return HttpResponse.json({ id, status: 'running', dir: agent.dir })
+  }),
+
+  http.post('/v1/agents/:id/stop', ({ params }) => {
+    const id = params.id as string
+    agentsState = agentsState.map((a) => (a.id === id ? { ...a, session_alive: false } : a))
+    return HttpResponse.json({ id, status: 'stopped' })
   }),
 
   http.get('/v1/agents/:id/questions', ({ params, request }) => {
