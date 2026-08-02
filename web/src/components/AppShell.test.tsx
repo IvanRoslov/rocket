@@ -41,27 +41,35 @@ test('шапка: лого и табы', () => {
   }
 })
 
-test('с главной страницы Kanban и Agents ведут на запомненный проект', async () => {
+test('с главной страницы Kanban ведёт на запомненный проект, Agents — на глобальный список', async () => {
   window.localStorage.setItem(LAST_PROJECT_STORAGE_KEY, 'analytics')
   renderShell('/')
   expect(tabHref('Kanban')).toBe('/p/analytics')
-  expect(tabHref('Agents')).toBe('/p/analytics/agents')
+  // Агент может быть зарегистрирован вообще без проекта, поэтому таб Agents
+  // всегда ведёт на глобальный /agents.
+  expect(tabHref('Agents')).toBe('/agents')
 })
 
-test('без запомненного проекта табы ведут на первый проект из списка', async () => {
+test('без запомненного проекта Kanban ведёт на первый проект из списка', async () => {
   renderShell('/')
   await waitFor(() => expect(tabHref('Kanban')).toBe('/p/billing'))
-  expect(tabHref('Agents')).toBe('/p/billing/agents')
+  expect(tabHref('Agents')).toBe('/agents')
 })
 
-test('внутри проекта табы ведут на текущий проект и он запоминается', async () => {
+test('внутри проекта Kanban ведёт на текущий проект и он запоминается', async () => {
   window.localStorage.setItem(LAST_PROJECT_STORAGE_KEY, 'analytics')
   renderShell('/p/billing/agents')
   expect(tabHref('Kanban')).toBe('/p/billing')
-  expect(tabHref('Agents')).toBe('/p/billing/agents')
+  expect(tabHref('Agents')).toBe('/agents')
   await waitFor(() =>
     expect(window.localStorage.getItem(LAST_PROJECT_STORAGE_KEY)).toBe('billing'),
   )
+})
+
+test('на глобальном /agents активен таб Agents', () => {
+  renderShell('/agents')
+  expect(screen.getByRole('link', { name: 'Agents' })).toHaveAttribute('aria-current', 'page')
+  expect(screen.getByRole('link', { name: 'Kanban' })).not.toHaveAttribute('aria-current')
 })
 
 test('на /p/:id/agents активен только таб Agents', () => {
