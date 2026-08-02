@@ -163,6 +163,11 @@ export interface QuestionMessage {
   author?: string
   kind: 'reply' | 'answer'
   body: string
+  /**
+   * Who owes a response to this message. Empty or absent means "everyone in
+   * the thread except its author" — the daemon's default fan-out.
+   */
+  addressed_to?: string[]
   created_at: number
 }
 
@@ -175,6 +180,13 @@ export interface Question {
   context?: string
   status: QuestionStatus
   resolution?: 'answered' | 'dismissed'
+  /** Everyone taking part in the thread; ids are "human", an agent or a session. */
+  participants: string[]
+  /** The subset expected to speak next. */
+  waiting_on: string[]
+  /** Whether the caller — us — is one of them. Drives the indicator. */
+  your_turn: boolean
+  /** Pre-participant compat field; retired by subtask #736. Do not read it. */
   whose_turn?: 'user' | 'orchestrator' | ''
   asked_at: number
   resolved_at?: number
@@ -226,6 +238,13 @@ export interface AgentQuestion {
   context?: string
   status: QuestionStatus
   resolution?: 'answered' | 'dismissed'
+  /** Everyone taking part in the thread; ids are "human", an agent or a session. */
+  participants: string[]
+  /** The subset expected to speak next. */
+  waiting_on: string[]
+  /** Whether the caller — us — is one of them. Drives the indicator. */
+  your_turn: boolean
+  /** Pre-participant compat field; retired by subtask #736. Do not read it. */
   whose_turn?: 'user' | 'role' | ''
   asked_at: number
   resolved_at?: number
