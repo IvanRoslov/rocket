@@ -3,8 +3,6 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
-	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -231,51 +229,12 @@ func getQuestionOr404(w http.ResponseWriter, d Deps, id int64) (store.Question, 
 	return q, true
 }
 
-// deliverToOrchestrator enqueues body to task's orchestrator session, mirroring
-// the enqueue pattern used by POST /v1/messages: insert with status "queued",
-// publish message.queued, and wake the recipient's delivery worker. If the
-// task has no attached session, or that session is no longer active, delivery
-// is skipped (logged) — the Q&A record itself still updates regardless.
-func deliverToOrchestrator(d Deps, task store.Task, body string) error {
-	body = rewriteAttachmentLinks(d, body)
-	if task.SessionID == "" {
-		return nil
-	}
-
-	sess, err := d.Store.GetSession(task.SessionID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			slog.Warn("api: question delivery target session not found, skipping", "task_id", task.ID, "session_id", task.SessionID)
-			return nil
-		}
-		return err
-	}
-	if isSessionTerminal(sess.State) {
-		slog.Warn("api: question delivery target session is terminal, skipping", "task_id", task.ID, "session_id", task.SessionID, "state", sess.State)
-		return nil
-	}
-
-	id, err := d.Store.AddMessage(store.Message{ToSession: task.SessionID, Body: body})
-	if err != nil {
-		return err
-	}
-
-	if d.Bus != nil {
-		d.Bus.Publish("message.queued", task.SessionID, map[string]any{
-			"id": id, "from": "", "to": task.SessionID,
-		})
-	}
-	if d.Queue != nil {
-		d.Queue.Wake(task.SessionID)
-	} else {
-		slog.Warn("api: question message queued with nil Queue, will not be delivered until daemon restart", "id", id, "to", task.SessionID)
-	}
-	return nil
-}
-
 type postQuestionRequest struct {
 	Body    string `json:"body"`
 	Context string `json:"context"`
+	// To narrows who is expected to respond. Its ids join the thread as
+	// participants and are stored as the message's addressed_to.
+	To []string `json:"to"`
 }
 
 // handlePostTaskQuestions serves POST /v1/tasks/{id}/questions
@@ -303,8 +262,10 @@ func handlePostTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 	if writeCallerErr(w, err) {
 		return
 	}
-	if caller != nil && (caller.Kind != "orchestrator" || task.SessionID != caller.ID) {
-		writeErr(w, http.StatusForbidden, "forbidden", "only the human user or the task's own orchestrator may ask questions")
+	subj := threadSubject{TaskID: task.ID, Counterpart: task.SessionID}
+	if !canOpenThread(d, caller, subj) {
+		writeErr(w, http.StatusForbidden, "forbidden",
+			"only the human user, a persistent agent or the task's own orchestrator may ask questions")
 		return
 	}
 	if task.ParentID != 0 {
@@ -338,43 +299,46 @@ func handlePostTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 	// orchestrator never has to be added by hand. An unattached task has no
 	// counterpart to seed: seeding "" would be canonicalised to "human" and
 	// invent a participant that is not there.
-	seed := []string{store.ParticipantHuman, callerAuthor(caller)}
+	author := callerParticipant(caller)
+	seed := []string{store.ParticipantHuman, author}
 	if task.SessionID != "" {
 		seed = append(seed, task.SessionID)
 	}
+	seed = append(seed, req.To...)
 	if err := d.Store.AddParticipants(qid, seed...); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 
-	if caller == nil {
-		q, ok := getQuestionOr404(w, d, qid)
-		if !ok {
-			return
-		}
-		ordinal, err := d.Store.QuestionOrdinal(q)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
-		}
-		body := fmt.Sprintf("[task #%d Q%d question] %s", task.ID, ordinal, req.Body)
-		if req.Context != "" {
-			body += "\n\n" + req.Context
-		}
-		if err := deliverToOrchestrator(d, task, body); err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
-		}
+	q, ok := getQuestionOr404(w, d, qid)
+	if !ok {
+		return
+	}
+	ordinal, err := d.Store.QuestionOrdinal(q)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	participants, err := d.Store.ListParticipants(qid)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	text := req.Body
+	if req.Context != "" {
+		text += "\n\n" + req.Context
+	}
+	if err := participantFanOut(d, subj, ordinal, "question", author, text, participants); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
 	}
 
 	d.Bus.Publish("task.question_asked", callerLabel(caller), map[string]any{
 		"task_id": id, "question_id": qid,
 	})
 
-	q, ok := getQuestionOr404(w, d, qid)
-	if !ok {
-		return
-	}
+	// q was re-read above, after the participants were seeded, so the
+	// response already carries them.
 	resp, err := buildQuestionResponse(d, caller, q)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -419,6 +383,8 @@ func handleGetTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 
 type postQuestionReplyRequest struct {
 	Body string `json:"body"`
+	// To narrows who is expected to respond and joins its ids to the thread.
+	To []string `json:"to"`
 }
 
 // handlePostQuestionReply serves POST /v1/questions/{id}/reply {body}. The
@@ -445,8 +411,15 @@ func handlePostQuestionReply(w http.ResponseWriter, r *http.Request, d Deps) {
 	if writeCallerErr(w, err) {
 		return
 	}
-	if caller != nil && (caller.Kind != "orchestrator" || task.SessionID != caller.ID) {
-		writeErr(w, http.StatusForbidden, "forbidden", "only the human user or the task's own orchestrator may reply")
+	subj := threadSubject{TaskID: task.ID, Counterpart: task.SessionID}
+	participants, err := d.Store.ListParticipants(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	if !canPostToThread(d, caller, subj, participants) {
+		writeErr(w, http.StatusForbidden, "forbidden",
+			"only a participant of this thread may reply")
 		return
 	}
 
@@ -483,12 +456,20 @@ func handlePostQuestionReply(w http.ResponseWriter, r *http.Request, d Deps) {
 		}
 	}
 
+	author := callerParticipant(caller)
 	if _, err := d.Store.AddQuestionMessage(store.QuestionMessage{
-		QuestionID: id,
-		Author:     callerAuthor(caller),
-		Kind:       "reply",
-		Body:       req.Body,
+		QuestionID:  id,
+		Author:      author,
+		Kind:        "reply",
+		Body:        req.Body,
+		AddressedTo: req.To,
 	}); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	// Writing into a thread joins it, and so does being addressed.
+	if err := d.Store.AddParticipants(id, append([]string{author}, req.To...)...); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
@@ -499,17 +480,20 @@ func handlePostQuestionReply(w http.ResponseWriter, r *http.Request, d Deps) {
 		})
 	}
 
-	if caller == nil {
-		ordinal, err := d.Store.QuestionOrdinal(q)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
-		}
-		prefixed := fmt.Sprintf("[task #%d Q%d reply] %s", task.ID, ordinal, req.Body)
-		if err := deliverToOrchestrator(d, task, prefixed); err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
-		}
+	ordinal, err := d.Store.QuestionOrdinal(q)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	// Re-read: req.To has just joined and must be notified too.
+	recipients, err := d.Store.ListParticipants(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	if err := participantFanOut(d, subj, ordinal, "reply", author, req.Body, recipients); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
 	}
 
 	d.Bus.Publish("task.question_replied", callerLabel(caller), map[string]any{
@@ -531,6 +515,9 @@ func handlePostQuestionReply(w http.ResponseWriter, r *http.Request, d Deps) {
 type postQuestionAnswerRequest struct {
 	Body    string `json:"body"`
 	Dismiss bool   `json:"dismiss"`
+	// To narrows who is expected to respond and joins its ids to the thread.
+	// On an answer it only records intent: a resolved thread waits on nobody.
+	To []string `json:"to"`
 }
 
 // handlePostQuestionAnswer serves POST /v1/questions/{id}/answer
@@ -552,8 +539,9 @@ func handlePostQuestionAnswer(w http.ResponseWriter, r *http.Request, d Deps) {
 	if writeCallerErr(w, err) {
 		return
 	}
-	if caller != nil {
-		writeErr(w, http.StatusForbidden, "forbidden", "only the human user may answer questions")
+	if !canAnswerThread(d, caller) {
+		writeErr(w, http.StatusForbidden, "forbidden",
+			"only the human user or a persistent agent may answer; use reply")
 		return
 	}
 
@@ -602,11 +590,21 @@ func handlePostQuestionAnswer(w http.ResponseWriter, r *http.Request, d Deps) {
 			return
 		}
 
+		// The author used to be left empty, which was only correct while the
+		// human was the only party allowed to answer.
+		author := callerParticipant(caller)
 		if _, err := d.Store.AddQuestionMessage(store.QuestionMessage{
-			QuestionID: id,
-			Kind:       "answer",
-			Body:       req.Body,
+			QuestionID:  id,
+			Author:      author,
+			Kind:        "answer",
+			Body:        req.Body,
+			AddressedTo: req.To,
 		}); err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+
+		if err := d.Store.AddParticipants(id, append([]string{author}, req.To...)...); err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
@@ -616,8 +614,13 @@ func handlePostQuestionAnswer(w http.ResponseWriter, r *http.Request, d Deps) {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
-		prefixed := fmt.Sprintf("[task #%d Q%d answer] %s", task.ID, ordinal, req.Body)
-		if err := deliverToOrchestrator(d, task, prefixed); err != nil {
+		recipients, err := d.Store.ListParticipants(id)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		subj := threadSubject{TaskID: task.ID, Counterpart: task.SessionID}
+		if err := participantFanOut(d, subj, ordinal, "answer", author, req.Body, recipients); err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
