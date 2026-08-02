@@ -65,7 +65,7 @@ CREATE TABLE tasks (
   status       TEXT NOT NULL DEFAULT 'backlog', -- backlog|in_progress|review|done|cancelled
   feature_slug TEXT,
   session_id   TEXT REFERENCES sessions(id),   -- задача → оркестратор, подзадача → воркер
-  created_by   TEXT NOT NULL DEFAULT 'user',   -- user|orchestrator
+  created_by   TEXT NOT NULL DEFAULT 'user',   -- user|orchestrator|agent
   created_at   INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL,
   completed_at INTEGER
