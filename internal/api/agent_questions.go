@@ -44,7 +44,7 @@ func whoseTurnAgent(q store.AgentQuestion, msgs []store.AgentQuestionMessage) st
 		}
 		return "user"
 	}
-	if msgs[len(msgs)-1].Author == "" {
+	if store.IsHuman(msgs[len(msgs)-1].Author) {
 		// Last entry from the human.
 		return "role"
 	}
@@ -67,7 +67,7 @@ func buildAgentQuestionResponse(d Deps, q store.AgentQuestion) (agentQuestionRes
 	for i, m := range msgs {
 		msgOut[i] = questionMessageResponse{
 			ID:        m.ID,
-			Author:    m.Author,
+			Author:    wireAuthor(m.Author),
 			Kind:      m.Kind,
 			Body:      m.Body,
 			CreatedAt: m.CreatedAt,

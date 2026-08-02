@@ -91,14 +91,12 @@ func (s *Store) migrate() error {
 	return s.migrateOn(ctx, conn)
 }
 
-func (s *Store) migrateOn(ctx context.Context, conn *sql.Conn) error {
-	if _, err := conn.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)`); err != nil {
-		return fmt.Errorf("create schema_migrations: %w", err)
-	}
-
+// migrationNames returns the embedded migration file names in the order they
+// are applied; a migration's version is its 1-based position in this list.
+func migrationNames() ([]string, error) {
 	entries, err := fs.ReadDir(migrationsFS, "migrations")
 	if err != nil {
-		return fmt.Errorf("read migrations dir: %w", err)
+		return nil, fmt.Errorf("read migrations dir: %w", err)
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -107,6 +105,18 @@ func (s *Store) migrateOn(ctx context.Context, conn *sql.Conn) error {
 		}
 	}
 	sort.Strings(names)
+	return names, nil
+}
+
+func (s *Store) migrateOn(ctx context.Context, conn *sql.Conn) error {
+	if _, err := conn.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)`); err != nil {
+		return fmt.Errorf("create schema_migrations: %w", err)
+	}
+
+	names, err := migrationNames()
+	if err != nil {
+		return err
+	}
 
 	for i, name := range names {
 		version := i + 1

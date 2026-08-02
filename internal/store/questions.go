@@ -4,15 +4,30 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
-// Question represents a task Q&A thread's originating question, asked by a
-// task's orchestrator.
+// ParticipantHuman is the participant id of the human user. The other two
+// forms a participant id takes are a persistent agent's id ("cto") and a
+// session id ("reply-answer-orch").
+const ParticipantHuman = "human"
+
+// IsHuman reports whether a stored author or participant id denotes the human.
+// Rows written before migration 0009 recorded the human as an empty string or
+// NULL, so both forms are accepted; everything the store writes now is
+// canonical.
+func IsHuman(id string) bool {
+	return id == "" || id == ParticipantHuman
+}
+
+// Question is a Q&A thread's originating question. A thread is bound to a
+// task, to a persistent agent's role, or to neither.
 type Question struct {
 	ID         int64
-	TaskID     int64
-	AskedBy    string // session id of the asking orchestrator
+	TaskID     int64  // 0 = not bound to a task
+	RoleID     string // "" = not bound to a role
+	AskedBy    string // session id of the asker; "" = the human
 	Body       string
 	Context    string // optional markdown context
 	Status     string // open|resolved
@@ -22,15 +37,45 @@ type Question struct {
 }
 
 // QuestionMessage represents a single entry in a question's thread: either a
-// reply (from either side, thread stays open) or the resolving answer (from
-// the human, thread becomes resolved).
+// reply (thread stays open) or the resolving answer (thread becomes resolved).
 type QuestionMessage struct {
 	ID         int64
 	QuestionID int64
-	Author     string // session id of the orchestrator, or "" for the human
+	Author     string // participant id; ParticipantHuman for the human
 	Kind       string // reply|answer
 	Body       string
-	CreatedAt  int64
+	// AddressedTo narrows who is expected to respond. Empty means every
+	// participant except the author.
+	AddressedTo []string
+	CreatedAt   int64
+}
+
+// questionColumns is the column list every Question scan relies on; it must
+// stay in sync with scanQuestion.
+const questionColumns = `id, task_id, role_id, asked_by, body, context, status, resolution, asked_at, resolved_at`
+
+// encodeAddressedTo renders a recipient list as the CSV stored in
+// question_messages.addressed_to. An empty list stores as "".
+func encodeAddressedTo(ids []string) string {
+	return strings.Join(ids, ",")
+}
+
+// decodeAddressedTo parses question_messages.addressed_to back into a list.
+// "" decodes to nil, not to a one-element slice holding "".
+func decodeAddressedTo(csv string) []string {
+	if csv == "" {
+		return nil
+	}
+	return strings.Split(csv, ",")
+}
+
+// canonicalParticipant maps the legacy empty author to the canonical human id
+// so participant-id columns never hold "".
+func canonicalParticipant(id string) string {
+	if id == "" {
+		return ParticipantHuman
+	}
+	return id
 }
 
 // AddQuestion inserts a new question with status "open" and AskedAt
@@ -44,10 +89,10 @@ func (s *Store) AddQuestion(q Question) (int64, error) {
 	}
 
 	res, err := s.db.Exec(
-		`INSERT INTO task_questions (task_id, asked_by, body, context, status, resolution, asked_at, resolved_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		q.TaskID, q.AskedBy, q.Body, nullIfEmpty(q.Context), q.Status, nullIfEmpty(q.Resolution),
-		q.AskedAt, nullIfZero(q.ResolvedAt),
+		`INSERT INTO questions (task_id, role_id, asked_by, body, context, status, resolution, asked_at, resolved_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		nullIfZero(q.TaskID), nullIfEmpty(q.RoleID), q.AskedBy, q.Body, nullIfEmpty(q.Context),
+		q.Status, nullIfEmpty(q.Resolution), q.AskedAt, nullIfZero(q.ResolvedAt),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert question: %w", err)
@@ -57,18 +102,14 @@ func (s *Store) AddQuestion(q Question) (int64, error) {
 
 // GetQuestion returns the question with the given id, or ErrNotFound.
 func (s *Store) GetQuestion(id int64) (Question, error) {
-	row := s.db.QueryRow(
-		`SELECT id, task_id, asked_by, body, context, status, resolution, asked_at, resolved_at
-		 FROM task_questions WHERE id = ?`, id,
-	)
+	row := s.db.QueryRow(`SELECT `+questionColumns+` FROM questions WHERE id = ?`, id)
 	return scanQuestion(row)
 }
 
 // ListQuestions returns questions for taskID, ascending by id. If openOnly
 // is true, only questions with status "open" are returned.
 func (s *Store) ListQuestions(taskID int64, openOnly bool) ([]Question, error) {
-	query := `SELECT id, task_id, asked_by, body, context, status, resolution, asked_at, resolved_at
-	          FROM task_questions WHERE task_id = ?`
+	query := `SELECT ` + questionColumns + ` FROM questions WHERE task_id = ?`
 	if openOnly {
 		query += ` AND status = 'open'`
 	}
@@ -100,7 +141,7 @@ func (s *Store) ListQuestions(taskID int64, openOnly bool) ([]Question, error) {
 // ErrQuestionResolved if it is already resolved.
 func (s *Store) ResolveQuestion(id int64, resolution string) error {
 	res, err := s.db.Exec(
-		`UPDATE task_questions SET status = 'resolved', resolution = ?, resolved_at = ?
+		`UPDATE questions SET status = 'resolved', resolution = ?, resolved_at = ?
 		 WHERE id = ? AND status = 'open'`,
 		resolution, time.Now().Unix(), id,
 	)
@@ -134,9 +175,10 @@ func (s *Store) AddQuestionMessage(m QuestionMessage) (int64, error) {
 	}
 
 	res, err := s.db.Exec(
-		`INSERT INTO question_messages (question_id, author, kind, body, created_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		m.QuestionID, nullIfEmpty(m.Author), m.Kind, m.Body, m.CreatedAt,
+		`INSERT INTO question_messages (question_id, author, kind, body, addressed_to, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		m.QuestionID, canonicalParticipant(m.Author), m.Kind, m.Body,
+		encodeAddressedTo(m.AddressedTo), m.CreatedAt,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert question message: %w", err)
@@ -147,7 +189,7 @@ func (s *Store) AddQuestionMessage(m QuestionMessage) (int64, error) {
 // ListQuestionMessages returns the thread for questionID, ascending by id.
 func (s *Store) ListQuestionMessages(questionID int64) ([]QuestionMessage, error) {
 	rows, err := s.db.Query(
-		`SELECT id, question_id, author, kind, body, created_at
+		`SELECT id, question_id, author, kind, body, addressed_to, created_at
 		 FROM question_messages WHERE question_id = ? ORDER BY id`, questionID,
 	)
 	if err != nil {
@@ -158,11 +200,12 @@ func (s *Store) ListQuestionMessages(questionID int64) ([]QuestionMessage, error
 	var out []QuestionMessage
 	for rows.Next() {
 		var m QuestionMessage
-		var author sql.NullString
-		if err := rows.Scan(&m.ID, &m.QuestionID, &author, &m.Kind, &m.Body, &m.CreatedAt); err != nil {
+		var author, addressedTo sql.NullString
+		if err := rows.Scan(&m.ID, &m.QuestionID, &author, &m.Kind, &m.Body, &addressedTo, &m.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan question message: %w", err)
 		}
-		m.Author = author.String
+		m.Author = canonicalParticipant(author.String)
+		m.AddressedTo = decodeAddressedTo(addressedTo.String)
 		out = append(out, m)
 	}
 	if err := rows.Err(); err != nil {
@@ -176,7 +219,7 @@ func (s *Store) ListQuestionMessages(questionID int64) ([]QuestionMessage, error
 func (s *Store) QuestionOrdinal(q Question) (int, error) {
 	var n int
 	err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM task_questions WHERE task_id = ? AND id <= ?`, q.TaskID, q.ID,
+		`SELECT COUNT(*) FROM questions WHERE task_id = ? AND id <= ?`, q.TaskID, q.ID,
 	).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("compute question ordinal: %w", err)
@@ -196,7 +239,9 @@ type QuestionCounts struct {
 // with no thread messages the question itself counts as the last entry (so
 // an orchestrator-opened question awaits the human, a user-opened one
 // doesn't); otherwise the last message's author decides (orchestrator
-// author -> human's turn). Computed in one query so list/board handlers can
+// author -> human's turn). The human is recognised in both the canonical
+// 'human' form and the pre-0009 empty one. Computed in one query so
+// list/board handlers can
 // annotate every task without an N+1.
 func (s *Store) OpenQuestionCounts() (map[int64]QuestionCounts, error) {
 	rows, err := s.db.Query(`
@@ -204,14 +249,14 @@ func (s *Store) OpenQuestionCounts() (map[int64]QuestionCounts, error) {
 			SELECT q.task_id AS task_id,
 				CASE
 					WHEN m.id IS NULL THEN (CASE WHEN q.asked_by != '' THEN 1 ELSE 0 END)
-					WHEN m.author IS NOT NULL AND m.author != '' THEN 1
+					WHEN m.author IS NOT NULL AND m.author NOT IN ('', 'human') THEN 1
 					ELSE 0
 				END AS turn_user
-			FROM task_questions q
+			FROM questions q
 			LEFT JOIN question_messages m
 				ON m.question_id = q.id
 				AND m.id = (SELECT MAX(id) FROM question_messages WHERE question_id = q.id)
-			WHERE q.status = 'open'
+			WHERE q.status = 'open' AND q.task_id IS NOT NULL
 		) GROUP BY task_id`)
 	if err != nil {
 		return nil, fmt.Errorf("query open question counts: %w", err)
@@ -238,8 +283,8 @@ func (s *Store) OpenQuestionCounts() (map[int64]QuestionCounts, error) {
 // Questions page.
 func (s *Store) ListAllOpenQuestions() ([]Question, error) {
 	rows, err := s.db.Query(
-		`SELECT id, task_id, asked_by, body, context, status, resolution, asked_at, resolved_at
-		 FROM task_questions WHERE status = 'open' ORDER BY id`)
+		`SELECT ` + questionColumns + ` FROM questions
+		 WHERE status = 'open' AND task_id IS NOT NULL ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("query all open questions: %w", err)
 	}
@@ -261,11 +306,12 @@ func (s *Store) ListAllOpenQuestions() ([]Question, error) {
 
 func scanQuestion(row interface{ Scan(...any) error }) (Question, error) {
 	var q Question
-	var context, resolution sql.NullString
-	var resolvedAt sql.NullInt64
+	var roleID, context, resolution sql.NullString
+	var taskID, resolvedAt sql.NullInt64
 
 	err := row.Scan(
-		&q.ID, &q.TaskID, &q.AskedBy, &q.Body, &context, &q.Status, &resolution, &q.AskedAt, &resolvedAt,
+		&q.ID, &taskID, &roleID, &q.AskedBy, &q.Body, &context, &q.Status, &resolution,
+		&q.AskedAt, &resolvedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Question{}, ErrNotFound
@@ -274,6 +320,8 @@ func scanQuestion(row interface{ Scan(...any) error }) (Question, error) {
 		return Question{}, fmt.Errorf("scan question: %w", err)
 	}
 
+	q.TaskID = taskID.Int64
+	q.RoleID = roleID.String
 	q.Context = context.String
 	q.Resolution = resolution.String
 	q.ResolvedAt = resolvedAt.Int64

@@ -161,6 +161,19 @@ func TestDeleteAgentPurgesQuestions(t *testing.T) {
 	if _, err := s.AddAgentQuestionMessage(AgentQuestionMessage{QuestionID: qid, Body: "m"}); err != nil {
 		t.Fatalf("AddAgentQuestionMessage: %v", err)
 	}
+	if err := s.AddParticipants(qid, "human", "sre"); err != nil {
+		t.Fatalf("AddParticipants: %v", err)
+	}
+
+	// A task thread must survive the role deletion untouched.
+	taskID := mustAddQuestionTask(t, s)
+	survivor, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch-1", Body: "task thread"})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+	if err := s.AddParticipants(survivor, "human", "orch-1"); err != nil {
+		t.Fatalf("AddParticipants survivor: %v", err)
+	}
 
 	if err := s.DeleteAgent("sre"); err != nil {
 		t.Fatalf("DeleteAgent: %v", err)
@@ -171,5 +184,17 @@ func TestDeleteAgentPurgesQuestions(t *testing.T) {
 	msgs, err := s.ListAgentQuestionMessages(qid)
 	if err != nil || len(msgs) != 0 {
 		t.Fatalf("messages survived delete: %+v, %v", msgs, err)
+	}
+	parts, err := s.ListParticipants(qid)
+	if err != nil || len(parts) != 0 {
+		t.Fatalf("participants survived delete: %+v, %v", parts, err)
+	}
+
+	if _, err := s.GetQuestion(survivor); err != nil {
+		t.Fatalf("task thread did not survive the role deletion: %v", err)
+	}
+	parts, err = s.ListParticipants(survivor)
+	if err != nil || len(parts) != 2 {
+		t.Fatalf("task thread participants = %+v, %v; want both intact", parts, err)
 	}
 }

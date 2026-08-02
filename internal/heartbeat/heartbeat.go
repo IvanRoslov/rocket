@@ -240,7 +240,7 @@ func (h *Heartbeat) reminderLine(q store.Question, now time.Time) (string, bool,
 		return "", false, nil
 	}
 	last := msgs[len(msgs)-1]
-	if last.Author != "" {
+	if !store.IsHuman(last.Author) {
 		// Last entry from the orchestrator; not overdue for it.
 		return "", false, nil
 	}
