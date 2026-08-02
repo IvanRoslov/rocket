@@ -797,8 +797,8 @@ func handlePostTaskStart(w http.ResponseWriter, r *http.Request, d Deps) {
 	if writeCallerErr(w, err) {
 		return
 	}
-	if caller != nil {
-		writeErr(w, http.StatusForbidden, "forbidden", "only the human user may start a task")
+	if caller != nil && caller.Kind != "agent" {
+		writeErr(w, http.StatusForbidden, "forbidden", "only the human user or a registered agent may start a task")
 		return
 	}
 
