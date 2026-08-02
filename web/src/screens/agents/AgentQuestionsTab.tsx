@@ -1,6 +1,6 @@
-// Role Q&A threads, both directions (docs/10-agents.md): threads the role
-// opened to escalate to you, and threads you open to the role — the latter
-// wake it with a `question` inbox event.
+// Agent Q&A threads, both directions (docs/10-agents.md): threads the agent
+// opened to escalate to you, and threads you open to the agent — the latter
+// reach it the same live-or-inbox way a plain message does.
 
 import { useMemo, useState } from 'react'
 import { AgentQuestionThread } from '../../components/AgentQuestionThread'
@@ -56,7 +56,7 @@ export function AgentQuestionsTab({ roleId }: AgentQuestionsTabProps) {
 
       <div className="agent-questions__ask">
         <textarea
-          aria-label="Ask the role"
+          aria-label="Ask the agent"
           rows={3}
           placeholder={`Ask ${roleId} something…`}
           value={body}
@@ -68,7 +68,7 @@ export function AgentQuestionsTab({ roleId }: AgentQuestionsTabProps) {
             Ask
           </Button>
           <span className="agent-questions__ask-hint">
-            Opens a thread and wakes the role.
+            Opens a thread and writes to the agent.
           </span>
         </div>
       </div>

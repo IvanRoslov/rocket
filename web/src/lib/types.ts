@@ -427,74 +427,48 @@ export interface Settings {
 }
 
 // ---------------------------------------------------------------------------
-// Agent roles — internal/api/agents.go, internal/api/agent_questions.go
-// (docs/10-agents.md «Роли (постоянные агенты)»)
+// Agents — internal/api/agents.go, internal/api/agent_questions.go
+// (docs/10-agents.md «Постоянные агенты»)
 // ---------------------------------------------------------------------------
 
-/** A GitHub subscription of a role: which repo feeds its inbox, and how it is
- * filtered (`store.AgentSubscription`). */
-export interface AgentSubscription {
-  repo: string
-  labels?: string[]
-  mention_only?: boolean
-}
-
-/** A registered role. `prompt` (the role prompt body) is only present on
- * `GET /v1/agents/{id}` — the list omits it. */
+/** A registered agent. Everything past the stored columns is derived by the
+ * daemon: `session_alive` (is the tmux session named `<id>` up), `unread` and
+ * the Q&A counters. `dir`/`command` are the optional launcher pair — without a
+ * `dir` the agent can only be started by hand (`tmux new -s <id>`). */
 export interface Agent {
   id: string
+  description: string
   project: string
-  prompt_path: string
-  prompt?: string
-  subscriptions: AgentSubscription[]
-  cron: string
-  agent: string
+  dir: string
+  command: string
   enabled: boolean
-  inbox_queued: number
-  items: number
+  session_alive: boolean
+  unread: number
   open_questions: number
   awaiting_user: number
   created_at: number
   updated_at: number
 }
 
-export type AgentInboxKind =
-  | 'message'
-  | 'issue_opened'
-  | 'issue_comment'
-  | 'task_update'
-  | 'snooze_expired'
-  | 'cron'
-  | 'question'
-  | 'terminal_opened'
-
-export interface AgentInboxEvent {
+/** One inbox message. The inbox is what an agent gets when its session is
+ * down; it reads them back one by one (`rocket inbox next`), which is what
+ * flips `status` from `unread` to `read`. */
+export interface AgentInboxMessage {
   id: number
-  kind: AgentInboxKind
-  /** Kind-specific JSON from the event's producer: `{text, from}` for
-   * `message`, `{repo, number, title}` for issue events, `{task_id, title,
-   * from, to}` for `task_update`, `{question_id, ordinal, entry, text}` for
-   * `question`. */
-  payload: Record<string, unknown>
-  status: 'queued' | 'delivered' | 'done'
+  from: string
+  body: string
+  status: 'unread' | 'read'
   created_at: number
-  updated_at: number
+  read_at?: number
 }
 
-/** A dossier row — what the role is tracking and in which state. `state` is
- * free text the role writes (`new`, `triaged`, `taken`, `deferred`,
- * `waiting_team`, `in_work`, `resolved`, `closed`), not a daemon-enforced
- * state machine. */
-export interface AgentItem {
+/** `POST /v1/agents/{id}/messages` -> 202. `live` says which path the message
+ * took: `queued` into the running session, or `inbox` for later. */
+export interface AgentDelivery {
   id: number
-  kind: 'issue' | 'task' | 'ping'
-  ref: string
-  state: string
-  note: string
-  task_id: number
-  snooze_until: number
-  created_at: number
-  updated_at: number
+  to: string
+  status: 'queued' | 'inbox'
+  live: boolean
 }
 
 /** A role Q&A thread. Mirrors `Question` with `role_id` in place of the task
@@ -514,18 +488,3 @@ export interface AgentQuestion {
   messages: QuestionMessage[]
 }
 
-/** One fact file of a role's file memory (body inlined). */
-export interface AgentMemoryFile {
-  name: string
-  size: number
-  updated_at: number
-  body: string
-}
-
-/** `GET /v1/agents/{id}/memory`: the MEMORY.md index plus the fact files
- * beside it. `PUT` writes one file at a time (`file` defaults to MEMORY.md). */
-export interface AgentMemory {
-  path: string
-  index: string
-  files: AgentMemoryFile[]
-}

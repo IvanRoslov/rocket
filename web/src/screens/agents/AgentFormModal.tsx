@@ -1,59 +1,23 @@
-// Create/edit a role: id, role prompt (markdown, with preview), GitHub
-// subscriptions, cron and the underlying agent. The prompt is the role's
-// triage policy in free text (docs/10-agents.md) — editing it takes effect on
-// the role's next wake, no restart involved.
+// Register/edit an agent: its id (which is also its tmux session name and its
+// address in the message queue), a description for humans and the optional
+// launcher pair dir/command. Rocket stores nothing else — what the agent is
+// and how it works lives in its own directory (docs/10-agents.md).
 
 import { useState, type FormEvent } from 'react'
 import { Button } from '../../components/Button'
-import { Markdown } from '../../components/Markdown'
 import { Modal } from '../../components/Modal'
 import { useCreateAgent, useUpdateAgent } from '../../lib/queries'
-import type { Agent, AgentSubscription } from '../../lib/types'
+import type { Agent } from '../../lib/types'
 import './agents.css'
 
 const ID_PATTERN = /^[a-z0-9-]+$/
 
-const AGENT_OPTIONS = ['claude', 'claude-code', 'codex']
-
-/**
- * Subscriptions are edited as one repo per line — the daemon's structural
- * filters (docs/10-agents.md): `owner/repo [label=a,b] [mention-only]`.
- * Unrecognized trailing words are ignored rather than rejected, so a typo in
- * a modifier never silently drops the whole repo from the subscription list.
- */
-export function parseSubscriptions(text: string): AgentSubscription[] {
-  return text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [repo, ...rest] = line.split(/\s+/)
-      const labelPart = rest.find((w) => w.startsWith('label='))
-      return {
-        repo,
-        labels: labelPart ? labelPart.slice('label='.length).split(',').filter(Boolean) : [],
-        mention_only: rest.includes('mention-only'),
-      }
-    })
-}
-
-export function formatSubscriptions(subs: AgentSubscription[]): string {
-  return subs
-    .map((s) => {
-      const parts = [s.repo]
-      if (s.labels && s.labels.length > 0) parts.push(`label=${s.labels.join(',')}`)
-      if (s.mention_only) parts.push('mention-only')
-      return parts.join(' ')
-    })
-    .join('\n')
-}
-
 export interface AgentFormModalProps {
   projectId: string
-  /** Existing role to edit; omitted when creating. */
+  /** Existing agent to edit; omitted when registering a new one. */
   agent?: Agent
   onClose: () => void
-  /** Called with the role id after a successful create. */
+  /** Called with the agent id after a successful registration. */
   onCreated?: (id: string) => void
 }
 
@@ -61,11 +25,9 @@ export function AgentFormModal({ projectId, agent, onClose, onCreated }: AgentFo
   const editing = agent !== undefined
 
   const [id, setId] = useState(agent?.id ?? '')
-  const [prompt, setPrompt] = useState(agent?.prompt ?? '')
-  const [subsText, setSubsText] = useState(formatSubscriptions(agent?.subscriptions ?? []))
-  const [cron, setCron] = useState(agent?.cron ?? '')
-  const [underlying, setUnderlying] = useState(agent?.agent ?? '')
-  const [preview, setPreview] = useState(false)
+  const [description, setDescription] = useState(agent?.description ?? '')
+  const [dir, setDir] = useState(agent?.dir ?? '')
+  const [command, setCommand] = useState(agent?.command ?? '')
 
   const create = useCreateAgent()
   const update = useUpdateAgent()
@@ -78,16 +40,12 @@ export function AgentFormModal({ projectId, agent, onClose, onCreated }: AgentFo
     e.preventDefault()
     if (!idValid || busy) return
 
-    const subscriptions = parseSubscriptions(subsText)
     if (editing) {
-      update.mutate(
-        { id: agent.id, prompt, subscriptions, cron, agent: underlying },
-        { onSuccess: onClose },
-      )
+      update.mutate({ id: agent.id, description, dir, command }, { onSuccess: onClose })
       return
     }
     create.mutate(
-      { id, project: projectId, prompt, subscriptions, cron, agent: underlying },
+      { id, project: projectId, description, dir, command },
       {
         onSuccess: () => {
           onCreated?.(id)
@@ -98,10 +56,10 @@ export function AgentFormModal({ projectId, agent, onClose, onCreated }: AgentFo
   }
 
   return (
-    <Modal title={editing ? `Edit role ${agent.id}` : 'New role'} onClose={onClose}>
+    <Modal title={editing ? `Edit agent ${agent.id}` : 'New agent'} onClose={onClose}>
       <form className="agent-form" onSubmit={handleSubmit}>
         <label className="agent-form__label" htmlFor="agent-form-id">
-          Role id
+          Agent id
         </label>
         <input
           id="agent-form-id"
@@ -116,83 +74,55 @@ export function AgentFormModal({ projectId, agent, onClose, onCreated }: AgentFo
           <p className="agent-form__error">Use lowercase letters, digits and dashes</p>
         )}
         <p className="agent-form__hint">
-          The id is also the role's address in the message queue: <code>rocket send {id || 'sre'}</code>.
+          Also the agent's tmux session name and its address in the message queue:{' '}
+          <code>rocket send {id || 'sre'}</code>.
         </p>
 
-        <div className="agent-form__label-row">
-          <label className="agent-form__label" htmlFor="agent-form-prompt">
-            Role prompt
-          </label>
-          <button
-            type="button"
-            className="agent-form__toggle"
-            onClick={() => setPreview((v) => !v)}
-          >
-            {preview ? 'Edit' : 'Preview'}
-          </button>
-        </div>
-        {preview ? (
-          <div className="agent-form__preview">
-            <Markdown>{prompt || '_empty prompt_'}</Markdown>
-          </div>
-        ) : (
-          <textarea
-            id="agent-form-prompt"
-            className="agent-form__textarea agent-form__textarea--mono"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder={'# SRE\n\nWhat this role owns and how it triages: what to take, what to label, what to escalate.'}
-            rows={14}
-          />
-        )}
-        <p className="agent-form__hint">
-          Markdown. Read on every wake — edits need no restart.
-        </p>
-
-        <label className="agent-form__label" htmlFor="agent-form-subs">
-          GitHub subscriptions
+        <label className="agent-form__label" htmlFor="agent-form-description">
+          Description
         </label>
         <textarea
-          id="agent-form-subs"
-          className="agent-form__textarea agent-form__textarea--mono"
-          value={subsText}
-          onChange={(e) => setSubsText(e.target.value)}
-          placeholder={'acme/platform label=bug mention-only\nacme/web'}
-          rows={4}
+          id="agent-form-description"
+          className="agent-form__textarea"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Platform SRE: takes platform blockers, turns them into tasks."
+          rows={3}
         />
         <p className="agent-form__hint">
-          One repo per line: <code>owner/repo [label=a,b] [mention-only]</code>. These decide what
-          reaches the inbox; the prompt decides what to do with it.
+          What this agent is for — so people know when to write to it.
         </p>
 
-        <label className="agent-form__label" htmlFor="agent-form-cron">
-          Cron
+        <label className="agent-form__label" htmlFor="agent-form-dir">
+          Directory
         </label>
         <input
-          id="agent-form-cron"
+          id="agent-form-dir"
           className="agent-form__input agent-form__input--mono"
-          value={cron}
-          onChange={(e) => setCron(e.target.value)}
-          placeholder="0 * * * *"
+          value={dir}
+          onChange={(e) => setDir(e.target.value)}
+          placeholder="/home/dev/agents/sre"
         />
-        <p className="agent-form__hint">Five fields; leave empty for no schedule.</p>
+        <p className="agent-form__hint">
+          Where Start runs the agent — its own project directory with its own{' '}
+          <code>CLAUDE.md</code>. Leave empty and start the session yourself:{' '}
+          <code>tmux new -s {id || 'sre'}</code>.
+        </p>
 
-        <label className="agent-form__label" htmlFor="agent-form-agent">
-          Underlying agent
+        <label className="agent-form__label" htmlFor="agent-form-command">
+          Command
         </label>
-        <select
-          id="agent-form-agent"
-          className="agent-form__input"
-          value={underlying}
-          onChange={(e) => setUnderlying(e.target.value)}
-        >
-          <option value="">daemon default</option>
-          {AGENT_OPTIONS.map((a) => (
-            <option key={a} value={a}>
-              {a}
-            </option>
-          ))}
-        </select>
+        <input
+          id="agent-form-command"
+          className="agent-form__input agent-form__input--mono"
+          value={command}
+          onChange={(e) => setCommand(e.target.value)}
+          placeholder="claude"
+        />
+        <p className="agent-form__hint">
+          Run on Start; empty means an interactive shell. Rocket sets no prompt and manages no
+          lifecycle.
+        </p>
 
         {error && <p className="agent-form__error">{error.message}</p>}
 
@@ -201,7 +131,7 @@ export function AgentFormModal({ projectId, agent, onClose, onCreated }: AgentFo
             Cancel
           </Button>
           <Button variant="primary" type="submit" disabled={!idValid || busy}>
-            {editing ? 'Save' : 'Create role'}
+            {editing ? 'Save' : 'Register agent'}
           </Button>
         </div>
       </form>

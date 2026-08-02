@@ -133,7 +133,7 @@ describe('ProjectsScreen', () => {
   it('flags roles of the project that are waiting on your answer', async () => {
     renderScreen()
 
-    // Fixture role "sre" (project billing) has awaiting_user = 1.
-    expect(await screen.findByText('？1 role awaiting you')).toBeInTheDocument()
+    // Fixture agent "sre" (project billing) has awaiting_user = 1.
+    expect(await screen.findByText('？1 agent awaiting you')).toBeInTheDocument()
   })
 })

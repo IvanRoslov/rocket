@@ -1,14 +1,13 @@
-// Role card: header signals, the wake/terminal actions and the tabs over the
-// role's durable state (inbox, dossier, memory, runs, Q&A threads).
+// Agent card: header signals, the send/terminal/Start actions and the two
+// tabs over what rocket actually keeps — Q&A threads and the inbox.
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { agentRuns } from '../../mocks/fixtures'
 import { handlers, resetAgents } from '../../mocks/handlers'
 import { AgentScreen } from './AgentScreen'
 
@@ -26,11 +25,11 @@ afterEach(() => {
 })
 afterAll(() => server.close())
 
-function renderScreen(roleId = 'sre') {
+function renderScreen(agentId = 'sre') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[`/p/billing/agents/${roleId}`]}>
+      <MemoryRouter initialEntries={[`/p/billing/agents/${agentId}`]}>
         <Routes>
           <Route path="/p/:projectId/agents/:roleId" element={<AgentScreen />} />
           <Route path="/p/:projectId/agents" element={<div>agents list</div>} />
@@ -41,70 +40,74 @@ function renderScreen(roleId = 'sre') {
 }
 
 describe('AgentScreen header', () => {
-  it('shows the role, its live instance and the enabled state', async () => {
+  it('shows the agent, its live session and its launcher pair', async () => {
     renderScreen()
 
     expect(await screen.findByRole('heading', { name: 'sre' })).toBeInTheDocument()
-    expect(screen.getByText('● sre-run-3')).toBeInTheDocument()
+    expect(screen.getByText('● session live')).toBeInTheDocument()
     expect(screen.getByText('enabled')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Disable' })).toBeInTheDocument()
-    expect(screen.getByText('/home/dev/.rocket/agents/sre/role.md')).toBeInTheDocument()
+    expect(screen.getByText(/Platform SRE/)).toBeInTheDocument()
+    expect(screen.getByText('/home/dev/agents/sre')).toBeInTheDocument()
+    expect(screen.getByText('claude')).toBeInTheDocument()
   })
 
-  it('wakes the role with a ping and clears the field', async () => {
+  it('sends a message and clears the field', async () => {
     renderScreen()
 
-    const ping = await screen.findByLabelText('Ping the role')
-    await userEvent.type(ping, 'status?')
-    await userEvent.click(screen.getByRole('button', { name: 'Wake' }))
+    const field = await screen.findByLabelText('Message the agent')
+    await userEvent.type(field, 'status?')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
 
-    await waitFor(() => expect(ping).toHaveValue(''))
+    await waitFor(() => expect(field).toHaveValue(''))
   })
 
-  it('attaches straight to the live instance from the terminal button', async () => {
+  it('attaches to the session named after the agent', async () => {
     renderScreen()
 
     await userEvent.click(await screen.findByRole('button', { name: 'Terminal' }))
 
-    expect(await screen.findByText('term:sre-run-3')).toBeInTheDocument()
+    expect(await screen.findByText('term:sre')).toBeInTheDocument()
   })
 
-  it('keeps waiting while the spawned instance is not running yet', async () => {
-    // A `spawning` row exists before its tmux session does; attaching then
-    // gets the socket closed by the daemon, so the pending state must hold.
+  it('offers Stop while the session is live, and no Start', async () => {
+    renderScreen()
+
+    expect(await screen.findByRole('button', { name: 'Stop' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Start' })).not.toBeInTheDocument()
+  })
+
+  it('offers Start when the session is down, and opens the terminal once it is up', async () => {
+    renderScreen('triage')
+
+    expect(screen.queryByRole('button', { name: 'Terminal' })).not.toBeInTheDocument()
+    await userEvent.click(await screen.findByRole('button', { name: 'Start' }))
+
+    // The mock start flips session_alive; the card re-reads the agent and the
+    // terminal becomes reachable.
+    expect(await screen.findByRole('button', { name: 'Terminal' })).toBeInTheDocument()
+  })
+
+  it('surfaces a launcher error instead of pretending the agent started', async () => {
     server.use(
-      http.get('/v1/sessions', () =>
-        HttpResponse.json([
+      http.post('/v1/agents/:id/start', () =>
+        HttpResponse.json(
           {
-            ...agentRuns[0],
-            id: 'triage-run-1',
-            tmux_name: 'triage-run-1',
-            state: 'spawning',
+            error: {
+              code: 'agent_no_dir',
+              message: 'agent triage has no dir: set one or create the tmux session yourself',
+            },
           },
-        ]),
+          { status: 400 },
+        ),
       ),
     )
     renderScreen('triage')
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Wake & open terminal' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Start' }))
 
-    expect(await screen.findByText(/waking…/)).toBeInTheDocument()
-    expect(screen.queryByText(/^term:/)).not.toBeInTheDocument()
-  })
-
-  it('offers wake-and-open when no instance is live', async () => {
-    renderScreen('triage')
-
-    const button = await screen.findByRole('button', { name: 'Wake & open terminal' })
-    await userEvent.click(button)
-
-    expect(await screen.findByText(/waking…/)).toBeInTheDocument()
-    // No instance appeared, so no terminal — the pending state stays visible
-    // until the wake engine spawns one (or the user cancels).
-    expect(screen.queryByText(/^term:/)).not.toBeInTheDocument()
-
-    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(screen.queryByText(/waking…/)).not.toBeInTheDocument()
+    expect(await screen.findByText(/has no dir/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Start' })).toBeInTheDocument()
   })
 })
 
@@ -117,43 +120,29 @@ describe('AgentScreen tabs', () => {
     expect(screen.getByText('sre asked')).toBeInTheDocument()
   })
 
-  it('shows the inbox with human-readable event summaries', async () => {
+  it('shows the inbox messages and filters them by status', async () => {
     renderScreen()
 
     await userEvent.click(await screen.findByRole('tab', { name: /Inbox/ }))
 
-    expect(await screen.findByText('billing-v2-orch: blocked by the platform migration')).toBeInTheDocument()
-    expect(screen.getByText('acme/platform#42 — DB migration stuck')).toBeInTheDocument()
-    expect(screen.getByText('#12 Billing v2: in_progress → review')).toBeInTheDocument()
-  })
+    expect(await screen.findByText('blocked by the platform migration')).toBeInTheDocument()
+    expect(screen.getByText('migration is done, thanks')).toBeInTheDocument()
 
-  it('filters the dossier by state and links tasks to the board', async () => {
-    renderScreen()
+    await userEvent.selectOptions(screen.getByLabelText('Status'), 'unread')
 
-    await userEvent.click(await screen.findByRole('tab', { name: /Dossier/ }))
-
-    expect(await screen.findByText('acme/platform#42')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '#12' })).toHaveAttribute('href', '/p/billing/tasks/12')
-
-    await userEvent.selectOptions(screen.getByLabelText('State'), 'deferred')
-
-    await waitFor(() => expect(screen.queryByText('acme/platform#42')).not.toBeInTheDocument())
-    expect(screen.getByText('acme/platform#43')).toBeInTheDocument()
-  })
-
-  it('lists the runs newest first with a terminal link for the live one', async () => {
-    renderScreen()
-
-    await userEvent.click(await screen.findByRole('tab', { name: /Runs/ }))
-
-    const rows = await screen.findAllByRole('row')
-    expect(within(rows[1]).getByText('sre-run-3')).toBeInTheDocument()
-    expect(within(rows[1]).getByText('running')).toBeInTheDocument()
-    expect(within(rows[1]).getByRole('link', { name: /term/ })).toHaveAttribute(
-      'href',
-      '/term/sre-run-3',
+    await waitFor(() =>
+      expect(screen.queryByText('migration is done, thanks')).not.toBeInTheDocument(),
     )
-    expect(within(rows[2]).getByText('sre-run-2')).toBeInTheDocument()
-    expect(within(rows[2]).queryByRole('link')).toBeNull()
+    expect(screen.getByText('blocked by the platform migration')).toBeInTheDocument()
+  })
+
+  it('has no Dossier, Memory or Runs tab', async () => {
+    renderScreen()
+
+    await screen.findByRole('tab', { name: /Inbox/ })
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual([
+      'Questions1',
+      'Inbox2',
+    ])
   })
 })
