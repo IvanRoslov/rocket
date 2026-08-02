@@ -40,3 +40,19 @@
 .questions-screen__task:hover {
   color: var(--text);
 }
+
+.questions-screen__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.questions-screen__filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 13px var(--font-ui);
+  color: var(--text-3);
+  cursor: pointer;
+}
