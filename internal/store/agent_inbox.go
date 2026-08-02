@@ -1,71 +1,64 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
-	"strings"
 	"time"
 )
 
-// Inbox event kinds and statuses. Kinds are validated at the API/CLI edge
-// (see internal/api/agents.go); the store keeps them as free strings so a
-// later event source can be added without a migration.
+// Inbox message statuses. An inbox message is written when a message is
+// addressed to an agent whose tmux session is not alive; the agent drains it
+// itself with `rocket inbox next` (see docs/10-agents.md).
 const (
-	InboxStatusQueued    = "queued"
-	InboxStatusDelivered = "delivered"
-	InboxStatusDone      = "done"
+	InboxUnread = "unread"
+	InboxRead   = "read"
 )
 
-// AgentInboxEvent is one durable event in a role's inbox. Inbox events are
-// what wakes a role instance (task #642); this layer only stores them.
-type AgentInboxEvent struct {
-	ID        int64
-	RoleID    string
-	Kind      string
-	Payload   string // JSON object, "{}" when absent
-	Status    string // queued|delivered|done
+// InboxMessage is one message waiting in an agent's inbox.
+type InboxMessage struct {
+	ID      int64
+	AgentID string
+	// From is the sender's session id; empty for the human/UI.
+	From      string
+	Body      string
+	Status    string // unread|read
 	CreatedAt int64
-	UpdatedAt int64
+	ReadAt    int64
 }
 
-const inboxColumns = `id, role_id, kind, payload, status, created_at, updated_at`
+const inboxColumns = `id, agent_id, from_id, body, status, created_at, read_at`
 
-// EnqueueInboxEvent appends an event to a role's inbox and returns its id.
-// Status defaults to queued and payload to an empty JSON object.
-func (s *Store) EnqueueInboxEvent(e AgentInboxEvent) (int64, error) {
-	if e.Status == "" {
-		e.Status = InboxStatusQueued
+// AddInboxMessage appends a message to an agent's inbox and returns its id.
+// Status defaults to unread.
+func (s *Store) AddInboxMessage(m InboxMessage) (int64, error) {
+	if m.Status == "" {
+		m.Status = InboxUnread
 	}
-	if strings.TrimSpace(e.Payload) == "" {
-		e.Payload = "{}"
-	}
-	now := time.Now().Unix()
-	if e.CreatedAt == 0 {
-		e.CreatedAt = now
-	}
-	if e.UpdatedAt == 0 {
-		e.UpdatedAt = e.CreatedAt
+	if m.CreatedAt == 0 {
+		m.CreatedAt = time.Now().Unix()
 	}
 
 	res, err := s.db.Exec(
-		`INSERT INTO agent_inbox (role_id, kind, payload, status, created_at, updated_at)
+		`INSERT INTO agent_inbox (agent_id, from_id, body, status, created_at, read_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
-		e.RoleID, e.Kind, e.Payload, e.Status, e.CreatedAt, e.UpdatedAt,
+		m.AgentID, m.From, m.Body, m.Status, m.CreatedAt, nullIfZero(m.ReadAt),
 	)
 	if err != nil {
-		return 0, fmt.Errorf("insert inbox event: %w", err)
+		return 0, fmt.Errorf("insert inbox message: %w", err)
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		return 0, fmt.Errorf("inbox event id: %w", err)
+		return 0, fmt.Errorf("inbox message id: %w", err)
 	}
 	return id, nil
 }
 
-// ListInboxEvents returns a role's events oldest-first. An empty status
-// returns every event; limit <= 0 means no limit.
-func (s *Store) ListInboxEvents(roleID, status string, limit int) ([]AgentInboxEvent, error) {
-	query := `SELECT ` + inboxColumns + ` FROM agent_inbox WHERE role_id = ?`
-	args := []any{roleID}
+// ListInboxMessages returns an agent's messages oldest-first. An empty status
+// returns every message; limit <= 0 means no limit.
+func (s *Store) ListInboxMessages(agentID, status string, limit int) ([]InboxMessage, error) {
+	query := `SELECT ` + inboxColumns + ` FROM agent_inbox WHERE agent_id = ?`
+	args := []any{agentID}
 	if status != "" {
 		query += ` AND status = ?`
 		args = append(args, status)
@@ -78,18 +71,17 @@ func (s *Store) ListInboxEvents(roleID, status string, limit int) ([]AgentInboxE
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query inbox events: %w", err)
+		return nil, fmt.Errorf("query inbox messages: %w", err)
 	}
 	defer rows.Close()
 
-	var out []AgentInboxEvent
+	var out []InboxMessage
 	for rows.Next() {
-		var e AgentInboxEvent
-		if err := rows.Scan(&e.ID, &e.RoleID, &e.Kind, &e.Payload, &e.Status,
-			&e.CreatedAt, &e.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("scan inbox event: %w", err)
+		m, err := scanInboxMessage(rows)
+		if err != nil {
+			return nil, err
 		}
-		out = append(out, e)
+		out = append(out, m)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -97,77 +89,111 @@ func (s *Store) ListInboxEvents(roleID, status string, limit int) ([]AgentInboxE
 	return out, nil
 }
 
-// QueuedInboxEvents returns a role's undelivered events, oldest first.
-func (s *Store) QueuedInboxEvents(roleID string) ([]AgentInboxEvent, error) {
-	return s.ListInboxEvents(roleID, InboxStatusQueued, 0)
+// GetInboxMessage returns one message by id, or ErrNotFound.
+func (s *Store) GetInboxMessage(id int64) (InboxMessage, error) {
+	row := s.db.QueryRow(`SELECT `+inboxColumns+` FROM agent_inbox WHERE id = ?`, id)
+	return scanInboxMessage(row)
 }
 
-// CountQueuedInboxEvents returns how many events are waiting in a role's inbox.
-func (s *Store) CountQueuedInboxEvents(roleID string) (int, error) {
+// NextUnreadInboxMessage takes an agent's oldest unread message and marks it
+// read, atomically: two concurrent `rocket inbox next` calls never hand out the
+// same message twice. ok is false when the inbox holds nothing unread.
+func (s *Store) NextUnreadInboxMessage(agentID string) (InboxMessage, bool, error) {
+	for {
+		tx, err := s.db.Begin()
+		if err != nil {
+			return InboxMessage{}, false, fmt.Errorf("begin inbox next: %w", err)
+		}
+
+		row := tx.QueryRow(
+			`SELECT `+inboxColumns+` FROM agent_inbox
+			 WHERE agent_id = ? AND status = ? ORDER BY id LIMIT 1`,
+			agentID, InboxUnread,
+		)
+		m, err := scanInboxMessage(row)
+		if errors.Is(err, ErrNotFound) {
+			tx.Rollback()
+			return InboxMessage{}, false, nil
+		}
+		if err != nil {
+			tx.Rollback()
+			return InboxMessage{}, false, err
+		}
+
+		now := time.Now().Unix()
+		res, err := tx.Exec(
+			`UPDATE agent_inbox SET status = ?, read_at = ? WHERE id = ? AND status = ?`,
+			InboxRead, now, m.ID, InboxUnread,
+		)
+		if err != nil {
+			tx.Rollback()
+			return InboxMessage{}, false, fmt.Errorf("mark inbox message read: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			tx.Rollback()
+			return InboxMessage{}, false, fmt.Errorf("mark inbox message read: %w", err)
+		}
+		if n == 0 {
+			// Someone else took it between the select and the update; retry.
+			tx.Rollback()
+			continue
+		}
+		if err := tx.Commit(); err != nil {
+			return InboxMessage{}, false, fmt.Errorf("commit inbox next: %w", err)
+		}
+
+		m.Status = InboxRead
+		m.ReadAt = now
+		return m, true, nil
+	}
+}
+
+// CountUnreadInbox returns how many unread messages an agent has.
+func (s *Store) CountUnreadInbox(agentID string) (int, error) {
 	var n int
 	err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM agent_inbox WHERE role_id = ? AND status = ?`,
-		roleID, InboxStatusQueued,
+		`SELECT COUNT(*) FROM agent_inbox WHERE agent_id = ? AND status = ?`,
+		agentID, InboxUnread,
 	).Scan(&n)
 	if err != nil {
-		return 0, fmt.Errorf("count queued inbox events: %w", err)
+		return 0, fmt.Errorf("count unread inbox: %w", err)
 	}
 	return n, nil
 }
 
-// MarkInboxDelivered moves events to the delivered status.
-func (s *Store) MarkInboxDelivered(ids []int64) error {
-	return s.setInboxStatus(ids, InboxStatusDelivered)
-}
-
-// MarkInboxDone moves events to the done status (the role has processed them).
-func (s *Store) MarkInboxDone(ids []int64) error {
-	return s.setInboxStatus(ids, InboxStatusDone)
-}
-
-func (s *Store) setInboxStatus(ids []int64, status string) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
-	args := make([]any, 0, len(ids)+2)
-	args = append(args, status, time.Now().Unix())
-	for _, id := range ids {
-		args = append(args, id)
-	}
-	_, err := s.db.Exec(
-		`UPDATE agent_inbox SET status = ?, updated_at = ? WHERE id IN (`+placeholders+`)`,
-		args...,
-	)
+// MaxUnreadInboxID returns the highest id among an agent's unread messages, or
+// 0 when it has none. The unread notifier uses it to tell "the same unread pile
+// I already announced" from "something new arrived since".
+func (s *Store) MaxUnreadInboxID(agentID string) (int64, error) {
+	var id sql.NullInt64
+	err := s.db.QueryRow(
+		`SELECT MAX(id) FROM agent_inbox WHERE agent_id = ? AND status = ?`,
+		agentID, InboxUnread,
+	).Scan(&id)
 	if err != nil {
-		return fmt.Errorf("update inbox status: %w", err)
+		return 0, fmt.Errorf("max unread inbox id: %w", err)
 	}
-	return nil
+	if !id.Valid {
+		return 0, nil
+	}
+	return id.Int64, nil
 }
 
-// RolesWithQueuedInbox returns the ids of roles that have at least one
-// queued inbox event, ordered by role id. The wake engine uses it on daemon
-// startup to pick up events enqueued while the daemon was down.
-func (s *Store) RolesWithQueuedInbox() ([]string, error) {
-	rows, err := s.db.Query(
-		`SELECT DISTINCT role_id FROM agent_inbox WHERE status = ? ORDER BY role_id`,
-		InboxStatusQueued,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("query roles with queued inbox: %w", err)
-	}
-	defer rows.Close()
+func scanInboxMessage(row interface{ Scan(...any) error }) (InboxMessage, error) {
+	var m InboxMessage
+	var from sql.NullString
+	var readAt sql.NullInt64
 
-	var out []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan role id: %w", err)
-		}
-		out = append(out, id)
+	err := row.Scan(&m.ID, &m.AgentID, &from, &m.Body, &m.Status, &m.CreatedAt, &readAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return InboxMessage{}, ErrNotFound
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+	if err != nil {
+		return InboxMessage{}, fmt.Errorf("scan inbox message: %w", err)
 	}
-	return out, nil
+
+	m.From = from.String
+	m.ReadAt = readAt.Int64
+	return m, nil
 }

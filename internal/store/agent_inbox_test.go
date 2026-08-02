@@ -15,259 +15,204 @@ func openStoreWithAgent(t *testing.T) *Store {
 	return s
 }
 
-func TestEnqueueInboxEventDefaults(t *testing.T) {
+func TestAddInboxMessageDefaults(t *testing.T) {
 	s := openStoreWithAgent(t)
 
-	id, err := s.EnqueueInboxEvent(AgentInboxEvent{RoleID: "sre", Kind: "message"})
+	id, err := s.AddInboxMessage(InboxMessage{AgentID: "sre", Body: "deploy is stuck"})
 	if err != nil {
-		t.Fatalf("EnqueueInboxEvent: %v", err)
+		t.Fatalf("AddInboxMessage: %v", err)
 	}
 	if id == 0 {
 		t.Fatalf("id = 0, want a rowid")
 	}
 
-	events, err := s.ListInboxEvents("sre", "", 0)
+	msgs, err := s.ListInboxMessages("sre", "", 0)
 	if err != nil {
-		t.Fatalf("ListInboxEvents: %v", err)
+		t.Fatalf("ListInboxMessages: %v", err)
 	}
-	if len(events) != 1 {
-		t.Fatalf("events = %d, want 1", len(events))
+	if len(msgs) != 1 {
+		t.Fatalf("messages = %d, want 1", len(msgs))
 	}
-	e := events[0]
-	if e.Status != InboxStatusQueued {
-		t.Errorf("Status = %q, want queued", e.Status)
+	m := msgs[0]
+	if m.Status != InboxUnread {
+		t.Errorf("Status = %q, want unread", m.Status)
 	}
-	if e.Payload != "{}" {
-		t.Errorf("Payload = %q, want {}", e.Payload)
+	if m.From != "" {
+		t.Errorf("From = %q, want empty (human)", m.From)
 	}
-	if e.CreatedAt == 0 || e.UpdatedAt == 0 {
-		t.Errorf("timestamps not set: %+v", e)
+	if m.CreatedAt == 0 {
+		t.Errorf("CreatedAt not set: %+v", m)
+	}
+	if m.ReadAt != 0 {
+		t.Errorf("ReadAt = %d, want 0", m.ReadAt)
 	}
 }
 
-func TestEnqueueInboxEventUnknownRole(t *testing.T) {
+func TestAddInboxMessageUnknownAgent(t *testing.T) {
 	s := openTestStore(t)
-	if _, err := s.EnqueueInboxEvent(AgentInboxEvent{RoleID: "ghost", Kind: "message"}); err == nil {
-		t.Fatalf("EnqueueInboxEvent for unknown role: want foreign key error, got nil")
+	if _, err := s.AddInboxMessage(InboxMessage{AgentID: "ghost", Body: "hi"}); err == nil {
+		t.Fatalf("AddInboxMessage for unknown agent: want foreign key error, got nil")
 	}
 }
 
-func TestQueuedInboxEventsAndMarks(t *testing.T) {
+func TestNextUnreadInboxMessageDrainsOldestFirst(t *testing.T) {
 	s := openStoreWithAgent(t)
 
-	first, err := s.EnqueueInboxEvent(AgentInboxEvent{RoleID: "sre", Kind: "message", Payload: `{"text":"hi"}`})
+	first, err := s.AddInboxMessage(InboxMessage{AgentID: "sre", From: "task-1-orch", Body: "one"})
 	if err != nil {
-		t.Fatalf("enqueue first: %v", err)
+		t.Fatalf("add first: %v", err)
 	}
-	second, err := s.EnqueueInboxEvent(AgentInboxEvent{RoleID: "sre", Kind: "cron"})
+	second, err := s.AddInboxMessage(InboxMessage{AgentID: "sre", Body: "two"})
 	if err != nil {
-		t.Fatalf("enqueue second: %v", err)
+		t.Fatalf("add second: %v", err)
 	}
 
-	queued, err := s.QueuedInboxEvents("sre")
-	if err != nil {
-		t.Fatalf("QueuedInboxEvents: %v", err)
+	m, ok, err := s.NextUnreadInboxMessage("sre")
+	if err != nil || !ok {
+		t.Fatalf("NextUnreadInboxMessage = %v, ok=%v", err, ok)
 	}
-	if len(queued) != 2 || queued[0].ID != first || queued[1].ID != second {
-		t.Fatalf("queued = %+v, want oldest-first [%d %d]", queued, first, second)
+	if m.ID != first || m.Body != "one" || m.From != "task-1-orch" {
+		t.Fatalf("first next = %+v", m)
 	}
-	if queued[0].Payload != `{"text":"hi"}` {
-		t.Errorf("Payload = %q", queued[0].Payload)
+	if m.Status != InboxRead || m.ReadAt == 0 {
+		t.Errorf("first next not marked read: %+v", m)
 	}
 
-	if err := s.MarkInboxDelivered([]int64{first}); err != nil {
-		t.Fatalf("MarkInboxDelivered: %v", err)
-	}
-	n, err := s.CountQueuedInboxEvents("sre")
+	n, err := s.CountUnreadInbox("sre")
 	if err != nil {
-		t.Fatalf("CountQueuedInboxEvents: %v", err)
+		t.Fatalf("CountUnreadInbox: %v", err)
 	}
 	if n != 1 {
-		t.Errorf("queued count = %d, want 1", n)
+		t.Errorf("unread = %d, want 1", n)
 	}
 
-	delivered, err := s.ListInboxEvents("sre", InboxStatusDelivered, 0)
-	if err != nil {
-		t.Fatalf("ListInboxEvents(delivered): %v", err)
-	}
-	if len(delivered) != 1 || delivered[0].ID != first {
-		t.Fatalf("delivered = %+v", delivered)
+	m, ok, err = s.NextUnreadInboxMessage("sre")
+	if err != nil || !ok || m.ID != second {
+		t.Fatalf("second next = %+v, ok=%v, err=%v", m, ok, err)
 	}
 
-	if err := s.MarkInboxDone([]int64{first, second}); err != nil {
-		t.Fatalf("MarkInboxDone: %v", err)
-	}
-	done, err := s.ListInboxEvents("sre", InboxStatusDone, 0)
-	if err != nil {
-		t.Fatalf("ListInboxEvents(done): %v", err)
-	}
-	if len(done) != 2 {
-		t.Fatalf("done = %d, want 2", len(done))
-	}
-
-	// Marking an empty set is a no-op, not an error.
-	if err := s.MarkInboxDone(nil); err != nil {
-		t.Fatalf("MarkInboxDone(nil): %v", err)
+	if _, ok, err = s.NextUnreadInboxMessage("sre"); err != nil || ok {
+		t.Fatalf("third next: ok=%v, err=%v, want ok=false", ok, err)
 	}
 }
 
-func TestListInboxEventsLimit(t *testing.T) {
+func TestNextUnreadInboxMessageEmpty(t *testing.T) {
+	s := openStoreWithAgent(t)
+	if _, ok, err := s.NextUnreadInboxMessage("sre"); err != nil || ok {
+		t.Fatalf("NextUnreadInboxMessage on empty inbox: ok=%v, err=%v", ok, err)
+	}
+}
+
+func TestGetInboxMessageDoesNotMarkRead(t *testing.T) {
+	s := openStoreWithAgent(t)
+
+	id, err := s.AddInboxMessage(InboxMessage{AgentID: "sre", Body: "peek me"})
+	if err != nil {
+		t.Fatalf("AddInboxMessage: %v", err)
+	}
+
+	m, err := s.GetInboxMessage(id)
+	if err != nil {
+		t.Fatalf("GetInboxMessage: %v", err)
+	}
+	if m.Body != "peek me" || m.Status != InboxUnread {
+		t.Fatalf("message = %+v", m)
+	}
+
+	n, err := s.CountUnreadInbox("sre")
+	if err != nil {
+		t.Fatalf("CountUnreadInbox: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("unread after peek = %d, want 1", n)
+	}
+}
+
+func TestGetInboxMessageNotFound(t *testing.T) {
+	s := openStoreWithAgent(t)
+	if _, err := s.GetInboxMessage(404); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetInboxMessage = %v, want ErrNotFound", err)
+	}
+}
+
+func TestListInboxMessagesFiltersAndLimits(t *testing.T) {
 	s := openStoreWithAgent(t)
 	for i := 0; i < 3; i++ {
-		if _, err := s.EnqueueInboxEvent(AgentInboxEvent{RoleID: "sre", Kind: "message"}); err != nil {
-			t.Fatalf("enqueue: %v", err)
+		if _, err := s.AddInboxMessage(InboxMessage{AgentID: "sre", Body: "m"}); err != nil {
+			t.Fatalf("add: %v", err)
 		}
 	}
-
-	events, err := s.ListInboxEvents("sre", "", 2)
-	if err != nil {
-		t.Fatalf("ListInboxEvents: %v", err)
+	if _, _, err := s.NextUnreadInboxMessage("sre"); err != nil {
+		t.Fatalf("next: %v", err)
 	}
-	if len(events) != 2 {
-		t.Fatalf("events = %d, want 2", len(events))
+
+	unread, err := s.ListInboxMessages("sre", InboxUnread, 0)
+	if err != nil {
+		t.Fatalf("ListInboxMessages(unread): %v", err)
+	}
+	if len(unread) != 2 {
+		t.Fatalf("unread = %d, want 2", len(unread))
+	}
+
+	read, err := s.ListInboxMessages("sre", InboxRead, 0)
+	if err != nil {
+		t.Fatalf("ListInboxMessages(read): %v", err)
+	}
+	if len(read) != 1 {
+		t.Fatalf("read = %d, want 1", len(read))
+	}
+
+	limited, err := s.ListInboxMessages("sre", "", 2)
+	if err != nil {
+		t.Fatalf("ListInboxMessages(limit): %v", err)
+	}
+	if len(limited) != 2 {
+		t.Fatalf("limited = %d, want 2", len(limited))
 	}
 }
 
-func TestUpsertAgentItemInsertThenUpdate(t *testing.T) {
+func TestMaxUnreadInboxID(t *testing.T) {
 	s := openStoreWithAgent(t)
 
-	created, err := s.UpsertAgentItem(AgentItem{
-		RoleID: "sre", Kind: "issue", ExternalRef: "acme/platform#12",
-	})
+	got, err := s.MaxUnreadInboxID("sre")
 	if err != nil {
-		t.Fatalf("UpsertAgentItem insert: %v", err)
+		t.Fatalf("MaxUnreadInboxID(empty): %v", err)
 	}
-	if created.State != "new" {
-		t.Errorf("State = %q, want new", created.State)
-	}
-	if created.TaskID != 0 || created.SnoozeUntil != 0 {
-		t.Errorf("nullable fields = %+v, want zero", created)
+	if got != 0 {
+		t.Fatalf("MaxUnreadInboxID(empty) = %d, want 0", got)
 	}
 
-	updated, err := s.UpsertAgentItem(AgentItem{
-		RoleID: "sre", Kind: "issue", ExternalRef: "acme/platform#12",
-		State: "deferred", Note: "waiting for db migration", TaskID: 45, SnoozeUntil: 1800000000,
-	})
+	if _, err := s.AddInboxMessage(InboxMessage{AgentID: "sre", Body: "one"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	last, err := s.AddInboxMessage(InboxMessage{AgentID: "sre", Body: "two"})
 	if err != nil {
-		t.Fatalf("UpsertAgentItem update: %v", err)
-	}
-	if updated.ID != created.ID {
-		t.Errorf("ID = %d, want %d (upsert must keep the row)", updated.ID, created.ID)
-	}
-	if updated.CreatedAt != created.CreatedAt {
-		t.Errorf("CreatedAt = %d, want %d", updated.CreatedAt, created.CreatedAt)
-	}
-	if updated.State != "deferred" || updated.Note != "waiting for db migration" ||
-		updated.TaskID != 45 || updated.SnoozeUntil != 1800000000 {
-		t.Errorf("updated = %+v", updated)
-	}
-}
-
-func TestListAgentItemsFiltersByState(t *testing.T) {
-	s := openStoreWithAgent(t)
-
-	if _, err := s.UpsertAgentItem(AgentItem{RoleID: "sre", Kind: "issue", ExternalRef: "acme/platform#1", State: "taken"}); err != nil {
-		t.Fatalf("upsert 1: %v", err)
-	}
-	if _, err := s.UpsertAgentItem(AgentItem{RoleID: "sre", Kind: "task", ExternalRef: "task:45", State: "deferred"}); err != nil {
-		t.Fatalf("upsert 2: %v", err)
+		t.Fatalf("add: %v", err)
 	}
 
-	all, err := s.ListAgentItems("sre", "")
+	got, err = s.MaxUnreadInboxID("sre")
 	if err != nil {
-		t.Fatalf("ListAgentItems: %v", err)
+		t.Fatalf("MaxUnreadInboxID: %v", err)
 	}
-	if len(all) != 2 {
-		t.Fatalf("all = %d, want 2", len(all))
+	if got != last {
+		t.Fatalf("MaxUnreadInboxID = %d, want %d", got, last)
 	}
 
-	deferred, err := s.ListAgentItems("sre", "deferred")
+	// Draining everything takes it back to zero.
+	for {
+		_, ok, err := s.NextUnreadInboxMessage("sre")
+		if err != nil {
+			t.Fatalf("next: %v", err)
+		}
+		if !ok {
+			break
+		}
+	}
+	got, err = s.MaxUnreadInboxID("sre")
 	if err != nil {
-		t.Fatalf("ListAgentItems(deferred): %v", err)
+		t.Fatalf("MaxUnreadInboxID after drain: %v", err)
 	}
-	if len(deferred) != 1 || deferred[0].ExternalRef != "task:45" {
-		t.Fatalf("deferred = %+v", deferred)
-	}
-}
-
-func TestGetAgentItemNotFound(t *testing.T) {
-	s := openStoreWithAgent(t)
-	if _, err := s.GetAgentItem("sre", "issue", "acme/platform#404"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("GetAgentItem = %v, want ErrNotFound", err)
-	}
-}
-
-func TestRolesWithQueuedInbox(t *testing.T) {
-	s := openStoreWithAgent(t)
-	if err := s.AddAgent(testAgent("triage")); err != nil {
-		t.Fatalf("AddAgent: %v", err)
-	}
-
-	id, err := s.EnqueueInboxEvent(AgentInboxEvent{RoleID: "sre", Kind: "message"})
-	if err != nil {
-		t.Fatalf("enqueue sre: %v", err)
-	}
-	if _, err := s.EnqueueInboxEvent(AgentInboxEvent{RoleID: "triage", Kind: "cron"}); err != nil {
-		t.Fatalf("enqueue triage: %v", err)
-	}
-	if err := s.MarkInboxDone([]int64{id}); err != nil {
-		t.Fatalf("MarkInboxDone: %v", err)
-	}
-
-	got, err := s.RolesWithQueuedInbox()
-	if err != nil {
-		t.Fatalf("RolesWithQueuedInbox: %v", err)
-	}
-	if len(got) != 1 || got[0] != "triage" {
-		t.Fatalf("RolesWithQueuedInbox = %v, want [triage]", got)
-	}
-}
-
-func TestDueSnoozedItemsAndClear(t *testing.T) {
-	s := openStoreWithAgent(t)
-
-	due, err := s.UpsertAgentItem(AgentItem{
-		RoleID: "sre", Kind: "issue", ExternalRef: "a/b#1", State: "deferred", SnoozeUntil: 100,
-	})
-	if err != nil {
-		t.Fatalf("upsert due item: %v", err)
-	}
-	if _, err := s.UpsertAgentItem(AgentItem{
-		RoleID: "sre", Kind: "issue", ExternalRef: "a/b#2", State: "deferred", SnoozeUntil: 5000,
-	}); err != nil {
-		t.Fatalf("upsert future item: %v", err)
-	}
-	if _, err := s.UpsertAgentItem(AgentItem{
-		RoleID: "sre", Kind: "issue", ExternalRef: "a/b#3", State: "taken",
-	}); err != nil {
-		t.Fatalf("upsert unsnoozed item: %v", err)
-	}
-
-	items, err := s.DueSnoozedItems(1000)
-	if err != nil {
-		t.Fatalf("DueSnoozedItems: %v", err)
-	}
-	if len(items) != 1 || items[0].ExternalRef != "a/b#1" {
-		t.Fatalf("DueSnoozedItems = %+v, want only a/b#1", items)
-	}
-
-	if err := s.ClearAgentItemSnooze(due.ID); err != nil {
-		t.Fatalf("ClearAgentItemSnooze: %v", err)
-	}
-
-	items, err = s.DueSnoozedItems(1000)
-	if err != nil {
-		t.Fatalf("DueSnoozedItems after clear: %v", err)
-	}
-	if len(items) != 0 {
-		t.Fatalf("DueSnoozedItems after clear = %+v, want none", items)
-	}
-
-	cleared, err := s.GetAgentItem("sre", "issue", "a/b#1")
-	if err != nil {
-		t.Fatalf("GetAgentItem: %v", err)
-	}
-	if cleared.SnoozeUntil != 0 || cleared.State != "deferred" {
-		t.Fatalf("cleared item = %+v, want snooze 0 and state kept", cleared)
+	if got != 0 {
+		t.Fatalf("MaxUnreadInboxID after drain = %d, want 0", got)
 	}
 }
