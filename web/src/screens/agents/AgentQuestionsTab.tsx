@@ -56,7 +56,7 @@ export function AgentQuestionsTab({ roleId }: AgentQuestionsTabProps) {
 
       <div className="agent-questions__ask">
         <textarea
-          aria-label="Ask the role"
+          aria-label="Ask the agent"
           rows={3}
           placeholder={`Ask ${roleId} something…`}
           value={body}
