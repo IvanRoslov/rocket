@@ -104,6 +104,41 @@ type questionRow struct {
 	Messages   []questionMessageRow `json:"messages"`
 }
 
+// parseTo normalises --to values into participant ids. The flag is both
+// comma-separated and repeatable, so "--to a,b --to c" and "--to a --to b,c"
+// mean the same thing. Blank segments are dropped and duplicates collapse,
+// preserving first-seen order so the request body is predictable.
+func parseTo(vals []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, v := range vals {
+		for _, part := range strings.Split(v, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" || seen[part] {
+				continue
+			}
+			seen[part] = true
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+// setTo attaches the addressees to a thread-write request body. No --to means
+// no "to" key at all rather than an empty array, which keeps the request
+// byte-identical to what the CLI sent before the participant model existed.
+// "to" decides who must RESPOND (waiting_on), never who gets notified: every
+// participant is notified of every message regardless.
+func setTo(reqBody map[string]any, to []string) {
+	if len(to) > 0 {
+		reqBody["to"] = to
+	}
+}
+
+// toFlagUsage is the shared --to help string, so all six thread-writing
+// commands describe the flag identically.
+const toFlagUsage = "кому адресован вопрос — id участников через запятую (можно повторять)"
+
 func newTaskCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "task",
@@ -594,13 +629,14 @@ func newTaskLogCmd() *cobra.Command {
 // rejects any other caller.
 func newTaskAskCmd() *cobra.Command {
 	var context string
+	var to []string
 
 	cmd := &cobra.Command{
 		Use:   "ask <task-id> \"<вопрос>\"",
 		Short: "Задать вопрос пользователю по задаче (от имени оркестратора этой задачи)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 2 {
-				return &usageError{message: "usage: rocket task ask <task-id> \"<вопрос>\" [--context <md>]"}
+				return &usageError{message: "usage: rocket task ask <task-id> \"<вопрос>\" [--context <md>] [--to <id,...>]"}
 			}
 			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
 				return &usageError{message: "invalid task id"}
@@ -619,6 +655,7 @@ func newTaskAskCmd() *cobra.Command {
 			if context != "" {
 				reqBody["context"] = context
 			}
+			setTo(reqBody, parseTo(to))
 
 			path := apiPath("v1", "tasks", args[0], "questions")
 			var resp questionRow
@@ -634,6 +671,7 @@ func newTaskAskCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&context, "context", "", "дополнительный контекст (MD)")
+	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
 	return cmd
 }
 
@@ -645,13 +683,14 @@ func newTaskAskCmd() *cobra.Command {
 // opened it can resolve it (rocket task answer).
 func newTaskAskOrchCmd() *cobra.Command {
 	var context string
+	var to []string
 
 	cmd := &cobra.Command{
 		Use:   "ask-orch <task-id> \"<вопрос>\"",
 		Short: "Задать вопрос оркестратору задачи (от пользователя)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 2 {
-				return &usageError{message: "usage: rocket task ask-orch <task-id> \"<вопрос>\" [--context <md>]"}
+				return &usageError{message: "usage: rocket task ask-orch <task-id> \"<вопрос>\" [--context <md>] [--to <id,...>]"}
 			}
 			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
 				return &usageError{message: "invalid task id"}
@@ -666,6 +705,7 @@ func newTaskAskOrchCmd() *cobra.Command {
 			if context != "" {
 				reqBody["context"] = context
 			}
+			setTo(reqBody, parseTo(to))
 
 			path := apiPath("v1", "tasks", args[0], "questions")
 			var resp questionRow
@@ -681,6 +721,7 @@ func newTaskAskOrchCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&context, "context", "", "дополнительный контекст (MD)")
+	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
 	return cmd
 }
 
@@ -781,12 +822,14 @@ func newTaskQuestionsCmd() *cobra.Command {
 }
 
 func newTaskReplyCmd() *cobra.Command {
+	var to []string
+
 	cmd := &cobra.Command{
 		Use:   "reply <question-id> \"<текст>\"",
 		Short: "Ответить в тред вопроса",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 2 {
-				return &usageError{message: "usage: rocket task reply <question-id> \"<текст>\""}
+				return &usageError{message: "usage: rocket task reply <question-id> \"<текст>\" [--to <id,...>]"}
 			}
 			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
 				return &usageError{message: "invalid question id"}
@@ -798,6 +841,7 @@ func newTaskReplyCmd() *cobra.Command {
 			}
 
 			reqBody := map[string]any{"body": args[1]}
+			setTo(reqBody, parseTo(to))
 			path := apiPath("v1", "questions", args[0], "reply")
 			var resp questionRow
 			if err := c.Post(path, reqBody, &resp); err != nil {
@@ -811,11 +855,13 @@ func newTaskReplyCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
 	return cmd
 }
 
 func newTaskAnswerCmd() *cobra.Command {
 	var dismiss bool
+	var to []string
 
 	cmd := &cobra.Command{
 		Use:   "answer <question-id> [\"<ответ>\"]",
@@ -845,6 +891,7 @@ func newTaskAnswerCmd() *cobra.Command {
 			} else {
 				reqBody["body"] = args[1]
 			}
+			setTo(reqBody, parseTo(to))
 
 			path := apiPath("v1", "questions", args[0], "answer")
 			var resp questionRow
@@ -864,6 +911,7 @@ func newTaskAnswerCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&dismiss, "dismiss", false, "закрыть вопрос без ответа")
+	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
 	return cmd
 }
 

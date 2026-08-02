@@ -32,13 +32,14 @@ type agentQuestionRow struct {
 // inside a role instance it escalates to the human.
 func newAgentAskCmd() *cobra.Command {
 	var context string
+	var to []string
 
 	cmd := &cobra.Command{
 		Use:   "ask <role> \"<вопрос>\"",
 		Short: "Открыть тред-вопрос с ролью (направление — по вызывающему)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 2 {
-				return &usageError{message: "usage: rocket agent ask <role> \"<вопрос>\" [--context <md>]"}
+				return &usageError{message: "usage: rocket agent ask <role> \"<вопрос>\" [--context <md>] [--to <id,...>]"}
 			}
 
 			c, _, err := connect(true)
@@ -50,6 +51,7 @@ func newAgentAskCmd() *cobra.Command {
 			if context != "" {
 				reqBody["context"] = context
 			}
+			setTo(reqBody, parseTo(to))
 
 			var resp agentQuestionRow
 			if err := c.Post(apiPath("v1", "agents", args[0], "questions"), reqBody, &resp); err != nil {
@@ -64,6 +66,7 @@ func newAgentAskCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&context, "context", "", "дополнительный контекст (MD)")
+	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
 	return cmd
 }
 
@@ -117,12 +120,14 @@ func newAgentQuestionsCmd() *cobra.Command {
 // newAgentReplyCmd builds "rocket agent reply": a thread entry from either
 // side. A role instance's reply into a resolved thread reopens it.
 func newAgentReplyCmd() *cobra.Command {
-	return &cobra.Command{
+	var to []string
+
+	cmd := &cobra.Command{
 		Use:   "reply <question-id> \"<текст>\"",
 		Short: "Ответить в тред роли",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 2 {
-				return &usageError{message: "usage: rocket agent reply <question-id> \"<текст>\""}
+				return &usageError{message: "usage: rocket agent reply <question-id> \"<текст>\" [--to <id,...>]"}
 			}
 			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
 				return &usageError{message: "invalid question id"}
@@ -133,9 +138,12 @@ func newAgentReplyCmd() *cobra.Command {
 				return err
 			}
 
+			reqBody := map[string]any{"body": args[1]}
+			setTo(reqBody, parseTo(to))
+
 			var resp agentQuestionRow
 			if err := c.Post(apiPath("v1", "agent-questions", args[0], "reply"),
-				map[string]any{"body": args[1]}, &resp); err != nil {
+				reqBody, &resp); err != nil {
 				return err
 			}
 
@@ -146,12 +154,15 @@ func newAgentReplyCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
+	return cmd
 }
 
 // newAgentAnswerCmd builds "rocket agent answer": only the human closes a
 // role thread, with an answer or by dismissing it.
 func newAgentAnswerCmd() *cobra.Command {
 	var dismiss bool
+	var to []string
 
 	cmd := &cobra.Command{
 		Use:   "answer <question-id> [\"<ответ>\"]",
@@ -181,6 +192,7 @@ func newAgentAnswerCmd() *cobra.Command {
 			} else {
 				reqBody["body"] = args[1]
 			}
+			setTo(reqBody, parseTo(to))
 
 			var resp agentQuestionRow
 			if err := c.Post(apiPath("v1", "agent-questions", args[0], "answer"), reqBody, &resp); err != nil {
@@ -199,6 +211,7 @@ func newAgentAnswerCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&dismiss, "dismiss", false, "закрыть тред без ответа")
+	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
 	return cmd
 }
 

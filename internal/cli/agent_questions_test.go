@@ -144,3 +144,18 @@ func TestQuestionsCell(t *testing.T) {
 		}
 	}
 }
+
+// TestAgentThreadCommandsHaveToFlag tests that every role thread-writing
+// command registers --to.
+func TestAgentThreadCommandsHaveToFlag(t *testing.T) {
+	cmds := map[string]*cobra.Command{
+		"ask":    newAgentAskCmd(),
+		"reply":  newAgentReplyCmd(),
+		"answer": newAgentAnswerCmd(),
+	}
+	for name, cmd := range cmds {
+		if cmd.Flags().Lookup("to") == nil {
+			t.Errorf("agent %s: expected --to flag", name)
+		}
+	}
+}

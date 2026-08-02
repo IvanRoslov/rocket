@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/client"
+	"github.com/spf13/cobra"
 )
 
 // TestTaskAddUsage tests usage violations for task add.
@@ -1227,5 +1229,84 @@ func TestRenderTaskCardSubtaskWithPRAndCI(t *testing.T) {
 	}
 	if !foundNoPR {
 		t.Errorf("did not find subtask without PR in output")
+	}
+}
+
+// TestParseTo covers the --to normalisation: comma splitting, repetition,
+// trimming, empty segments and deduplication.
+func TestParseTo(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"nil", nil, nil},
+		{"empty string", []string{""}, nil},
+		{"single", []string{"cto"}, []string{"cto"}},
+		{"comma separated", []string{"cto,human"}, []string{"cto", "human"}},
+		{"repeated flag", []string{"cto", "human"}, []string{"cto", "human"}},
+		{"spaces trimmed", []string{" cto , human "}, []string{"cto", "human"}},
+		{"empty segments dropped", []string{"cto,,"}, []string{"cto"}},
+		{"deduped", []string{"cto", "cto,human"}, []string{"cto", "human"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseTo(tt.in)
+			if len(got) != len(tt.want) {
+				t.Fatalf("parseTo(%v) = %v, want %v", tt.in, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("parseTo(%v) = %v, want %v", tt.in, got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+// TestSetToOmitsEmpty tests that no --to leaves the request body byte-identical
+// to what the CLI sent before the participant model existed: no "to" key at
+// all, not an empty array.
+func TestSetToOmitsEmpty(t *testing.T) {
+	body := map[string]any{"body": "q"}
+	setTo(body, nil)
+	if _, ok := body["to"]; ok {
+		t.Errorf("expected no \"to\" key for empty to, got %v", body)
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(raw) != `{"body":"q"}` {
+		t.Errorf("expected unchanged body JSON, got %s", raw)
+	}
+}
+
+// TestSetToAddsRecipients tests that --to reaches the request body as an array.
+func TestSetToAddsRecipients(t *testing.T) {
+	body := map[string]any{"body": "q"}
+	setTo(body, []string{"cto", "human"})
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(raw) != `{"body":"q","to":["cto","human"]}` {
+		t.Errorf("unexpected body JSON: %s", raw)
+	}
+}
+
+// TestTaskThreadCommandsHaveToFlag tests that every task thread-writing
+// command registers --to.
+func TestTaskThreadCommandsHaveToFlag(t *testing.T) {
+	cmds := map[string]*cobra.Command{
+		"ask":      newTaskAskCmd(),
+		"ask-orch": newTaskAskOrchCmd(),
+		"reply":    newTaskReplyCmd(),
+		"answer":   newTaskAnswerCmd(),
+	}
+	for name, cmd := range cmds {
+		if cmd.Flags().Lookup("to") == nil {
+			t.Errorf("task %s: expected --to flag", name)
+		}
 	}
 }
