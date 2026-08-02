@@ -14,9 +14,11 @@ rocket task start <id> [--agent <name>]          # назначить оркес
 rocket task move <id> <status>
 rocket task doc put <id> --kind spec|plan|report --title "..." --file <f.md>
 rocket task log <id> --kind decision|problem|note "<текст>"
-rocket task questions [<id>] [--open]            # вопросы и их треды
-rocket task reply <question-id> "<уточнение>"    # реплика в тред, вопрос открыт
-rocket task answer <question-id> "<ответ>"       # финальный ответ, закрывает
+rocket task ask-orch <id> "<вопрос>" [--context <md>] [--to a,b]
+                                                 # открыть тред оркестратору
+rocket task questions [<id>] [--open]            # вопросы, треды и участники
+rocket task reply <question-id> "<уточнение>" [--to a,b]  # реплика, вопрос открыт
+rocket task answer <question-id> "<ответ>" [--to a,b]     # финальный ответ, закрывает
 rocket task answer <question-id> --dismiss       # закрыть как неактуальный
 rocket task cancel <id>
     Подробности — 12-tasks.md.
@@ -93,15 +95,16 @@ rocket agent start <id>           # tmux-сессия <id>: cwd=dir, коман�
 rocket agent attach <id>          # подключиться к сессии агента
 rocket agent stop <id>            # убить сессию; регистрация остаётся
 
-rocket agent ask <id> "<вопрос>" [--context <md>]
+rocket agent ask <id> "<вопрос>" [--context <md>] [--to a,b]
     Открыть тред-вопрос агенту. Изнутри сессии агента тот же вызов
     открывает тред человеку.
 rocket agent questions [<id>] [--open]
-    Треды агента (без аргумента — агент текущей сессии).
-rocket agent reply <qid> "<текст>"      # ответ в тред (обе стороны)
+    Треды агента и их участники (без аргумента — агент текущей сессии).
+rocket agent reply <qid> "<текст>" [--to a,b]   # реплика; любой участник треда
 rocket agent answer <qid> "<ответ>" | --dismiss
-    Закрыть тред; только человек. Агент может оспорить закрытый тред
-    своим reply — тред переоткроется.
+    Закрыть тред; человек и постоянный агент (оркестратору и воркеру — 403,
+    им остаётся reply). Любой участник, кроме человека, может оспорить
+    закрытый тред своим reply — тред переоткроется.
 ```
 
 ### Инбокс агента (изнутри его сессии)
@@ -131,11 +134,14 @@ rocket spawn --task <name> --repo <id> --prompt "<бриф>" [--agent <name>]
 rocket task ... (см. выше)
     Оркестратор ведёт доки/журнал своей задачи, воркер — своей подзадачи.
 
-rocket task ask <id> "<вопрос>" [--context <md>]
-    Только для оркестраторов: открыть вопрос пользователю через задачу.
-    Пользователь увидит его в дашборде/CLI. Вопрос — тред: уточнения приходят
-    как "[task #N QM reply] ..." (отвечать rocket task reply в тот же тред),
-    финальный ответ — "[task #N QM answer] ...".
+rocket task ask <id> "<вопрос>" [--context <md>] [--to a,b]
+    Открыть тред по задаче. Доступно человеку, постоянному агенту и
+    оркестратору самой задачи. Вопрос — тред с участниками: записи приходят
+    как "[task #N QM reply from <кто>] ..." (отвечать rocket task reply в тот
+    же тред), финальный ответ — "[task #N QM answer from <кто>] ...".
+    --to называет, от кого ждут ответа, и втягивает названных в тред;
+    уведомление о каждой записи всё равно получают все участники, кроме
+    её автора. Закрыть тред оркестратор не может — 403, только reply.
 
 rocket send <session|role> "<текст>"
     То же, что у пользователя; from заполняется из ROCKET_SESSION_ID,
