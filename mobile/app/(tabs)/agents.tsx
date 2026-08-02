@@ -20,8 +20,8 @@ import { ago } from '../../src/lib/format'
 import { colors, radius } from '../../src/theme'
 
 /** Filter key for agents whose `project` is empty. Project ids are
- *  `[a-z0-9-]+`, so the sentinel cannot collide with one. */
-const NO_PROJECT = ' none'
+ *  `[a-z0-9-]+`, so no project can collide with it. */
+const NO_PROJECT = '__no_project__'
 
 function AgentCard({ agent, projectLabel }: { agent: Agent; projectLabel: string }) {
   const toast = useToast()
