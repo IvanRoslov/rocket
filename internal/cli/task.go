@@ -80,28 +80,38 @@ type taskLogRow struct {
 // questionMessageRow is the JSON shape of a single entry in a question's
 // thread, mirroring internal/api.questionMessageResponse.
 type questionMessageRow struct {
-	ID        int64  `json:"id"`
-	Author    string `json:"author,omitempty"`
-	Kind      string `json:"kind"`
-	Body      string `json:"body"`
-	CreatedAt int64  `json:"created_at"`
+	ID     int64  `json:"id"`
+	Author string `json:"author,omitempty"`
+	Kind   string `json:"kind"`
+	Body   string `json:"body"`
+	// AddressedTo narrows who is expected to respond. Empty means every
+	// participant except the author.
+	AddressedTo []string `json:"addressed_to,omitempty"`
+	CreatedAt   int64    `json:"created_at"`
 }
 
 // questionRow is the JSON shape of a question and its thread, mirroring
 // internal/api.questionResponse.
 type questionRow struct {
-	ID         int64                `json:"id"`
-	TaskID     int64                `json:"task_id"`
-	Ordinal    int                  `json:"ordinal"`
-	AskedBy    string               `json:"asked_by"`
-	Body       string               `json:"body"`
-	Context    string               `json:"context,omitempty"`
-	Status     string               `json:"status"`
-	Resolution string               `json:"resolution,omitempty"`
-	WhoseTurn  string               `json:"whose_turn,omitempty"`
-	AskedAt    int64                `json:"asked_at"`
-	ResolvedAt int64                `json:"resolved_at,omitempty"`
-	Messages   []questionMessageRow `json:"messages"`
+	ID         int64  `json:"id"`
+	TaskID     int64  `json:"task_id"`
+	Ordinal    int    `json:"ordinal"`
+	AskedBy    string `json:"asked_by"`
+	Body       string `json:"body"`
+	Context    string `json:"context,omitempty"`
+	Status     string `json:"status"`
+	Resolution string `json:"resolution,omitempty"`
+	// Participants is everyone taking part in the thread; WaitingOn is the
+	// subset expected to speak next; YourTurn says whether this CLI's caller
+	// is one of them. WhoseTurn is the pre-participant field the CLI no longer
+	// prints but keeps on the wire for web and mobile — subtask #736 retires it.
+	Participants []string             `json:"participants,omitempty"`
+	WaitingOn    []string             `json:"waiting_on,omitempty"`
+	YourTurn     bool                 `json:"your_turn,omitempty"`
+	WhoseTurn    string               `json:"whose_turn,omitempty"`
+	AskedAt      int64                `json:"asked_at"`
+	ResolvedAt   int64                `json:"resolved_at,omitempty"`
+	Messages     []questionMessageRow `json:"messages"`
 }
 
 // parseTo normalises --to values into participant ids. The flag is both
@@ -915,10 +925,56 @@ func newTaskAnswerCmd() *cobra.Command {
 	return cmd
 }
 
+// threadTurnArrow renders the header suffix naming who is expected to speak
+// next. It replaces the pre-participant whose_turn arrow: with several
+// participants "the orchestrator" is no longer something a single word can
+// name. Nobody awaited — a resolved thread, or a server that predates the
+// participant model — renders nothing, as the old arrow did.
+func threadTurnArrow(waiting []string, yourTurn bool) string {
+	if len(waiting) == 0 {
+		return ""
+	}
+	arrow := " → ждут: " + strings.Join(waiting, ", ")
+	if yourTurn {
+		arrow += " (ваш ход)"
+	}
+	return arrow
+}
+
+// threadAuthorLabel renders a message author for a thread line. The human is
+// spelled "" on the wire today and "human" once subtask #736 flips it; both
+// render as "user", the word the CLI has always shown.
+func threadAuthorLabel(author string) string {
+	if author == "" || author == "human" {
+		return "user"
+	}
+	return author
+}
+
+// renderParticipantsLine writes the thread's participant line, omitted when
+// the server sent none.
+func renderParticipantsLine(sb *strings.Builder, participants []string) {
+	if len(participants) > 0 {
+		fmt.Fprintf(sb, "  участники: %s\n", strings.Join(participants, ", "))
+	}
+}
+
+// renderThreadMessage writes one thread line: "  [author] body", or
+// "  [author → a, b] body" when the message is addressed at somebody in
+// particular. Shared by task and role threads, which carry the same message
+// shape.
+func renderThreadMessage(sb *strings.Builder, m questionMessageRow) {
+	frame := threadAuthorLabel(m.Author)
+	if len(m.AddressedTo) > 0 {
+		frame += " → " + strings.Join(m.AddressedTo, ", ")
+	}
+	fmt.Fprintf(sb, "  [%s] %s\n", frame, m.Body)
+}
+
 // renderQuestions renders a task's questions block: a "task #<id>" header
 // followed by, per question, a header line "Q<ordinal> (#<id>) [status]
-// <arrow>" (arrow indicates whose turn it is to speak, empty when
-// resolved), the indented question body, an optional indented context
+// <arrow>" (arrow names who is awaited, empty when nobody is), the indented
+// question body, an optional indented context line, an optional participants
 // line, and indented thread lines ("  [user] ..." / "  [<session>] ...").
 // Returns "" if qs is empty (callers should skip empty tasks entirely).
 func renderQuestions(taskID int64, qs []questionRow) string {
@@ -929,24 +985,15 @@ func renderQuestions(taskID int64, qs []questionRow) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "task #%d\n", taskID)
 	for _, q := range qs {
-		arrow := ""
-		switch q.WhoseTurn {
-		case "user":
-			arrow = " → ждёт ответа пользователя"
-		case "orchestrator":
-			arrow = " → ждёт оркестратора"
-		}
-		fmt.Fprintf(&sb, "Q%d (#%d) [%s]%s\n", q.Ordinal, q.ID, q.Status, arrow)
+		fmt.Fprintf(&sb, "Q%d (#%d) [%s]%s\n", q.Ordinal, q.ID, q.Status,
+			threadTurnArrow(q.WaitingOn, q.YourTurn))
 		fmt.Fprintf(&sb, "  %s\n", q.Body)
 		if q.Context != "" {
 			fmt.Fprintf(&sb, "  context: %s\n", q.Context)
 		}
+		renderParticipantsLine(&sb, q.Participants)
 		for _, m := range q.Messages {
-			author := m.Author
-			if author == "" {
-				author = "user"
-			}
-			fmt.Fprintf(&sb, "  [%s] %s\n", author, m.Body)
+			renderThreadMessage(&sb, m)
 		}
 	}
 	sb.WriteString("\n")

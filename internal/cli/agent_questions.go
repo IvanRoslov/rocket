@@ -12,18 +12,24 @@ import (
 // internal/api.agentQuestionResponse. Thread entries reuse questionMessageRow
 // — role and task threads have the same message shape.
 type agentQuestionRow struct {
-	ID         int64                `json:"id"`
-	RoleID     string               `json:"role_id"`
-	Ordinal    int                  `json:"ordinal"`
-	AskedBy    string               `json:"asked_by"`
-	Body       string               `json:"body"`
-	Context    string               `json:"context,omitempty"`
-	Status     string               `json:"status"`
-	Resolution string               `json:"resolution,omitempty"`
-	WhoseTurn  string               `json:"whose_turn,omitempty"`
-	AskedAt    int64                `json:"asked_at"`
-	ResolvedAt int64                `json:"resolved_at,omitempty"`
-	Messages   []questionMessageRow `json:"messages"`
+	ID         int64  `json:"id"`
+	RoleID     string `json:"role_id"`
+	Ordinal    int    `json:"ordinal"`
+	AskedBy    string `json:"asked_by"`
+	Body       string `json:"body"`
+	Context    string `json:"context,omitempty"`
+	Status     string `json:"status"`
+	Resolution string `json:"resolution,omitempty"`
+	// Participants, WaitingOn and YourTurn mirror questionRow; WhoseTurn is
+	// the pre-participant field the CLI no longer prints but keeps on the wire
+	// for web and mobile — subtask #736 retires it.
+	Participants []string             `json:"participants,omitempty"`
+	WaitingOn    []string             `json:"waiting_on,omitempty"`
+	YourTurn     bool                 `json:"your_turn,omitempty"`
+	WhoseTurn    string               `json:"whose_turn,omitempty"`
+	AskedAt      int64                `json:"asked_at"`
+	ResolvedAt   int64                `json:"resolved_at,omitempty"`
+	Messages     []questionMessageRow `json:"messages"`
 }
 
 // newAgentAskCmd builds "rocket agent ask": open a Q&A thread with a role.
@@ -217,10 +223,10 @@ func newAgentAnswerCmd() *cobra.Command {
 
 // renderAgentQuestions renders a role's threads: an "agent <role>" header
 // followed by, per thread, a header line "Q<ordinal> (#<id>) [status] <arrow>"
-// (arrow indicates whose turn it is, empty when resolved), the indented body,
-// an optional context line, and indented thread lines ("  [user] ..." /
-// "  [<session>] ..."). Mirrors renderQuestions for tasks. Returns "" if qs is
-// empty.
+// (arrow names who is awaited, empty when nobody is), the indented body, an
+// optional context line, an optional participants line, and indented thread
+// lines ("  [user] ..." / "  [<session>] ..."). Mirrors renderQuestions for
+// tasks, down to the shared helpers. Returns "" if qs is empty.
 func renderAgentQuestions(role string, qs []agentQuestionRow) string {
 	if len(qs) == 0 {
 		return ""
@@ -229,24 +235,15 @@ func renderAgentQuestions(role string, qs []agentQuestionRow) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "agent %s\n", role)
 	for _, q := range qs {
-		arrow := ""
-		switch q.WhoseTurn {
-		case "user":
-			arrow = " → ждёт ответа пользователя"
-		case "role":
-			arrow = " → ждёт роль"
-		}
-		fmt.Fprintf(&sb, "Q%d (#%d) [%s]%s\n", q.Ordinal, q.ID, q.Status, arrow)
+		fmt.Fprintf(&sb, "Q%d (#%d) [%s]%s\n", q.Ordinal, q.ID, q.Status,
+			threadTurnArrow(q.WaitingOn, q.YourTurn))
 		fmt.Fprintf(&sb, "  %s\n", q.Body)
 		if q.Context != "" {
 			fmt.Fprintf(&sb, "  context: %s\n", q.Context)
 		}
+		renderParticipantsLine(&sb, q.Participants)
 		for _, m := range q.Messages {
-			author := m.Author
-			if author == "" {
-				author = "user"
-			}
-			fmt.Fprintf(&sb, "  [%s] %s\n", author, m.Body)
+			renderThreadMessage(&sb, m)
 		}
 	}
 	sb.WriteString("\n")

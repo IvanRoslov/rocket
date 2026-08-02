@@ -525,39 +525,36 @@ func TestRenderQuestionsEmpty(t *testing.T) {
 	}
 }
 
-// TestRenderQuestionsWhoseTurnUser tests the "waits for user" arrow.
-func TestRenderQuestionsWhoseTurnUser(t *testing.T) {
-	qs := []questionRow{
-		{ID: 5, Ordinal: 1, Status: "open", WhoseTurn: "user", Body: "Which approach?"},
-	}
+// TestRenderQuestionsWaitingArrow tests that the header arrow names who is
+// awaited, replacing the pre-participant whose_turn arrow.
+func TestRenderQuestionsWaitingArrow(t *testing.T) {
+	qs := []questionRow{{
+		ID: 5, Ordinal: 1, Status: "open", WhoseTurn: "user", Body: "Which approach?",
+		Participants: []string{"human", "cto"},
+		WaitingOn:    []string{"cto", "human"},
+	}}
 	out := renderQuestions(42, qs)
 	if !strings.Contains(out, "task #42") {
 		t.Errorf("expected task header, got: %q", out)
 	}
-	if !strings.Contains(out, "Q1 (#5) [open]") {
-		t.Errorf("expected question header, got: %q", out)
+	if !strings.Contains(out, "Q1 (#5) [open] → ждут: cto, human") {
+		t.Errorf("expected waiting-on arrow, got: %q", out)
 	}
-	if !strings.Contains(out, "ждёт ответа пользователя") {
-		t.Errorf("expected user-turn arrow, got: %q", out)
+	if strings.Contains(out, "ждёт ответа") || strings.Contains(out, "ждёт оркестратора") {
+		t.Errorf("expected the whose_turn arrow to be gone, got: %q", out)
+	}
+	if !strings.Contains(out, "  участники: human, cto") {
+		t.Errorf("expected participants line, got: %q", out)
 	}
 	if !strings.Contains(out, "Which approach?") {
 		t.Errorf("expected body, got: %q", out)
 	}
 }
 
-// TestRenderQuestionsWhoseTurnOrchestrator tests the "waits for orchestrator" arrow.
-func TestRenderQuestionsWhoseTurnOrchestrator(t *testing.T) {
-	qs := []questionRow{
-		{ID: 6, Ordinal: 2, Status: "open", WhoseTurn: "orchestrator", Body: "Question body"},
-	}
-	out := renderQuestions(42, qs)
-	if !strings.Contains(out, "ждёт оркестратора") {
-		t.Errorf("expected orchestrator-turn arrow, got: %q", out)
-	}
-}
-
-// TestRenderQuestionsResolvedNoArrow tests that a resolved question shows no arrow.
-func TestRenderQuestionsResolvedNoArrow(t *testing.T) {
+// TestRenderQuestionsNoWaitingNoArrow tests that a thread nobody is awaited on
+// -- a resolved one, or a pre-participant server -- renders no arrow and no
+// participants line.
+func TestRenderQuestionsNoWaitingNoArrow(t *testing.T) {
 	qs := []questionRow{
 		{ID: 7, Ordinal: 3, Status: "resolved", WhoseTurn: "", Body: "Done question"},
 	}
@@ -565,8 +562,59 @@ func TestRenderQuestionsResolvedNoArrow(t *testing.T) {
 	if !strings.Contains(out, "Q3 (#7) [resolved]") {
 		t.Errorf("expected resolved header, got: %q", out)
 	}
-	if strings.Contains(out, "ждёт") {
-		t.Errorf("expected no turn arrow for resolved question, got: %q", out)
+	if strings.Contains(out, "ждут") || strings.Contains(out, "участники") {
+		t.Errorf("expected no arrow and no participants line, got: %q", out)
+	}
+}
+
+// TestRenderQuestionsYourTurn tests that a thread waiting on the caller is
+// marked, so "rocket task questions" shows what needs an answer.
+func TestRenderQuestionsYourTurn(t *testing.T) {
+	qs := []questionRow{{
+		ID: 12, Ordinal: 1, Status: "open", Body: "Q body",
+		Participants: []string{"human", "cto"},
+		WaitingOn:    []string{"human"},
+		YourTurn:     true,
+	}}
+	out := renderQuestions(42, qs)
+	if !strings.Contains(out, "→ ждут: human (ваш ход)") {
+		t.Errorf("expected your-turn marker, got: %q", out)
+	}
+}
+
+// TestRenderQuestionsCanonicalHumanAuthor tests that the canonical "human"
+// author renders like the legacy empty author: the wire still sends "" today,
+// but subtask #736 flips it and the CLI must read both.
+func TestRenderQuestionsCanonicalHumanAuthor(t *testing.T) {
+	qs := []questionRow{{
+		ID: 13, Ordinal: 1, Status: "open", Body: "Q body",
+		Messages: []questionMessageRow{
+			{ID: 1, Author: "human", Kind: "reply", Body: "canonical human"},
+			{ID: 2, Author: "", Kind: "reply", Body: "legacy human"},
+		},
+	}}
+	out := renderQuestions(42, qs)
+	if !strings.Contains(out, "[user] canonical human") {
+		t.Errorf("expected canonical human rendered as user, got: %q", out)
+	}
+	if !strings.Contains(out, "[user] legacy human") {
+		t.Errorf("expected legacy human rendered as user, got: %q", out)
+	}
+}
+
+// TestRenderQuestionsAddressedTo tests that a targeted message names its
+// addressees in the frame.
+func TestRenderQuestionsAddressedTo(t *testing.T) {
+	qs := []questionRow{{
+		ID: 14, Ordinal: 1, Status: "open", Body: "Q body",
+		Messages: []questionMessageRow{
+			{ID: 1, Author: "cto", Kind: "reply", Body: "targeted",
+				AddressedTo: []string{"reply-answer-orch", "human"}},
+		},
+	}}
+	out := renderQuestions(42, qs)
+	if !strings.Contains(out, "[cto → reply-answer-orch, human] targeted") {
+		t.Errorf("expected addressed-to frame, got: %q", out)
 	}
 }
 
