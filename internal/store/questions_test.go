@@ -456,3 +456,95 @@ func TestAddQuestion_UnboundThreadRoundTrips(t *testing.T) {
 		t.Errorf("got %+v, want no task and no role", got)
 	}
 }
+
+func TestAddParticipants_IsIdempotent(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+	qid, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch-1", Body: "Q"})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+
+	if err := s.AddParticipants(qid, "human", "cto"); err != nil {
+		t.Fatalf("AddParticipants first: %v", err)
+	}
+	// Re-adding an existing participant is a no-op, not an error, and does
+	// not duplicate the row.
+	if err := s.AddParticipants(qid, "cto", "orch-1"); err != nil {
+		t.Fatalf("AddParticipants second: %v", err)
+	}
+
+	got, err := s.ListParticipants(qid)
+	if err != nil {
+		t.Fatalf("ListParticipants: %v", err)
+	}
+	if strings.Join(got, ",") != "cto,human,orch-1" {
+		t.Errorf("participants = %v, want [cto human orch-1]", got)
+	}
+}
+
+func TestAddParticipants_NoIdsIsANoOp(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+	qid, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch-1", Body: "Q"})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+
+	if err := s.AddParticipants(qid); err != nil {
+		t.Fatalf("AddParticipants: %v", err)
+	}
+	got, err := s.ListParticipants(qid)
+	if err != nil {
+		t.Fatalf("ListParticipants: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("participants = %v, want none", got)
+	}
+}
+
+func TestListQuestionsForParticipant_OpenOnly(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+
+	add := func(body string) int64 {
+		t.Helper()
+		id, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch-1", Body: body})
+		if err != nil {
+			t.Fatalf("AddQuestion %s: %v", body, err)
+		}
+		return id
+	}
+	openWithCTO := add("open, cto participates")
+	resolvedWithCTO := add("resolved, cto participates")
+	openWithoutCTO := add("open, cto absent")
+
+	if err := s.AddParticipants(openWithCTO, "human", "cto"); err != nil {
+		t.Fatalf("AddParticipants: %v", err)
+	}
+	if err := s.AddParticipants(resolvedWithCTO, "human", "cto"); err != nil {
+		t.Fatalf("AddParticipants: %v", err)
+	}
+	if err := s.AddParticipants(openWithoutCTO, "human", "orch-1"); err != nil {
+		t.Fatalf("AddParticipants: %v", err)
+	}
+	if err := s.ResolveQuestion(resolvedWithCTO, "answered"); err != nil {
+		t.Fatalf("ResolveQuestion: %v", err)
+	}
+
+	got, err := s.ListQuestionsForParticipant("cto", true)
+	if err != nil {
+		t.Fatalf("ListQuestionsForParticipant: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != openWithCTO {
+		t.Fatalf("open threads for cto = %+v, want only %d", got, openWithCTO)
+	}
+
+	all, err := s.ListQuestionsForParticipant("cto", false)
+	if err != nil {
+		t.Fatalf("ListQuestionsForParticipant all: %v", err)
+	}
+	if len(all) != 2 || all[0].ID != openWithCTO || all[1].ID != resolvedWithCTO {
+		t.Errorf("all threads for cto = %+v, want %d and %d ascending", all, openWithCTO, resolvedWithCTO)
+	}
+}
