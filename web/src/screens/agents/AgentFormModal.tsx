@@ -6,14 +6,19 @@
 import { useState, type FormEvent } from 'react'
 import { Button } from '../../components/Button'
 import { Modal } from '../../components/Modal'
-import { useCreateAgent, useUpdateAgent } from '../../lib/queries'
+import { useCreateAgent, useProjects, useUpdateAgent } from '../../lib/queries'
 import type { Agent } from '../../lib/types'
 import './agents.css'
 
 const ID_PATTERN = /^[a-z0-9-]+$/
 
 export interface AgentFormModalProps {
-  projectId: string
+  /**
+   * The project the agent is registered in. Omitted in the global `/agents`
+   * view, where the form offers a project picker instead — «no project» being
+   * a valid answer (the daemon accepts an empty `project`).
+   */
+  projectId?: string
   /** Existing agent to edit; omitted when registering a new one. */
   agent?: Agent
   onClose: () => void
@@ -28,10 +33,15 @@ export function AgentFormModal({ projectId, agent, onClose, onCreated }: AgentFo
   const [description, setDescription] = useState(agent?.description ?? '')
   const [dir, setDir] = useState(agent?.dir ?? '')
   const [command, setCommand] = useState(agent?.command ?? '')
+  const [project, setProject] = useState(agent?.project ?? projectId ?? '')
 
+  const { data: projects } = useProjects()
   const create = useCreateAgent()
   const update = useUpdateAgent()
 
+  // Inside a project the project is fixed by the route; the global view lets
+  // you choose one — or none.
+  const pickProject = projectId === undefined
   const idValid = ID_PATTERN.test(id)
   const busy = create.isPending || update.isPending
   const error = create.error ?? update.error
@@ -41,11 +51,14 @@ export function AgentFormModal({ projectId, agent, onClose, onCreated }: AgentFo
     if (!idValid || busy) return
 
     if (editing) {
-      update.mutate({ id: agent.id, description, dir, command }, { onSuccess: onClose })
+      update.mutate(
+        { id: agent.id, description, dir, command, ...(pickProject ? { project } : {}) },
+        { onSuccess: onClose },
+      )
       return
     }
     create.mutate(
-      { id, project: projectId, description, dir, command },
+      { id, project: projectId ?? project, description, dir, command },
       {
         onSuccess: () => {
           onCreated?.(id)
@@ -77,6 +90,31 @@ export function AgentFormModal({ projectId, agent, onClose, onCreated }: AgentFo
           Also the agent's tmux session name and its address in the message queue:{' '}
           <code>rocket send {id || 'sre'}</code>.
         </p>
+
+        {pickProject && (
+          <>
+            <label className="agent-form__label" htmlFor="agent-form-project">
+              Project
+            </label>
+            <select
+              id="agent-form-project"
+              className="agent-form__input"
+              value={project}
+              onChange={(e) => setProject(e.target.value)}
+            >
+              <option value="">— no project —</option>
+              {(projects ?? []).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <p className="agent-form__hint">
+              Only groups the agent in the lists. An agent with no project still works — it just
+              lives under «No project».
+            </p>
+          </>
+        )}
 
         <label className="agent-form__label" htmlFor="agent-form-description">
           Description

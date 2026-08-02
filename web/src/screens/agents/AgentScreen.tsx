@@ -26,7 +26,10 @@ import './agents.css'
 type TabId = 'questions' | 'inbox'
 
 export function AgentScreen() {
-  const { projectId, roleId: agentId } = useParams<{ projectId: string; roleId: string }>()
+  // Reached from both routes: `/p/:projectId/agents/:roleId` (inside a
+  // project) and `/agents/:roleId` (the global list, the only way in for an
+  // agent registered without a project).
+  const { projectId, roleId: agentId } = useParams<{ projectId?: string; roleId: string }>()
   const navigate = useNavigate()
 
   const [tab, setTab] = useState<TabId>('questions')
@@ -44,9 +47,10 @@ export function AgentScreen() {
   const setEnabled = useSetAgentEnabled()
   const remove = useDeleteAgent()
 
-  if (!projectId || !agentId || !agent) return null
+  if (!agentId || !agent) return null
 
-  const project = projects?.find((p) => p.id === projectId)
+  const listPath = projectId ? `/p/${projectId}/agents` : '/agents'
+  const project = projects?.find((p) => p.id === (projectId ?? agent.project))
   const openQuestions = (questions ?? []).filter((q) => q.status === 'open').length
 
   function handleSend() {
@@ -56,7 +60,7 @@ export function AgentScreen() {
 
   function handleDelete() {
     if (!window.confirm(`Delete agent ${agentId}? Its inbox and threads go with it.`)) return
-    remove.mutate(agentId!, { onSuccess: () => navigate(`/p/${projectId}/agents`) })
+    remove.mutate(agentId!, { onSuccess: () => navigate(listPath) })
   }
 
   const tabs: Array<{ id: TabId; label: string; count?: number; warn?: boolean }> = [
@@ -71,8 +75,8 @@ export function AgentScreen() {
 
   return (
     <main className="agent-screen">
-      <Link to={`/p/${projectId}/agents`} className="agent-screen__back">
-        ← {project?.name ?? projectId} agents
+      <Link to={listPath} className="agent-screen__back">
+        ← {projectId ? `${project?.name ?? projectId} agents` : 'all agents'}
       </Link>
 
       <div className="agent-screen__title-row">
@@ -94,6 +98,10 @@ export function AgentScreen() {
       {agent.description && <p className="agent-screen__desc">{agent.description}</p>}
 
       <div className="agent-screen__meta">
+        {/* Coming from the global list the project isn't in the URL, so name it
+            here — «No project» is a legitimate registration. */}
+        {!projectId && <span>{agent.project ? (project?.name ?? agent.project) : 'No project'}</span>}
+        {!projectId && <span>·</span>}
         <span className="agent-screen__meta-mono">{agent.dir || 'no dir — start it yourself'}</span>
         <span>·</span>
         <span className="agent-screen__meta-mono">{agent.command || 'interactive shell'}</span>
@@ -198,7 +206,11 @@ export function AgentScreen() {
       {tab === 'inbox' && <InboxTab agentId={agent.id} />}
 
       {editing && (
-        <AgentFormModal projectId={projectId} agent={agent} onClose={() => setEditing(false)} />
+        <AgentFormModal
+          projectId={projectId}
+          agent={agent}
+          onClose={() => setEditing(false)}
+        />
       )}
 
       {/* The agent's tmux session is named after the agent, so its session row

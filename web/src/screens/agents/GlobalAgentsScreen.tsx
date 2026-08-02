@@ -1,0 +1,150 @@
+// Global Agents screen (`/agents`): every registered agent, whatever project
+// it belongs to — including the ones registered with no project at all, which
+// the project-scoped list at `/p/:projectId/agents` can never show.
+//
+// Grouped by project, «No project» last, with project chips to narrow the list
+// the way the Kanban search narrows its board.
+
+import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { EmptyState } from '../../components/EmptyState'
+import { useAgents, useProjects } from '../../lib/queries'
+import type { Agent } from '../../lib/types'
+import { AgentCard } from './AgentCard'
+import { AgentFormModal } from './AgentFormModal'
+import './agents.css'
+
+/** Chip/section key for agents whose `project` is empty. Not a project id —
+ *  project ids are `[a-z0-9-]+`, so no project can collide with it. */
+export const NO_PROJECT = '__no_project__'
+
+export interface AgentGroup {
+  /** Project id, or NO_PROJECT. */
+  key: string
+  label: string
+  agents: Agent[]
+}
+
+/**
+ * Groups agents by project, ordered by project name (with unknown projects
+ * falling back to their id) and «No project» always last. Projects with no
+ * agents are left out — this is a list of agents, not of projects.
+ */
+export function groupAgents(agents: Agent[], projectNames: Map<string, string>): AgentGroup[] {
+  const byProject = new Map<string, Agent[]>()
+  for (const agent of agents) {
+    const key = agent.project || NO_PROJECT
+    const bucket = byProject.get(key)
+    if (bucket) bucket.push(agent)
+    else byProject.set(key, [agent])
+  }
+
+  const groups: AgentGroup[] = [...byProject.entries()]
+    .filter(([key]) => key !== NO_PROJECT)
+    .map(([key, list]) => ({ key, label: projectNames.get(key) ?? key, agents: list }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+
+  const orphans = byProject.get(NO_PROJECT)
+  if (orphans) groups.push({ key: NO_PROJECT, label: 'No project', agents: orphans })
+  return groups
+}
+
+export function GlobalAgentsScreen() {
+  const navigate = useNavigate()
+  const [creating, setCreating] = useState(false)
+  const [filter, setFilter] = useState<string | null>(null)
+
+  const { data: agents } = useAgents()
+  const { data: projects } = useProjects()
+
+  const groups = useMemo(() => {
+    const names = new Map((projects ?? []).map((p) => [p.id, p.name]))
+    return groupAgents(agents ?? [], names)
+  }, [agents, projects])
+
+  const shown = filter === null ? groups : groups.filter((g) => g.key === filter)
+
+  return (
+    <main className="agents-screen">
+      <div className="agents-screen__header">
+        <div>
+          <h1 className="agents-screen__title">Agents</h1>
+          <p className="agents-screen__subtitle">
+            Every standing agent — platform SRE, issue triage — you and other agents can address by
+            id. Messages reach its live session or wait in its inbox. An agent needs no project:
+            those live under «No project».
+          </p>
+        </div>
+        <button type="button" className="agents-screen__new-btn" onClick={() => setCreating(true)}>
+          <span aria-hidden="true">＋</span> New agent
+        </button>
+      </div>
+
+      {groups.length > 1 && (
+        <div className="agents-chips" role="group" aria-label="Filter by project">
+          <button
+            type="button"
+            className={
+              filter === null ? 'agents-chip agents-chip--active' : 'agents-chip'
+            }
+            aria-pressed={filter === null}
+            onClick={() => setFilter(null)}
+          >
+            All
+          </button>
+          {groups.map((group) => (
+            <button
+              key={group.key}
+              type="button"
+              className={
+                filter === group.key ? 'agents-chip agents-chip--active' : 'agents-chip'
+              }
+              aria-pressed={filter === group.key}
+              onClick={() => setFilter(group.key)}
+            >
+              {group.label}
+              <span className="agents-chip__count">{group.agents.length}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {agents && agents.length === 0 ? (
+        <EmptyState
+          icon="◎"
+          title="No agents registered yet"
+          action={
+            <button
+              type="button"
+              className="agents-screen__new-btn"
+              onClick={() => setCreating(true)}
+            >
+              <span aria-hidden="true">＋</span> Register agent
+            </button>
+          }
+        />
+      ) : (
+        shown.map((group) => (
+          <section key={group.key} className="agents-group">
+            <h2 className="agents-group__title">
+              {group.label}
+              <span className="agents-group__count">{group.agents.length}</span>
+            </h2>
+            <div className="agents-grid">
+              {group.agents.map((agent) => (
+                <AgentCard key={agent.id} agent={agent} />
+              ))}
+            </div>
+          </section>
+        ))
+      )}
+
+      {creating && (
+        <AgentFormModal
+          onClose={() => setCreating(false)}
+          onCreated={(id) => navigate(`/agents/${encodeURIComponent(id)}`)}
+        />
+      )}
+    </main>
+  )
+}

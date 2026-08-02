@@ -1,8 +1,13 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge, type BadgeTone } from '../../components/Badge'
 import { timeAgo } from '../../lib/format'
 import type { Agent } from '../../lib/types'
+import { chatPagePath } from '../chat/ChatScreen'
+import { termPagePath } from '../term/TermScreen'
 import './agents.css'
+
+const COPY_FEEDBACK_MS = 1500
 
 interface Stat {
   tone: BadgeTone
@@ -31,14 +36,54 @@ export function agentStats(agent: Agent): Stat[] {
   return stats
 }
 
+/** What you paste into a shell to land in the agent's tmux session. */
+export function attachCommand(agentId: string): string {
+  return `rocket agent attach ${agentId}`
+}
+
+/** Where the card's title links — the project route inside a project, the
+ *  global one otherwise (a project-less agent has no project route). */
+export function agentPath(agent: Agent, projectId?: string): string {
+  return projectId
+    ? `/p/${projectId}/agents/${agent.id}`
+    : `/agents/${encodeURIComponent(agent.id)}`
+}
+
 export interface AgentCardProps {
-  projectId: string
+  /**
+   * Set inside a project — the card then links into the project-scoped route.
+   * Omitted in the global `/agents` view, where an agent may have no project
+   * at all and its card lives at `/agents/:id`.
+   */
+  projectId?: string
   agent: Agent
 }
 
 export function AgentCard({ projectId, agent }: AgentCardProps) {
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = setTimeout(() => setCopied(false), COPY_FEEDBACK_MS)
+    return () => clearTimeout(timer)
+  }, [copied])
+
+  async function copyAttach() {
+    try {
+      await navigator.clipboard.writeText(attachCommand(agent.id))
+      setCopied(true)
+    } catch {
+      // Clipboard access can fail (permissions, non-secure context); just
+      // skip the "copied" confirmation.
+    }
+  }
+
+  const deadHint = 'Session is down — start the agent first'
+
   return (
-    <Link to={`/p/${projectId}/agents/${agent.id}`} className="agent-card">
+    // Not one big <a>: the card carries its own term/chat links and a copy
+    // button, and an anchor may not nest interactive content.
+    <div className="agent-card">
       <div className="agent-card__header">
         <div className="agent-card__title">
           <span
@@ -47,7 +92,9 @@ export function AgentCard({ projectId, agent }: AgentCardProps) {
               (agent.session_alive ? 'agent-card__dot--live' : 'agent-card__dot--idle')
             }
           />
-          <span className="agent-card__name">{agent.id}</span>
+          <Link to={agentPath(agent, projectId)} className="agent-card__name">
+            {agent.id}
+          </Link>
         </div>
       </div>
 
@@ -61,9 +108,53 @@ export function AgentCard({ projectId, agent }: AgentCardProps) {
         ))}
       </div>
 
+      {/* The agent's tmux session is named after the agent, so its session id
+          IS the agent id (docs/10-agents.md «Живость и адопция») — the shared
+          full-window /term and /chat pages take it as-is. */}
+      <div className="agent-card__actions">
+        {agent.session_alive ? (
+          <a
+            className="agent-card__action"
+            href={termPagePath(agent.id)}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            ▣ term
+          </a>
+        ) : (
+          <span className="agent-card__action agent-card__action--off" title={deadHint}>
+            ▣ term
+          </span>
+        )}
+        {agent.session_alive ? (
+          <a
+            className="agent-card__action"
+            href={chatPagePath(agent.id)}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            💬 chat
+          </a>
+        ) : (
+          <span className="agent-card__action agent-card__action--off" title={deadHint}>
+            💬 chat
+          </span>
+        )}
+        {/* Always available: it is what you paste into a terminal, and it is
+            just as useful before you start the session. */}
+        <button
+          type="button"
+          className="agent-card__action"
+          onClick={copyAttach}
+          title={attachCommand(agent.id)}
+        >
+          {copied ? '✓ copied' : '⧉ attach'}
+        </button>
+      </div>
+
       <div className="agent-card__footer">
         <span className="agent-card__updated">updated {timeAgo(agent.updated_at)}</span>
       </div>
-    </Link>
+    </div>
   )
 }

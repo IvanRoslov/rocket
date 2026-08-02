@@ -20,9 +20,13 @@ export function AppShell() {
   // Project-scoped tabs use plain <Link>: NavLink's own prefix matching would
   // light up Kanban on /p/:id/agents too, so we derive both the highlight and
   // aria-current from the pathname ourselves.
+  // Agents is global (`/agents`): agents may be registered without a project,
+  // so the tab must not funnel you into one. It still lights up on the
+  // project-scoped agents routes.
   const inProject = location.pathname.startsWith('/p/')
-  const agentsActive = inProject && location.pathname.includes('/agents')
-  const kanbanActive = inProject && !agentsActive
+  const agentsActive =
+    location.pathname.startsWith('/agents') || (inProject && location.pathname.includes('/agents'))
+  const kanbanActive = inProject && !location.pathname.includes('/agents')
   const awaitingCount = (questions ?? []).filter((q) => q.whose_turn === 'user').length
 
   return (
@@ -76,7 +80,7 @@ export function AppShell() {
             Kanban
           </Link>
           <Link
-            to={navProjectId ? `/p/${navProjectId}/agents` : '/'}
+            to="/agents"
             aria-current={agentsActive ? 'page' : undefined}
             style={navLinkStyle({ isActive: agentsActive })}
           >

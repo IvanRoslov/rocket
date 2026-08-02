@@ -1,6 +1,7 @@
 import { createBrowserRouter } from 'react-router-dom'
 import { AgentScreen } from './screens/agents/AgentScreen'
 import { AgentsScreen } from './screens/agents/AgentsScreen'
+import { GlobalAgentsScreen } from './screens/agents/GlobalAgentsScreen'
 import { AppShell } from './components/AppShell'
 import { ChatScreen } from './screens/chat/ChatScreen'
 import { KanbanScreen } from './screens/kanban/KanbanScreen'
@@ -27,6 +28,10 @@ export const router = createBrowserRouter([
       { path: '/projects/new', element: <WizardScreen /> },
       { path: '/p/:projectId', element: <KanbanScreen /> },
       { path: '/p/:projectId/tasks/:taskId', element: <TaskScreen /> },
+      // Global agents list and card: the only way to reach an agent
+      // registered without a project (docs/11-dashboard.md).
+      { path: '/agents', element: <GlobalAgentsScreen /> },
+      { path: '/agents/:roleId', element: <AgentScreen /> },
       { path: '/p/:projectId/agents', element: <AgentsScreen /> },
       { path: '/p/:projectId/agents/:roleId', element: <AgentScreen /> },
       { path: '/questions', element: <QuestionsScreen /> },

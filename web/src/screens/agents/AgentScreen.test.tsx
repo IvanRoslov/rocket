@@ -39,6 +39,39 @@ function renderScreen(agentId = 'sre') {
   )
 }
 
+/** The same screen reached from the global list, where the URL carries no
+ *  project — the only route a project-less agent has. */
+function renderGlobal(agentId = 'librarian') {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[`/agents/${agentId}`]}>
+        <Routes>
+          <Route path="/agents/:roleId" element={<AgentScreen />} />
+          <Route path="/agents" element={<div>global agents list</div>} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+}
+
+describe('AgentScreen without a project in the URL', () => {
+  it('renders a project-less agent and links back to the global list', async () => {
+    renderGlobal()
+
+    expect(await screen.findByRole('heading', { name: 'librarian' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '← all agents' })).toHaveAttribute('href', '/agents')
+    expect(screen.getByText('No project')).toBeInTheDocument()
+  })
+
+  it('names the project of an agent that has one', async () => {
+    renderGlobal('sre')
+
+    expect(await screen.findByRole('heading', { name: 'sre' })).toBeInTheDocument()
+    expect(screen.getByText('Billing')).toBeInTheDocument()
+  })
+})
+
 describe('AgentScreen header', () => {
   it('shows the agent, its live session and its launcher pair', async () => {
     renderScreen()

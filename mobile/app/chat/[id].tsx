@@ -90,7 +90,11 @@ function EntryBubble({ entry }: { entry: ChatEntry }) {
 }
 
 export default function ChatScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>()
+  // `agent=1` says the id addresses a standing agent rather than a session
+  // (docs/10-agents.md): POST /v1/messages routes it to the agent's live tmux
+  // session or, when that is down, into its inbox — so the composer stays open
+  // either way.
+  const { id, agent: agentFlag } = useLocalSearchParams<{ id: string; agent?: string }>()
   const { entries, session, error, loading } = useChatFeed(id)
   const send = useSendMessage()
   const toast = useToast()
@@ -121,8 +125,12 @@ export default function ChatScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading])
 
+  const isAgent = agentFlag === '1' || session?.kind === 'agent'
   const pendingQuiz = session?.pending_quiz
-  const canWrite = session?.kind === 'orchestrator' && session.state === 'running' && !pendingQuiz
+  const canWrite =
+    (isAgent && !pendingQuiz) ||
+    (session?.kind === 'orchestrator' && session.state === 'running' && !pendingQuiz)
+  const agentLive = session?.state === 'spawning' || session?.state === 'running'
 
   const hiddenCount = useMemo(() => entries.filter(isNoise).length, [entries])
 
@@ -223,7 +231,13 @@ export default function ChatScreen() {
           {rows.length === 0 ? (
             <View style={{ padding: 30, alignItems: 'center' }}>
               <Text style={{ color: colors.textFaint, fontSize: 13.5 }}>
-                {loading ? 'Loading transcript…' : error ? `Error: ${error}` : 'No transcript yet.'}
+                {loading
+                ? 'Loading transcript…'
+                : isAgent && !agentLive
+                  ? 'No transcript — the agent session is not running. What you send waits in its inbox.'
+                  : error
+                    ? `Error: ${error}`
+                    : 'No transcript yet.'}
               </Text>
             </View>
           ) : null}
@@ -237,7 +251,13 @@ export default function ChatScreen() {
           <View style={styles.composer}>
             <TextInput
               style={styles.input}
-              placeholder="Message the orchestrator…"
+              placeholder={
+                isAgent
+                  ? agentLive
+                    ? `Message ${id} — goes straight into its session…`
+                    : `Message ${id} — session is down, this waits in its inbox…`
+                  : 'Message the orchestrator…'
+              }
               placeholderTextColor={colors.textFaint}
               value={text}
               onChangeText={setText}

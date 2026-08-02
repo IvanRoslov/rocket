@@ -84,6 +84,13 @@ export function resetAgents(): void {
   agentInboxState = agentInbox.map((m) => ({ ...m }))
 }
 
+/** The agent most recently added by `POST /v1/agents` — how tests assert on
+ *  the registration payload (the project in particular) without intercepting
+ *  the request themselves. */
+export function lastCreatedAgent(): Agent | undefined {
+  return agentsState[agentsState.length - 1]
+}
+
 /**
  * Spy for `POST /v1/sessions/:id/quiz/answer` bodies — tests assert against
  * this after triggering a submit rather than intercepting fetch directly.

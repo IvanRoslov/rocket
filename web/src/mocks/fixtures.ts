@@ -775,6 +775,22 @@ export const agents: Agent[] = [
     created_at: NOW - 2 * DAY,
     updated_at: NOW - 2 * DAY,
   },
+  // Registered with no project: invisible in the project-scoped list, which is
+  // exactly what the global `/agents` view exists for.
+  {
+    id: 'librarian',
+    description: 'Keeps the docs honest across every project.',
+    project: '',
+    dir: '/home/dev/agents/librarian',
+    command: 'claude',
+    enabled: true,
+    session_alive: false,
+    unread: 0,
+    open_questions: 0,
+    awaiting_user: 0,
+    created_at: NOW - 3 * DAY,
+    updated_at: NOW - 1 * DAY,
+  },
 ]
 
 export const agentInbox: AgentInboxMessage[] = [
