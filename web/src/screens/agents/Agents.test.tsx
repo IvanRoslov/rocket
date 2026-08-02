@@ -1,15 +1,14 @@
-// Agents list screen: role cards with their signals, and the liveInstance
-// helper that binds a role to its running `<role>-run-<n>` session.
+// Agents list screen: one card per registered agent with its signals.
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { setupServer } from 'msw/node'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { handlers, resetAgents } from '../../mocks/handlers'
-import type { Session } from '../../lib/types'
+import type { Agent } from '../../lib/types'
 import { AgentsScreen } from './AgentsScreen'
-import { liveInstance } from './AgentCard'
+import { agentStats } from './AgentCard'
 
 const server = setupServer(...handlers)
 
@@ -34,58 +33,72 @@ function renderScreen() {
 }
 
 describe('AgentsScreen', () => {
-  it('lists the project roles with their signals', async () => {
+  it('lists the project agents with their description and signals', async () => {
     renderScreen()
 
     expect(await screen.findByText('sre')).toBeInTheDocument()
     expect(screen.getByText('triage')).toBeInTheDocument()
-    expect(screen.getByText('2 queued')).toBeInTheDocument()
-    expect(screen.getByText('2 in dossier')).toBeInTheDocument()
+    expect(screen.getByText(/Platform SRE/)).toBeInTheDocument()
+    expect(screen.getByText('2 unread')).toBeInTheDocument()
     expect(screen.getByText('awaiting you')).toBeInTheDocument()
     expect(screen.getByText('disabled')).toBeInTheDocument()
   })
 
-  it('shows the live instance of a role and links to its card', async () => {
+  it('marks a live session and links to the agent card', async () => {
     renderScreen()
 
-    await waitFor(() => expect(screen.getByText('● sre-run-3')).toBeInTheDocument())
+    expect(await screen.findByText('● live')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /sre/ })).toHaveAttribute(
       'href',
       '/p/billing/agents/sre',
     )
   })
 
-  it('shows the role subscriptions and cron', async () => {
+  it('has no dossier, cron or subscription copy left', async () => {
     renderScreen()
 
-    expect(await screen.findByText(/acme\/platform/)).toBeInTheDocument()
-    expect(screen.getByText(/0 \* \* \* \*/)).toBeInTheDocument()
-    expect(screen.getByText('no GitHub subscriptions')).toBeInTheDocument()
+    await screen.findByText('sre')
+    expect(screen.queryByText(/dossier/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/cron/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/subscription/i)).not.toBeInTheDocument()
   })
 })
 
-describe('liveInstance', () => {
-  const sessions = [
-    { id: 'sre-run-3', kind: 'agent', state: 'running' },
-    { id: 'sre-run-2', kind: 'agent', state: 'done' },
-    { id: 'triage-run-1', kind: 'agent', state: 'running' },
-    { id: 'sre-x-run-1', kind: 'agent', state: 'running' },
-  ] as unknown as Session[]
+function makeAgent(over: Partial<Agent> = {}): Agent {
+  return {
+    id: 'sre',
+    description: '',
+    project: 'billing',
+    dir: '',
+    command: '',
+    enabled: true,
+    session_alive: false,
+    unread: 0,
+    open_questions: 0,
+    awaiting_user: 0,
+    created_at: 0,
+    updated_at: 0,
+    ...over,
+  }
+}
 
-  it('matches only a live run of the exact role', () => {
-    expect(liveInstance(sessions, 'sre')?.id).toBe('sre-run-3')
-    expect(liveInstance(sessions, 'triage')?.id).toBe('triage-run-1')
+describe('agentStats', () => {
+  it('leads with what stops the agent working', () => {
+    expect(agentStats(makeAgent({ enabled: false })).map((s) => s.label)).toEqual(['disabled'])
   })
 
-  it('does not match a prefix of another role id', () => {
-    expect(liveInstance(sessions, 'sre-x')?.id).toBe('sre-x-run-1')
-    expect(liveInstance(sessions, 'sr')).toBeUndefined()
+  it('shows liveness, unread and the thread waiting on you', () => {
+    const stats = agentStats(
+      makeAgent({ session_alive: true, unread: 3, open_questions: 2, awaiting_user: 1 }),
+    ).map((s) => s.label)
+    expect(stats).toEqual(['● live', '3 unread', 'awaiting you'])
   })
 
-  it('ignores terminal runs and non-agent sessions', () => {
-    expect(liveInstance([{ id: 'sre-run-2', kind: 'agent', state: 'done' }] as unknown as Session[], 'sre')).toBeUndefined()
-    expect(
-      liveInstance([{ id: 'sre-run-9', kind: 'worker', state: 'running' }] as unknown as Session[], 'sre'),
-    ).toBeUndefined()
+  it('falls back to the open thread count when none awaits you', () => {
+    expect(agentStats(makeAgent({ open_questions: 2 })).map((s) => s.label)).toEqual(['2 open Q'])
+  })
+
+  it('says idle when there is no signal at all', () => {
+    expect(agentStats(makeAgent()).map((s) => s.label)).toEqual(['idle'])
   })
 })
