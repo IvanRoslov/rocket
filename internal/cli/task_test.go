@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/client"
+	"github.com/spf13/cobra"
 )
 
 // TestTaskAddUsage tests usage violations for task add.
@@ -523,39 +525,36 @@ func TestRenderQuestionsEmpty(t *testing.T) {
 	}
 }
 
-// TestRenderQuestionsWhoseTurnUser tests the "waits for user" arrow.
-func TestRenderQuestionsWhoseTurnUser(t *testing.T) {
-	qs := []questionRow{
-		{ID: 5, Ordinal: 1, Status: "open", WhoseTurn: "user", Body: "Which approach?"},
-	}
+// TestRenderQuestionsWaitingArrow tests that the header arrow names who is
+// awaited, replacing the pre-participant whose_turn arrow.
+func TestRenderQuestionsWaitingArrow(t *testing.T) {
+	qs := []questionRow{{
+		ID: 5, Ordinal: 1, Status: "open", WhoseTurn: "user", Body: "Which approach?",
+		Participants: []string{"human", "cto"},
+		WaitingOn:    []string{"cto", "human"},
+	}}
 	out := renderQuestions(42, qs)
 	if !strings.Contains(out, "task #42") {
 		t.Errorf("expected task header, got: %q", out)
 	}
-	if !strings.Contains(out, "Q1 (#5) [open]") {
-		t.Errorf("expected question header, got: %q", out)
+	if !strings.Contains(out, "Q1 (#5) [open] → ждут: cto, human") {
+		t.Errorf("expected waiting-on arrow, got: %q", out)
 	}
-	if !strings.Contains(out, "ждёт ответа пользователя") {
-		t.Errorf("expected user-turn arrow, got: %q", out)
+	if strings.Contains(out, "ждёт ответа") || strings.Contains(out, "ждёт оркестратора") {
+		t.Errorf("expected the whose_turn arrow to be gone, got: %q", out)
+	}
+	if !strings.Contains(out, "  участники: human, cto") {
+		t.Errorf("expected participants line, got: %q", out)
 	}
 	if !strings.Contains(out, "Which approach?") {
 		t.Errorf("expected body, got: %q", out)
 	}
 }
 
-// TestRenderQuestionsWhoseTurnOrchestrator tests the "waits for orchestrator" arrow.
-func TestRenderQuestionsWhoseTurnOrchestrator(t *testing.T) {
-	qs := []questionRow{
-		{ID: 6, Ordinal: 2, Status: "open", WhoseTurn: "orchestrator", Body: "Question body"},
-	}
-	out := renderQuestions(42, qs)
-	if !strings.Contains(out, "ждёт оркестратора") {
-		t.Errorf("expected orchestrator-turn arrow, got: %q", out)
-	}
-}
-
-// TestRenderQuestionsResolvedNoArrow tests that a resolved question shows no arrow.
-func TestRenderQuestionsResolvedNoArrow(t *testing.T) {
+// TestRenderQuestionsNoWaitingNoArrow tests that a thread nobody is awaited on
+// -- a resolved one, or a pre-participant server -- renders no arrow and no
+// participants line.
+func TestRenderQuestionsNoWaitingNoArrow(t *testing.T) {
 	qs := []questionRow{
 		{ID: 7, Ordinal: 3, Status: "resolved", WhoseTurn: "", Body: "Done question"},
 	}
@@ -563,8 +562,59 @@ func TestRenderQuestionsResolvedNoArrow(t *testing.T) {
 	if !strings.Contains(out, "Q3 (#7) [resolved]") {
 		t.Errorf("expected resolved header, got: %q", out)
 	}
-	if strings.Contains(out, "ждёт") {
-		t.Errorf("expected no turn arrow for resolved question, got: %q", out)
+	if strings.Contains(out, "ждут") || strings.Contains(out, "участники") {
+		t.Errorf("expected no arrow and no participants line, got: %q", out)
+	}
+}
+
+// TestRenderQuestionsYourTurn tests that a thread waiting on the caller is
+// marked, so "rocket task questions" shows what needs an answer.
+func TestRenderQuestionsYourTurn(t *testing.T) {
+	qs := []questionRow{{
+		ID: 12, Ordinal: 1, Status: "open", Body: "Q body",
+		Participants: []string{"human", "cto"},
+		WaitingOn:    []string{"human"},
+		YourTurn:     true,
+	}}
+	out := renderQuestions(42, qs)
+	if !strings.Contains(out, "→ ждут: human (ваш ход)") {
+		t.Errorf("expected your-turn marker, got: %q", out)
+	}
+}
+
+// TestRenderQuestionsCanonicalHumanAuthor tests that the canonical "human"
+// author renders like the legacy empty author: the wire still sends "" today,
+// but subtask #736 flips it and the CLI must read both.
+func TestRenderQuestionsCanonicalHumanAuthor(t *testing.T) {
+	qs := []questionRow{{
+		ID: 13, Ordinal: 1, Status: "open", Body: "Q body",
+		Messages: []questionMessageRow{
+			{ID: 1, Author: "human", Kind: "reply", Body: "canonical human"},
+			{ID: 2, Author: "", Kind: "reply", Body: "legacy human"},
+		},
+	}}
+	out := renderQuestions(42, qs)
+	if !strings.Contains(out, "[user] canonical human") {
+		t.Errorf("expected canonical human rendered as user, got: %q", out)
+	}
+	if !strings.Contains(out, "[user] legacy human") {
+		t.Errorf("expected legacy human rendered as user, got: %q", out)
+	}
+}
+
+// TestRenderQuestionsAddressedTo tests that a targeted message names its
+// addressees in the frame.
+func TestRenderQuestionsAddressedTo(t *testing.T) {
+	qs := []questionRow{{
+		ID: 14, Ordinal: 1, Status: "open", Body: "Q body",
+		Messages: []questionMessageRow{
+			{ID: 1, Author: "cto", Kind: "reply", Body: "targeted",
+				AddressedTo: []string{"reply-answer-orch", "human"}},
+		},
+	}}
+	out := renderQuestions(42, qs)
+	if !strings.Contains(out, "[cto → reply-answer-orch, human] targeted") {
+		t.Errorf("expected addressed-to frame, got: %q", out)
 	}
 }
 
@@ -1227,5 +1277,84 @@ func TestRenderTaskCardSubtaskWithPRAndCI(t *testing.T) {
 	}
 	if !foundNoPR {
 		t.Errorf("did not find subtask without PR in output")
+	}
+}
+
+// TestParseTo covers the --to normalisation: comma splitting, repetition,
+// trimming, empty segments and deduplication.
+func TestParseTo(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"nil", nil, nil},
+		{"empty string", []string{""}, nil},
+		{"single", []string{"cto"}, []string{"cto"}},
+		{"comma separated", []string{"cto,human"}, []string{"cto", "human"}},
+		{"repeated flag", []string{"cto", "human"}, []string{"cto", "human"}},
+		{"spaces trimmed", []string{" cto , human "}, []string{"cto", "human"}},
+		{"empty segments dropped", []string{"cto,,"}, []string{"cto"}},
+		{"deduped", []string{"cto", "cto,human"}, []string{"cto", "human"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseTo(tt.in)
+			if len(got) != len(tt.want) {
+				t.Fatalf("parseTo(%v) = %v, want %v", tt.in, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("parseTo(%v) = %v, want %v", tt.in, got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+// TestSetToOmitsEmpty tests that no --to leaves the request body byte-identical
+// to what the CLI sent before the participant model existed: no "to" key at
+// all, not an empty array.
+func TestSetToOmitsEmpty(t *testing.T) {
+	body := map[string]any{"body": "q"}
+	setTo(body, nil)
+	if _, ok := body["to"]; ok {
+		t.Errorf("expected no \"to\" key for empty to, got %v", body)
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(raw) != `{"body":"q"}` {
+		t.Errorf("expected unchanged body JSON, got %s", raw)
+	}
+}
+
+// TestSetToAddsRecipients tests that --to reaches the request body as an array.
+func TestSetToAddsRecipients(t *testing.T) {
+	body := map[string]any{"body": "q"}
+	setTo(body, []string{"cto", "human"})
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(raw) != `{"body":"q","to":["cto","human"]}` {
+		t.Errorf("unexpected body JSON: %s", raw)
+	}
+}
+
+// TestTaskThreadCommandsHaveToFlag tests that every task thread-writing
+// command registers --to.
+func TestTaskThreadCommandsHaveToFlag(t *testing.T) {
+	cmds := map[string]*cobra.Command{
+		"ask":      newTaskAskCmd(),
+		"ask-orch": newTaskAskOrchCmd(),
+		"reply":    newTaskReplyCmd(),
+		"answer":   newTaskAnswerCmd(),
+	}
+	for name, cmd := range cmds {
+		if cmd.Flags().Lookup("to") == nil {
+			t.Errorf("task %s: expected --to flag", name)
+		}
 	}
 }

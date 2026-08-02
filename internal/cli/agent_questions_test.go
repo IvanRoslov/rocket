@@ -70,47 +70,76 @@ func TestRenderAgentQuestionsEmpty(t *testing.T) {
 
 func TestRenderAgentQuestionsThread(t *testing.T) {
 	qs := []agentQuestionRow{{
-		ID:        7,
-		RoleID:    "sre",
-		Ordinal:   1,
-		Status:    "open",
-		WhoseTurn: "user",
-		Body:      "нужно решение",
-		Context:   "детали",
+		ID:           7,
+		RoleID:       "sre",
+		Ordinal:      1,
+		Status:       "open",
+		WhoseTurn:    "user",
+		Body:         "нужно решение",
+		Context:      "детали",
+		Participants: []string{"human", "sre"},
+		WaitingOn:    []string{"human"},
 		Messages: []questionMessageRow{
 			{Author: "sre-run-1", Body: "смотрю"},
 			{Author: "", Body: "жду"},
+			{Author: "human", Body: "и я жду"},
 		},
 	}}
 
 	out := renderAgentQuestions("sre", qs)
 	for _, want := range []string{
 		"agent sre",
-		"Q1 (#7) [open]",
-		"ждёт ответа пользователя",
+		"Q1 (#7) [open] → ждут: human",
 		"нужно решение",
 		"context: детали",
+		"  участники: human, sre",
 		"[sre-run-1] смотрю",
 		"[user] жду",
+		"[user] и я жду",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("renderAgentQuestions missing %q in:\n%s", want, out)
 		}
 	}
+	if strings.Contains(out, "ждёт ответа") {
+		t.Errorf("expected the whose_turn arrow to be gone:\n%s", out)
+	}
 }
 
-func TestRenderAgentQuestionsAwaitingRole(t *testing.T) {
-	qs := []agentQuestionRow{{ID: 8, Ordinal: 2, Status: "open", WhoseTurn: "role", Body: "как быть?"}}
+// TestRenderAgentQuestionsYourTurn tests that a role thread waiting on the
+// caller is marked, so "rocket agent questions" shows what needs an answer.
+func TestRenderAgentQuestionsYourTurn(t *testing.T) {
+	qs := []agentQuestionRow{{
+		ID: 8, Ordinal: 2, Status: "open", Body: "как быть?",
+		Participants: []string{"human", "sre"},
+		WaitingOn:    []string{"sre"},
+		YourTurn:     true,
+	}}
 	out := renderAgentQuestions("sre", qs)
-	if !strings.Contains(out, "ждёт роль") {
-		t.Errorf("renderAgentQuestions = %q, want the role's turn marked", out)
+	if !strings.Contains(out, "→ ждут: sre (ваш ход)") {
+		t.Errorf("renderAgentQuestions = %q, want the caller's turn marked", out)
+	}
+}
+
+// TestRenderAgentQuestionsAddressedTo tests that a targeted message names its
+// addressees in the frame.
+func TestRenderAgentQuestionsAddressedTo(t *testing.T) {
+	qs := []agentQuestionRow{{
+		ID: 10, Ordinal: 1, Status: "open", Body: "вопрос",
+		Messages: []questionMessageRow{
+			{Author: "sre", Body: "уточню", AddressedTo: []string{"human"}},
+		},
+	}}
+	out := renderAgentQuestions("sre", qs)
+	if !strings.Contains(out, "[sre → human] уточню") {
+		t.Errorf("expected addressed-to frame, got: %q", out)
 	}
 }
 
 func TestRenderAgentQuestionsResolvedHasNoArrow(t *testing.T) {
 	qs := []agentQuestionRow{{ID: 9, Ordinal: 1, Status: "resolved", Body: "старое"}}
 	out := renderAgentQuestions("sre", qs)
-	if strings.Contains(out, "ждёт") {
+	if strings.Contains(out, "ждут") || strings.Contains(out, "участники") {
 		t.Errorf("resolved question must have no turn marker: %q", out)
 	}
 }
@@ -141,6 +170,21 @@ func TestQuestionsCell(t *testing.T) {
 	for _, tc := range cases {
 		if got := questionsCell(tc.open, tc.awaiting); got != tc.want {
 			t.Errorf("questionsCell(%v, %v) = %q, want %q", tc.open, tc.awaiting, got, tc.want)
+		}
+	}
+}
+
+// TestAgentThreadCommandsHaveToFlag tests that every role thread-writing
+// command registers --to.
+func TestAgentThreadCommandsHaveToFlag(t *testing.T) {
+	cmds := map[string]*cobra.Command{
+		"ask":    newAgentAskCmd(),
+		"reply":  newAgentReplyCmd(),
+		"answer": newAgentAnswerCmd(),
+	}
+	for name, cmd := range cmds {
+		if cmd.Flags().Lookup("to") == nil {
+			t.Errorf("agent %s: expected --to flag", name)
 		}
 	}
 }
