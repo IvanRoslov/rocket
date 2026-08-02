@@ -331,17 +331,23 @@ func handlePostTask(w http.ResponseWriter, r *http.Request, d Deps) {
 
 	createdBy := "user"
 	if caller != nil {
-		createdBy = "orchestrator"
-		if caller.Kind != "orchestrator" {
-			writeErr(w, http.StatusForbidden, "forbidden", "only orchestrators may create tasks")
-			return
-		}
-		if req.ParentID == 0 {
-			writeErr(w, http.StatusForbidden, "forbidden", "agents may only create subtasks")
-			return
-		}
-		if parent.SessionID != caller.ID {
-			writeErr(w, http.StatusForbidden, "forbidden", "parent task does not belong to caller")
+		switch caller.Kind {
+		case "agent":
+			// A registered persistent agent has the same task rights as the
+			// human user; its session id is attribution, not authentication.
+			createdBy = "agent"
+		case "orchestrator":
+			createdBy = "orchestrator"
+			if req.ParentID == 0 {
+				writeErr(w, http.StatusForbidden, "forbidden", "agents may only create subtasks")
+				return
+			}
+			if parent.SessionID != caller.ID {
+				writeErr(w, http.StatusForbidden, "forbidden", "parent task does not belong to caller")
+				return
+			}
+		default:
+			writeErr(w, http.StatusForbidden, "forbidden", "workers may not create tasks")
 			return
 		}
 	}
@@ -791,8 +797,8 @@ func handlePostTaskStart(w http.ResponseWriter, r *http.Request, d Deps) {
 	if writeCallerErr(w, err) {
 		return
 	}
-	if caller != nil {
-		writeErr(w, http.StatusForbidden, "forbidden", "only the human user may start a task")
+	if caller != nil && caller.Kind != "agent" {
+		writeErr(w, http.StatusForbidden, "forbidden", "only the human user or a registered agent may start a task")
 		return
 	}
 

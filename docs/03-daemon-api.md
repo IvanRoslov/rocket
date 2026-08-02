@@ -83,10 +83,10 @@ tmux рендерит окно ровно в **одном** размере; пр
 | Метод | Путь | Описание |
 |---|---|---|
 | GET | `/v1/tasks` | Список; фильтры `?status=&project=&parent=`; `?board=true` — сгруппировано по колонкам |
-| POST | `/v1/tasks` | `{title, description?, project, parent_id?}` |
+| POST | `/v1/tasks` | `{title, description?, project, parent_id?}`. Человек и постоянный агент (`kind='agent'`) создают любые задачи (`created_by` = `user`/`agent`); оркестратор — только подзадачи своей задачи (иначе `403 agents may only create subtasks` / `parent task does not belong to caller`); воркер — `403 workers may not create tasks` |
 | GET | `/v1/tasks/{id}` | Карточка: поля + подзадачи + привязанная сессия (с `tmux_name` и attach-командой) |
 | PATCH | `/v1/tasks/{id}` | `{status?, title?, description?}` — ручной move и правки |
-| POST | `/v1/tasks/{id}/start` | Создать оркестратора и назначить на задачу (`{agent?}`); задача → `in_progress` |
+| POST | `/v1/tasks/{id}/start` | Создать оркестратора и назначить на задачу (`{agent?}`); задача → `in_progress`. Только человек или постоянный агент; остальным `403 only the human user or a registered agent may start a task` |
 | POST | `/v1/tasks/{id}/cancel` | Отмена; каскадно убивает сессии задачи |
 | GET | `/v1/tasks/{id}/docs` | Документы (последние версии; `?history=true` — все) |
 | PUT | `/v1/tasks/{id}/docs` | `{kind, title, body}` — создаёт новую версию |
@@ -98,7 +98,7 @@ tmux рендерит окно ровно в **одном** размере; пр
 | POST | `/v1/questions/{id}/reply` | `{body}` — реплика в тред. В open-вопрос — от любой стороны (вопрос остаётся open; реплика пользователя доставляется оркестратору через очередь `[task #N QM reply] ...`; реплика оркестратора поднимает бейдж). В resolved-вопрос: пользователь → `409 question_resolved`; оркестратор задачи → **переоткрывает** вопрос (оспаривание финального ответа доказательствами; статус снова open, события `task.question_reopened` + `task.question_replied`) |
 | POST | `/v1/questions/{id}/answer` | `{body}` или `{dismiss: true}` — только пользователь; финальный ответ закрывает вопрос (`resolved`), уходит оркестратору как `[task #N QM answer] ...`. Событие `task.question_resolved` |
 
-Права: вызовы от агентов (определяются по `from`/env сессии) ограничены — оркестратор пишет только в свою задачу и её подзадачи, воркер — только в свою подзадачу. Автопереходы статусов (spawn → подзадача `in_progress`, PR open → `review`, merged → `done`) делает демон и записывает в `task_log` с `kind=status`.
+Права: вызовы от сессий (определяются по `from`/env сессии) ограничены — постоянный агент (`kind='agent'`) в правах на задачи приравнен к человеку, оркестратор пишет только в свою задачу и её подзадачи, воркер — только в свою подзадачу. Автопереходы статусов (spawn → подзадача `in_progress`, PR open → `review`, merged → `done`) делает демон и записывает в `task_log` с `kind=status`.
 
 ## Постоянные агенты
 
