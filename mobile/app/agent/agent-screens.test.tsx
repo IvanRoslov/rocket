@@ -1,10 +1,10 @@
 /**
- * Renders the two role screens against the daemon's real JSON shapes
+ * Renders the two agent screens against the daemon's real JSON shapes
  * (captured from `/v1/agents*` on a live rocketd), so a contract drift or a
  * crashing branch fails here rather than in the app.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react-native'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { ToastProvider } from '../../src/components/Toast'
 import { ServerProvider } from '../../src/servers/ServerContext'
@@ -22,15 +22,13 @@ jest.mock('expo-router', () => ({
 
 const AGENT = {
   id: 'sre',
+  description: 'platform on-call',
   project: 'platform',
-  prompt_path: '/home/agents/sre/role.md',
-  prompt: '# SRE\n\nTriage policy: take small things.\n',
-  subscriptions: [{ repo: 'o/r', labels: ['bug'], mention_only: true }],
-  cron: '0 * * * *',
-  agent: 'claude-code',
+  dir: '/home/agents/sre',
+  command: 'claude',
   enabled: true,
-  inbox_queued: 2,
-  items: 1,
+  session_alive: false,
+  unread: 2,
   open_questions: 1,
   awaiting_user: 1,
   created_at: 1785622872,
@@ -54,6 +52,11 @@ const QUESTIONS = {
   ],
 }
 
+const INBOX = [
+  { id: 7, from: 'ivan', body: 'db is down', status: 'unread', created_at: 1785622879 },
+  { id: 6, from: 'orch', body: 'take #12', status: 'read', created_at: 1785622800, read_at: 1785622850 },
+]
+
 /** Routes a request path to a canned body; unknown paths 404 like the daemon. */
 function mockApi(overrides: Record<string, unknown> = {}) {
   const bodies: Record<string, unknown> = {
@@ -61,6 +64,7 @@ function mockApi(overrides: Record<string, unknown> = {}) {
     '/v1/agents?project=platform': [AGENT],
     '/v1/agents/sre': AGENT,
     '/v1/agents/sre/questions': QUESTIONS,
+    '/v1/agents/sre/inbox': INBOX,
     '/v1/sessions': [],
     '/v1/sessions?project=platform': [],
     '/v1/projects': [{ id: 'platform', name: 'Platform', main: 'demo', linked: [], live_sessions: 0, created_at: 1 }],
@@ -95,19 +99,20 @@ function renderWithProviders(ui: React.ReactElement) {
 describe('AgentsScreen', () => {
   afterEach(() => jest.restoreAllMocks())
 
-  it('lists roles with their badges', async () => {
+  it('lists agents with their description and badges', async () => {
     mockApi()
     renderWithProviders(<AgentsScreen />)
     await waitFor(() => expect(screen.getByText('sre')).toBeTruthy())
+    expect(screen.getByText('platform on-call')).toBeTruthy()
     expect(screen.getByText('? 1 awaiting you')).toBeTruthy()
-    expect(screen.getByText('2 queued')).toBeTruthy()
+    expect(screen.getByText('2 unread')).toBeTruthy()
     expect(screen.getByText('1 open Q')).toBeTruthy()
   })
 
-  it('shows an empty state when the project has no roles', async () => {
+  it('shows an empty state when the project has no agents', async () => {
     mockApi({ '/v1/agents': [] })
     renderWithProviders(<AgentsScreen />)
-    await waitFor(() => expect(screen.getByText(/No roles yet/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/No agents yet/)).toBeTruthy())
   })
 })
 
@@ -118,27 +123,41 @@ describe('AgentScreen', () => {
     mockApi()
     renderWithProviders(<AgentScreen />)
     await waitFor(() => expect(screen.getByText('status?')).toBeTruthy())
-    // The user opened this thread, so the role owes the answer.
+    // The user opened this thread, so the agent owes the answer.
     expect(screen.getByText('waiting for sre')).toBeTruthy()
     expect(screen.getByText('Q1')).toBeTruthy()
   })
 
-  it('hides the memory tab when the daemon has no memory endpoint', async () => {
-    mockApi() // /v1/agents/sre/memory is absent → 404
+  it('renders the inbox messages with sender and status', async () => {
+    mockApi()
     renderWithProviders(<AgentScreen />)
-    await waitFor(() => expect(screen.getByText('Prompt')).toBeTruthy())
-    await waitFor(() => expect(screen.queryByText('Memory')).toBeNull())
+    await waitFor(() => expect(screen.getByText('Inbox')).toBeTruthy())
+    fireEvent.press(screen.getByText('Inbox'))
+    await waitFor(() => expect(screen.getByText('db is down')).toBeTruthy())
+    expect(screen.getByText('ivan')).toBeTruthy()
+    expect(screen.getByText('unread')).toBeTruthy()
+    expect(screen.getByText('take #12')).toBeTruthy()
   })
 
-  it('shows the memory tab when the endpoint answers', async () => {
-    mockApi({
-      '/v1/agents/sre/memory': {
-        path: '/home/agents/sre/memory',
-        index: '- [db](db.md) — postgres 16\n',
-        files: [{ name: 'db.md', size: 12, updated_at: 1785622879, body: 'postgres 16\n' }],
-      },
-    })
+  it('offers Start while the session is dead', async () => {
+    mockApi()
     renderWithProviders(<AgentScreen />)
-    await waitFor(() => expect(screen.getByText('Memory')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Start')).toBeTruthy())
+  })
+
+  it('drops Start for a live session and offers the terminal instead', async () => {
+    mockApi({ '/v1/agents/sre': { ...AGENT, session_alive: true } })
+    renderWithProviders(<AgentScreen />)
+    await waitFor(() => expect(screen.getByText('Open terminal')).toBeTruthy())
+    expect(screen.queryByText('Start')).toBeNull()
+  })
+
+  it('has no dossier, prompt or memory tabs', async () => {
+    mockApi()
+    renderWithProviders(<AgentScreen />)
+    await waitFor(() => expect(screen.getByText('Questions')).toBeTruthy())
+    expect(screen.queryByText('Dossier')).toBeNull()
+    expect(screen.queryByText('Prompt')).toBeNull()
+    expect(screen.queryByText('Memory')).toBeNull()
   })
 })

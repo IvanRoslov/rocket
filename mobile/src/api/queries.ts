@@ -4,9 +4,7 @@ import { useConnection } from './events'
 import { useServers } from '../servers/ServerContext'
 import type {
   Agent,
-  AgentInboxEvent,
-  AgentItem,
-  AgentMemory,
+  AgentInboxMessage,
   AgentQuestion,
   GithubRepo,
   Health,
@@ -136,7 +134,7 @@ export function useTaskQuestions(id: number) {
   })
 }
 
-// --- Agent roles (docs/10-agents.md) ---------------------------------------
+// --- Agents (docs/10-agents.md) --------------------------------------------
 
 export function useAgents(project?: string) {
   const baseUrl = useBaseUrl()
@@ -159,41 +157,14 @@ export function useAgent(id: string) {
   })
 }
 
+/** The agent's inbox — everything it has not pulled yet, plus what it has. */
 export function useAgentInbox(id: string, enabled: boolean) {
   const baseUrl = useBaseUrl()
   const refetchInterval = usePoll(5000)
   return useQuery({
     queryKey: [baseUrl, 'agent', id, 'inbox'],
-    queryFn: async () => (await api.get<AgentInboxEvent[]>(baseUrl, `/v1/agents/${id}/inbox`)) ?? [],
+    queryFn: async () => (await api.get<AgentInboxMessage[]>(baseUrl, `/v1/agents/${id}/inbox`)) ?? [],
     enabled,
-    refetchInterval,
-  })
-}
-
-export function useAgentItems(id: string, enabled: boolean) {
-  const baseUrl = useBaseUrl()
-  const refetchInterval = usePoll(5000)
-  return useQuery({
-    queryKey: [baseUrl, 'agent', id, 'items'],
-    queryFn: async () => (await api.get<AgentItem[]>(baseUrl, `/v1/agents/${id}/items`)) ?? [],
-    enabled,
-    refetchInterval,
-  })
-}
-
-/**
- * The role's file memory, read-only. The endpoint ships with the dashboard
- * work; a daemon without it answers 404, so failures must not retry — the role
- * screen drops the memory tab when this query errors.
- */
-export function useAgentMemory(id: string, enabled: boolean) {
-  const baseUrl = useBaseUrl()
-  const refetchInterval = usePoll(15000, 60000)
-  return useQuery({
-    queryKey: [baseUrl, 'agent', id, 'memory'],
-    queryFn: () => api.get<AgentMemory>(baseUrl, `/v1/agents/${id}/memory`),
-    enabled,
-    retry: false,
     refetchInterval,
   })
 }
@@ -474,18 +445,48 @@ export function useSaveSettings() {
   })
 }
 
-// --- Agent role mutations --------------------------------------------------
+// --- Agent mutations -------------------------------------------------------
 
-/** Pings a role: enqueues a `message` inbox event, which wakes an instance. */
-export function useWakeAgent() {
+/**
+ * Writes to an agent: the daemon injects the text into its tmux session when
+ * one is live, and drops it in the inbox when it is not.
+ */
+export function useSendAgentMessage() {
   const baseUrl = useBaseUrl()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (p: { id: string; text: string }) =>
-      api.post(baseUrl, `/v1/agents/${p.id}/wake`, { kind: 'message', text: p.text }),
+    mutationFn: (p: { id: string; body: string }) => api.post(baseUrl, `/v1/agents/${p.id}/messages`, { body: p.body }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: [baseUrl, 'agents'] })
       qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] })
+    },
+  })
+}
+
+/** The thin launcher: a tmux session named after the agent, running its command. */
+export function useStartAgent() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.post(baseUrl, `/v1/agents/${id}/start`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'agents'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'sessions'] })
+    },
+  })
+}
+
+/** Kills the agent's tmux session; the registration survives. */
+export function useStopAgent() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.post(baseUrl, `/v1/agents/${id}/stop`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'agents'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'sessions'] })
     },
   })
 }
@@ -503,13 +504,13 @@ export function useSetAgentEnabled() {
   })
 }
 
-/** Opens a user-initiated thread on a role (asked_by=""), which wakes it. */
+/** Opens a user-initiated thread on an agent (asked_by=""). */
 export function useCreateAgentQuestion() {
   const baseUrl = useBaseUrl()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (p: { roleId: string; body: string; context?: string }) =>
-      api.post<AgentQuestion>(baseUrl, `/v1/agents/${p.roleId}/questions`, { body: p.body, context: p.context }),
+    mutationFn: (p: { agentId: string; body: string; context?: string }) =>
+      api.post<AgentQuestion>(baseUrl, `/v1/agents/${p.agentId}/questions`, { body: p.body, context: p.context }),
     onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] }),
   })
 }

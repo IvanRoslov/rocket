@@ -1,47 +1,49 @@
 import { router } from 'expo-router'
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useAgents, useProjects, useSessions } from '../../src/api/queries'
-import type { Agent, Session } from '../../src/api/types'
+import { useAgents, useProjects } from '../../src/api/queries'
+import type { Agent } from '../../src/api/types'
 import { ConnectionBanner } from '../../src/components/ConnectionBanner'
 import { Badge, Card, ChipTabs, Dot, EmptyState, MonoText } from '../../src/components/ui'
-import { agentBadges, isRoleRun, subscriptionLabel } from '../../src/lib/agents'
+import { agentBadges } from '../../src/lib/agents'
 import { ago } from '../../src/lib/format'
 import { useServers } from '../../src/servers/ServerContext'
 import { colors, radius } from '../../src/theme'
 
-/** The live run of a role, if one is up — at most one exists at a time. */
-function liveRun(sessions: Session[] | undefined, id: string): Session | undefined {
-  return sessions?.find(
-    (s) => isRoleRun(s.id, id) && (s.state === 'running' || s.state === 'spawning'),
-  )
-}
-
-function AgentCard({ agent, live }: { agent: Agent; live: boolean }) {
+function AgentCard({ agent }: { agent: Agent }) {
   return (
     <Pressable onPress={() => router.navigate(`/agent/${agent.id}`)}>
       <Card>
         <View style={styles.head}>
-          <Dot color={live ? colors.green : agent.enabled ? colors.slate : colors.textFaint} size={9} />
+          <Dot
+            color={agent.session_alive ? colors.green : agent.enabled ? colors.slate : colors.textFaint}
+            size={9}
+          />
           <MonoText style={styles.name}>{agent.id}</MonoText>
-          <View style={styles.idPill}>
-            <MonoText style={{ fontSize: 11, color: colors.textFaint }}>{agent.project}</MonoText>
-          </View>
+          {agent.project ? (
+            <View style={styles.idPill}>
+              <MonoText style={{ fontSize: 11, color: colors.textFaint }}>{agent.project}</MonoText>
+            </View>
+          ) : null}
         </View>
-        {agent.subscriptions.length > 0 ? (
-          <MonoText style={{ fontSize: 12.5, marginBottom: 11 }} numberOfLines={2}>
-            ⌘ {agent.subscriptions.map(subscriptionLabel).join('   ·   ')}
-          </MonoText>
+        {agent.description ? (
+          <Text style={styles.description} numberOfLines={2}>
+            {agent.description}
+          </Text>
         ) : null}
         <View style={styles.statsRow}>
-          {live ? <Badge label="● live" fg={colors.greenFg} bg={colors.greenBg} /> : null}
           {agentBadges(agent).map((b) => (
             <Badge key={b.label} {...b} />
           ))}
         </View>
         <View style={styles.footer}>
-          {agent.cron ? <MonoText style={{ fontSize: 11.5 }}>⏱ {agent.cron}</MonoText> : null}
-          <View style={{ flex: 1 }} />
+          {agent.command ? (
+            <MonoText style={{ fontSize: 11.5, flex: 1 }} numberOfLines={1}>
+              $ {agent.command}
+            </MonoText>
+          ) : (
+            <View style={{ flex: 1 }} />
+          )}
           <Text style={{ fontSize: 11.5, color: colors.textFaint }}>{ago(agent.updated_at)}</Text>
         </View>
       </Card>
@@ -53,7 +55,6 @@ export default function AgentsScreen() {
   const { activeProjectId, setActiveProjectId } = useServers()
   const projects = useProjects()
   const agents = useAgents(activeProjectId ?? undefined)
-  const sessions = useSessions(activeProjectId ?? undefined)
 
   const chips = [
     { key: 'all', label: 'All projects' },
@@ -65,20 +66,12 @@ export default function AgentsScreen() {
       <ConnectionBanner />
       <ScrollView
         contentContainerStyle={{ padding: 16, paddingBottom: 24 }}
-        refreshControl={
-          <RefreshControl
-            refreshing={false}
-            onRefresh={() => {
-              agents.refetch()
-              sessions.refetch()
-            }}
-          />
-        }
+        refreshControl={<RefreshControl refreshing={false} onRefresh={() => agents.refetch()} />}
       >
         <Text style={styles.h1}>Agents</Text>
         <Text style={styles.lede}>
-          A role is permanent, its runs are not: events land in the role&apos;s inbox, wake a run, and it exits when the
-          inbox is clear.
+          An agent is a registration plus a tmux session named after it: write to it and the message lands in its
+          session, or in its inbox when nothing is running.
         </Text>
         <View style={{ marginBottom: 14 }}>
           <ChipTabs
@@ -89,7 +82,7 @@ export default function AgentsScreen() {
         </View>
         {agents.isError ? (
           <Card style={{ borderColor: colors.redBorder, backgroundColor: colors.redBgSoft }}>
-            <Text style={{ color: colors.redFg, fontSize: 13, fontWeight: '600' }}>Could not load roles</Text>
+            <Text style={{ color: colors.redFg, fontSize: 13, fontWeight: '600' }}>Could not load agents</Text>
             <Text style={{ color: colors.redFg, fontSize: 12.5, marginTop: 4 }}>
               {(agents.error as Error).message}
             </Text>
@@ -97,10 +90,10 @@ export default function AgentsScreen() {
         ) : (
           <View style={{ gap: 12 }}>
             {(agents.data ?? []).map((a) => (
-              <AgentCard key={a.id} agent={a} live={!!liveRun(sessions.data, a.id)} />
+              <AgentCard key={a.id} agent={a} />
             ))}
             {agents.isSuccess && agents.data.length === 0 ? (
-              <EmptyState text="No roles yet — create one with `rocket agent add`." />
+              <EmptyState text="No agents yet — register one with `rocket agent add`." />
             ) : null}
           </View>
         )}
@@ -112,8 +105,9 @@ export default function AgentsScreen() {
 const styles = StyleSheet.create({
   h1: { fontSize: 24, fontWeight: '700', color: colors.text, letterSpacing: -0.4, marginBottom: 3 },
   lede: { fontSize: 13.5, lineHeight: 20, color: colors.textDim, marginBottom: 18 },
-  head: { flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 11 },
+  head: { flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 9 },
   name: { fontSize: 16, fontWeight: '700', color: colors.text, flex: 1 },
+  description: { fontSize: 13, lineHeight: 19, color: colors.textBody, marginBottom: 11 },
   idPill: { backgroundColor: colors.page, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.sm },
   statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
   footer: {
