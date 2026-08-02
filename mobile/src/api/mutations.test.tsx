@@ -3,9 +3,12 @@ import { act, renderHook, waitFor } from '@testing-library/react-native'
 import { ServerProvider, useServers } from '../servers/ServerContext'
 import {
   useCancelTask,
+  useCreateQuestion,
   useKillSession,
   useMoveTask,
+  useQuestionAnswer,
   useQuestionDismiss,
+  useQuestionReply,
   useRestoreSession,
   useSystemCleanup,
 } from './queries'
@@ -107,5 +110,46 @@ describe('mutation hooks', () => {
     const { url, init } = lastCall()
     expect(url).toBe(`${BASE}/v1/questions/7/answer`)
     expect(JSON.parse(init.body as string)).toEqual({ dismiss: true })
+  })
+
+  it('reply sends the picked addressees', async () => {
+    const r = await setup(useQuestionReply)
+    await act(async () => {
+      await r.current.hook.mutateAsync({ id: 7, body: 'here you go', to: ['cto'] })
+    })
+    const { url, init } = lastCall()
+    expect(url).toBe(`${BASE}/v1/questions/7/reply`)
+    expect(JSON.parse(init.body as string)).toEqual({ body: 'here you go', to: ['cto'] })
+  })
+
+  it('reply omits the to key when nobody is picked', async () => {
+    const r = await setup(useQuestionReply)
+    await act(async () => {
+      await r.current.hook.mutateAsync({ id: 7, body: 'here you go' })
+    })
+    expect(JSON.parse(lastCall().init.body as string)).toEqual({ body: 'here you go' })
+  })
+
+  it('answer sends the picked addressees', async () => {
+    const r = await setup(useQuestionAnswer)
+    await act(async () => {
+      await r.current.hook.mutateAsync({ id: 7, body: 'final', to: ['cto', 'reply-answer-orch'] })
+    })
+    const { url, init } = lastCall()
+    expect(url).toBe(`${BASE}/v1/questions/7/answer`)
+    expect(JSON.parse(init.body as string)).toEqual({
+      body: 'final',
+      to: ['cto', 'reply-answer-orch'],
+    })
+  })
+
+  it('creating a thread sends the picked addressees', async () => {
+    const r = await setup(useCreateQuestion)
+    await act(async () => {
+      await r.current.hook.mutateAsync({ taskId: 12, body: 'who owns this?', to: ['cto'] })
+    })
+    const { url, init } = lastCall()
+    expect(url).toBe(`${BASE}/v1/tasks/12/questions`)
+    expect(JSON.parse(init.body as string)).toEqual({ body: 'who owns this?', to: ['cto'] })
   })
 })

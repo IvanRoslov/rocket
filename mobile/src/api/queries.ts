@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
 import { useConnection } from './events'
+import { addresseePayload } from '../lib/threads'
 import { useServers } from '../servers/ServerContext'
 import type {
   Agent,
@@ -259,8 +260,12 @@ export function useCreateQuestion() {
   const baseUrl = useBaseUrl()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (p: { taskId: number; body: string; context?: string }) =>
-      api.post<Question>(baseUrl, `/v1/tasks/${p.taskId}/questions`, { body: p.body, context: p.context }),
+    mutationFn: (p: { taskId: number; body: string; context?: string; to?: string[] }) =>
+      api.post<Question>(baseUrl, `/v1/tasks/${p.taskId}/questions`, {
+        body: p.body,
+        context: p.context,
+        ...addresseePayload(p.to ?? []),
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'task'] }),
   })
 }
@@ -269,8 +274,8 @@ export function useQuestionReply() {
   const baseUrl = useBaseUrl()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (p: { id: number; body: string }) =>
-      api.post(baseUrl, `/v1/questions/${p.id}/reply`, { body: p.body }),
+    mutationFn: (p: { id: number; body: string; to?: string[] }) =>
+      api.post(baseUrl, `/v1/questions/${p.id}/reply`, { body: p.body, ...addresseePayload(p.to ?? []) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'task'] }),
   })
 }
@@ -279,8 +284,8 @@ export function useQuestionAnswer() {
   const baseUrl = useBaseUrl()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (p: { id: number; body: string }) =>
-      api.post(baseUrl, `/v1/questions/${p.id}/answer`, { body: p.body }),
+    mutationFn: (p: { id: number; body: string; to?: string[] }) =>
+      api.post(baseUrl, `/v1/questions/${p.id}/answer`, { body: p.body, ...addresseePayload(p.to ?? []) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'task'] }),
   })
 }
@@ -509,8 +514,12 @@ export function useCreateAgentQuestion() {
   const baseUrl = useBaseUrl()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (p: { agentId: string; body: string; context?: string }) =>
-      api.post<AgentQuestion>(baseUrl, `/v1/agents/${p.agentId}/questions`, { body: p.body, context: p.context }),
+    mutationFn: (p: { agentId: string; body: string; context?: string; to?: string[] }) =>
+      api.post<AgentQuestion>(baseUrl, `/v1/agents/${p.agentId}/questions`, {
+        body: p.body,
+        context: p.context,
+        ...addresseePayload(p.to ?? []),
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] }),
   })
 }
@@ -519,8 +528,8 @@ export function useAgentQuestionReply() {
   const baseUrl = useBaseUrl()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (p: { id: number; body: string }) =>
-      api.post(baseUrl, `/v1/agent-questions/${p.id}/reply`, { body: p.body }),
+    mutationFn: (p: { id: number; body: string; to?: string[] }) =>
+      api.post(baseUrl, `/v1/agent-questions/${p.id}/reply`, { body: p.body, ...addresseePayload(p.to ?? []) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] }),
   })
 }
@@ -529,8 +538,8 @@ export function useAgentQuestionAnswer() {
   const baseUrl = useBaseUrl()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (p: { id: number; body: string }) =>
-      api.post(baseUrl, `/v1/agent-questions/${p.id}/answer`, { body: p.body }),
+    mutationFn: (p: { id: number; body: string; to?: string[] }) =>
+      api.post(baseUrl, `/v1/agent-questions/${p.id}/answer`, { body: p.body, ...addresseePayload(p.to ?? []) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] }),
   })
 }

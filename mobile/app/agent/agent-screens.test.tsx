@@ -57,13 +57,21 @@ const QUESTIONS = {
       id: 1,
       role_id: 'sre',
       ordinal: 1,
-      asked_by: '',
+      asked_by: 'sre',
       body: 'status?',
       context: 'from mobile',
       status: 'open',
-      whose_turn: 'role',
+      participants: ['human', 'sre', 'cto'],
+      waiting_on: ['human'],
+      your_turn: true,
+      whose_turn: 'user',
       asked_at: 1785622879,
-      messages: [],
+      messages: [
+        // The legacy empty form and the canonical one must render identically.
+        { id: 11, author: '', kind: 'reply', body: 'looking', addressed_to: [], created_at: 1785622880 },
+        { id: 12, author: 'human', kind: 'reply', body: 'still looking', addressed_to: ['cto'], created_at: 1785622881 },
+        { id: 13, author: 'cto', kind: 'reply', body: 'over to you', addressed_to: ['human'], created_at: 1785622882 },
+      ],
     },
   ],
 }
@@ -185,9 +193,85 @@ describe('AgentScreen', () => {
     mockApi()
     renderWithProviders(<AgentScreen />)
     await waitFor(() => expect(screen.getByText('status?')).toBeTruthy())
-    // The user opened this thread, so the agent owes the answer.
-    expect(screen.getByText('waiting for sre')).toBeTruthy()
+    // The agent opened this thread and waiting_on is us, so we owe the answer.
+    expect(screen.getByText('awaiting you')).toBeTruthy()
     expect(screen.getByText('Q1')).toBeTruthy()
+  })
+
+  it('lists the thread participants', async () => {
+    mockApi()
+    renderWithProviders(<AgentScreen />)
+    await waitFor(() => expect(screen.getByText('status?')).toBeTruthy())
+    expect(screen.getByText('you, sre, cto')).toBeTruthy()
+  })
+
+  it('does not flag our turn when your_turn is false', async () => {
+    // whose_turn stays "user" so a regression back onto the compat field fails here.
+    const q = QUESTIONS.questions[0]
+    mockApi({
+      '/v1/agents/sre/questions': {
+        questions: [{ ...q, your_turn: false, waiting_on: ['cto'], whose_turn: 'user' }],
+      },
+    })
+    renderWithProviders(<AgentScreen />)
+    await waitFor(() => expect(screen.getByText('status?')).toBeTruthy())
+    expect(screen.queryByText('awaiting you')).toBeNull()
+    expect(screen.getByText('waiting for cto')).toBeTruthy()
+  })
+
+  it('renders a human message as us for both the empty and canonical author', async () => {
+    mockApi()
+    renderWithProviders(<AgentScreen />)
+    await waitFor(() => expect(screen.getByText('looking')).toBeTruthy())
+    // Two human-authored messages: author "" and author "human".
+    expect(screen.getAllByText('you').length).toBe(2)
+  })
+
+  it('shows who a message was addressed to', async () => {
+    mockApi()
+    renderWithProviders(<AgentScreen />)
+    await waitFor(() => expect(screen.getByText('still looking')).toBeTruthy())
+    expect(screen.getByText('→ cto')).toBeTruthy()
+    expect(screen.getByText('→ you')).toBeTruthy()
+  })
+
+  it('sends the picked addressee with the reply', async () => {
+    mockApi()
+    renderWithProviders(<AgentScreen />)
+    await waitFor(() => expect(screen.getByText('status?')).toBeTruthy())
+
+    fireEvent.changeText(screen.getByPlaceholderText(/Write a reply/), 'ack')
+    // Each event's state must land before the next one reads it.
+    await waitFor(() => expect(screen.getByPlaceholderText(/Write a reply/).props.value).toBe('ack'))
+    fireEvent.press(screen.getByTestId('to-cto'))
+    await waitFor(() => expect(screen.getByTestId('to-cto').props.accessibilityState?.selected).toBe(true))
+    fireEvent.press(screen.getByText('Clarify'))
+
+    await waitFor(() => {
+      const call = (fetch as jest.Mock).mock.calls.find(([u]: [string]) =>
+        String(u).includes('/v1/agent-questions/1/reply'),
+      )
+      expect(call).toBeTruthy()
+      expect(JSON.parse(call[1].body)).toEqual({ body: 'ack', to: ['cto'] })
+    })
+  })
+
+  it('omits the to key when no addressee is picked', async () => {
+    mockApi()
+    renderWithProviders(<AgentScreen />)
+    await waitFor(() => expect(screen.getByText('status?')).toBeTruthy())
+
+    fireEvent.changeText(screen.getByPlaceholderText(/Write a reply/), 'ack')
+    await waitFor(() => expect(screen.getByPlaceholderText(/Write a reply/).props.value).toBe('ack'))
+    fireEvent.press(screen.getByText('Clarify'))
+
+    await waitFor(() => {
+      const call = (fetch as jest.Mock).mock.calls.find(([u]: [string]) =>
+        String(u).includes('/v1/agent-questions/1/reply'),
+      )
+      expect(call).toBeTruthy()
+      expect(JSON.parse(call[1].body)).toEqual({ body: 'ack' })
+    })
   })
 
   it('renders the inbox messages with sender and status', async () => {

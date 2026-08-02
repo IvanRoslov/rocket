@@ -42,6 +42,14 @@ import {
 } from '../../src/components/ui'
 import { inboxStatusBadge } from '../../src/lib/agents'
 import { ago } from '../../src/lib/format'
+import {
+  addresseeLabel,
+  answerableBy,
+  isHuman,
+  participantInitial,
+  participantLabel,
+  toggleAddressee,
+} from '../../src/lib/threads'
 import { colors, mono, radius } from '../../src/theme'
 
 /**
@@ -55,10 +63,14 @@ function AgentQuestionCard({ q, agentId }: { q: AgentQuestion; agentId: string }
   const dismiss = useAgentQuestionDismiss()
   const [text, setText] = useState('')
   const [ctxOpen, setCtxOpen] = useState(false)
+  const [to, setTo] = useState<string[]>([])
   const busy = reply.isPending || answer.isPending || dismiss.isPending
   const toast = useToast()
 
-  const mine = !q.asked_by
+  // A thread we opened flips the roles. The human is "" on the wire today and
+  // "human" after subtask #736, so recognise both.
+  const mine = isHuman(q.asked_by)
+  const others = answerableBy(q.participants ?? [])
 
   const confirmDismiss = () =>
     Alert.alert(
@@ -78,7 +90,16 @@ function AgentQuestionCard({ q, agentId }: { q: AgentQuestion; agentId: string }
     const body = text.trim()
     if (!body) return
     const m = final ? answer : reply
-    m.mutate({ id: q.id, body }, { onSuccess: () => setText(''), onError: (e) => toast.show((e as Error).message) })
+    m.mutate(
+      { id: q.id, body, to },
+      {
+        onSuccess: () => {
+          setText('')
+          setTo([])
+        },
+        onError: (e) => toast.show((e as Error).message),
+      },
+    )
   }
 
   return (
@@ -86,15 +107,27 @@ function AgentQuestionCard({ q, agentId }: { q: AgentQuestion; agentId: string }
       <View style={styles.qHead}>
         <Badge label={`Q${q.ordinal}`} fg={colors.amberDeep} bg={colors.amberBg} />
         <Badge
-          label={q.whose_turn === 'user' ? 'awaiting you' : `waiting for ${agentId}`}
+          label={
+            q.your_turn
+              ? 'awaiting you'
+              : `waiting for ${(q.waiting_on ?? []).map(participantLabel).join(', ') || agentId}`
+          }
           fg={colors.amberDeep}
           bg={colors.amberBg}
         />
         <View style={{ flex: 1 }} />
-        <MonoText style={{ fontSize: 11, color: '#a1621a' }}>{mine ? 'you asked' : agentId}</MonoText>
+        <MonoText style={{ fontSize: 11, color: '#a1621a' }}>{participantLabel(q.asked_by)} asked</MonoText>
       </View>
       <View style={{ padding: 16 }}>
         <Text style={styles.qText}>{q.body}</Text>
+        {(q.participants ?? []).length > 0 ? (
+          <>
+            <Text style={styles.discussLabel}>PARTICIPANTS</Text>
+            <Text style={{ fontSize: 12.5, color: colors.textDim, marginBottom: 14 }}>
+              {q.participants.map(participantLabel).join(', ')}
+            </Text>
+          </>
+        ) : null}
         {q.context ? (
           ctxOpen ? (
             <View style={styles.ctxBox}>
@@ -114,10 +147,11 @@ function AgentQuestionCard({ q, agentId }: { q: AgentQuestion; agentId: string }
         ) : null}
         <Text style={styles.discussLabel}>DISCUSSION · {q.messages.length} REPLIES</Text>
         {q.messages.map((m) => {
-          const isUser = !m.author
+          const isUser = isHuman(m.author)
+          const addressees = addresseeLabel(m.addressed_to)
           return (
             <View key={m.id} style={styles.threadMsg}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
                 <View style={[styles.avatar, { backgroundColor: isUser ? colors.indigoBg : colors.amberBg }]}>
                   <Text
                     style={{
@@ -127,12 +161,15 @@ function AgentQuestionCard({ q, agentId }: { q: AgentQuestion; agentId: string }
                       color: isUser ? colors.indigoFg : colors.amberDeep,
                     }}
                   >
-                    {isUser ? 'Y' : agentId.slice(0, 1).toUpperCase()}
+                    {participantInitial(m.author)}
                   </Text>
                 </View>
                 <Text style={{ fontSize: 12.5, fontWeight: '600', color: isUser ? colors.indigoFg : colors.amberDeep }}>
-                  {isUser ? 'you' : agentId}
+                  {participantLabel(m.author)}
                 </Text>
+                {addressees ? (
+                  <Text style={{ fontSize: 11, color: colors.textDim }}>{addressees}</Text>
+                ) : null}
                 <Text style={{ fontSize: 11, color: colors.textFaint }}>{ago(m.created_at)}</Text>
               </View>
               <Text style={{ fontSize: 13.5, lineHeight: 22, color: '#27272a' }}>{m.body}</Text>
@@ -140,6 +177,26 @@ function AgentQuestionCard({ q, agentId }: { q: AgentQuestion; agentId: string }
           )
         })}
         <View style={styles.replyBox}>
+          {others.length > 0 ? (
+            <View style={styles.toRow}>
+              <Text style={styles.toLabel}>TO</Text>
+              {others.map((p) => {
+                const on = to.includes(p)
+                return (
+                  <Pressable
+                    key={p}
+                    testID={`to-${p}`}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ selected: on }}
+                    onPress={() => setTo((sel) => toggleAddressee(sel, p))}
+                    style={[styles.toChip, on ? styles.toChipOn : null]}
+                  >
+                    <Text style={{ fontSize: 12, color: on ? colors.amberDeep : colors.textDim }}>{p}</Text>
+                  </Pressable>
+                )
+              })}
+            </View>
+          ) : null}
           <TextInput
             style={styles.replyInput}
             placeholder={mine ? 'Ask a follow-up…' : 'Write a reply or give your final answer…'}
@@ -270,7 +327,7 @@ export default function AgentScreen() {
   const a = detail.data
   const open = (questions.data ?? []).filter((q) => q.status === 'open')
   const resolved = (questions.data ?? []).filter((q) => q.status === 'resolved')
-  const awaiting = open.filter((q) => q.whose_turn === 'user')
+  const awaiting = open.filter((q) => q.your_turn)
 
   if (!a) {
     return (
@@ -532,6 +589,16 @@ const styles = StyleSheet.create({
   threadMsg: { paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#f4f4f2' },
   avatar: { width: 24, height: 24, borderRadius: 7, alignItems: 'center', justifyContent: 'center' },
   replyBox: { marginTop: 8, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 16 },
+  toRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 7, marginBottom: 10 },
+  toLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 0.6, color: colors.textFaint },
+  toChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.chip,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  toChipOn: { borderColor: colors.amberDeep, backgroundColor: colors.amberBg },
   askInput: {
     minHeight: 90,
     padding: 12,
