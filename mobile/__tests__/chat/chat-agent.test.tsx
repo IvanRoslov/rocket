@@ -10,7 +10,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react-nativ
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { ToastProvider } from '../../src/components/Toast'
 import { ServerProvider } from '../../src/servers/ServerContext'
-import ChatScreen from './[id]'
+import ChatScreen from '../../app/chat/[id]'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 

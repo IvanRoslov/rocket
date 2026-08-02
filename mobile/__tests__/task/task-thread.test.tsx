@@ -7,7 +7,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react-nativ
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { ToastProvider } from '../../src/components/Toast'
 import { ServerProvider } from '../../src/servers/ServerContext'
-import TaskScreen from './[id]'
+import TaskScreen from '../../app/task/[id]'
 
 // react-query's polling re-renders outside act(); mark the environment so
 // React reports them as handled instead of warning on every tick.

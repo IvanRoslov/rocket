@@ -10,8 +10,8 @@ import { router } from 'expo-router'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { ToastProvider } from '../../src/components/Toast'
 import { ServerProvider } from '../../src/servers/ServerContext'
-import AgentsScreen from '../(tabs)/agents'
-import AgentScreen from './[id]'
+import AgentsScreen from '../../app/(tabs)/agents'
+import AgentScreen from '../../app/agent/[id]'
 
 // react-query's polling re-renders outside act(); mark the environment so
 // React reports them as handled instead of warning on every tick.
