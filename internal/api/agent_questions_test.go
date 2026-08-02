@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -51,29 +52,6 @@ func setupRoleForQuestions(t *testing.T, d Deps) *httptest.Server {
 	return srv
 }
 
-// --- whoseTurnAgent ------------------------------------------------------
-
-func TestWhoseTurnAgent_HumanOpenedNoMessages(t *testing.T) {
-	q := store.AgentQuestion{Status: "open", AskedBy: ""}
-	if got := whoseTurnAgent(q, nil); got != "role" {
-		t.Errorf("whoseTurnAgent = %q, want role", got)
-	}
-}
-
-func TestWhoseTurnAgent_RoleOpenedNoMessages(t *testing.T) {
-	q := store.AgentQuestion{Status: "open", AskedBy: "sre"}
-	if got := whoseTurnAgent(q, nil); got != "user" {
-		t.Errorf("whoseTurnAgent = %q, want user", got)
-	}
-}
-
-func TestWhoseTurnAgent_ResolvedHasNoTurn(t *testing.T) {
-	q := store.AgentQuestion{Status: "resolved", AskedBy: "sre"}
-	if got := whoseTurnAgent(q, nil); got != "" {
-		t.Errorf("whoseTurnAgent = %q, want empty", got)
-	}
-}
-
 // --- POST /v1/agents/{id}/questions --------------------------------------
 
 func TestPostAgentQuestion_FromHumanEnqueuesInboxEvent(t *testing.T) {
@@ -96,7 +74,7 @@ func TestPostAgentQuestion_FromHumanEnqueuesInboxEvent(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("inbox = %+v, want one message", msgs)
 	}
-	for _, want := range []string{"[role sre Q1 question]", "почему упал деплой?"} {
+	for _, want := range []string{"[role sre Q1 question from human]", "почему упал деплой?"} {
 		if !strings.Contains(msgs[0].Body, want) {
 			t.Errorf("body = %q, missing %q", msgs[0].Body, want)
 		}
@@ -134,19 +112,41 @@ func TestPostAgentQuestion_FromRoleInstanceAwaitsUser(t *testing.T) {
 	}
 }
 
-func TestPostAgentQuestion_ForeignSessionForbidden(t *testing.T) {
+// TestPostAgentQuestion_ForeignOrchestratorForbidden: an ephemeral session
+// that is not the role itself still may not open a role thread.
+func TestPostAgentQuestion_ForeignOrchestratorForbidden(t *testing.T) {
+	d := agentQuestionsTestDeps(t)
+	srv := setupRoleForQuestions(t, d)
+	addTestSession(t, d, "platform-orch", "orchestrator", "platform")
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/agents/sre/questions", "platform-orch",
+		map[string]any{"body": "чужой"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+}
+
+// TestPostAgentQuestion_AnotherAgentMayAsk is the rule spec v1 §3 changed: a
+// persistent agent may open a thread on ANY role, not only its own. This is
+// the point of the participant model — agents reach each other in threads
+// instead of writing into each other's terminals with rocket send.
+func TestPostAgentQuestion_AnotherAgentMayAsk(t *testing.T) {
 	d := agentQuestionsTestDeps(t)
 	srv := setupRoleForQuestions(t, d)
 	addTestSession(t, d, "triage", "agent", "platform")
-	addTestSession(t, d, "platform-orch", "orchestrator", "platform")
 
-	for _, sessionID := range []string{"triage", "platform-orch"} {
-		resp := postJSONWithHeader(t, srv.URL+"/v1/agents/sre/questions", sessionID,
-			map[string]any{"body": "чужой"})
-		if resp.StatusCode != http.StatusForbidden {
-			t.Fatalf("%s status = %d, want 403", sessionID, resp.StatusCode)
-		}
-		resp.Body.Close()
+	resp := postJSONWithHeader(t, srv.URL+"/v1/agents/sre/questions", "triage",
+		map[string]any{"body": "посмотри деплой"})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	q := decodeAgentQuestion(t, resp)
+	if !contains(q.Participants, "triage") {
+		t.Errorf("participants = %v, want the asking agent included", q.Participants)
+	}
+	if !reflect.DeepEqual(q.WaitingOn, []string{"human", "sre"}) {
+		t.Errorf("waiting_on = %v, want [human sre]", q.WaitingOn)
 	}
 }
 
@@ -238,7 +238,7 @@ func TestAgentQuestion_ReplyAnswerAndReopen(t *testing.T) {
 		t.Fatalf("after human reply: %+v", q)
 	}
 	sent, _ := d.Store.ListMessages("sre", 0)
-	if len(sent) != 2 || !strings.Contains(sent[1].Body, "[role sre Q1 reply]") {
+	if len(sent) != 2 || !strings.Contains(sent[1].Body, "[role sre Q1 reply from human]") {
 		t.Fatalf("a human reply must reach the live agent: %+v", sent)
 	}
 
@@ -293,21 +293,33 @@ func TestAgentQuestion_HumanReplyToResolvedIsConflict(t *testing.T) {
 	}
 }
 
-func TestAgentQuestion_AnswerRejectsAgents(t *testing.T) {
+// TestAgentQuestion_AnswerRejectsOrchestrators: answer is the human's and a
+// persistent agent's alone. An orchestrator is told to use reply instead —
+// spec v1 §3 reversed the old "any agent gets 403" rule for kind=agent
+// callers, but ephemeral sessions are still refused.
+func TestAgentQuestion_AnswerRejectsOrchestrators(t *testing.T) {
 	d := agentQuestionsTestDeps(t)
 	srv := setupRoleForQuestions(t, d)
-	addTestSession(t, d, "sre", "agent", "platform")
+	addTestProject(t, d, "proj1")
+	addTestSession(t, d, "orch-1", "orchestrator", "proj1")
 
 	qid, err := d.Store.AddAgentQuestion(store.AgentQuestion{RoleID: "sre", Body: "q"})
 	if err != nil {
 		t.Fatalf("AddAgentQuestion: %v", err)
 	}
 
-	resp := postJSONWithHeader(t, srv.URL+"/v1/agent-questions/"+itoa(qid)+"/answer", "sre",
-		map[string]any{"body": "сам себе"})
+	resp := postJSONWithHeader(t, srv.URL+"/v1/agent-questions/"+itoa(qid)+"/answer", "orch-1",
+		map[string]any{"body": "не моё дело"})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	var e errBody
+	if err := json.NewDecoder(resp.Body).Decode(&e); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if !strings.Contains(e.Error.Message, "reply") {
+		t.Errorf("403 message = %q, want it to point at reply", e.Error.Message)
 	}
 }
 
@@ -360,8 +372,8 @@ func TestAgentQuestion_HumanEntriesReachTheLiveSession(t *testing.T) {
 	if len(sent) != 2 {
 		t.Fatalf("messages = %+v, want the question and the answer", sent)
 	}
-	if !strings.Contains(sent[0].Body, "[role sre Q1 question]") ||
-		!strings.Contains(sent[1].Body, "[role sre Q1 answer]") {
+	if !strings.Contains(sent[0].Body, "[role sre Q1 question from human]") ||
+		!strings.Contains(sent[1].Body, "[role sre Q1 answer from human]") {
 		t.Errorf("bodies = %q / %q", sent[0].Body, sent[1].Body)
 	}
 
@@ -398,5 +410,82 @@ func TestAgentQuestion_NoLiveSessionInboxesTheEntry(t *testing.T) {
 	}
 	if inbox, _ := d.Store.ListInboxMessages("sre", store.InboxUnread, 0); len(inbox) != 1 {
 		t.Fatalf("a dead agent must find the entry in its inbox: %+v", inbox)
+	}
+}
+
+// TestAgentQuestion_ParticipantFields: a role thread carries the same additive
+// fields as a task thread, with the role's own whose_turn vocabulary.
+func TestAgentQuestion_ParticipantFields(t *testing.T) {
+	d := agentQuestionsTestDeps(t)
+	srv := newTestServer(t, d)
+	createTestAgent(t, srv, "sre")
+
+	q := decodeAgentQuestion(t, postJSON(t, srv.URL+"/v1/agents/sre/questions",
+		map[string]any{"body": "Status?"}))
+
+	if !reflect.DeepEqual(q.Participants, []string{"human", "sre"}) {
+		t.Errorf("participants = %v, want [human sre]", q.Participants)
+	}
+	if !reflect.DeepEqual(q.WaitingOn, []string{"sre"}) {
+		t.Errorf("waiting_on = %v, want [sre]", q.WaitingOn)
+	}
+	if q.WhoseTurn != "role" {
+		t.Errorf("whose_turn = %q, want role (compat)", q.WhoseTurn)
+	}
+	if q.YourTurn {
+		t.Error("your_turn = true for the human asker, want false")
+	}
+}
+
+// TestAgentQuestion_OrchestratorMayReplyWhenAddressed: an orchestrator named in
+// "to" joins a role thread and may reply, but still may not answer it.
+func TestAgentQuestion_OrchestratorMayReplyWhenAddressed(t *testing.T) {
+	d := agentQuestionsTestDeps(t)
+	srv := newTestServer(t, d)
+	createTestAgent(t, srv, "sre")
+	addTestProject(t, d, "proj1")
+	addTestSession(t, d, "orch-1", "orchestrator", "proj1")
+
+	q := decodeAgentQuestion(t, postJSON(t, srv.URL+"/v1/agents/sre/questions",
+		map[string]any{"body": "Status?", "to": []string{"orch-1"}}))
+
+	if !contains(q.Participants, "orch-1") {
+		t.Fatalf("participants = %v, want orch-1 joined via to", q.Participants)
+	}
+
+	rep := postJSONWithHeader(t, srv.URL+"/v1/agent-questions/"+itoa(q.ID)+"/reply", "orch-1",
+		map[string]any{"body": "green"})
+	defer rep.Body.Close()
+	if rep.StatusCode != http.StatusCreated {
+		t.Fatalf("addressed orchestrator reply = %d, want 201", rep.StatusCode)
+	}
+
+	ans := postJSONWithHeader(t, srv.URL+"/v1/agent-questions/"+itoa(q.ID)+"/answer", "orch-1",
+		map[string]any{"body": "done"})
+	defer ans.Body.Close()
+	if ans.StatusCode != http.StatusForbidden {
+		t.Errorf("orchestrator answer = %d, want 403", ans.StatusCode)
+	}
+}
+
+// TestAgentQuestion_RoleMayAnswerItsOwnThread: a persistent agent resolves a
+// thread the human opened to it.
+func TestAgentQuestion_RoleMayAnswerItsOwnThread(t *testing.T) {
+	d := agentQuestionsTestDeps(t)
+	srv := newTestServer(t, d)
+	createTestAgent(t, srv, "sre")
+	addLiveAgentSession(t, d, "sre")
+
+	q := decodeAgentQuestion(t, postJSON(t, srv.URL+"/v1/agents/sre/questions",
+		map[string]any{"body": "Status?"}))
+
+	ans := postJSONWithHeader(t, srv.URL+"/v1/agent-questions/"+itoa(q.ID)+"/answer", "sre",
+		map[string]any{"body": "all green"})
+	got := decodeAgentQuestion(t, ans)
+	if got.Status != "resolved" || got.Resolution != "answered" {
+		t.Errorf("status/resolution = %q/%q, want resolved/answered", got.Status, got.Resolution)
+	}
+	if len(got.WaitingOn) != 0 {
+		t.Errorf("waiting_on = %v, want empty", got.WaitingOn)
 	}
 }

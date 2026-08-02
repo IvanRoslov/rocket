@@ -3,6 +3,9 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,17 +43,108 @@ func decodeQuestion(t *testing.T, resp *http.Response) questionResponse {
 	return q
 }
 
-func TestWhoseTurn_UserOpenedNoMessages(t *testing.T) {
-	q := store.Question{Status: "open", AskedBy: ""}
-	if got := whoseTurn(q, nil); got != "orchestrator" {
-		t.Errorf("whoseTurn = %q, want orchestrator", got)
+// getQuestions GETs a task's threads as the given caller ("" = the human).
+func getQuestions(t *testing.T, srv *httptest.Server, taskID int64, sessionID string) []questionResponse {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if sessionID != "" {
+		req.Header.Set(sessionHeader, sessionID)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET questions: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET questions = %d, want 200", resp.StatusCode)
+	}
+	var body struct {
+		Questions []questionResponse `json:"questions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode questions: %v", err)
+	}
+	return body.Questions
+}
+
+// TestGetTaskQuestions_ParticipantFields covers the additive wire contract: an
+// orchestrator-opened thread has the human and the orchestrator as
+// participants, waits on the human, and reports your_turn for a human caller.
+func TestGetTaskQuestions_ParticipantFields(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
+		map[string]any{"body": "Which approach?"})
+	resp.Body.Close()
+
+	got := getQuestions(t, srv, taskID, "")
+	if len(got) != 1 {
+		t.Fatalf("got %d questions, want 1", len(got))
+	}
+	q := got[0]
+	if !reflect.DeepEqual(q.Participants, []string{"human", "orch-1"}) {
+		t.Errorf("participants = %v, want [human orch-1]", q.Participants)
+	}
+	if !reflect.DeepEqual(q.WaitingOn, []string{"human"}) {
+		t.Errorf("waiting_on = %v, want [human]", q.WaitingOn)
+	}
+	if !q.YourTurn {
+		t.Error("your_turn = false for a human caller, want true")
+	}
+	if q.WhoseTurn != "user" {
+		t.Errorf("whose_turn = %q, want user (compat)", q.WhoseTurn)
 	}
 }
 
-func TestWhoseTurn_OrchestratorOpenedNoMessages(t *testing.T) {
-	q := store.Question{Status: "open", AskedBy: "orch-1"}
-	if got := whoseTurn(q, nil); got != "user" {
-		t.Errorf("whoseTurn = %q, want user", got)
+// TestGetTaskQuestions_YourTurnIsCallerRelative: the same thread reads as
+// not-your-turn for the orchestrator that opened it.
+func TestGetTaskQuestions_YourTurnIsCallerRelative(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
+		map[string]any{"body": "Which approach?"})
+	resp.Body.Close()
+
+	got := getQuestions(t, srv, taskID, "orch-1")
+	if len(got) != 1 {
+		t.Fatalf("got %d questions, want 1", len(got))
+	}
+	if got[0].YourTurn {
+		t.Error("your_turn = true for the asker, want false")
+	}
+}
+
+// TestGetTaskQuestions_HumanOpenedWaitsOnOrchestrator is the no-message case
+// from the other side: asked_by is empty, so the human asked and the task's
+// orchestrator owes the reply.
+func TestGetTaskQuestions_HumanOpenedWaitsOnOrchestrator(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	resp := postJSON(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions",
+		map[string]any{"body": "Status?"})
+	resp.Body.Close()
+
+	got := getQuestions(t, srv, taskID, "")
+	if len(got) != 1 {
+		t.Fatalf("got %d questions, want 1", len(got))
+	}
+	if !reflect.DeepEqual(got[0].WaitingOn, []string{"orch-1"}) {
+		t.Errorf("waiting_on = %v, want [orch-1]", got[0].WaitingOn)
+	}
+	if got[0].WhoseTurn != "orchestrator" {
+		t.Errorf("whose_turn = %q, want orchestrator (compat)", got[0].WhoseTurn)
+	}
+	if got[0].YourTurn {
+		t.Error("your_turn = true for the human asker, want false")
 	}
 }
 
@@ -129,7 +223,7 @@ func TestPostTaskQuestions_HumanOpensThreadToOrchestrator(t *testing.T) {
 		t.Errorf("Messages = %+v, want empty", q.Messages)
 	}
 
-	wantPrefix := "[task #" + itoa(taskID) + " Q1 question] What's the status?"
+	wantPrefix := "[task #" + itoa(taskID) + " Q1 question from human] What's the status?"
 	msgs, err := d.Store.ListMessages("orch-1", 10)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
@@ -153,7 +247,7 @@ func TestPostTaskQuestions_HumanOpensThreadWithContext(t *testing.T) {
 		t.Fatalf("status = %d, want 201", resp.StatusCode)
 	}
 
-	wantBody := "[task #" + itoa(taskID) + " Q1 question] What's the status?\n\nextra info"
+	wantBody := "[task #" + itoa(taskID) + " Q1 question from human] What's the status?\n\nextra info"
 	msgs, err := d.Store.ListMessages("orch-1", 10)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
@@ -348,7 +442,7 @@ func TestQuestionThread_FullLifecycle(t *testing.T) {
 		t.Fatalf("messages after user reply = %+v", afterUserReply.Messages)
 	}
 
-	wantUserReplyPrefix := "[task #" + itoa(taskID) + " Q1 reply] consider X"
+	wantUserReplyPrefix := "[task #" + itoa(taskID) + " Q1 reply from human] consider X"
 	msgs, err := d.Store.ListMessages("orch-1", 10)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
@@ -393,7 +487,7 @@ func TestQuestionThread_FullLifecycle(t *testing.T) {
 		t.Fatalf("after answer: WhoseTurn = %q, want empty (resolved)", afterAnswer.WhoseTurn)
 	}
 
-	wantAnswerPrefix := "[task #" + itoa(taskID) + " Q1 answer] final: use X"
+	wantAnswerPrefix := "[task #" + itoa(taskID) + " Q1 answer from human] final: use X"
 	msgsAfterAnswer, err := d.Store.ListMessages("orch-1", 10)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
@@ -761,5 +855,256 @@ func TestGetAllQuestions(t *testing.T) {
 	}
 	if got.OrchestratorName == "" {
 		t.Errorf("orchestrator_name empty, want the orch-1 session tmux name")
+	}
+}
+
+// setupQuestionAgent registers persistent agent "cto" with no live session.
+func setupQuestionAgent(t *testing.T, d Deps) {
+	t.Helper()
+	if err := d.Store.AddAgent(store.Agent{
+		ID: "cto", Dir: "/tmp/cto", Command: "claude", Enabled: true,
+	}); err != nil {
+		t.Fatalf("AddAgent: %v", err)
+	}
+}
+
+// TestPostTaskQuestions_ToAddsParticipant covers acceptance criterion 2: an
+// orchestrator addresses cto, who becomes a participant, is waited on, and is
+// notified in its inbox because it has no live session.
+func TestPostTaskQuestions_ToAddsParticipant(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+	setupQuestionAgent(t, d)
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
+		map[string]any{"body": "Approve the schema?", "to": []string{"cto"}})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	q := decodeQuestion(t, resp)
+
+	if !reflect.DeepEqual(q.Participants, []string{"cto", "human", "orch-1"}) {
+		t.Errorf("participants = %v, want [cto human orch-1]", q.Participants)
+	}
+	// A thread with no messages has no addressed_to to read: spec v1 §2 falls
+	// back to "everyone except the asker", so --to on ask joins and notifies
+	// cto without narrowing the turn to it. Orchestrator question 8114.
+	if !reflect.DeepEqual(q.WaitingOn, []string{"cto", "human"}) {
+		t.Errorf("waiting_on = %v, want [cto human]", q.WaitingOn)
+	}
+
+	inbox, err := d.Store.ListInboxMessages("cto", store.InboxUnread, 0)
+	if err != nil {
+		t.Fatalf("ListInboxMessages: %v", err)
+	}
+	if len(inbox) != 1 {
+		t.Fatalf("cto inbox has %d messages, want 1", len(inbox))
+	}
+}
+
+// TestPostQuestionAnswer_AgentMayAnswer covers acceptance criterion 1: a
+// persistent agent with ROCKET_SESSION_ID set closes the thread itself.
+func TestPostQuestionAnswer_AgentMayAnswer(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+	setupQuestionAgent(t, d)
+	addLiveAgentSession(t, d, "cto")
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
+		map[string]any{"body": "Approve the schema?", "to": []string{"cto"}})
+	q := decodeQuestion(t, resp)
+	resp.Body.Close()
+
+	ans := postJSONWithHeader(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/answer", "cto",
+		map[string]any{"body": "Approved."})
+	defer ans.Body.Close()
+	if ans.StatusCode != http.StatusOK {
+		t.Fatalf("agent answer = %d, want 200", ans.StatusCode)
+	}
+	got := decodeQuestion(t, ans)
+	if got.Status != "resolved" || got.Resolution != "answered" {
+		t.Errorf("status/resolution = %q/%q, want resolved/answered", got.Status, got.Resolution)
+	}
+	if len(got.WaitingOn) != 0 {
+		t.Errorf("waiting_on = %v, want empty for a resolved thread", got.WaitingOn)
+	}
+}
+
+// TestPostQuestionAnswer_OrchestratorForbidden covers acceptance criterion 5.
+func TestPostQuestionAnswer_OrchestratorForbidden(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	resp := postJSON(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions",
+		map[string]any{"body": "What now?"})
+	q := decodeQuestion(t, resp)
+	resp.Body.Close()
+
+	ans := postJSONWithHeader(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/answer", "orch-1",
+		map[string]any{"body": "Done."})
+	defer ans.Body.Close()
+	if ans.StatusCode != http.StatusForbidden {
+		t.Fatalf("orchestrator answer = %d, want 403", ans.StatusCode)
+	}
+	var e errBody
+	if err := json.NewDecoder(ans.Body).Decode(&e); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if !strings.Contains(e.Error.Message, "reply") {
+		t.Errorf("403 message = %q, want it to point at reply", e.Error.Message)
+	}
+}
+
+// TestPostQuestionReply_HumanDelegatesWithTo covers acceptance criterion 3.
+func TestPostQuestionReply_HumanDelegatesWithTo(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+	setupQuestionAgent(t, d)
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
+		map[string]any{"body": "Which approach?"})
+	q := decodeQuestion(t, resp)
+	resp.Body.Close()
+
+	rep := postJSON(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/reply",
+		map[string]any{"body": "cto decides.", "to": []string{"cto"}})
+	defer rep.Body.Close()
+	if rep.StatusCode != http.StatusCreated {
+		t.Fatalf("human reply = %d, want 201", rep.StatusCode)
+	}
+	got := decodeQuestion(t, rep)
+	if !contains(got.Participants, "cto") {
+		t.Errorf("participants = %v, want cto included", got.Participants)
+	}
+	if !reflect.DeepEqual(got.WaitingOn, []string{"cto"}) {
+		t.Errorf("waiting_on = %v, want [cto]", got.WaitingOn)
+	}
+	if !reflect.DeepEqual(got.Messages[0].AddressedTo, []string{"cto"}) {
+		t.Errorf("addressed_to = %v, want [cto] on the wire", got.Messages[0].AddressedTo)
+	}
+
+	inbox, err := d.Store.ListInboxMessages("cto", store.InboxUnread, 0)
+	if err != nil {
+		t.Fatalf("ListInboxMessages: %v", err)
+	}
+	if len(inbox) != 1 {
+		t.Errorf("cto inbox has %d messages, want 1", len(inbox))
+	}
+}
+
+// TestPostQuestionReply_NonParticipantWorkerForbidden: participation, not the
+// old "human or my own orchestrator" pair, is what grants reply.
+func TestPostQuestionReply_NonParticipantWorkerForbidden(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+	addTestSession(t, d, "w-9", "worker", "proj1")
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
+		map[string]any{"body": "Which approach?"})
+	q := decodeQuestion(t, resp)
+	resp.Body.Close()
+
+	rep := postJSONWithHeader(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/reply", "w-9",
+		map[string]any{"body": "me too"})
+	defer rep.Body.Close()
+	if rep.StatusCode != http.StatusForbidden {
+		t.Errorf("non-participant worker reply = %d, want 403", rep.StatusCode)
+	}
+}
+
+// TestQuestionThread_OrchestratorAsksAgentAnswers walks acceptance criteria 1,
+// 2 and 4 end to end: the orchestrator addresses cto, cto is notified and
+// becomes a participant, cto replies (which notifies the orchestrator), and
+// cto's answer closes the thread.
+func TestQuestionThread_OrchestratorAsksAgentAnswers(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+	setupQuestionAgent(t, d)
+	addLiveAgentSession(t, d, "cto")
+
+	ask := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
+		map[string]any{"body": "Approve the schema?", "to": []string{"cto"}})
+	q := decodeQuestion(t, ask)
+	ask.Body.Close()
+	if !contains(q.WaitingOn, "cto") {
+		t.Fatalf("after ask waiting_on = %v, want cto included", q.WaitingOn)
+	}
+
+	ctoMsgs, err := d.Store.ListMessages("cto", 0)
+	if err != nil {
+		t.Fatalf("ListMessages(cto): %v", err)
+	}
+	if len(ctoMsgs) != 1 {
+		t.Fatalf("cto got %d queued messages after ask, want 1", len(ctoMsgs))
+	}
+
+	rep := postJSONWithHeader(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/reply", "cto",
+		map[string]any{"body": "One question first."})
+	got := decodeQuestion(t, rep)
+	rep.Body.Close()
+	if !reflect.DeepEqual(got.WaitingOn, []string{"human", "orch-1"}) {
+		t.Errorf("after cto reply waiting_on = %v, want [human orch-1]", got.WaitingOn)
+	}
+
+	orchMsgs, err := d.Store.ListMessages("orch-1", 0)
+	if err != nil {
+		t.Fatalf("ListMessages(orch-1): %v", err)
+	}
+	if len(orchMsgs) == 0 {
+		t.Fatal("the orchestrator was not notified of cto's reply")
+	}
+	want := "[task #" + itoa(taskID) + " Q1 reply from cto] One question first."
+	if last := orchMsgs[len(orchMsgs)-1].Body; last != want {
+		t.Errorf("orchestrator body = %q, want %q", last, want)
+	}
+
+	ans := postJSONWithHeader(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/answer", "cto",
+		map[string]any{"body": "Approved."})
+	final := decodeQuestion(t, ans)
+	ans.Body.Close()
+	if final.Status != "resolved" || final.Resolution != "answered" {
+		t.Fatalf("status/resolution = %q/%q, want resolved/answered", final.Status, final.Resolution)
+	}
+	if len(final.WaitingOn) != 0 {
+		t.Errorf("waiting_on = %v, want empty", final.WaitingOn)
+	}
+	if final.WhoseTurn != "" {
+		t.Errorf("whose_turn = %q, want empty for a resolved thread", final.WhoseTurn)
+	}
+}
+
+// TestGetTaskQuestions_UnrelatedSessionSeesNothing: cross-task snooping is the
+// one thing the read gate forbids. The thread is still there for its own
+// orchestrator.
+func TestGetTaskQuestions_UnrelatedSessionSeesNothing(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+	addTestSession(t, d, "orch-2", "orchestrator", "proj1")
+	if _, err := d.Store.AddTask(store.Task{
+		Title: "Other", ProjectID: "proj1", SessionID: "orch-2",
+	}); err != nil {
+		t.Fatalf("AddTask other: %v", err)
+	}
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
+		map[string]any{"body": "Which approach?"})
+	resp.Body.Close()
+
+	if got := getQuestions(t, srv, taskID, "orch-2"); len(got) != 0 {
+		t.Errorf("an unrelated orchestrator saw %d threads, want 0", len(got))
+	}
+	if got := getQuestions(t, srv, taskID, "orch-1"); len(got) != 1 {
+		t.Errorf("the task's own orchestrator saw %d threads, want 1", len(got))
+	}
+	if got := getQuestions(t, srv, taskID, ""); len(got) != 1 {
+		t.Errorf("the human saw %d threads, want 1", len(got))
 	}
 }

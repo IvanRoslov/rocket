@@ -63,6 +63,54 @@ func deliverToAgent(d Deps, agentID, from, body string) (live bool, msgID int64,
 	return false, inboxID, nil
 }
 
+// deliverToSession enqueues body to an ephemeral session — an orchestrator or
+// a worker taking part in a thread. It is the generalisation of the old
+// deliverToOrchestrator: the same enqueue pattern POST /v1/messages uses
+// (insert queued, publish message.queued, wake the delivery worker), with the
+// recipient named directly instead of derived from a task.
+//
+// Unlike an agent, an ephemeral session has no inbox: if it is gone or
+// terminal the message is dropped with a log, because there is nothing to
+// deliver it to later. The thread record itself is written regardless.
+func deliverToSession(d Deps, sessionID, body string) error {
+	if sessionID == "" {
+		return nil
+	}
+	body = rewriteAttachmentLinks(d, body)
+
+	sess, err := d.Store.GetSession(sessionID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			slog.Warn("api: thread delivery target session not found, skipping", "session_id", sessionID)
+			return nil
+		}
+		return err
+	}
+	if isSessionTerminal(sess.State) {
+		slog.Warn("api: thread delivery target session is terminal, skipping",
+			"session_id", sessionID, "state", sess.State)
+		return nil
+	}
+
+	id, err := d.Store.AddMessage(store.Message{ToSession: sessionID, Body: body})
+	if err != nil {
+		return err
+	}
+
+	if d.Bus != nil {
+		d.Bus.Publish("message.queued", sessionID, map[string]any{
+			"id": id, "from": "", "to": sessionID,
+		})
+	}
+	if d.Queue != nil {
+		d.Queue.Wake(sessionID)
+	} else {
+		slog.Warn("api: thread message queued with nil Queue, will not be delivered until daemon restart",
+			"id", id, "to", sessionID)
+	}
+	return nil
+}
+
 // senderIfSession returns from only when it names a session the store knows:
 // the queue looks senders up to report delivery failures back to them, so an
 // unknown sender must not be recorded as one.
