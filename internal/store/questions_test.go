@@ -651,3 +651,38 @@ func TestAddParticipants_IsSafeUnderConcurrency(t *testing.T) {
 		t.Errorf("participants = %v, want each exactly once", got)
 	}
 }
+
+// TestAddQuestion_RoundTripsAddressedTo: a question carries its own
+// addressed_to, mirroring question_messages, so --to on ask can narrow the
+// turn before the thread has any messages (spec v2 §2).
+func TestAddQuestion_RoundTripsAddressedTo(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+
+	addressed, err := s.AddQuestion(Question{
+		TaskID: taskID, Body: "addressed", AddressedTo: []string{"cto", "human"},
+	})
+	if err != nil {
+		t.Fatalf("AddQuestion addressed: %v", err)
+	}
+	plain, err := s.AddQuestion(Question{TaskID: taskID, Body: "plain"})
+	if err != nil {
+		t.Fatalf("AddQuestion plain: %v", err)
+	}
+
+	got, err := s.GetQuestion(addressed)
+	if err != nil {
+		t.Fatalf("GetQuestion addressed: %v", err)
+	}
+	if want := "cto,human"; strings.Join(got.AddressedTo, ",") != want {
+		t.Errorf("AddressedTo = %v, want %q", got.AddressedTo, want)
+	}
+
+	got, err = s.GetQuestion(plain)
+	if err != nil {
+		t.Fatalf("GetQuestion plain: %v", err)
+	}
+	if len(got.AddressedTo) != 0 {
+		t.Errorf("AddressedTo = %v, want empty for an unaddressed question", got.AddressedTo)
+	}
+}

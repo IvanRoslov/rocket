@@ -19,8 +19,11 @@ type AgentQuestion struct {
 	Context    string // optional markdown context
 	Status     string // open|resolved
 	Resolution string // answered|dismissed (set once resolved)
-	AskedAt    int64
-	ResolvedAt int64 // 0 = not resolved
+	// AddressedTo narrows who is expected to respond before the thread has any
+	// messages; see Question.AddressedTo.
+	AddressedTo []string
+	AskedAt     int64
+	ResolvedAt  int64 // 0 = not resolved
 }
 
 // AgentQuestionMessage is a single entry in a role question's thread: either a
@@ -39,14 +42,15 @@ type AgentQuestionMessage struct {
 // what makes a thread a role thread is a non-NULL role_id. The functions below
 // are a thin facade over that shared storage, kept so internal/api's role
 // handlers keep their existing shape.
-const agentQuestionColumns = `id, role_id, asked_by, body, context, status, resolution, asked_at, resolved_at`
+const agentQuestionColumns = `id, role_id, asked_by, body, context, status, resolution, addressed_to, asked_at, resolved_at`
 
 // toQuestion / toAgentQuestion convert between the facade's type and the
 // unified one, so the facade owns no SQL of its own where it can avoid it.
 func (q AgentQuestion) toQuestion() Question {
 	return Question{
 		ID: q.ID, RoleID: q.RoleID, AskedBy: q.AskedBy, Body: q.Body, Context: q.Context,
-		Status: q.Status, Resolution: q.Resolution, AskedAt: q.AskedAt, ResolvedAt: q.ResolvedAt,
+		Status: q.Status, Resolution: q.Resolution, AddressedTo: q.AddressedTo,
+		AskedAt: q.AskedAt, ResolvedAt: q.ResolvedAt,
 	}
 }
 
@@ -246,11 +250,12 @@ func (s *Store) OpenAgentQuestionCounts() (map[string]QuestionCounts, error) {
 
 func scanAgentQuestion(row interface{ Scan(...any) error }) (AgentQuestion, error) {
 	var q AgentQuestion
-	var context, resolution sql.NullString
+	var context, resolution, addressedTo sql.NullString
 	var resolvedAt sql.NullInt64
 
 	err := row.Scan(
-		&q.ID, &q.RoleID, &q.AskedBy, &q.Body, &context, &q.Status, &resolution, &q.AskedAt, &resolvedAt,
+		&q.ID, &q.RoleID, &q.AskedBy, &q.Body, &context, &q.Status, &resolution,
+		&addressedTo, &q.AskedAt, &resolvedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AgentQuestion{}, ErrNotFound
@@ -261,6 +266,7 @@ func scanAgentQuestion(row interface{ Scan(...any) error }) (AgentQuestion, erro
 
 	q.Context = context.String
 	q.Resolution = resolution.String
+	q.AddressedTo = decodeAddressedTo(addressedTo.String)
 	q.ResolvedAt = resolvedAt.Int64
 
 	return q, nil

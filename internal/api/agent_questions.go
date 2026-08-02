@@ -59,6 +59,7 @@ func buildAgentQuestionResponse(d Deps, caller *store.Session, q store.AgentQues
 
 	waiting := waitingOn(store.Question{
 		ID: q.ID, RoleID: q.RoleID, AskedBy: q.AskedBy, Status: q.Status,
+		AddressedTo: q.AddressedTo,
 	}, msgs, participants)
 
 	return agentQuestionResponse{
@@ -219,10 +220,11 @@ func handlePostAgentQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 	}
 
 	qid, err := d.Store.AddAgentQuestion(store.AgentQuestion{
-		RoleID:  a.ID,
-		AskedBy: callerAuthor(caller),
-		Body:    req.Body,
-		Context: req.Context,
+		RoleID:      a.ID,
+		AskedBy:     callerAuthor(caller),
+		Body:        req.Body,
+		Context:     req.Context,
+		AddressedTo: req.To,
 	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())

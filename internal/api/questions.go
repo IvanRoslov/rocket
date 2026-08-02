@@ -297,6 +297,9 @@ func handlePostTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 		AskedBy: callerAuthor(caller),
 		Body:    req.Body,
 		Context: req.Context,
+		// --to narrows the turn from the very first entry: with no messages
+		// yet, waitingOn reads the question's own addressees.
+		AddressedTo: req.To,
 	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())

@@ -32,8 +32,13 @@ type Question struct {
 	Context    string // optional markdown context
 	Status     string // open|resolved
 	Resolution string // answered|dismissed (set once resolved)
-	AskedAt    int64
-	ResolvedAt int64 // 0 = not resolved
+	// AddressedTo narrows who is expected to respond before the thread has
+	// any messages. Empty means every participant except the asker. It
+	// mirrors QuestionMessage.AddressedTo, so the turn is derived the same
+	// way whether or not anyone has replied yet.
+	AddressedTo []string
+	AskedAt     int64
+	ResolvedAt  int64 // 0 = not resolved
 }
 
 // QuestionMessage represents a single entry in a question's thread: either a
@@ -52,7 +57,7 @@ type QuestionMessage struct {
 
 // questionColumns is the column list every Question scan relies on; it must
 // stay in sync with scanQuestion.
-const questionColumns = `id, task_id, role_id, asked_by, body, context, status, resolution, asked_at, resolved_at`
+const questionColumns = `id, task_id, role_id, asked_by, body, context, status, resolution, addressed_to, asked_at, resolved_at`
 
 // encodeAddressedTo renders a recipient list as the CSV stored in
 // question_messages.addressed_to. An empty list stores as "".
@@ -89,10 +94,11 @@ func (s *Store) AddQuestion(q Question) (int64, error) {
 	}
 
 	res, err := s.db.Exec(
-		`INSERT INTO questions (task_id, role_id, asked_by, body, context, status, resolution, asked_at, resolved_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO questions (task_id, role_id, asked_by, body, context, status, resolution, addressed_to, asked_at, resolved_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nullIfZero(q.TaskID), nullIfEmpty(q.RoleID), q.AskedBy, q.Body, nullIfEmpty(q.Context),
-		q.Status, nullIfEmpty(q.Resolution), q.AskedAt, nullIfZero(q.ResolvedAt),
+		q.Status, nullIfEmpty(q.Resolution), encodeAddressedTo(q.AddressedTo),
+		q.AskedAt, nullIfZero(q.ResolvedAt),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert question: %w", err)
@@ -306,12 +312,12 @@ func (s *Store) ListAllOpenQuestions() ([]Question, error) {
 
 func scanQuestion(row interface{ Scan(...any) error }) (Question, error) {
 	var q Question
-	var roleID, context, resolution sql.NullString
+	var roleID, context, resolution, addressedTo sql.NullString
 	var taskID, resolvedAt sql.NullInt64
 
 	err := row.Scan(
 		&q.ID, &taskID, &roleID, &q.AskedBy, &q.Body, &context, &q.Status, &resolution,
-		&q.AskedAt, &resolvedAt,
+		&addressedTo, &q.AskedAt, &resolvedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Question{}, ErrNotFound
@@ -324,6 +330,7 @@ func scanQuestion(row interface{ Scan(...any) error }) (Question, error) {
 	q.RoleID = roleID.String
 	q.Context = context.String
 	q.Resolution = resolution.String
+	q.AddressedTo = decodeAddressedTo(addressedTo.String)
 	q.ResolvedAt = resolvedAt.Int64
 
 	return q, nil
