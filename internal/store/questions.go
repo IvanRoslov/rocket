@@ -227,55 +227,13 @@ func (s *Store) QuestionOrdinal(q Question) (int, error) {
 	return n, nil
 }
 
-// QuestionCounts summarizes a task's open questions for board/list views.
+// QuestionCounts summarizes a subject's open threads for board/list views.
+// AwaitingUser means "the human is in waiting_on"; it is derived in
+// internal/api from ListOpenThreads, never in SQL, so it cannot drift from the
+// waiting_on a thread response shows.
 type QuestionCounts struct {
 	Open         int
 	AwaitingUser int
-}
-
-// OpenQuestionCounts returns, per task with at least one open question, how
-// many questions are open and how many of those await the human. "Awaiting
-// the human" mirrors the whoseTurn derivation in internal/api/questions.go:
-// with no thread messages the question itself counts as the last entry (so
-// an orchestrator-opened question awaits the human, a user-opened one
-// doesn't); otherwise the last message's author decides (orchestrator
-// author -> human's turn). The human is recognised in both the canonical
-// 'human' form and the pre-0009 empty one. Computed in one query so
-// list/board handlers can
-// annotate every task without an N+1.
-func (s *Store) OpenQuestionCounts() (map[int64]QuestionCounts, error) {
-	rows, err := s.db.Query(`
-		SELECT task_id, COUNT(*), SUM(turn_user) FROM (
-			SELECT q.task_id AS task_id,
-				CASE
-					WHEN m.id IS NULL THEN (CASE WHEN q.asked_by != '' THEN 1 ELSE 0 END)
-					WHEN m.author IS NOT NULL AND m.author NOT IN ('', 'human') THEN 1
-					ELSE 0
-				END AS turn_user
-			FROM questions q
-			LEFT JOIN question_messages m
-				ON m.question_id = q.id
-				AND m.id = (SELECT MAX(id) FROM question_messages WHERE question_id = q.id)
-			WHERE q.status = 'open' AND q.task_id IS NOT NULL
-		) GROUP BY task_id`)
-	if err != nil {
-		return nil, fmt.Errorf("query open question counts: %w", err)
-	}
-	defer rows.Close()
-
-	out := make(map[int64]QuestionCounts)
-	for rows.Next() {
-		var taskID int64
-		var c QuestionCounts
-		if err := rows.Scan(&taskID, &c.Open, &c.AwaitingUser); err != nil {
-			return nil, fmt.Errorf("scan open question counts: %w", err)
-		}
-		out[taskID] = c
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 // ListAllOpenQuestions returns every open question across all tasks,

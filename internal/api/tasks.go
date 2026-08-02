@@ -48,7 +48,7 @@ type taskResponse struct {
 	CompletedAt int64  `json:"completed_at,omitempty"`
 	// Open-question annotations (docs/superpowers/specs/2026-07-21-questions-
 	// visibility-design.md §1): populated by list/board/detail handlers from
-	// one Store.OpenQuestionCounts() call, not per-task queries.
+	// one taskQuestionCounts(d) aggregate, not per-task queries.
 	OpenQuestions         int `json:"open_questions"`
 	QuestionsAwaitingUser int `json:"questions_awaiting_user"`
 }
@@ -254,7 +254,7 @@ func handleListTasks(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
-	counts, err := d.Store.OpenQuestionCounts()
+	counts, err := taskQuestionCounts(d)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -413,7 +413,7 @@ func handleGetTask(w http.ResponseWriter, r *http.Request, d Deps) {
 		}
 	}
 
-	counts, err := d.Store.OpenQuestionCounts()
+	counts, err := taskQuestionCounts(d)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return

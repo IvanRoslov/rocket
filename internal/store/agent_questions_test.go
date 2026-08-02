@@ -111,45 +111,6 @@ func TestListAgentQuestionsAndOrdinal(t *testing.T) {
 	}
 }
 
-func TestOpenAgentQuestionCounts(t *testing.T) {
-	s := openTestStore(t)
-	seedAgentForQuestions(t, s, "sre")
-
-	// Role-opened, no reply yet: awaits the human.
-	if _, err := s.AddAgentQuestion(AgentQuestion{RoleID: "sre", AskedBy: "sre-run-1", Body: "нужно решение"}); err != nil {
-		t.Fatalf("AddAgentQuestion: %v", err)
-	}
-	// Human-opened, no reply yet: awaits the role.
-	if _, err := s.AddAgentQuestion(AgentQuestion{RoleID: "sre", Body: "как дела?"}); err != nil {
-		t.Fatalf("AddAgentQuestion: %v", err)
-	}
-	// Human-opened but the role spoke last: awaits the human again.
-	replied, err := s.AddAgentQuestion(AgentQuestion{RoleID: "sre", Body: "и ещё"})
-	if err != nil {
-		t.Fatalf("AddAgentQuestion: %v", err)
-	}
-	if _, err := s.AddAgentQuestionMessage(AgentQuestionMessage{QuestionID: replied, Author: "sre-run-1", Body: "ответ"}); err != nil {
-		t.Fatalf("AddAgentQuestionMessage: %v", err)
-	}
-	// Resolved threads never count.
-	done, err := s.AddAgentQuestion(AgentQuestion{RoleID: "sre", Body: "старое"})
-	if err != nil {
-		t.Fatalf("AddAgentQuestion: %v", err)
-	}
-	if err := s.ResolveAgentQuestion(done, "answered"); err != nil {
-		t.Fatalf("ResolveAgentQuestion: %v", err)
-	}
-
-	counts, err := s.OpenAgentQuestionCounts()
-	if err != nil {
-		t.Fatalf("OpenAgentQuestionCounts: %v", err)
-	}
-	got := counts["sre"]
-	if got.Open != 3 || got.AwaitingUser != 2 {
-		t.Fatalf("counts = %+v; want {Open:3 AwaitingUser:2}", got)
-	}
-}
-
 func TestDeleteAgentPurgesQuestions(t *testing.T) {
 	s := openTestStore(t)
 	seedAgentForQuestions(t, s, "sre")

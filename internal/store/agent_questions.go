@@ -202,48 +202,6 @@ func (s *Store) AgentQuestionOrdinal(q AgentQuestion) (int, error) {
 	return n, nil
 }
 
-// OpenAgentQuestionCounts returns, per role with at least one open question,
-// how many questions are open and how many of those await the human. Mirrors
-// OpenQuestionCounts: with no thread messages the question itself counts as
-// the last entry (so a role-opened question awaits the human, a human-opened
-// one doesn't); otherwise the last message's author decides (role author ->
-// human's turn). Computed in one query so the agents list handler can annotate
-// every role without an N+1.
-func (s *Store) OpenAgentQuestionCounts() (map[string]QuestionCounts, error) {
-	rows, err := s.db.Query(`
-		SELECT role_id, COUNT(*), SUM(turn_user) FROM (
-			SELECT q.role_id AS role_id,
-				CASE
-					WHEN m.id IS NULL THEN (CASE WHEN q.asked_by != '' THEN 1 ELSE 0 END)
-					WHEN m.author IS NOT NULL AND m.author NOT IN ('', 'human') THEN 1
-					ELSE 0
-				END AS turn_user
-			FROM questions q
-			LEFT JOIN question_messages m
-				ON m.question_id = q.id
-				AND m.id = (SELECT MAX(id) FROM question_messages WHERE question_id = q.id)
-			WHERE q.status = 'open' AND q.role_id IS NOT NULL
-		) GROUP BY role_id`)
-	if err != nil {
-		return nil, fmt.Errorf("query open agent question counts: %w", err)
-	}
-	defer rows.Close()
-
-	out := make(map[string]QuestionCounts)
-	for rows.Next() {
-		var roleID string
-		var c QuestionCounts
-		if err := rows.Scan(&roleID, &c.Open, &c.AwaitingUser); err != nil {
-			return nil, fmt.Errorf("scan open agent question counts: %w", err)
-		}
-		out[roleID] = c
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func scanAgentQuestion(row interface{ Scan(...any) error }) (AgentQuestion, error) {
 	var q AgentQuestion
 	var context, resolution sql.NullString

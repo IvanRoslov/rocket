@@ -69,7 +69,7 @@ func agentSessionAlive(d Deps, id string) (bool, error) {
 	return sess.State == "spawning" || sess.State == "running", nil
 }
 
-// toAgentResponse renders an agent. counts is the OpenAgentQuestionCounts map,
+// toAgentResponse renders an agent. counts is the roleQuestionCounts map,
 // passed in so the list handler fetches it once instead of per agent.
 func toAgentResponse(d Deps, a store.Agent, counts map[string]store.QuestionCounts) (agentResponse, error) {
 	unread, err := d.Store.CountUnreadInbox(a.ID)
@@ -164,7 +164,7 @@ func writeAgent(w http.ResponseWriter, d Deps, id string, status int) {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	counts, err := d.Store.OpenAgentQuestionCounts()
+	counts, err := roleQuestionCounts(d)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -183,7 +183,7 @@ func handleListAgents(w http.ResponseWriter, r *http.Request, d Deps) {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	counts, err := d.Store.OpenAgentQuestionCounts()
+	counts, err := roleQuestionCounts(d)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
