@@ -489,3 +489,82 @@ func TestAgentQuestion_RoleMayAnswerItsOwnThread(t *testing.T) {
 		t.Errorf("waiting_on = %v, want empty", got.WaitingOn)
 	}
 }
+
+// TestListAgents_AwaitingUserFollowsWaitingOn: a role's awaiting_user counter
+// means exactly "the human is in waiting_on". The role's reply addressed to the
+// orchestrator hands the turn there, not to the human.
+func TestListAgents_AwaitingUserFollowsWaitingOn(t *testing.T) {
+	d := agentQuestionsTestDeps(t)
+	srv := newTestServer(t, d)
+	createTestAgent(t, srv, "sre")
+	addLiveAgentSession(t, d, "sre")
+	addTestProject(t, d, "proj1")
+	addTestSession(t, d, "orch-1", "orchestrator", "proj1")
+
+	q := decodeAgentQuestion(t, postJSON(t, srv.URL+"/v1/agents/sre/questions",
+		map[string]any{"body": "Status?", "to": []string{"orch-1"}}))
+
+	rep := postJSONWithHeader(t, srv.URL+"/v1/agent-questions/"+itoa(q.ID)+"/reply", "sre",
+		map[string]any{"body": "orchestrator decides", "to": []string{"orch-1"}})
+	got := decodeAgentQuestion(t, rep)
+	if !reflect.DeepEqual(got.WaitingOn, []string{"orch-1"}) {
+		t.Fatalf("waiting_on = %v, want [orch-1]", got.WaitingOn)
+	}
+
+	open, awaiting := agentQuestionCounters(t, srv, "sre")
+	if open != 1 {
+		t.Errorf("open_questions = %d, want 1", open)
+	}
+	if awaiting != 0 {
+		t.Errorf("awaiting_user = %d, want 0 — the turn is the orchestrator's", awaiting)
+	}
+}
+
+// TestListAgents_AwaitingUserCountsAnAddressedHuman is the mirror case: the
+// role addresses the human, so its thread does await the user.
+func TestListAgents_AwaitingUserCountsAnAddressedHuman(t *testing.T) {
+	d := agentQuestionsTestDeps(t)
+	srv := newTestServer(t, d)
+	createTestAgent(t, srv, "sre")
+	addLiveAgentSession(t, d, "sre")
+	addTestProject(t, d, "proj1")
+	addTestSession(t, d, "orch-1", "orchestrator", "proj1")
+
+	q := decodeAgentQuestion(t, postJSON(t, srv.URL+"/v1/agents/sre/questions",
+		map[string]any{"body": "Status?", "to": []string{"orch-1"}}))
+
+	rep := postJSONWithHeader(t, srv.URL+"/v1/agent-questions/"+itoa(q.ID)+"/reply", "sre",
+		map[string]any{"body": "your call", "to": []string{"human"}})
+	rep.Body.Close()
+
+	open, awaiting := agentQuestionCounters(t, srv, "sre")
+	if open != 1 || awaiting != 1 {
+		t.Errorf("counters = %d/%d, want 1/1", open, awaiting)
+	}
+}
+
+// agentQuestionCounters GETs /v1/agents and returns the role's
+// open_questions / awaiting_user pair.
+func agentQuestionCounters(t *testing.T, srv *httptest.Server, roleID string) (int, int) {
+	t.Helper()
+	resp, err := http.Get(srv.URL + "/v1/agents")
+	if err != nil {
+		t.Fatalf("GET /v1/agents: %v", err)
+	}
+	defer resp.Body.Close()
+	var agents []struct {
+		ID            string `json:"id"`
+		OpenQuestions int    `json:"open_questions"`
+		AwaitingUser  int    `json:"awaiting_user"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&agents); err != nil {
+		t.Fatalf("decode agents: %v", err)
+	}
+	for _, a := range agents {
+		if a.ID == roleID {
+			return a.OpenQuestions, a.AwaitingUser
+		}
+	}
+	t.Fatalf("agent %q absent from %+v", roleID, agents)
+	return 0, 0
+}

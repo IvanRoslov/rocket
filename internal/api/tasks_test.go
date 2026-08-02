@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -1808,8 +1810,14 @@ func TestListTasks_QuestionCounts(t *testing.T) {
 	taskID := setupQuestionTask(t, d)
 
 	// One open orchestrator-asked question (awaiting user), one resolved.
-	if _, err := d.Store.AddQuestion(store.Question{TaskID: taskID, AskedBy: "orch-1", Body: "open q"}); err != nil {
+	openID, err := d.Store.AddQuestion(store.Question{TaskID: taskID, AskedBy: "orch-1", Body: "open q"})
+	if err != nil {
 		t.Fatalf("AddQuestion: %v", err)
+	}
+	// The turn follows the participant list, exactly as it does for the
+	// thread response — a thread nobody takes part in waits on nobody.
+	if err := d.Store.AddParticipants(openID, "human", "orch-1"); err != nil {
+		t.Fatalf("AddParticipants: %v", err)
 	}
 	qid, err := d.Store.AddQuestion(store.Question{TaskID: taskID, AskedBy: "orch-1", Body: "done q"})
 	if err != nil {
@@ -1840,6 +1848,117 @@ func TestListTasks_QuestionCounts(t *testing.T) {
 	if got.OpenQuestions != 1 || got.QuestionsAwaitingUser != 1 {
 		t.Errorf("counts = %d/%d, want 1/1", got.OpenQuestions, got.QuestionsAwaitingUser)
 	}
+}
+
+// TestListTasks_AwaitingUserFollowsWaitingOn: questions_awaiting_user means
+// exactly "the human is in waiting_on". A reply addressed to the orchestrator
+// leaves the human out of the turn even though a non-human spoke last, so the
+// task must not be reported as awaiting the user.
+func TestListTasks_AwaitingUserFollowsWaitingOn(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+	setupQuestionAgent(t, d)
+	addLiveAgentSession(t, d, "cto")
+
+	ask := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
+		map[string]any{"body": "Approve the schema?", "to": []string{"cto"}})
+	q := decodeQuestion(t, ask)
+	ask.Body.Close()
+
+	rep := postJSONWithHeader(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/reply", "cto",
+		map[string]any{"body": "Your call, orchestrator.", "to": []string{"orch-1"}})
+	got := decodeQuestion(t, rep)
+	rep.Body.Close()
+	if !reflect.DeepEqual(got.WaitingOn, []string{"orch-1"}) {
+		t.Fatalf("waiting_on = %v, want [orch-1]", got.WaitingOn)
+	}
+
+	counts := listTaskQuestionCounts(t, srv, taskID)
+	if counts.OpenQuestions != 1 {
+		t.Errorf("open_questions = %d, want 1", counts.OpenQuestions)
+	}
+	if counts.QuestionsAwaitingUser != 0 {
+		t.Errorf("questions_awaiting_user = %d, want 0 — the turn is the orchestrator's", counts.QuestionsAwaitingUser)
+	}
+}
+
+// TestListTasks_AwaitingUserCountsAnAddressedHuman: the mirror case — a reply
+// addressed to the human counts, even though the human is only one of several
+// participants.
+func TestListTasks_AwaitingUserCountsAnAddressedHuman(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+	setupQuestionAgent(t, d)
+	addLiveAgentSession(t, d, "cto")
+
+	ask := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
+		map[string]any{"body": "Approve the schema?", "to": []string{"cto"}})
+	q := decodeQuestion(t, ask)
+	ask.Body.Close()
+
+	rep := postJSONWithHeader(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/reply", "cto",
+		map[string]any{"body": "Needs the human.", "to": []string{"human"}})
+	rep.Body.Close()
+
+	counts := listTaskQuestionCounts(t, srv, taskID)
+	if counts.OpenQuestions != 1 || counts.QuestionsAwaitingUser != 1 {
+		t.Errorf("counts = %d/%d, want 1/1", counts.OpenQuestions, counts.QuestionsAwaitingUser)
+	}
+}
+
+// TestListTasks_AwaitingUserZeroWhenTheHumanSpokeLast: with no addressee the
+// turn is everyone but the last speaker, so a human's own broadcast reply
+// leaves the thread awaiting the orchestrator.
+func TestListTasks_AwaitingUserZeroWhenTheHumanSpokeLast(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	ask := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
+		map[string]any{"body": "Which approach?"})
+	q := decodeQuestion(t, ask)
+	ask.Body.Close()
+
+	if counts := listTaskQuestionCounts(t, srv, taskID); counts.QuestionsAwaitingUser != 1 {
+		t.Fatalf("questions_awaiting_user = %d before the reply, want 1", counts.QuestionsAwaitingUser)
+	}
+
+	rep := postJSON(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/reply", map[string]any{"body": "Take the first."})
+	rep.Body.Close()
+
+	counts := listTaskQuestionCounts(t, srv, taskID)
+	if counts.OpenQuestions != 1 || counts.QuestionsAwaitingUser != 0 {
+		t.Errorf("counts = %d/%d, want 1/0 — the human spoke last", counts.OpenQuestions, counts.QuestionsAwaitingUser)
+	}
+}
+
+// taskCountsRow is the pair of counters every task response carries.
+type taskCountsRow struct {
+	ID                    int64 `json:"id"`
+	OpenQuestions         int   `json:"open_questions"`
+	QuestionsAwaitingUser int   `json:"questions_awaiting_user"`
+}
+
+// listTaskQuestionCounts GETs /v1/tasks and returns taskID's counters.
+func listTaskQuestionCounts(t *testing.T, srv *httptest.Server, taskID int64) taskCountsRow {
+	t.Helper()
+	resp := getJSON(t, srv.URL+"/v1/tasks")
+	defer resp.Body.Close()
+	var body struct {
+		Tasks []taskCountsRow `json:"tasks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode tasks: %v", err)
+	}
+	for _, tk := range body.Tasks {
+		if tk.ID == taskID {
+			return tk
+		}
+	}
+	t.Fatalf("task %d absent from %+v", taskID, body.Tasks)
+	return taskCountsRow{}
 }
 
 // itoa is a tiny helper to avoid importing strconv in every test that needs

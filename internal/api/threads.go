@@ -96,6 +96,56 @@ func waitingOn(q store.Question, msgs []store.QuestionMessage, participants []st
 	return out
 }
 
+// threadCounts aggregates the open threads of one subject kind into per-subject
+// counters. awaitingUser is deliberately not a second derivation: it is exactly
+// "the human is in waiting_on", computed by the same waitingOn used to render a
+// single thread, so a list badge and the thread it opens can never disagree.
+// key picks the subject a thread belongs to and reports false for threads of
+// the other kind.
+func threadCounts[K comparable](threads []store.OpenThread, key func(store.OpenThread) (K, bool)) map[K]store.QuestionCounts {
+	out := make(map[K]store.QuestionCounts)
+	for _, th := range threads {
+		k, ok := key(th)
+		if !ok {
+			continue
+		}
+		var msgs []store.QuestionMessage
+		if th.LastMessage != nil {
+			msgs = []store.QuestionMessage{*th.LastMessage}
+		}
+		c := out[k]
+		c.Open++
+		if contains(waitingOn(th.Question, msgs, th.Participants), store.ParticipantHuman) {
+			c.AwaitingUser++
+		}
+		out[k] = c
+	}
+	return out
+}
+
+// taskQuestionCounts returns the open-question counters of every task with at
+// least one open thread, in one aggregate read instead of a per-task query.
+func taskQuestionCounts(d Deps) (map[int64]store.QuestionCounts, error) {
+	threads, err := d.Store.ListOpenThreads()
+	if err != nil {
+		return nil, err
+	}
+	return threadCounts(threads, func(th store.OpenThread) (int64, bool) {
+		return th.Question.TaskID, th.Question.TaskID != 0
+	}), nil
+}
+
+// roleQuestionCounts is taskQuestionCounts for role threads, keyed by role id.
+func roleQuestionCounts(d Deps) (map[string]store.QuestionCounts, error) {
+	threads, err := d.Store.ListOpenThreads()
+	if err != nil {
+		return nil, err
+	}
+	return threadCounts(threads, func(th store.OpenThread) (string, bool) {
+		return th.Question.RoleID, th.Question.RoleID != ""
+	}), nil
+}
+
 // whoseTurnCompat renders waiting_on into the pre-participant whose_turn field
 // the clients still read. The human's turn is "user"; anybody else's is the
 // subject's own word for its agent side — "orchestrator" for a task thread,
