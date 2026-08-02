@@ -185,7 +185,8 @@ func TestAddQuestionMessage_AndList(t *testing.T) {
 	if len(msgs) != 3 {
 		t.Fatalf("len = %d, want 3", len(msgs))
 	}
-	if msgs[0].Body != "user reply" || msgs[0].Author != "" {
+	// Written with the legacy empty author, read back canonicalised.
+	if msgs[0].Body != "user reply" || msgs[0].Author != ParticipantHuman {
 		t.Errorf("msgs[0] = %+v", msgs[0])
 	}
 	if msgs[1].Body != "orch reply" || msgs[1].Author != "orch-1" {
@@ -546,5 +547,69 @@ func TestListQuestionsForParticipant_OpenOnly(t *testing.T) {
 	}
 	if len(all) != 2 || all[0].ID != openWithCTO || all[1].ID != resolvedWithCTO {
 		t.Errorf("all threads for cto = %+v, want %d and %d ascending", all, openWithCTO, resolvedWithCTO)
+	}
+}
+
+// Task threads and role threads now share one table, so each aggregate must
+// exclude the other's rows instead of silently counting them.
+func TestThreadAggregates_DoNotLeakAcrossSubjects(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+	seedAgentForQuestions(t, s, "cto")
+
+	if _, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch-1", Body: "task thread"}); err != nil {
+		t.Fatalf("AddQuestion task: %v", err)
+	}
+	if _, err := s.AddQuestion(Question{RoleID: "cto", AskedBy: "cto-run-1", Body: "role thread"}); err != nil {
+		t.Fatalf("AddQuestion role: %v", err)
+	}
+
+	taskCounts, err := s.OpenQuestionCounts()
+	if err != nil {
+		t.Fatalf("OpenQuestionCounts: %v", err)
+	}
+	if len(taskCounts) != 1 || taskCounts[taskID].Open != 1 {
+		t.Errorf("OpenQuestionCounts = %v, want exactly task %d with one open", taskCounts, taskID)
+	}
+
+	roleCounts, err := s.OpenAgentQuestionCounts()
+	if err != nil {
+		t.Fatalf("OpenAgentQuestionCounts: %v", err)
+	}
+	if len(roleCounts) != 1 || roleCounts["cto"].Open != 1 {
+		t.Errorf("OpenAgentQuestionCounts = %v, want exactly cto with one open", roleCounts)
+	}
+
+	all, err := s.ListAllOpenQuestions()
+	if err != nil {
+		t.Fatalf("ListAllOpenQuestions: %v", err)
+	}
+	if len(all) != 1 || all[0].TaskID != taskID {
+		t.Errorf("ListAllOpenQuestions = %+v, want only the task thread", all)
+	}
+}
+
+// The canonical human author must count as the human in the turn aggregate,
+// exactly as the pre-0009 empty string did.
+func TestOpenQuestionCounts_CanonicalHumanAuthorIsNotAwaitingTheUser(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+
+	qid, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch-1", Body: "Q"})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+	if _, err := s.AddQuestionMessage(QuestionMessage{
+		QuestionID: qid, Author: ParticipantHuman, Body: "the human spoke last",
+	}); err != nil {
+		t.Fatalf("AddQuestionMessage: %v", err)
+	}
+
+	counts, err := s.OpenQuestionCounts()
+	if err != nil {
+		t.Fatalf("OpenQuestionCounts: %v", err)
+	}
+	if counts[taskID].AwaitingUser != 0 {
+		t.Errorf("AwaitingUser = %d, want 0 — the human spoke last", counts[taskID].AwaitingUser)
 	}
 }

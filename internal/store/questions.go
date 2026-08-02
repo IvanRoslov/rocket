@@ -239,7 +239,9 @@ type QuestionCounts struct {
 // with no thread messages the question itself counts as the last entry (so
 // an orchestrator-opened question awaits the human, a user-opened one
 // doesn't); otherwise the last message's author decides (orchestrator
-// author -> human's turn). Computed in one query so list/board handlers can
+// author -> human's turn). The human is recognised in both the canonical
+// 'human' form and the pre-0009 empty one. Computed in one query so
+// list/board handlers can
 // annotate every task without an N+1.
 func (s *Store) OpenQuestionCounts() (map[int64]QuestionCounts, error) {
 	rows, err := s.db.Query(`
@@ -247,14 +249,14 @@ func (s *Store) OpenQuestionCounts() (map[int64]QuestionCounts, error) {
 			SELECT q.task_id AS task_id,
 				CASE
 					WHEN m.id IS NULL THEN (CASE WHEN q.asked_by != '' THEN 1 ELSE 0 END)
-					WHEN m.author IS NOT NULL AND m.author != '' THEN 1
+					WHEN m.author IS NOT NULL AND m.author NOT IN ('', 'human') THEN 1
 					ELSE 0
 				END AS turn_user
 			FROM questions q
 			LEFT JOIN question_messages m
 				ON m.question_id = q.id
 				AND m.id = (SELECT MAX(id) FROM question_messages WHERE question_id = q.id)
-			WHERE q.status = 'open'
+			WHERE q.status = 'open' AND q.task_id IS NOT NULL
 		) GROUP BY task_id`)
 	if err != nil {
 		return nil, fmt.Errorf("query open question counts: %w", err)

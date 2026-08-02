@@ -35,7 +35,20 @@ type AgentQuestionMessage struct {
 	CreatedAt  int64
 }
 
+// Role threads live in the same tables as task threads since migration 0009;
+// what makes a thread a role thread is a non-NULL role_id. The functions below
+// are a thin facade over that shared storage, kept so internal/api's role
+// handlers keep their existing shape.
 const agentQuestionColumns = `id, role_id, asked_by, body, context, status, resolution, asked_at, resolved_at`
+
+// toQuestion / toAgentQuestion convert between the facade's type and the
+// unified one, so the facade owns no SQL of its own where it can avoid it.
+func (q AgentQuestion) toQuestion() Question {
+	return Question{
+		ID: q.ID, RoleID: q.RoleID, AskedBy: q.AskedBy, Body: q.Body, Context: q.Context,
+		Status: q.Status, Resolution: q.Resolution, AskedAt: q.AskedAt, ResolvedAt: q.ResolvedAt,
+	}
+}
 
 // AddAgentQuestion inserts a new role question with status "open" and AskedAt
 // defaulted to now (unless already set). Returns the assigned id.
@@ -47,28 +60,20 @@ func (s *Store) AddAgentQuestion(q AgentQuestion) (int64, error) {
 		q.Status = "open"
 	}
 
-	res, err := s.db.Exec(
-		`INSERT INTO agent_questions (role_id, asked_by, body, context, status, resolution, asked_at, resolved_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		q.RoleID, q.AskedBy, q.Body, nullIfEmpty(q.Context), q.Status, nullIfEmpty(q.Resolution),
-		q.AskedAt, nullIfZero(q.ResolvedAt),
-	)
-	if err != nil {
-		return 0, fmt.Errorf("insert agent question: %w", err)
-	}
-	return res.LastInsertId()
+	return s.AddQuestion(q.toQuestion())
 }
 
 // GetAgentQuestion returns the role question with the given id, or ErrNotFound.
 func (s *Store) GetAgentQuestion(id int64) (AgentQuestion, error) {
-	row := s.db.QueryRow(`SELECT `+agentQuestionColumns+` FROM agent_questions WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT `+agentQuestionColumns+` FROM questions
+		WHERE id = ? AND role_id IS NOT NULL`, id)
 	return scanAgentQuestion(row)
 }
 
 // ListAgentQuestions returns a role's questions, ascending by id. If openOnly
 // is true, only questions with status "open" are returned.
 func (s *Store) ListAgentQuestions(roleID string, openOnly bool) ([]AgentQuestion, error) {
-	query := `SELECT ` + agentQuestionColumns + ` FROM agent_questions WHERE role_id = ?`
+	query := `SELECT ` + agentQuestionColumns + ` FROM questions WHERE role_id = ?`
 	if openOnly {
 		query += ` AND status = 'open'`
 	}
@@ -99,7 +104,7 @@ func (s *Store) ListAgentQuestions(roleID string, openOnly bool) ([]AgentQuestio
 // if it doesn't exist and ErrQuestionResolved if it is already resolved.
 func (s *Store) ResolveAgentQuestion(id int64, resolution string) error {
 	res, err := s.db.Exec(
-		`UPDATE agent_questions SET status = 'resolved', resolution = ?, resolved_at = ?
+		`UPDATE questions SET status = 'resolved', resolution = ?, resolved_at = ?
 		 WHERE id = ? AND status = 'open'`,
 		resolution, time.Now().Unix(), id,
 	)
@@ -129,7 +134,7 @@ func (s *Store) ResolveAgentQuestion(id int64, resolution string) error {
 // id and ErrQuestionOpen if the question is not resolved.
 func (s *Store) ReopenAgentQuestion(id int64) error {
 	res, err := s.db.Exec(
-		`UPDATE agent_questions SET status = 'open', resolution = '', resolved_at = NULL
+		`UPDATE questions SET status = 'open', resolution = '', resolved_at = NULL
 		 WHERE id = ? AND status = 'resolved'`,
 		id,
 	)
@@ -159,40 +164,27 @@ func (s *Store) AddAgentQuestionMessage(m AgentQuestionMessage) (int64, error) {
 		m.Kind = "reply"
 	}
 
-	res, err := s.db.Exec(
-		`INSERT INTO agent_question_messages (question_id, author, kind, body, created_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		m.QuestionID, nullIfEmpty(m.Author), m.Kind, m.Body, m.CreatedAt,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("insert agent question message: %w", err)
-	}
-	return res.LastInsertId()
+	return s.AddQuestionMessage(QuestionMessage{
+		QuestionID: m.QuestionID, Author: m.Author, Kind: m.Kind,
+		Body: m.Body, CreatedAt: m.CreatedAt,
+	})
 }
 
 // ListAgentQuestionMessages returns the thread for questionID, ascending by id.
 func (s *Store) ListAgentQuestionMessages(questionID int64) ([]AgentQuestionMessage, error) {
-	rows, err := s.db.Query(
-		`SELECT id, question_id, author, kind, body, created_at
-		 FROM agent_question_messages WHERE question_id = ? ORDER BY id`, questionID,
-	)
+	msgs, err := s.ListQuestionMessages(questionID)
 	if err != nil {
-		return nil, fmt.Errorf("query agent question messages: %w", err)
-	}
-	defer rows.Close()
-
-	var out []AgentQuestionMessage
-	for rows.Next() {
-		var m AgentQuestionMessage
-		var author sql.NullString
-		if err := rows.Scan(&m.ID, &m.QuestionID, &author, &m.Kind, &m.Body, &m.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan agent question message: %w", err)
-		}
-		m.Author = author.String
-		out = append(out, m)
-	}
-	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	out := make([]AgentQuestionMessage, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, AgentQuestionMessage{
+			ID: m.ID, QuestionID: m.QuestionID, Author: m.Author,
+			Kind: m.Kind, Body: m.Body, CreatedAt: m.CreatedAt,
+		})
+	}
+	if len(out) == 0 {
+		return nil, nil
 	}
 	return out, nil
 }
@@ -202,7 +194,7 @@ func (s *Store) ListAgentQuestionMessages(questionID int64) ([]AgentQuestionMess
 func (s *Store) AgentQuestionOrdinal(q AgentQuestion) (int, error) {
 	var n int
 	err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM agent_questions WHERE role_id = ? AND id <= ?`, q.RoleID, q.ID,
+		`SELECT COUNT(*) FROM questions WHERE role_id = ? AND id <= ?`, q.RoleID, q.ID,
 	).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("compute agent question ordinal: %w", err)
@@ -223,14 +215,14 @@ func (s *Store) OpenAgentQuestionCounts() (map[string]QuestionCounts, error) {
 			SELECT q.role_id AS role_id,
 				CASE
 					WHEN m.id IS NULL THEN (CASE WHEN q.asked_by != '' THEN 1 ELSE 0 END)
-					WHEN m.author IS NOT NULL AND m.author != '' THEN 1
+					WHEN m.author IS NOT NULL AND m.author NOT IN ('', 'human') THEN 1
 					ELSE 0
 				END AS turn_user
-			FROM agent_questions q
-			LEFT JOIN agent_question_messages m
+			FROM questions q
+			LEFT JOIN question_messages m
 				ON m.question_id = q.id
-				AND m.id = (SELECT MAX(id) FROM agent_question_messages WHERE question_id = q.id)
-			WHERE q.status = 'open'
+				AND m.id = (SELECT MAX(id) FROM question_messages WHERE question_id = q.id)
+			WHERE q.status = 'open' AND q.role_id IS NOT NULL
 		) GROUP BY role_id`)
 	if err != nil {
 		return nil, fmt.Errorf("query open agent question counts: %w", err)

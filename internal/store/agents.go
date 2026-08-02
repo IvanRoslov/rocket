@@ -117,12 +117,19 @@ func (s *Store) DeleteAgent(id string) error {
 	if _, err := tx.Exec(`DELETE FROM agent_inbox WHERE agent_id = ?`, id); err != nil {
 		return fmt.Errorf("delete agent inbox: %w", err)
 	}
+	// Role threads share the unified tables with task threads, so every delete
+	// is scoped by role_id — a task thread must not be caught by it.
 	if _, err := tx.Exec(
-		`DELETE FROM agent_question_messages WHERE question_id IN
-		 (SELECT id FROM agent_questions WHERE role_id = ?)`, id); err != nil {
+		`DELETE FROM question_participants WHERE question_id IN
+		 (SELECT id FROM questions WHERE role_id = ?)`, id); err != nil {
+		return fmt.Errorf("delete agent question participants: %w", err)
+	}
+	if _, err := tx.Exec(
+		`DELETE FROM question_messages WHERE question_id IN
+		 (SELECT id FROM questions WHERE role_id = ?)`, id); err != nil {
 		return fmt.Errorf("delete agent question messages: %w", err)
 	}
-	if _, err := tx.Exec(`DELETE FROM agent_questions WHERE role_id = ?`, id); err != nil {
+	if _, err := tx.Exec(`DELETE FROM questions WHERE role_id = ?`, id); err != nil {
 		return fmt.Errorf("delete agent questions: %w", err)
 	}
 	res, err := tx.Exec(`DELETE FROM agents WHERE id = ?`, id)
