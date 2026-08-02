@@ -39,25 +39,11 @@ type Deps struct {
 	Shutdown  func()
 	StartedAt time.Time
 
-	// Agents is the role wake engine (internal/agentrun). It may be nil in
-	// tests and in builds that serve the API without the runtime: handlers
-	// must degrade to "enqueue only" rather than fail.
-	Agents AgentEngine
-
 	// GH builds a GitHub API client using the currently stored token,
 	// reading it fresh from settings on every call (so a token change takes
 	// effect without a daemon restart). It returns github.ErrNoToken if no
 	// token is configured.
 	GH func() (*github.Client, error)
-}
-
-// AgentEngine is the role wake engine as the API sees it: enqueuing an inbox
-// event notifies it, and a role instance ends its own run through it.
-type AgentEngine interface {
-	// Notify tells the engine a role's inbox has grown.
-	Notify(roleID string)
-	// Done ends the run the given role-instance session belongs to.
-	Done(ctx context.Context, sessionID string) error
 }
 
 // NewHandler builds the routed http.Handler for rocket's API.

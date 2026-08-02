@@ -61,14 +61,14 @@ func TestWhoseTurnAgent_HumanOpenedNoMessages(t *testing.T) {
 }
 
 func TestWhoseTurnAgent_RoleOpenedNoMessages(t *testing.T) {
-	q := store.AgentQuestion{Status: "open", AskedBy: "sre-run-1"}
+	q := store.AgentQuestion{Status: "open", AskedBy: "sre"}
 	if got := whoseTurnAgent(q, nil); got != "user" {
 		t.Errorf("whoseTurnAgent = %q, want user", got)
 	}
 }
 
 func TestWhoseTurnAgent_ResolvedHasNoTurn(t *testing.T) {
-	q := store.AgentQuestion{Status: "resolved", AskedBy: "sre-run-1"}
+	q := store.AgentQuestion{Status: "resolved", AskedBy: "sre"}
 	if got := whoseTurnAgent(q, nil); got != "" {
 		t.Errorf("whoseTurnAgent = %q, want empty", got)
 	}
@@ -89,16 +89,16 @@ func TestPostAgentQuestion_FromHumanEnqueuesInboxEvent(t *testing.T) {
 		t.Fatalf("question = %+v", q)
 	}
 
-	events, err := d.Store.QueuedInboxEvents("sre")
+	msgs, err := d.Store.ListInboxMessages("sre", store.InboxUnread, 0)
 	if err != nil {
-		t.Fatalf("QueuedInboxEvents: %v", err)
+		t.Fatalf("ListInboxMessages: %v", err)
 	}
-	if len(events) != 1 || events[0].Kind != "question" {
-		t.Fatalf("inbox events = %+v", events)
+	if len(msgs) != 1 {
+		t.Fatalf("inbox = %+v, want one message", msgs)
 	}
-	for _, want := range []string{`"entry":"question"`, `"ordinal":1`, "почему упал деплой?"} {
-		if !strings.Contains(events[0].Payload, want) {
-			t.Errorf("payload = %s, missing %q", events[0].Payload, want)
+	for _, want := range []string{"[role sre Q1 question]", "почему упал деплой?"} {
+		if !strings.Contains(msgs[0].Body, want) {
+			t.Errorf("body = %q, missing %q", msgs[0].Body, want)
 		}
 	}
 }
@@ -106,34 +106,41 @@ func TestPostAgentQuestion_FromHumanEnqueuesInboxEvent(t *testing.T) {
 func TestPostAgentQuestion_FromRoleInstanceAwaitsUser(t *testing.T) {
 	d := agentQuestionsTestDeps(t)
 	srv := setupRoleForQuestions(t, d)
-	addTestSession(t, d, "sre-run-1", "agent", "platform")
+	addTestSession(t, d, "sre", "agent", "platform")
 
-	resp := postJSONWithHeader(t, srv.URL+"/v1/agents/sre/questions", "sre-run-1",
+	resp := postJSONWithHeader(t, srv.URL+"/v1/agents/sre/questions", "sre",
 		map[string]any{"body": "нужно ваше решение", "context": "детали"})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("status = %d, want 201", resp.StatusCode)
 	}
 	q := decodeAgentQuestion(t, resp)
-	if q.AskedBy != "sre-run-1" || q.WhoseTurn != "user" || q.Context != "детали" {
+	if q.AskedBy != "sre" || q.WhoseTurn != "user" || q.Context != "детали" {
 		t.Fatalf("question = %+v", q)
 	}
 
-	events, err := d.Store.QueuedInboxEvents("sre")
+	msgs, err := d.Store.ListInboxMessages("sre", "", 0)
 	if err != nil {
-		t.Fatalf("QueuedInboxEvents: %v", err)
+		t.Fatalf("ListInboxMessages: %v", err)
 	}
-	if len(events) != 0 {
-		t.Fatalf("role-opened question must not wake the role: %+v", events)
+	if len(msgs) != 0 {
+		t.Fatalf("an agent-opened question must not be delivered back to it: %+v", msgs)
+	}
+	sent, err := d.Store.ListMessages("sre", 0)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(sent) != 0 {
+		t.Fatalf("an agent-opened question must not be delivered back to it: %+v", sent)
 	}
 }
 
 func TestPostAgentQuestion_ForeignSessionForbidden(t *testing.T) {
 	d := agentQuestionsTestDeps(t)
 	srv := setupRoleForQuestions(t, d)
-	addTestSession(t, d, "triage-run-1", "agent", "platform")
+	addTestSession(t, d, "triage", "agent", "platform")
 	addTestSession(t, d, "platform-orch", "orchestrator", "platform")
 
-	for _, sessionID := range []string{"triage-run-1", "platform-orch"} {
+	for _, sessionID := range []string{"triage", "platform-orch"} {
 		resp := postJSONWithHeader(t, srv.URL+"/v1/agents/sre/questions", sessionID,
 			map[string]any{"body": "чужой"})
 		if resp.StatusCode != http.StatusForbidden {
@@ -201,14 +208,14 @@ func TestGetAgentQuestions_FiltersOpen(t *testing.T) {
 func TestAgentQuestion_ReplyAnswerAndReopen(t *testing.T) {
 	d := agentQuestionsTestDeps(t)
 	srv := setupRoleForQuestions(t, d)
-	addTestSession(t, d, "sre-run-1", "agent", "platform")
+	addTestSession(t, d, "sre", "agent", "platform")
 
 	q := decodeAgentQuestion(t, postJSON(t, srv.URL+"/v1/agents/sre/questions",
 		map[string]any{"body": "вопрос"}))
 	qid := itoa(q.ID)
 
 	// The role replies in-thread: no new inbox event, turn flips to the human.
-	resp := postJSONWithHeader(t, srv.URL+"/v1/agent-questions/"+qid+"/reply", "sre-run-1",
+	resp := postJSONWithHeader(t, srv.URL+"/v1/agent-questions/"+qid+"/reply", "sre",
 		map[string]any{"body": "разбираюсь"})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("role reply status = %d, want 201", resp.StatusCode)
@@ -217,8 +224,8 @@ func TestAgentQuestion_ReplyAnswerAndReopen(t *testing.T) {
 	if len(q.Messages) != 1 || q.WhoseTurn != "user" {
 		t.Fatalf("after role reply: %+v", q)
 	}
-	if events, _ := d.Store.QueuedInboxEvents("sre"); len(events) != 1 {
-		t.Fatalf("role reply must not enqueue: %+v", events)
+	if sent, _ := d.Store.ListMessages("sre", 0); len(sent) != 1 {
+		t.Fatalf("an agent reply must not be delivered back to it: %+v", sent)
 	}
 
 	// The human replies: a second inbox event lands.
@@ -230,9 +237,9 @@ func TestAgentQuestion_ReplyAnswerAndReopen(t *testing.T) {
 	if q.WhoseTurn != "role" {
 		t.Fatalf("after human reply: %+v", q)
 	}
-	events, _ := d.Store.QueuedInboxEvents("sre")
-	if len(events) != 2 || !strings.Contains(events[1].Payload, `"entry":"reply"`) {
-		t.Fatalf("human reply must enqueue a reply event: %+v", events)
+	sent, _ := d.Store.ListMessages("sre", 0)
+	if len(sent) != 2 || !strings.Contains(sent[1].Body, "[role sre Q1 reply]") {
+		t.Fatalf("a human reply must reach the live agent: %+v", sent)
 	}
 
 	// The human closes the thread.
@@ -244,8 +251,8 @@ func TestAgentQuestion_ReplyAnswerAndReopen(t *testing.T) {
 	if q.Status != "resolved" || q.Resolution != "answered" || q.WhoseTurn != "" {
 		t.Fatalf("after answer: %+v", q)
 	}
-	if events, _ := d.Store.QueuedInboxEvents("sre"); len(events) != 3 {
-		t.Fatalf("answer must enqueue: %+v", events)
+	if sent, _ := d.Store.ListMessages("sre", 0); len(sent) != 3 {
+		t.Fatalf("an answer must reach the live agent: %+v", sent)
 	}
 
 	// A second human answer is a conflict.
@@ -256,7 +263,7 @@ func TestAgentQuestion_ReplyAnswerAndReopen(t *testing.T) {
 	}
 
 	// The role may dispute a resolved thread: its reply reopens it.
-	resp = postJSONWithHeader(t, srv.URL+"/v1/agent-questions/"+qid+"/reply", "sre-run-1",
+	resp = postJSONWithHeader(t, srv.URL+"/v1/agent-questions/"+qid+"/reply", "sre",
 		map[string]any{"body": "вариант Б не сработает"})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("reopen status = %d, want 201", resp.StatusCode)
@@ -289,14 +296,14 @@ func TestAgentQuestion_HumanReplyToResolvedIsConflict(t *testing.T) {
 func TestAgentQuestion_AnswerRejectsAgents(t *testing.T) {
 	d := agentQuestionsTestDeps(t)
 	srv := setupRoleForQuestions(t, d)
-	addTestSession(t, d, "sre-run-1", "agent", "platform")
+	addTestSession(t, d, "sre", "agent", "platform")
 
 	qid, err := d.Store.AddAgentQuestion(store.AgentQuestion{RoleID: "sre", Body: "q"})
 	if err != nil {
 		t.Fatalf("AddAgentQuestion: %v", err)
 	}
 
-	resp := postJSONWithHeader(t, srv.URL+"/v1/agent-questions/"+itoa(qid)+"/answer", "sre-run-1",
+	resp := postJSONWithHeader(t, srv.URL+"/v1/agent-questions/"+itoa(qid)+"/answer", "sre",
 		map[string]any{"body": "сам себе"})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
@@ -336,54 +343,43 @@ func TestAgentQuestion_NotFound(t *testing.T) {
 
 // --- delivery into a live instance ---------------------------------------
 
-func TestAgentQuestion_EnqueuesInboxEventsAndWakesTheRole(t *testing.T) {
+func TestAgentQuestion_HumanEntriesReachTheLiveSession(t *testing.T) {
 	d := agentQuestionsTestDeps(t)
-	eng := &fakeAgentEngine{}
-	d.Agents = eng
 	srv := setupRoleForQuestions(t, d)
-	addTestSession(t, d, "sre-run-1", "agent", "platform")
+	addTestSession(t, d, "sre", "agent", "platform")
 
 	q := decodeAgentQuestion(t, postJSON(t, srv.URL+"/v1/agents/sre/questions",
 		map[string]any{"body": "почему упал деплой?"}))
 	postJSON(t, srv.URL+"/v1/agent-questions/"+itoa(q.ID)+"/answer",
 		map[string]any{"body": "перезапусти воркер"}).Body.Close()
 
-	events, err := d.Store.ListInboxEvents("sre", "", 0)
-	if err != nil {
-		t.Fatalf("ListInboxEvents: %v", err)
-	}
-	if len(events) != 2 {
-		t.Fatalf("inbox = %+v, want two question events", events)
-	}
-	for _, e := range events {
-		if e.Kind != "question" {
-			t.Errorf("event kind = %q, want question", e.Kind)
-		}
-	}
-	if !strings.Contains(events[0].Payload, `"entry":"question"`) ||
-		!strings.Contains(events[1].Payload, `"entry":"answer"`) {
-		t.Errorf("payloads = %q / %q", events[0].Payload, events[1].Payload)
-	}
-
-	// Delivery into a live instance is the wake engine's job (it also marks
-	// the events delivered); the API only enqueues and wakes.
-	if len(eng.notified) != 2 {
-		t.Fatalf("engine notifications = %v, want one per human entry", eng.notified)
-	}
-	msgs, err := d.Store.ListMessages("sre-run-1", 0)
+	sent, err := d.Store.ListMessages("sre", 0)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
 	}
-	if len(msgs) != 0 {
-		t.Fatalf("the API must not inject into the instance itself: %+v", msgs)
+	if len(sent) != 2 {
+		t.Fatalf("messages = %+v, want the question and the answer", sent)
+	}
+	if !strings.Contains(sent[0].Body, "[role sre Q1 question]") ||
+		!strings.Contains(sent[1].Body, "[role sre Q1 answer]") {
+		t.Errorf("bodies = %q / %q", sent[0].Body, sent[1].Body)
+	}
+
+	// A live agent is delivered to, not inboxed.
+	inbox, err := d.Store.ListInboxMessages("sre", "", 0)
+	if err != nil {
+		t.Fatalf("ListInboxMessages: %v", err)
+	}
+	if len(inbox) != 0 {
+		t.Fatalf("a live agent must not be inboxed: %+v", inbox)
 	}
 }
 
-func TestAgentQuestion_NoLiveInstanceStillRecords(t *testing.T) {
+func TestAgentQuestion_NoLiveSessionInboxesTheEntry(t *testing.T) {
 	d := agentQuestionsTestDeps(t)
 	srv := setupRoleForQuestions(t, d)
-	addTestSession(t, d, "sre-run-1", "agent", "platform")
-	if err := d.Store.UpdateSessionState("sre-run-1", "killed"); err != nil {
+	addTestSession(t, d, "sre", "agent", "platform")
+	if err := d.Store.UpdateSessionState("sre", "killed"); err != nil {
 		t.Fatalf("UpdateSessionState: %v", err)
 	}
 
@@ -393,14 +389,14 @@ func TestAgentQuestion_NoLiveInstanceStillRecords(t *testing.T) {
 		t.Fatal("question was not recorded")
 	}
 
-	msgs, err := d.Store.ListMessages("sre-run-1", 0)
+	msgs, err := d.Store.ListMessages("sre", 0)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
 	}
 	if len(msgs) != 0 {
 		t.Fatalf("a terminal instance must not be delivered to: %+v", msgs)
 	}
-	if events, _ := d.Store.QueuedInboxEvents("sre"); len(events) != 1 {
-		t.Fatalf("inbox event must still be queued: %+v", events)
+	if inbox, _ := d.Store.ListInboxMessages("sre", store.InboxUnread, 0); len(inbox) != 1 {
+		t.Fatalf("a dead agent must find the entry in its inbox: %+v", inbox)
 	}
 }

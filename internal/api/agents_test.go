@@ -1,20 +1,18 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
+	"strconv"
 	"testing"
 
-	"github.com/IvanRoslov/rocket/internal/roles"
+	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
-// agentsTestDeps builds Deps with a real store and a temp home, so role home
-// directories are created under Cfg.Home.
+// agentsTestDeps builds Deps with a real store, a temp home and one project to
+// group agents under.
 func agentsTestDeps(t *testing.T) Deps {
 	t.Helper()
 	d := sessionsTestDeps(t)
@@ -44,6 +42,30 @@ func putJSONWithHeader(t *testing.T, url, sessionID string, payload any) *http.R
 	return resp
 }
 
+// errCode digs the error code out of an {"error":{"code":...}} response body.
+func errCode(body map[string]any) string {
+	e, ok := body["error"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	code, _ := e["code"].(string)
+	return code
+}
+
+// deleteJSON issues a DELETE request against url.
+func deleteJSON(t *testing.T, url string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		t.Fatalf("build DELETE request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE %s: %v", url, err)
+	}
+	return resp
+}
+
 func decodeMap(t *testing.T, resp *http.Response) map[string]any {
 	t.Helper()
 	defer resp.Body.Close()
@@ -67,587 +89,397 @@ func decodeList(t *testing.T, resp *http.Response) []map[string]any {
 func createTestAgent(t *testing.T, srv *httptest.Server, id string) map[string]any {
 	t.Helper()
 	resp := postJSON(t, srv.URL+"/v1/agents", map[string]any{
-		"id":      id,
-		"project": "platform",
-		"prompt":  "you are the " + id + " role",
+		"id":          id,
+		"description": "the " + id + " agent",
+		"project":     "platform",
+		"dir":         "/tmp/agents/" + id,
+		"command":     "claude",
 	})
 	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("POST /v1/agents status = %d, want 201", resp.StatusCode)
+		t.Fatalf("POST /v1/agents = %d, want 201", resp.StatusCode)
 	}
 	return decodeMap(t, resp)
 }
 
-func TestPostAgentCreatesRoleAndHomeDir(t *testing.T) {
+// addLiveAgentSession registers the session row that marks an agent's tmux
+// session as alive, the way the daemon watcher does.
+func addLiveAgentSession(t *testing.T, d Deps, id string) {
+	t.Helper()
+	if err := d.Store.AddSession(store.Session{
+		ID: id, Kind: session.AgentSessionKind, ProjectID: "platform",
+		FeatureSlug: id, Agent: "claude-code", TmuxName: id, State: "running",
+	}); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+}
+
+func TestPostAgentCreatesRegistration(t *testing.T) {
 	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
 
 	body := createTestAgent(t, srv, "sre")
 
 	if body["id"] != "sre" || body["project"] != "platform" {
-		t.Errorf("body = %+v", body)
+		t.Errorf("agent = %+v", body)
+	}
+	if body["description"] != "the sre agent" || body["dir"] != "/tmp/agents/sre" || body["command"] != "claude" {
+		t.Errorf("agent fields = %+v", body)
 	}
 	if body["enabled"] != true {
 		t.Errorf("enabled = %v, want true", body["enabled"])
 	}
-	if body["agent"] != "fake" { // Cfg.DefaultAgent in tests
-		t.Errorf("agent = %v, want the daemon default", body["agent"])
+	if body["session_alive"] != false {
+		t.Errorf("session_alive = %v, want false", body["session_alive"])
 	}
+	if body["unread"] != float64(0) {
+		t.Errorf("unread = %v, want 0", body["unread"])
+	}
+}
 
-	promptPath := roles.PromptPath(d.Cfg.Home, "sre")
-	if body["prompt_path"] != promptPath {
-		t.Errorf("prompt_path = %v, want %s", body["prompt_path"], promptPath)
+func TestPostAgentWithoutProject(t *testing.T) {
+	d := agentsTestDeps(t)
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	resp := postJSON(t, srv.URL+"/v1/agents", map[string]any{"id": "solo"})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST /v1/agents = %d, want 201", resp.StatusCode)
 	}
-	prompt, err := os.ReadFile(promptPath)
-	if err != nil {
-		t.Fatalf("read role.md: %v", err)
-	}
-	if string(prompt) != "you are the sre role" {
-		t.Errorf("role.md = %q", prompt)
-	}
-	if _, err := os.Stat(filepath.Join(roles.MemoryDir(d.Cfg.Home, "sre"), "MEMORY.md")); err != nil {
-		t.Errorf("MEMORY.md: %v", err)
+	body := decodeMap(t, resp)
+	if body["project"] != "" {
+		t.Errorf("project = %v, want empty", body["project"])
 	}
 }
 
 func TestPostAgentValidation(t *testing.T) {
 	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
 
 	cases := []struct {
 		name    string
 		payload map[string]any
 		status  int
-		code    string
 	}{
-		{"bad id", map[string]any{"id": "SRE Bot", "project": "platform"}, http.StatusBadRequest, "invalid_id"},
-		{"missing id", map[string]any{"project": "platform"}, http.StatusBadRequest, "invalid_id"},
-		{"unknown project", map[string]any{"id": "sre2", "project": "ghost"}, http.StatusBadRequest, "project_not_found"},
+		{"bad id", map[string]any{"id": "Bad Id"}, http.StatusBadRequest},
+		{"unknown project", map[string]any{"id": "sre", "project": "nope"}, http.StatusBadRequest},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			resp := postJSON(t, srv.URL+"/v1/agents", tc.payload)
+			resp.Body.Close()
 			if resp.StatusCode != tc.status {
-				t.Fatalf("status = %d, want %d", resp.StatusCode, tc.status)
-			}
-			body := decodeErr(t, resp)
-			if body.Error.Code != tc.code {
-				t.Errorf("code = %q, want %q", body.Error.Code, tc.code)
+				t.Errorf("status = %d, want %d", resp.StatusCode, tc.status)
 			}
 		})
 	}
-}
 
-func TestPostAgentDuplicate(t *testing.T) {
-	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
 	createTestAgent(t, srv, "sre")
-
-	resp := postJSON(t, srv.URL+"/v1/agents", map[string]any{"id": "sre", "project": "platform"})
-	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("status = %d, want 409", resp.StatusCode)
-	}
-	if code := decodeErr(t, resp).Error.Code; code != "agent_exists" {
-		t.Errorf("code = %q, want agent_exists", code)
-	}
-}
-
-func TestListAgentsFilterAndCounters(t *testing.T) {
-	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
-	createTestAgent(t, srv, "sre")
-	addTestProject(t, d, "web")
-	resp := postJSON(t, srv.URL+"/v1/agents", map[string]any{"id": "triage", "project": "web"})
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("create triage: %d", resp.StatusCode)
-	}
+	resp := postJSON(t, srv.URL+"/v1/agents", map[string]any{"id": "sre"})
 	resp.Body.Close()
-
-	if resp := postJSON(t, srv.URL+"/v1/agents/sre/wake", map[string]any{"text": "hi"}); resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("wake status = %d, want 202", resp.StatusCode)
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("duplicate status = %d, want 409", resp.StatusCode)
 	}
+}
+
+func TestGetAgentReportsLivenessAndUnread(t *testing.T) {
+	d := agentsTestDeps(t)
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	createTestAgent(t, srv, "sre")
+	if _, err := d.Store.AddInboxMessage(store.InboxMessage{AgentID: "sre", Body: "one"}); err != nil {
+		t.Fatalf("AddInboxMessage: %v", err)
+	}
+	addLiveAgentSession(t, d, "sre")
+
+	body := decodeMap(t, getJSON(t, srv.URL+"/v1/agents/sre"))
+	if body["session_alive"] != true {
+		t.Errorf("session_alive = %v, want true", body["session_alive"])
+	}
+	if body["unread"] != float64(1) {
+		t.Errorf("unread = %v, want 1", body["unread"])
+	}
+}
+
+func TestListAgentsFiltersByProject(t *testing.T) {
+	d := agentsTestDeps(t)
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	createTestAgent(t, srv, "sre")
+	resp := postJSON(t, srv.URL+"/v1/agents", map[string]any{"id": "solo"})
+	resp.Body.Close()
 
 	all := decodeList(t, getJSON(t, srv.URL+"/v1/agents"))
 	if len(all) != 2 {
 		t.Fatalf("agents = %d, want 2", len(all))
 	}
-	if all[0]["id"] != "sre" || all[0]["inbox_queued"] != float64(1) {
-		t.Errorf("first agent = %+v, want sre with inbox_queued 1", all[0])
-	}
 
-	web := decodeList(t, getJSON(t, srv.URL+"/v1/agents?project=web"))
-	if len(web) != 1 || web[0]["id"] != "triage" {
-		t.Errorf("filtered = %+v", web)
+	platform := decodeList(t, getJSON(t, srv.URL+"/v1/agents?project=platform"))
+	if len(platform) != 1 || platform[0]["id"] != "sre" {
+		t.Fatalf("platform agents = %+v", platform)
 	}
 }
 
-func TestGetAgentIncludesPrompt(t *testing.T) {
+func TestPatchAgentUpdatesFields(t *testing.T) {
 	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
-	createTestAgent(t, srv, "sre")
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
 
-	body := decodeMap(t, getJSON(t, srv.URL+"/v1/agents/sre"))
-	if body["prompt"] != "you are the sre role" {
-		t.Errorf("prompt = %v", body["prompt"])
-	}
-
-	resp := getJSON(t, srv.URL+"/v1/agents/ghost")
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", resp.StatusCode)
-	}
-	if code := decodeErr(t, resp).Error.Code; code != "agent_not_found" {
-		t.Errorf("code = %q, want agent_not_found", code)
-	}
-}
-
-func TestPatchAgent(t *testing.T) {
-	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
 	createTestAgent(t, srv, "sre")
 
 	resp := patchJSON(t, srv.URL+"/v1/agents/sre", map[string]any{
-		"prompt":  "updated policy",
-		"cron":    "0 * * * *",
-		"enabled": false,
-		"subscriptions": []map[string]any{
-			{"repo": "acme/platform", "labels": []string{"bug"}, "mention_only": true},
-		},
+		"description": "on call",
+		"dir":         "/srv/sre",
+		"command":     "",
+		"enabled":     false,
 	})
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
+		t.Fatalf("PATCH = %d, want 200", resp.StatusCode)
 	}
 	body := decodeMap(t, resp)
-	if body["cron"] != "0 * * * *" || body["enabled"] != false {
-		t.Errorf("body = %+v", body)
+	if body["description"] != "on call" || body["dir"] != "/srv/sre" ||
+		body["command"] != "" || body["enabled"] != false {
+		t.Errorf("patched agent = %+v", body)
 	}
-	subs, ok := body["subscriptions"].([]any)
-	if !ok || len(subs) != 1 {
-		t.Fatalf("subscriptions = %+v", body["subscriptions"])
-	}
+}
 
-	prompt, err := os.ReadFile(roles.PromptPath(d.Cfg.Home, "sre"))
-	if err != nil {
-		t.Fatalf("read role.md: %v", err)
-	}
-	if string(prompt) != "updated policy" {
-		t.Errorf("role.md = %q, want the patched prompt", prompt)
+func TestPatchAgentRejectsUnknownProject(t *testing.T) {
+	d := agentsTestDeps(t)
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	createTestAgent(t, srv, "sre")
+	resp := patchJSON(t, srv.URL+"/v1/agents/sre", map[string]any{"project": "nope"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
 }
 
 func TestEnableDisableAgent(t *testing.T) {
 	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
 	createTestAgent(t, srv, "sre")
 
 	body := decodeMap(t, postJSON(t, srv.URL+"/v1/agents/sre/disable", nil))
 	if body["enabled"] != false {
-		t.Errorf("enabled = %v, want false", body["enabled"])
+		t.Errorf("enabled after disable = %v", body["enabled"])
 	}
 	body = decodeMap(t, postJSON(t, srv.URL+"/v1/agents/sre/enable", nil))
 	if body["enabled"] != true {
-		t.Errorf("enabled = %v, want true", body["enabled"])
+		t.Errorf("enabled after enable = %v", body["enabled"])
 	}
 }
 
 func TestDeleteAgent(t *testing.T) {
 	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
 	createTestAgent(t, srv, "sre")
 
-	resp := deleteReq(t, srv.URL+"/v1/agents/sre")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
+	resp := deleteJSON(t, srv.URL+"/v1/agents/sre")
 	resp.Body.Close()
-
-	if resp := getJSON(t, srv.URL+"/v1/agents/sre"); resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("status after delete = %d, want 404", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("DELETE = %d, want 200", resp.StatusCode)
 	}
-}
-
-func TestWakeEnqueuesInboxEvent(t *testing.T) {
-	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
-	createTestAgent(t, srv, "sre")
-
-	resp := postJSON(t, srv.URL+"/v1/agents/sre/wake", map[string]any{"text": "blocked by X"})
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("status = %d, want 202", resp.StatusCode)
-	}
-	body := decodeMap(t, resp)
-	if body["kind"] != "message" {
-		t.Errorf("kind = %v, want message", body["kind"])
-	}
-	if body["event_id"] == nil || body["event_id"] == float64(0) {
-		t.Errorf("event_id = %v", body["event_id"])
-	}
-
-	events := decodeList(t, getJSON(t, srv.URL+"/v1/agents/sre/inbox"))
-	if len(events) != 1 {
-		t.Fatalf("inbox = %d events, want 1", len(events))
-	}
-	if events[0]["status"] != "queued" || events[0]["kind"] != "message" {
-		t.Errorf("event = %+v", events[0])
-	}
-	payload, ok := events[0]["payload"].(map[string]any)
-	if !ok || payload["text"] != "blocked by X" {
-		t.Errorf("payload = %+v", events[0]["payload"])
-	}
-
-	queued := decodeList(t, getJSON(t, srv.URL+"/v1/agents/sre/inbox?status=queued"))
-	if len(queued) != 1 {
-		t.Errorf("queued = %d, want 1", len(queued))
-	}
-}
-
-func TestWakeRejectsUnknownKind(t *testing.T) {
-	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
-	createTestAgent(t, srv, "sre")
-
-	resp := postJSON(t, srv.URL+"/v1/agents/sre/wake", map[string]any{"kind": "explode"})
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", resp.StatusCode)
-	}
-	if code := decodeErr(t, resp).Error.Code; code != "invalid_kind" {
-		t.Errorf("code = %q, want invalid_kind", code)
-	}
-}
-
-func TestWakeUnknownAgent(t *testing.T) {
-	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
-
-	resp := postJSON(t, srv.URL+"/v1/agents/ghost/wake", map[string]any{"text": "hi"})
+	resp = getJSON(t, srv.URL+"/v1/agents/sre")
+	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", resp.StatusCode)
+		t.Errorf("GET after delete = %d, want 404", resp.StatusCode)
 	}
-	resp.Body.Close()
 }
 
-func TestPutAndListAgentItems(t *testing.T) {
+func TestUnknownAgentIs404(t *testing.T) {
 	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	for _, url := range []string{
+		srv.URL + "/v1/agents/ghost",
+		srv.URL + "/v1/agents/ghost/inbox",
+	} {
+		resp := getJSON(t, url)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404", url, resp.StatusCode)
+		}
+	}
+}
+
+func TestPostAgentMessageInboxesWhenSessionIsDead(t *testing.T) {
+	d := agentsTestDeps(t)
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
 	createTestAgent(t, srv, "sre")
 
-	resp := putJSON(t, srv.URL+"/v1/agents/sre/items", map[string]any{
-		"kind": "issue", "ref": "acme/platform#12", "state": "deferred",
-		"note": "waiting for migration", "snooze_until": 1800000000, "task_id": 45,
-	})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	item := decodeMap(t, resp)
-	if item["state"] != "deferred" || item["ref"] != "acme/platform#12" ||
-		item["task_id"] != float64(45) || item["snooze_until"] != float64(1800000000) {
-		t.Errorf("item = %+v", item)
-	}
-
-	if resp := putJSON(t, srv.URL+"/v1/agents/sre/items", map[string]any{
-		"kind": "task", "ref": "task:45", "state": "in_work",
-	}); resp.StatusCode != http.StatusOK {
-		t.Fatalf("second put status = %d", resp.StatusCode)
-	}
-
-	all := decodeList(t, getJSON(t, srv.URL+"/v1/agents/sre/items"))
-	if len(all) != 2 {
-		t.Fatalf("items = %d, want 2", len(all))
-	}
-	deferred := decodeList(t, getJSON(t, srv.URL+"/v1/agents/sre/items?state=deferred"))
-	if len(deferred) != 1 || deferred[0]["ref"] != "acme/platform#12" {
-		t.Errorf("deferred = %+v", deferred)
-	}
-}
-
-func TestPutAgentItemValidation(t *testing.T) {
-	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
-	createTestAgent(t, srv, "sre")
-
-	cases := []struct {
-		name    string
-		payload map[string]any
-		code    string
-	}{
-		{"missing ref", map[string]any{"kind": "issue", "state": "taken"}, "bad_request"},
-		{"bad kind", map[string]any{"kind": "banana", "ref": "x", "state": "taken"}, "invalid_kind"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			resp := putJSON(t, srv.URL+"/v1/agents/sre/items", tc.payload)
-			if resp.StatusCode != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400", resp.StatusCode)
-			}
-			if code := decodeErr(t, resp).Error.Code; code != tc.code {
-				t.Errorf("code = %q, want %q", code, tc.code)
-			}
-		})
-	}
-}
-
-// A role instance may only write its own dossier: the caller session must be
-// kind=agent and its id must start with "<role>-run-".
-func TestPutAgentItemSessionScope(t *testing.T) {
-	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
-	createTestAgent(t, srv, "sre")
-
-	addTestSession(t, d, "sre-run-1", "agent", "platform")
-	addTestSession(t, d, "other-run-1", "agent", "platform")
-	addTestSession(t, d, "platform-orch", "orchestrator", "platform")
-
-	body := map[string]any{"kind": "issue", "ref": "acme/platform#7", "state": "taken"}
-
-	if resp := putJSONWithHeader(t, srv.URL+"/v1/agents/sre/items", "sre-run-1", body); resp.StatusCode != http.StatusOK {
-		t.Fatalf("own instance status = %d, want 200", resp.StatusCode)
-	}
-	resp := putJSONWithHeader(t, srv.URL+"/v1/agents/sre/items", "other-run-1", body)
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("foreign role status = %d, want 403", resp.StatusCode)
-	}
-	if code := decodeErr(t, resp).Error.Code; code != "forbidden" {
-		t.Errorf("code = %q, want forbidden", code)
-	}
-	if resp := putJSONWithHeader(t, srv.URL+"/v1/agents/sre/items", "platform-orch", body); resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("orchestrator status = %d, want 403", resp.StatusCode)
-	}
-}
-
-func TestAgentStoreItemRoundtrip(t *testing.T) {
-	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
-	createTestAgent(t, srv, "sre")
-
-	if _, err := d.Store.UpsertAgentItem(store.AgentItem{
-		RoleID: "sre", Kind: "ping", ExternalRef: "msg:1", State: "triaged",
-	}); err != nil {
-		t.Fatalf("UpsertAgentItem: %v", err)
-	}
-	items := decodeList(t, getJSON(t, srv.URL+"/v1/agents/sre/items"))
-	if len(items) != 1 || items[0]["kind"] != "ping" {
-		t.Errorf("items = %+v", items)
-	}
-}
-
-func TestListAgentsCarriesOpenQuestionCounts(t *testing.T) {
-	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
-	createTestAgent(t, srv, "sre")
-
-	// Human-opened thread: open, but awaiting the role, not the user.
-	if _, err := d.Store.AddAgentQuestion(store.AgentQuestion{RoleID: "sre", Body: "q1"}); err != nil {
-		t.Fatalf("AddAgentQuestion: %v", err)
-	}
-	// Role-opened thread: awaits the user.
-	if _, err := d.Store.AddAgentQuestion(store.AgentQuestion{RoleID: "sre", AskedBy: "sre-run-1", Body: "q2"}); err != nil {
-		t.Fatalf("AddAgentQuestion: %v", err)
-	}
-
-	list := decodeList(t, getJSON(t, srv.URL+"/v1/agents"))
-	if len(list) != 1 {
-		t.Fatalf("list = %+v", list)
-	}
-	if list[0]["open_questions"] != float64(2) || list[0]["awaiting_user"] != float64(1) {
-		t.Errorf("list entry = %+v", list[0])
-	}
-
-	one := decodeMap(t, getJSON(t, srv.URL+"/v1/agents/sre"))
-	if one["open_questions"] != float64(2) || one["awaiting_user"] != float64(1) {
-		t.Errorf("get = %+v", one)
-	}
-}
-
-// fakeAgentEngine records the wake engine calls the API makes.
-type fakeAgentEngine struct {
-	notified []string
-	done     []string
-	doneErr  error
-}
-
-func (f *fakeAgentEngine) Notify(roleID string) { f.notified = append(f.notified, roleID) }
-
-func (f *fakeAgentEngine) Done(ctx context.Context, sessionID string) error {
-	f.done = append(f.done, sessionID)
-	return f.doneErr
-}
-
-// agentsTestDepsWithEngine is agentsTestDeps plus a fake wake engine and a
-// registered role.
-func agentsTestDepsWithEngine(t *testing.T) (Deps, *fakeAgentEngine) {
-	t.Helper()
-	d := agentsTestDeps(t)
-	eng := &fakeAgentEngine{}
-	d.Agents = eng
-
-	promptPath, err := roles.Ensure(d.Cfg.Home, "sre", "POLICY", true)
-	if err != nil {
-		t.Fatalf("roles.Ensure: %v", err)
-	}
-	if err := d.Store.AddAgent(store.Agent{
-		ID: "sre", ProjectID: "platform", PromptPath: promptPath, Enabled: true,
-	}); err != nil {
-		t.Fatalf("AddAgent: %v", err)
-	}
-	return d, eng
-}
-
-func TestWakeAgentNotifiesEngine(t *testing.T) {
-	d, eng := agentsTestDepsWithEngine(t)
-	srv := newTestServer(t, d)
-
-	resp := postJSON(t, srv.URL+"/v1/agents/sre/wake", map[string]any{"text": "hi"})
+	resp := postJSON(t, srv.URL+"/v1/agents/sre/messages", map[string]any{"body": "deploy is stuck"})
 	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("status = %d, want 202", resp.StatusCode)
-	}
-	resp.Body.Close()
-
-	if len(eng.notified) != 1 || eng.notified[0] != "sre" {
-		t.Fatalf("engine notifications = %v, want [sre]", eng.notified)
-	}
-}
-
-func TestAgentDoneFromOwnInstance(t *testing.T) {
-	d, eng := agentsTestDepsWithEngine(t)
-	addTestSession(t, d, "sre-run-1", "agent", "platform")
-	srv := newTestServer(t, d)
-
-	resp := postJSONWithHeader(t, srv.URL+"/v1/agents/sre/done", "sre-run-1", nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	resp.Body.Close()
-
-	if len(eng.done) != 1 || eng.done[0] != "sre-run-1" {
-		t.Fatalf("engine Done calls = %v, want [sre-run-1]", eng.done)
-	}
-}
-
-func TestAgentDoneRejectsForeignCaller(t *testing.T) {
-	d, eng := agentsTestDepsWithEngine(t)
-	addTestSession(t, d, "other-run-1", "agent", "platform")
-	srv := newTestServer(t, d)
-
-	resp := postJSONWithHeader(t, srv.URL+"/v1/agents/sre/done", "other-run-1", nil)
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", resp.StatusCode)
-	}
-	resp.Body.Close()
-
-	if len(eng.done) != 0 {
-		t.Fatalf("engine Done called for a foreign session: %v", eng.done)
-	}
-}
-
-func TestAgentDoneRequiresASession(t *testing.T) {
-	d, _ := agentsTestDepsWithEngine(t)
-	srv := newTestServer(t, d)
-
-	resp := postJSON(t, srv.URL+"/v1/agents/sre/done", nil)
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", resp.StatusCode)
-	}
-	resp.Body.Close()
-}
-
-func TestGetAgentMemoryReturnsIndexAndFiles(t *testing.T) {
-	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
-	createTestAgent(t, srv, "sre")
-
-	if err := os.WriteFile(filepath.Join(roles.MemoryDir(d.Cfg.Home, "sre"), "platform.md"), []byte("how it deploys"), 0600); err != nil {
-		t.Fatalf("write fact file: %v", err)
-	}
-
-	resp := getJSON(t, srv.URL+"/v1/agents/sre/memory")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET memory status = %d, want 200", resp.StatusCode)
+		t.Fatalf("POST messages = %d, want 202", resp.StatusCode)
 	}
 	body := decodeMap(t, resp)
+	if body["status"] != "inbox" || body["live"] != false {
+		t.Errorf("result = %+v, want inbox", body)
+	}
 
-	if body["path"] != roles.MemoryDir(d.Cfg.Home, "sre") {
-		t.Errorf("path = %v", body["path"])
-	}
-	if index, _ := body["index"].(string); index == "" {
-		t.Error("index is empty, want the seeded MEMORY.md")
-	}
-	files, ok := body["files"].([]any)
-	if !ok || len(files) != 1 {
-		t.Fatalf("files = %v, want one fact file", body["files"])
-	}
-	file := files[0].(map[string]any)
-	if file["name"] != "platform.md" || file["body"] != "how it deploys" {
-		t.Errorf("file = %+v", file)
+	msgs := decodeList(t, getJSON(t, srv.URL+"/v1/agents/sre/inbox"))
+	if len(msgs) != 1 || msgs[0]["body"] != "deploy is stuck" || msgs[0]["status"] != "unread" {
+		t.Fatalf("inbox = %+v", msgs)
 	}
 }
 
-func TestPutAgentMemoryWritesIndexAndFactFiles(t *testing.T) {
+func TestPostAgentMessageQueuesWhenSessionIsLive(t *testing.T) {
 	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
 	createTestAgent(t, srv, "sre")
+	addLiveAgentSession(t, d, "sre")
 
-	// No "file" — the index is the default target.
-	resp := putJSON(t, srv.URL+"/v1/agents/sre/memory", map[string]any{"body": "- [Platform](platform.md)\n"})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("PUT index status = %d, want 200", resp.StatusCode)
-	}
-	if body := decodeMap(t, resp); body["index"] != "- [Platform](platform.md)\n" {
-		t.Errorf("index = %v", body["index"])
+	body := decodeMap(t, postJSON(t, srv.URL+"/v1/agents/sre/messages", map[string]any{"body": "ping"}))
+	if body["status"] != "queued" || body["live"] != true {
+		t.Errorf("result = %+v, want queued", body)
 	}
 
-	resp = putJSON(t, srv.URL+"/v1/agents/sre/memory", map[string]any{"file": "platform.md", "body": "how it deploys"})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("PUT fact status = %d, want 200", resp.StatusCode)
+	msgs, err := d.Store.ListMessages("sre", 10)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
 	}
+	if len(msgs) != 1 || msgs[0].Body != "ping" {
+		t.Fatalf("messages = %+v", msgs)
+	}
+	inbox, err := d.Store.ListInboxMessages("sre", "", 0)
+	if err != nil {
+		t.Fatalf("ListInboxMessages: %v", err)
+	}
+	if len(inbox) != 0 {
+		t.Errorf("inbox = %+v, want empty for a live agent", inbox)
+	}
+}
+
+func TestPostAgentMessageRejectsEmptyBody(t *testing.T) {
+	d := agentsTestDeps(t)
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	createTestAgent(t, srv, "sre")
+	resp := postJSON(t, srv.URL+"/v1/agents/sre/messages", map[string]any{"body": "  "})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestAgentInboxNextDrainsOneByOne(t *testing.T) {
+	d := agentsTestDeps(t)
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	createTestAgent(t, srv, "sre")
+	for _, text := range []string{"one", "two"} {
+		resp := postJSON(t, srv.URL+"/v1/agents/sre/messages", map[string]any{"body": text})
+		resp.Body.Close()
+	}
+
+	first := decodeMap(t, postJSON(t, srv.URL+"/v1/agents/sre/inbox/next", nil))
+	if first["body"] != "one" || first["status"] != "read" {
+		t.Fatalf("first next = %+v", first)
+	}
+
+	unread := decodeList(t, getJSON(t, srv.URL+"/v1/agents/sre/inbox?status=unread"))
+	if len(unread) != 1 || unread[0]["body"] != "two" {
+		t.Fatalf("unread after next = %+v", unread)
+	}
+
+	second := decodeMap(t, postJSON(t, srv.URL+"/v1/agents/sre/inbox/next", nil))
+	if second["body"] != "two" {
+		t.Fatalf("second next = %+v", second)
+	}
+
+	resp := postJSON(t, srv.URL+"/v1/agents/sre/inbox/next", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("drained next = %d, want 204", resp.StatusCode)
+	}
+}
+
+func TestAgentInboxPeekDoesNotMarkRead(t *testing.T) {
+	d := agentsTestDeps(t)
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	createTestAgent(t, srv, "sre")
+	id, err := d.Store.AddInboxMessage(store.InboxMessage{AgentID: "sre", Body: "peek me"})
+	if err != nil {
+		t.Fatalf("AddInboxMessage: %v", err)
+	}
+
+	body := decodeMap(t, getJSON(t, srv.URL+"/v1/agents/sre/inbox/"+strconv.FormatInt(id, 10)))
+	if body["body"] != "peek me" || body["status"] != "unread" {
+		t.Fatalf("peek = %+v", body)
+	}
+
+	n, err := d.Store.CountUnreadInbox("sre")
+	if err != nil {
+		t.Fatalf("CountUnreadInbox: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("unread after peek = %d, want 1", n)
+	}
+}
+
+func TestAgentInboxPeekOfAnotherAgentIs404(t *testing.T) {
+	d := agentsTestDeps(t)
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	createTestAgent(t, srv, "sre")
+	createTestAgent(t, srv, "triage")
+	id, err := d.Store.AddInboxMessage(store.InboxMessage{AgentID: "sre", Body: "private"})
+	if err != nil {
+		t.Fatalf("AddInboxMessage: %v", err)
+	}
+
+	resp := getJSON(t, srv.URL+"/v1/agents/triage/inbox/"+strconv.FormatInt(id, 10))
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestAgentInboxRejectsUnknownStatus(t *testing.T) {
+	d := agentsTestDeps(t)
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	createTestAgent(t, srv, "sre")
+	resp := getJSON(t, srv.URL+"/v1/agents/sre/inbox?status=pending")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestStartAgentWithoutDirIsRejected(t *testing.T) {
+	d := agentsTestDeps(t)
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	resp := postJSON(t, srv.URL+"/v1/agents", map[string]any{"id": "solo"})
+	resp.Body.Close()
+
+	resp = postJSON(t, srv.URL+"/v1/agents/solo/start", nil)
 	body := decodeMap(t, resp)
-	files, ok := body["files"].([]any)
-	if !ok || len(files) != 1 {
-		t.Fatalf("files = %v, want the new fact file", body["files"])
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body %+v)", resp.StatusCode, body)
 	}
-	if file := files[0].(map[string]any); file["name"] != "platform.md" || file["body"] != "how it deploys" {
-		t.Errorf("file = %+v", file)
-	}
-
-	// The write really landed on disk, not just in the response.
-	onDisk, err := os.ReadFile(filepath.Join(roles.MemoryDir(d.Cfg.Home, "sre"), "platform.md"))
-	if err != nil {
-		t.Fatalf("read fact file: %v", err)
-	}
-	if string(onDisk) != "how it deploys" {
-		t.Errorf("fact file on disk = %q", onDisk)
-	}
-}
-
-func TestPutAgentMemoryRejectsPathTraversal(t *testing.T) {
-	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
-	createTestAgent(t, srv, "sre")
-
-	for _, name := range []string{"../role.md", "sub/dir.md", "notes.txt", ".."} {
-		resp := putJSON(t, srv.URL+"/v1/agents/sre/memory", map[string]any{"file": name, "body": "x"})
-		if resp.StatusCode != http.StatusBadRequest {
-			t.Fatalf("PUT %q status = %d, want 400", name, resp.StatusCode)
-		}
-		if body := decodeMap(t, resp); body["error"].(map[string]any)["code"] != "invalid_file" {
-			t.Errorf("PUT %q error = %v, want invalid_file", name, body["error"])
-		}
-	}
-
-	prompt, err := os.ReadFile(roles.PromptPath(d.Cfg.Home, "sre"))
-	if err != nil {
-		t.Fatalf("read role prompt: %v", err)
-	}
-	if string(prompt) != "you are the sre role" {
-		t.Errorf("role prompt was overwritten by a rejected memory write: %q", prompt)
-	}
-}
-
-func TestAgentMemoryUnknownRole404(t *testing.T) {
-	d := agentsTestDeps(t)
-	srv := newTestServer(t, d)
-
-	if resp := getJSON(t, srv.URL+"/v1/agents/nope/memory"); resp.StatusCode != http.StatusNotFound {
-		t.Errorf("GET status = %d, want 404", resp.StatusCode)
-	}
-	if resp := putJSON(t, srv.URL+"/v1/agents/nope/memory", map[string]any{"body": "x"}); resp.StatusCode != http.StatusNotFound {
-		t.Errorf("PUT status = %d, want 404", resp.StatusCode)
+	if errCode(body) != "agent_no_dir" {
+		t.Errorf("error = %+v, want agent_no_dir", body["error"])
 	}
 }

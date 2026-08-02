@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -82,21 +83,25 @@ func handlePostMessage(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
+	// An agent is an addressable recipient too: `rocket send sre "..."`
+	// reaches its live session or waits unread in its inbox. Agents and
+	// sessions share one namespace; an agent is handled by the agent path
+	// whether or not a session row for it exists, because a dead agent
+	// session must inbox the message rather than fail it as terminal.
 	toSess, err := d.Store.GetSession(req.To)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			// A role is an addressable recipient too: `rocket send sre "..."`
-			// lands in its inbox, which wakes it (or reaches its live
-			// instance through the engine). Roles and sessions share one
-			// namespace, and a live session always wins the lookup above.
-			if handled := postMessageToRole(w, d, req); handled {
-				return
-			}
+	notFound := errors.Is(err, store.ErrNotFound)
+	switch {
+	case err != nil && !notFound:
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	case notFound, toSess.Kind == session.AgentSessionKind:
+		if handled := postMessageToAgent(w, d, req); handled {
+			return
+		}
+		if notFound {
 			writeErr(w, http.StatusNotFound, "session_not_found", "recipient session not found")
 			return
 		}
-		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
 	}
 	if toSess.State != "spawning" && toSess.State != "running" {
 		writeErr(w, http.StatusConflict, "recipient_terminal", "recipient session is not active")
@@ -210,12 +215,13 @@ func handleGetMessage(w http.ResponseWriter, r *http.Request, d Deps) {
 	writeJSON(w, http.StatusOK, toMessageResponse(m))
 }
 
-// postMessageToRole handles POST /v1/messages addressed to an agent role: the
-// body becomes a `message` inbox event and the wake engine takes it from
-// there. It reports whether it wrote a response (false means "not a role",
-// and the caller falls through to its 404).
-func postMessageToRole(w http.ResponseWriter, d Deps, req postMessageRequest) bool {
-	role, err := d.Store.GetAgent(req.To)
+// postMessageToAgent handles POST /v1/messages addressed to a registered
+// agent: the body reaches its live tmux session through the delivery queue,
+// or waits unread in its inbox when that session is not up. It reports
+// whether it wrote a response (false means "not an agent", and the caller
+// falls through to its 404).
+func postMessageToAgent(w http.ResponseWriter, d Deps, req postMessageRequest) bool {
+	agent, err := d.Store.GetAgent(req.To)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return false
@@ -235,28 +241,12 @@ func postMessageToRole(w http.ResponseWriter, d Deps, req postMessageRequest) bo
 		}
 	}
 
-	payload, err := json.Marshal(map[string]string{"text": req.Body, "from": req.From})
+	live, err := deliverToAgent(d, agent.ID, req.From, req.Body)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return true
 	}
 
-	id, err := d.Store.EnqueueInboxEvent(store.AgentInboxEvent{
-		RoleID:  role.ID,
-		Kind:    "message",
-		Payload: string(payload),
-	})
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return true
-	}
-
-	NotifyRole(d, role.ID)
-
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"event_id": id,
-		"to":       role.ID,
-		"queued":   "inbox",
-	})
+	writeJSON(w, http.StatusAccepted, agentDeliveryResult(agent.ID, live))
 	return true
 }

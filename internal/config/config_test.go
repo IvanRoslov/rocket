@@ -288,17 +288,14 @@ func TestAgentRuntimeDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.AgentIdleTimeout != 15*time.Minute {
-		t.Errorf("AgentIdleTimeout = %v, want 15m", cfg.AgentIdleTimeout)
-	}
-	if cfg.AgentWakeDebounce != 30*time.Second {
-		t.Errorf("AgentWakeDebounce = %v, want 30s", cfg.AgentWakeDebounce)
+	if cfg.AgentNotifyInterval != 5*time.Minute {
+		t.Errorf("AgentNotifyInterval = %v, want 5m", cfg.AgentNotifyInterval)
 	}
 }
 
 func TestAgentRuntimeOverrides(t *testing.T) {
 	home := t.TempDir()
-	yaml := "agent_idle_timeout: 5m\nagent_wake_debounce: 2s\n"
+	yaml := "agent_notify_interval: 90s\n"
 	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(yaml), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -307,10 +304,7 @@ func TestAgentRuntimeOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.AgentIdleTimeout != 5*time.Minute {
-		t.Errorf("AgentIdleTimeout = %v, want 5m", cfg.AgentIdleTimeout)
-	}
-	if cfg.AgentWakeDebounce != 2*time.Second {
-		t.Errorf("AgentWakeDebounce = %v, want 2s", cfg.AgentWakeDebounce)
+	if cfg.AgentNotifyInterval != 90*time.Second {
+		t.Errorf("AgentNotifyInterval = %v, want 90s", cfg.AgentNotifyInterval)
 	}
 }
