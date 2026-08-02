@@ -67,21 +67,30 @@ func lastAuthor(q store.Question, msgs []store.QuestionMessage) string {
 	return author
 }
 
-// waitingOn derives who is expected to speak next, per spec v1 §2 of task
-// #722: a resolved thread waits on nobody; an explicitly addressed last
-// message names its own addressees; otherwise everyone but whoever spoke last.
+// waitingOn derives who is expected to speak next, per spec v2 §2 of task
+// #722: a resolved thread waits on nobody; an explicitly addressed last entry
+// names its own addressees; otherwise everyone but whoever spoke last.
+//
+// The "last entry" is the last message, or the question itself when the thread
+// has none — and both carry addressed_to, so `ask --to cto` narrows the turn
+// to cto exactly the way `reply --to cto` does. Without the question's own
+// column (migration 0010) a thread addressed to cto would still list the human
+// in waiting_on and show them an "awaiting you" badge.
+//
 // The result is sorted so the API response and its tests are deterministic.
 func waitingOn(q store.Question, msgs []store.QuestionMessage, participants []string) []string {
 	if q.Status != "open" {
 		return nil
 	}
 
+	addressed := q.AddressedTo
 	if len(msgs) > 0 {
-		if to := msgs[len(msgs)-1].AddressedTo; len(to) > 0 {
-			out := append([]string(nil), to...)
-			sort.Strings(out)
-			return out
-		}
+		addressed = msgs[len(msgs)-1].AddressedTo
+	}
+	if len(addressed) > 0 {
+		out := append([]string(nil), addressed...)
+		sort.Strings(out)
+		return out
 	}
 
 	author := lastAuthor(q, msgs)

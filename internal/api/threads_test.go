@@ -44,6 +44,21 @@ func TestWaitingOn(t *testing.T) {
 			want: []string{"cto", "human"},
 		},
 		{
+			name: "no messages, question addressed: exactly its addressees",
+			q: store.Question{
+				Status: "open", AskedBy: "orch-1", AddressedTo: []string{"cto"},
+			},
+			want: []string{"cto"},
+		},
+		{
+			name: "messages override the question's own addressees",
+			q: store.Question{
+				Status: "open", AskedBy: "orch-1", AddressedTo: []string{"cto"},
+			},
+			msgs: []store.QuestionMessage{{Author: "cto"}},
+			want: []string{"human", "orch-1"},
+		},
+		{
 			name: "no messages, human asked (asked_by is empty)",
 			q:    store.Question{Status: "open", AskedBy: ""},
 			want: []string{"cto", "orch-1"},

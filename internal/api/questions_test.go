@@ -888,11 +888,10 @@ func TestPostTaskQuestions_ToAddsParticipant(t *testing.T) {
 	if !reflect.DeepEqual(q.Participants, []string{"cto", "human", "orch-1"}) {
 		t.Errorf("participants = %v, want [cto human orch-1]", q.Participants)
 	}
-	// A thread with no messages has no addressed_to to read: spec v1 §2 falls
-	// back to "everyone except the asker", so --to on ask joins and notifies
-	// cto without narrowing the turn to it. Orchestrator question 8114.
-	if !reflect.DeepEqual(q.WaitingOn, []string{"cto", "human"}) {
-		t.Errorf("waiting_on = %v, want [cto human]", q.WaitingOn)
+	// --to narrows the turn from the very first entry (spec v2 §2, migration
+	// 0010): the human is NOT waited on for a thread addressed to cto.
+	if !reflect.DeepEqual(q.WaitingOn, []string{"cto"}) {
+		t.Errorf("waiting_on = %v, want [cto]", q.WaitingOn)
 	}
 
 	inbox, err := d.Store.ListInboxMessages("cto", store.InboxUnread, 0)
@@ -1106,5 +1105,39 @@ func TestGetTaskQuestions_UnrelatedSessionSeesNothing(t *testing.T) {
 	}
 	if got := getQuestions(t, srv, taskID, ""); len(got) != 1 {
 		t.Errorf("the human saw %d threads, want 1", len(got))
+	}
+}
+
+// TestPostTaskQuestions_ToDoesNotBadgeTheHuman is the point of --to on ask
+// (spec v2 §2): a thread the orchestrator addressed to cto must not show the
+// human an "awaiting you" badge. your_turn is the field the clients bind that
+// badge to.
+func TestPostTaskQuestions_ToDoesNotBadgeTheHuman(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+	setupQuestionAgent(t, d)
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
+		map[string]any{"body": "Approve the schema?", "to": []string{"cto"}})
+	resp.Body.Close()
+
+	asHuman := getQuestions(t, srv, taskID, "")
+	if len(asHuman) != 1 {
+		t.Fatalf("got %d threads, want 1", len(asHuman))
+	}
+	if asHuman[0].YourTurn {
+		t.Error("your_turn = true for the human on a thread addressed to cto, want false")
+	}
+	if contains(asHuman[0].WaitingOn, "human") {
+		t.Errorf("waiting_on = %v, must not include the human", asHuman[0].WaitingOn)
+	}
+	// The human still SEES the thread — your_turn drives a badge, never hiding.
+	if asHuman[0].Body != "Approve the schema?" {
+		t.Errorf("the human must still see the thread, got %+v", asHuman[0])
+	}
+	// And whose_turn no longer collapses to "user" for it.
+	if asHuman[0].WhoseTurn != "orchestrator" {
+		t.Errorf("whose_turn = %q, want orchestrator", asHuman[0].WhoseTurn)
 	}
 }
