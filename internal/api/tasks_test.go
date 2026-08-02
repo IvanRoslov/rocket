@@ -240,7 +240,7 @@ func TestPostTaskWorkerCannotCreateTask(t *testing.T) {
 	}
 }
 
-func TestPostTaskAgentRootTaskForbidden(t *testing.T) {
+func TestPostTaskOrchestratorRootTaskForbidden(t *testing.T) {
 	d := tasksTestDeps(t)
 	srv := newTestServer(t, d)
 	addTestProject(t, d, "proj1")
@@ -259,6 +259,103 @@ func TestPostTaskAgentRootTaskForbidden(t *testing.T) {
 	}
 	if eb := decodeErr(t, resp); eb.Error.Code != "forbidden" {
 		t.Errorf("code = %q, want forbidden", eb.Error.Code)
+	}
+}
+
+func TestPostTaskAgentCanCreateRootTask(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+	addTestSession(t, d, "cto", "agent", "proj1")
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/tasks", bytesReader([]byte(`{"title":"T","project":"proj1"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(sessionHeader, "cto")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	body := decodeRepo(t, resp)
+	if body["created_by"] != "agent" {
+		t.Errorf("created_by = %v, want agent", body["created_by"])
+	}
+}
+
+func TestPostTaskAgentCanCreateSubtaskOfForeignTask(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+	addTestSession(t, d, "cto", "agent", "proj1")
+	addTestSession(t, d, "orch-1", "orchestrator", "proj1")
+
+	rootID, err := d.Store.AddTask(store.Task{Title: "Root", ProjectID: "proj1", SessionID: "orch-1"})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/tasks",
+		bytesReader([]byte(`{"title":"Sub","project":"proj1","parent_id":`+itoa(rootID)+`}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(sessionHeader, "cto")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+}
+
+func TestPostTaskWorkerForbidden(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+	addTestSession(t, d, "w-1", "worker", "proj1")
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/tasks", bytesReader([]byte(`{"title":"T","project":"proj1"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(sessionHeader, "w-1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	eb := decodeErr(t, resp)
+	if eb.Error.Message != "workers may not create tasks" {
+		t.Errorf("message = %q, want %q", eb.Error.Message, "workers may not create tasks")
+	}
+}
+
+func TestPatchTaskByAgentAllowed(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+	addTestSession(t, d, "cto", "agent", "proj1")
+
+	id, err := d.Store.AddTask(store.Task{Title: "T", ProjectID: "proj1", CreatedBy: "agent"})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPatch, srv.URL+"/v1/tasks/"+itoa(id),
+		bytesReader([]byte(`{"description":"updated by agent"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(sessionHeader, "cto")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 }
 
@@ -1477,7 +1574,7 @@ func TestPostTaskStartHappyPath(t *testing.T) {
 	}
 }
 
-func TestPostTaskStartAgentCallerForbidden(t *testing.T) {
+func TestPostTaskStartOrchestratorForbidden(t *testing.T) {
 	d := tasksTestDeps(t)
 	srv := newTestServer(t, d)
 	addTestProject(t, d, "proj1")
@@ -1498,8 +1595,35 @@ func TestPostTaskStartAgentCallerForbidden(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", resp.StatusCode)
 	}
-	if eb := decodeErr(t, resp); eb.Error.Code != "forbidden" {
+	eb := decodeErr(t, resp)
+	if eb.Error.Code != "forbidden" {
 		t.Errorf("code = %q, want forbidden", eb.Error.Code)
+	}
+	if eb.Error.Message != "only the human user or a registered agent may start a task" {
+		t.Errorf("message = %q, want the agent-aware message", eb.Error.Message)
+	}
+}
+
+func TestPostTaskStartAgentAllowed(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+	addTestSession(t, d, "cto", "agent", "proj1")
+
+	id, err := d.Store.AddTask(store.Task{Title: "Add login page", ProjectID: "proj1"})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/tasks/"+itoa(id)+"/start", nil)
+	req.Header.Set(sessionHeader, "cto")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
 	}
 }
 
