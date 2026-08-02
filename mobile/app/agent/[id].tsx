@@ -360,7 +360,7 @@ export default function AgentScreen() {
               {a.session_alive ? (
                 <GhostButton
                   label="Open terminal"
-                  onPress={() => router.navigate(`/chat/${a.id}`)}
+                  onPress={() => router.navigate(`/chat/${a.id}?agent=1`)}
                   style={{ flex: 1 }}
                 />
               ) : (
@@ -373,6 +373,13 @@ export default function AgentScreen() {
                   style={{ flex: 1 }}
                 />
               )}
+              {/* Chat is reachable whatever the session does: what you write
+                  reaches the live session or waits in the inbox. */}
+              <GhostButton
+                label="Chat"
+                onPress={() => router.navigate(`/chat/${a.id}?agent=1`)}
+                style={{ flex: 1 }}
+              />
             </View>
 
             {awaiting.length > 0 && tab !== 'questions' ? (

@@ -5,6 +5,8 @@
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native'
+import * as Clipboard from 'expo-clipboard'
+import { router } from 'expo-router'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { ToastProvider } from '../../src/components/Toast'
 import { ServerProvider } from '../../src/servers/ServerContext'
@@ -20,6 +22,8 @@ jest.mock('expo-router', () => ({
   useLocalSearchParams: () => ({ id: 'sre' }),
 }))
 
+jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn() }))
+
 const AGENT = {
   id: 'sre',
   description: 'platform on-call',
@@ -33,6 +37,18 @@ const AGENT = {
   awaiting_user: 1,
   created_at: 1785622872,
   updated_at: 1785622879,
+}
+
+// Registered with no project: the project-filtered list could never show it,
+// which is what the global list exists for.
+const ORPHAN = {
+  ...AGENT,
+  id: 'librarian',
+  description: 'keeps the docs honest',
+  project: '',
+  unread: 0,
+  open_questions: 0,
+  awaiting_user: 0,
 }
 
 const QUESTIONS = {
@@ -60,7 +76,7 @@ const INBOX = [
 /** Routes a request path to a canned body; unknown paths 404 like the daemon. */
 function mockApi(overrides: Record<string, unknown> = {}) {
   const bodies: Record<string, unknown> = {
-    '/v1/agents': [AGENT],
+    '/v1/agents': [AGENT, ORPHAN],
     '/v1/agents?project=platform': [AGENT],
     '/v1/agents/sre': AGENT,
     '/v1/agents/sre/questions': QUESTIONS,
@@ -109,10 +125,56 @@ describe('AgentsScreen', () => {
     expect(screen.getByText('1 open Q')).toBeTruthy()
   })
 
-  it('shows an empty state when the project has no agents', async () => {
+  it('shows an empty state when nothing is registered', async () => {
     mockApi({ '/v1/agents': [] })
     renderWithProviders(<AgentsScreen />)
     await waitFor(() => expect(screen.getByText(/No agents yet/)).toBeTruthy())
+  })
+
+  it('lists project-less agents too, under «No project»', async () => {
+    mockApi()
+    renderWithProviders(<AgentsScreen />)
+    await waitFor(() => expect(screen.getByText('librarian')).toBeTruthy())
+    // The chip for the project-less bucket; the card's own pill reads lowercase.
+    expect(screen.getByText('No project')).toBeTruthy()
+    expect(screen.getByText('no project')).toBeTruthy()
+  })
+
+  it('filters by project, «No project» included', async () => {
+    mockApi()
+    renderWithProviders(<AgentsScreen />)
+    await waitFor(() => expect(screen.getByText('librarian')).toBeTruthy())
+
+    fireEvent.press(screen.getByText('No project'))
+    await waitFor(() => expect(screen.queryByText('sre')).toBeNull())
+    expect(screen.getByText('librarian')).toBeTruthy()
+
+    fireEvent.press(screen.getByText('All'))
+    await waitFor(() => expect(screen.getByText('sre')).toBeTruthy())
+  })
+
+  it('opens a chat with the agent from the card, live session or not', async () => {
+    mockApi()
+    renderWithProviders(<AgentsScreen />)
+    await waitFor(() => expect(screen.getByText('librarian')).toBeTruthy())
+
+    // librarian's session is down; chat must still open — what you send there
+    // waits in its inbox.
+    fireEvent.press(screen.getAllByText('💬 Chat')[1])
+    await waitFor(() =>
+      expect(router.navigate).toHaveBeenCalledWith('/chat/librarian?agent=1'),
+    )
+  })
+
+  it('copies the attach command for the agent', async () => {
+    mockApi()
+    renderWithProviders(<AgentsScreen />)
+    await waitFor(() => expect(screen.getByText('librarian')).toBeTruthy())
+
+    fireEvent.press(screen.getAllByText('⧉ Attach')[1])
+    await waitFor(() =>
+      expect(Clipboard.setStringAsync).toHaveBeenCalledWith('rocket agent attach librarian'),
+    )
   })
 })
 
