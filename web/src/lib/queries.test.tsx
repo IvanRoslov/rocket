@@ -4,6 +4,7 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { renderHook, waitFor } from '@testing-library/react'
+import { HttpResponse, http } from 'msw'
 import { setupServer } from 'msw/node'
 import type { ReactNode } from 'react'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
@@ -12,6 +13,9 @@ import {
   useAgentInbox,
   useAgentQuestions,
   useAgents,
+  useAnswerQuestion,
+  useReplyAgentQuestion,
+  useReplyQuestion,
   useSendAgentMessage,
   useStartAgent,
   useStopAgent,
@@ -115,5 +119,68 @@ describe('agent queries', () => {
     result.current.mutate('sre')
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data!.status).toBe('stopped')
+  })
+})
+
+// `to` decides who must RESPOND, never who gets notified. An empty pick must
+// not put the key on the wire at all: the API reads an absent `to` as
+// "everyone except the author" (waitingOn in internal/api/threads.go).
+describe('addressees on reply and answer', () => {
+  it('useReplyQuestion sends `to` when picked and omits the key when not', async () => {
+    const bodies: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/questions/:id/reply', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 3 }, { status: 201 })
+      }),
+    )
+    const { result } = renderHook(() => useReplyQuestion(), { wrapper })
+
+    result.current.mutate({ id: 3, body: 'over to you', taskId: 12, to: ['cto'] })
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ body: 'over to you', to: ['cto'] })
+
+    result.current.mutate({ id: 3, body: 'anyone', taskId: 12, to: [] })
+    await waitFor(() => expect(bodies).toHaveLength(2))
+    expect(bodies[1]).toEqual({ body: 'anyone' })
+    expect(bodies[1]).not.toHaveProperty('to')
+  })
+
+  it('useAnswerQuestion sends `to` on an answer but never alongside a dismiss', async () => {
+    const bodies: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/questions/:id/answer', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 3 })
+      }),
+    )
+    const { result } = renderHook(() => useAnswerQuestion(), { wrapper })
+
+    result.current.mutate({ id: 3, body: 'done', taskId: 12, to: ['cto', 'reply-answer-orch'] })
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ body: 'done', to: ['cto', 'reply-answer-orch'] })
+
+    result.current.mutate({ id: 3, dismiss: true, taskId: 12, to: ['cto'] })
+    await waitFor(() => expect(bodies).toHaveLength(2))
+    expect(bodies[1]).toEqual({ dismiss: true })
+  })
+
+  it('useReplyAgentQuestion carries the same optional `to`', async () => {
+    const bodies: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/agent-questions/:id/reply', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 90 }, { status: 201 })
+      }),
+    )
+    const { result } = renderHook(() => useReplyAgentQuestion(), { wrapper })
+
+    result.current.mutate({ id: 90, body: 'ping', roleId: 'sre', to: ['sre'] })
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ body: 'ping', to: ['sre'] })
+
+    result.current.mutate({ id: 90, body: 'ping', roleId: 'sre' })
+    await waitFor(() => expect(bodies).toHaveLength(2))
+    expect(bodies[1]).toEqual({ body: 'ping' })
   })
 })
