@@ -3,11 +3,9 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 
-	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -16,45 +14,36 @@ import (
 // reuses questionMessageResponse for thread entries so web/mobile can share
 // one thread component.
 type agentQuestionResponse struct {
-	ID         int64                     `json:"id"`
-	RoleID     string                    `json:"role_id"`
-	Ordinal    int                       `json:"ordinal"`
-	AskedBy    string                    `json:"asked_by"`
-	Body       string                    `json:"body"`
-	Context    string                    `json:"context,omitempty"`
-	Status     string                    `json:"status"`
-	Resolution string                    `json:"resolution,omitempty"`
-	WhoseTurn  string                    `json:"whose_turn,omitempty"` // user|role
-	AskedAt    int64                     `json:"asked_at"`
-	ResolvedAt int64                     `json:"resolved_at,omitempty"`
-	Messages   []questionMessageResponse `json:"messages"`
+	ID         int64  `json:"id"`
+	RoleID     string `json:"role_id"`
+	Ordinal    int    `json:"ordinal"`
+	AskedBy    string `json:"asked_by"`
+	Body       string `json:"body"`
+	Context    string `json:"context,omitempty"`
+	Status     string `json:"status"`
+	Resolution string `json:"resolution,omitempty"`
+	// Participants, WaitingOn and YourTurn mirror questionResponse; WhoseTurn
+	// keeps the role vocabulary (user|role) the clients already read.
+	Participants []string                  `json:"participants"`
+	WaitingOn    []string                  `json:"waiting_on"`
+	YourTurn     bool                      `json:"your_turn"`
+	WhoseTurn    string                    `json:"whose_turn,omitempty"` // user|role
+	AskedAt      int64                     `json:"asked_at"`
+	ResolvedAt   int64                     `json:"resolved_at,omitempty"`
+	Messages     []questionMessageResponse `json:"messages"`
 }
 
-// whoseTurnAgent derives whose turn it is to speak next in a role's thread
-// from the author of its last entry. The question itself counts as the first
-// entry when no messages exist yet: a role-opened thread awaits the human, a
-// human-opened one awaits the role. A resolved thread has no pending turn.
-func whoseTurnAgent(q store.AgentQuestion, msgs []store.AgentQuestionMessage) string {
-	if q.Status == "resolved" {
-		return ""
+// buildAgentQuestionResponse loads a role thread's messages, participants and
+// ordinal and assembles the full API response. Messages and participants come
+// from the unified DAO: migration 0009 put role threads in the same tables, and
+// only the unified QuestionMessage carries AddressedTo. caller decides
+// your_turn.
+func buildAgentQuestionResponse(d Deps, caller *store.Session, q store.AgentQuestion) (agentQuestionResponse, error) {
+	msgs, err := d.Store.ListQuestionMessages(q.ID)
+	if err != nil {
+		return agentQuestionResponse{}, err
 	}
-	if len(msgs) == 0 {
-		if q.AskedBy == "" {
-			return "role"
-		}
-		return "user"
-	}
-	if store.IsHuman(msgs[len(msgs)-1].Author) {
-		// Last entry from the human.
-		return "role"
-	}
-	return "user"
-}
-
-// buildAgentQuestionResponse loads a thread and its ordinal and assembles the
-// full API response shape.
-func buildAgentQuestionResponse(d Deps, q store.AgentQuestion) (agentQuestionResponse, error) {
-	msgs, err := d.Store.ListAgentQuestionMessages(q.ID)
+	participants, err := d.Store.ListParticipants(q.ID)
 	if err != nil {
 		return agentQuestionResponse{}, err
 	}
@@ -65,28 +54,29 @@ func buildAgentQuestionResponse(d Deps, q store.AgentQuestion) (agentQuestionRes
 
 	msgOut := make([]questionMessageResponse, len(msgs))
 	for i, m := range msgs {
-		msgOut[i] = questionMessageResponse{
-			ID:        m.ID,
-			Author:    wireAuthor(m.Author),
-			Kind:      m.Kind,
-			Body:      m.Body,
-			CreatedAt: m.CreatedAt,
-		}
+		msgOut[i] = toQuestionMessageResponse(m)
 	}
 
+	waiting := waitingOn(store.Question{
+		ID: q.ID, RoleID: q.RoleID, AskedBy: q.AskedBy, Status: q.Status,
+	}, msgs, participants)
+
 	return agentQuestionResponse{
-		ID:         q.ID,
-		RoleID:     q.RoleID,
-		Ordinal:    ordinal,
-		AskedBy:    q.AskedBy,
-		Body:       q.Body,
-		Context:    q.Context,
-		Status:     q.Status,
-		Resolution: q.Resolution,
-		WhoseTurn:  whoseTurnAgent(q, msgs),
-		AskedAt:    q.AskedAt,
-		ResolvedAt: q.ResolvedAt,
-		Messages:   msgOut,
+		ID:           q.ID,
+		RoleID:       q.RoleID,
+		Ordinal:      ordinal,
+		AskedBy:      q.AskedBy,
+		Body:         q.Body,
+		Context:      q.Context,
+		Status:       q.Status,
+		Resolution:   q.Resolution,
+		Participants: participants,
+		WaitingOn:    waiting,
+		YourTurn:     contains(waiting, callerParticipant(caller)),
+		WhoseTurn:    whoseTurnCompat(waiting, "role"),
+		AskedAt:      q.AskedAt,
+		ResolvedAt:   q.ResolvedAt,
+		Messages:     msgOut,
 	}, nil
 }
 
@@ -106,30 +96,6 @@ func registerAgentQuestionRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("POST /v1/agent-questions/{id}/answer", func(w http.ResponseWriter, r *http.Request) {
 		handlePostAgentQuestionAnswer(w, r, d)
 	})
-}
-
-// callerIsRoleInstance reports whether caller is the agent itself: its session
-// is registered under the agent's own id (docs/10-agents.md).
-func callerIsRoleInstance(caller *store.Session, roleID string) bool {
-	return caller != nil && caller.Kind == session.AgentSessionKind && caller.ID == roleID
-}
-
-// writeAgentQuestionForbidden rejects a caller that is neither the human nor
-// an instance of the role owning the thread.
-func writeAgentQuestionForbidden(w http.ResponseWriter, roleID string) {
-	writeErr(w, http.StatusForbidden, "forbidden",
-		"only the human user or an instance of role "+roleID+" may use its question threads")
-}
-
-// deliverHumanEntry delivers a human entry in a role's thread to the agent,
-// through the very same live-or-inbox path an ordinary message takes: a live
-// agent session gets it injected, a dead one finds it in its inbox. The
-// "[role sre Q2 reply]" frame mirrors the one task threads use, so the agent
-// can tell a thread entry from a plain message at a glance.
-func deliverHumanEntry(d Deps, roleID string, questionID int64, ordinal int, entry, text string) error {
-	body := fmt.Sprintf("[role %s Q%d %s] %s", roleID, ordinal, entry, text)
-	_, _, err := deliverToAgent(d, roleID, "", body)
-	return err
 }
 
 // parseAgentQuestionID extracts and parses the {id} path value, writing a 404
@@ -159,12 +125,12 @@ func getAgentQuestionOr404(w http.ResponseWriter, d Deps, id int64) (store.Agent
 }
 
 // writeAgentQuestion re-reads the thread and writes it with the given status.
-func writeAgentQuestion(w http.ResponseWriter, d Deps, id int64, status int) {
+func writeAgentQuestion(w http.ResponseWriter, d Deps, caller *store.Session, id int64, status int) {
 	q, ok := getAgentQuestionOr404(w, d, id)
 	if !ok {
 		return
 	}
-	resp, err := buildAgentQuestionResponse(d, q)
+	resp, err := buildAgentQuestionResponse(d, caller, q)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -179,6 +145,11 @@ func handleGetAgentQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
+	caller, err := callerSession(r, d.Store)
+	if writeCallerErr(w, err) {
+		return
+	}
+
 	questions, err := d.Store.ListAgentQuestions(a.ID, r.URL.Query().Get("status") == "open")
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -187,7 +158,7 @@ func handleGetAgentQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 
 	out := make([]agentQuestionResponse, len(questions))
 	for i, q := range questions {
-		resp, err := buildAgentQuestionResponse(d, q)
+		resp, err := buildAgentQuestionResponse(d, caller, q)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
@@ -198,8 +169,9 @@ func handleGetAgentQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 }
 
 type postAgentQuestionRequest struct {
-	Body    string `json:"body"`
-	Context string `json:"context"`
+	Body    string   `json:"body"`
+	Context string   `json:"context"`
+	To      []string `json:"to"`
 }
 
 // handlePostAgentQuestions serves POST /v1/agents/{id}/questions
@@ -220,8 +192,10 @@ func handlePostAgentQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 	if writeCallerErr(w, err) {
 		return
 	}
-	if caller != nil && !callerIsRoleInstance(caller, a.ID) {
-		writeAgentQuestionForbidden(w, a.ID)
+	subj := threadSubject{RoleID: a.ID, Counterpart: a.ID}
+	if !canOpenThread(d, caller, subj) {
+		writeErr(w, http.StatusForbidden, "forbidden",
+			"only the human user or a persistent agent may open a role question thread")
 		return
 	}
 
@@ -246,35 +220,46 @@ func handlePostAgentQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
-	if caller == nil {
-		q, ok := getAgentQuestionOr404(w, d, qid)
-		if !ok {
-			return
-		}
-		ordinal, err := d.Store.AgentQuestionOrdinal(q)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
-		}
-		text := req.Body
-		if req.Context != "" {
-			text += "\n\n" + req.Context
-		}
-		if err := deliverHumanEntry(d, a.ID, qid, ordinal, "question", text); err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
-		}
+	author := callerParticipant(caller)
+	if err := d.Store.AddParticipants(qid,
+		append([]string{store.ParticipantHuman, author, a.ID}, req.To...)...); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	q, ok := getAgentQuestionOr404(w, d, qid)
+	if !ok {
+		return
+	}
+	ordinal, err := d.Store.AgentQuestionOrdinal(q)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	participants, err := d.Store.ListParticipants(qid)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	text := req.Body
+	if req.Context != "" {
+		text += "\n\n" + req.Context
+	}
+	if err := participantFanOut(d, subj, ordinal, "question", author, text, participants); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
 	}
 
 	d.Bus.Publish("agent.question_asked", callerLabel(caller), map[string]any{
 		"role_id": a.ID, "question_id": qid,
 	})
 
-	writeAgentQuestion(w, d, qid, http.StatusCreated)
+	writeAgentQuestion(w, d, caller, qid, http.StatusCreated)
 }
 
 type postAgentQuestionReplyRequest struct {
-	Body string `json:"body"`
+	Body string   `json:"body"`
+	To   []string `json:"to"`
 }
 
 // handlePostAgentQuestionReply serves POST /v1/agent-questions/{id}/reply
@@ -301,8 +286,15 @@ func handlePostAgentQuestionReply(w http.ResponseWriter, r *http.Request, d Deps
 	if writeCallerErr(w, err) {
 		return
 	}
-	if caller != nil && !callerIsRoleInstance(caller, q.RoleID) {
-		writeAgentQuestionForbidden(w, q.RoleID)
+	subj := threadSubject{RoleID: q.RoleID, Counterpart: q.RoleID}
+	participants, err := d.Store.ListParticipants(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	if !canPostToThread(d, caller, subj, participants) {
+		writeErr(w, http.StatusForbidden, "forbidden",
+			"only a participant of this thread may reply")
 		return
 	}
 
@@ -334,12 +326,21 @@ func handlePostAgentQuestionReply(w http.ResponseWriter, r *http.Request, d Deps
 		}
 	}
 
-	if _, err := d.Store.AddAgentQuestionMessage(store.AgentQuestionMessage{
-		QuestionID: id,
-		Author:     callerAuthor(caller),
-		Kind:       "reply",
-		Body:       req.Body,
+	// The unified DAO, not the facade: only store.QuestionMessage carries
+	// AddressedTo, and since migration 0009 both live in the same table.
+	author := callerParticipant(caller)
+	if _, err := d.Store.AddQuestionMessage(store.QuestionMessage{
+		QuestionID:  id,
+		Author:      author,
+		Kind:        "reply",
+		Body:        req.Body,
+		AddressedTo: req.To,
 	}); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	if err := d.Store.AddParticipants(id, append([]string{author}, req.To...)...); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
@@ -350,28 +351,32 @@ func handlePostAgentQuestionReply(w http.ResponseWriter, r *http.Request, d Deps
 		})
 	}
 
-	if caller == nil {
-		ordinal, err := d.Store.AgentQuestionOrdinal(q)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
-		}
-		if err := deliverHumanEntry(d, q.RoleID, id, ordinal, "reply", req.Body); err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
-		}
+	ordinal, err := d.Store.AgentQuestionOrdinal(q)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	recipients, err := d.Store.ListParticipants(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	if err := participantFanOut(d, subj, ordinal, "reply", author, req.Body, recipients); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
 	}
 
 	d.Bus.Publish("agent.question_replied", callerLabel(caller), map[string]any{
 		"role_id": q.RoleID, "question_id": id,
 	})
 
-	writeAgentQuestion(w, d, id, http.StatusCreated)
+	writeAgentQuestion(w, d, caller, id, http.StatusCreated)
 }
 
 type postAgentQuestionAnswerRequest struct {
-	Body    string `json:"body"`
-	Dismiss bool   `json:"dismiss"`
+	Body    string   `json:"body"`
+	Dismiss bool     `json:"dismiss"`
+	To      []string `json:"to"`
 }
 
 // handlePostAgentQuestionAnswer serves POST /v1/agent-questions/{id}/answer
@@ -393,8 +398,9 @@ func handlePostAgentQuestionAnswer(w http.ResponseWriter, r *http.Request, d Dep
 	if writeCallerErr(w, err) {
 		return
 	}
-	if caller != nil {
-		writeErr(w, http.StatusForbidden, "forbidden", "only the human user may answer questions")
+	if !canAnswerThread(d, caller) {
+		writeErr(w, http.StatusForbidden, "forbidden",
+			"only the human user or a persistent agent may answer; use reply")
 		return
 	}
 
@@ -438,11 +444,19 @@ func handlePostAgentQuestionAnswer(w http.ResponseWriter, r *http.Request, d Dep
 			return
 		}
 
-		if _, err := d.Store.AddAgentQuestionMessage(store.AgentQuestionMessage{
-			QuestionID: id,
-			Kind:       "answer",
-			Body:       req.Body,
+		author := callerParticipant(caller)
+		if _, err := d.Store.AddQuestionMessage(store.QuestionMessage{
+			QuestionID:  id,
+			Author:      author,
+			Kind:        "answer",
+			Body:        req.Body,
+			AddressedTo: req.To,
 		}); err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+
+		if err := d.Store.AddParticipants(id, append([]string{author}, req.To...)...); err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
@@ -452,7 +466,13 @@ func handlePostAgentQuestionAnswer(w http.ResponseWriter, r *http.Request, d Dep
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
-		if err := deliverHumanEntry(d, q.RoleID, id, ordinal, "answer", req.Body); err != nil {
+		recipients, err := d.Store.ListParticipants(id)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		subj := threadSubject{RoleID: q.RoleID, Counterpart: q.RoleID}
+		if err := participantFanOut(d, subj, ordinal, "answer", author, req.Body, recipients); err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
@@ -462,5 +482,5 @@ func handlePostAgentQuestionAnswer(w http.ResponseWriter, r *http.Request, d Dep
 		"role_id": q.RoleID, "question_id": id, "resolution": resolution,
 	})
 
-	writeAgentQuestion(w, d, id, http.StatusOK)
+	writeAgentQuestion(w, d, caller, id, http.StatusOK)
 }

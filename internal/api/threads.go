@@ -193,7 +193,15 @@ func participantFanOut(d Deps, subj threadSubject, ordinal int, kind, author, bo
 
 		_, err := d.Store.GetAgent(p)
 		if err == nil {
-			if _, _, err := deliverToAgent(d, p, author, framed); err != nil {
+			// The frame already names the author. Passing "human" as the
+			// sender would make deliveryBody prefix a second "[from human]",
+			// because no session is named "human"; a session-id author is
+			// recorded on the message itself and adds no such prefix.
+			from := author
+			if store.IsHuman(from) {
+				from = ""
+			}
+			if _, _, err := deliverToAgent(d, p, from, framed); err != nil {
 				return err
 			}
 			continue
