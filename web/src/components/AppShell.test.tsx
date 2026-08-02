@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
+import { HttpResponse, http } from 'msw'
 import { setupServer } from 'msw/node'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { LAST_PROJECT_STORAGE_KEY } from '../lib/lastProject'
@@ -89,4 +90,25 @@ test('на главной ни Kanban, ни Agents не активны', () => {
   renderShell('/')
   expect(screen.getByRole('link', { name: 'Kanban' })).not.toHaveAttribute('aria-current')
   expect(screen.getByRole('link', { name: 'Agents' })).not.toHaveAttribute('aria-current')
+})
+
+// The nav counter is driven by `your_turn`, the caller-relative field, not by
+// the legacy two-party `whose_turn` string. They agree on the real API, so the
+// handler below deliberately makes them disagree to pin down which one wins.
+test('the Questions tab counts the threads whose turn is yours', async () => {
+  server.use(
+    http.get('/v1/questions', () =>
+      HttpResponse.json({
+        questions: [
+          { id: 1, task_id: 12, ordinal: 1, your_turn: true, whose_turn: 'orchestrator', messages: [] },
+          { id: 2, task_id: 12, ordinal: 2, your_turn: true, whose_turn: '', messages: [] },
+          { id: 3, task_id: 12, ordinal: 3, your_turn: false, whose_turn: 'user', messages: [] },
+        ],
+      }),
+    ),
+  )
+  renderShell()
+
+  const questions = await screen.findByRole('link', { name: /Questions/ })
+  await waitFor(() => expect(questions).toHaveTextContent('2'))
 })

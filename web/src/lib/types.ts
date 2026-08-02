@@ -357,6 +357,13 @@ export interface Question {
   context?: string
   status: QuestionStatus
   resolution?: QuestionResolution
+  /** Everyone taking part in the thread: "human", agent ids or session ids. */
+  participants?: string[]
+  /** The subset of `participants` expected to speak next. */
+  waiting_on?: string[]
+  /** Caller-relative: true when the dashboard user is in `waiting_on`. */
+  your_turn?: boolean
+  /** Legacy two-party turn field, derived from `waiting_on` by the API. */
   whose_turn?: QuestionWhoseTurn
   asked_at: number
   resolved_at?: number
@@ -377,15 +384,22 @@ export interface GlobalQuestion extends Question {
 export type QuestionMessageKind = 'reply' | 'answer'
 
 /**
- * A single entry in a question's thread. `author` is "" (omitted) for the
- * human user, otherwise the orchestrator session id that posted it — there
- * is no `dismiss` message kind; dismissing a question resolves it without
- * adding a thread message.
+ * A single entry in a question's thread. `author` is the participant id that
+ * posted it: "" (omitted) today for the human and "human" once subtask #736
+ * flips the wire — use `isHuman()` from lib/participants.ts, never a literal
+ * comparison. There is no `dismiss` message kind; dismissing a question
+ * resolves it without adding a thread message.
  */
 export interface QuestionMessage {
   id: number
   author?: string
   kind: QuestionMessageKind
+  /**
+   * Who must RESPOND to this entry — never who gets notified; every
+   * participant but the author is notified regardless. Absent or empty means
+   * "everyone except the author".
+   */
+  addressed_to?: string[]
   body: string
   created_at: number
 }
@@ -482,6 +496,13 @@ export interface AgentQuestion {
   context?: string
   status: 'open' | 'resolved'
   resolution?: string
+  /** Everyone taking part in the thread: "human", agent ids or session ids. */
+  participants?: string[]
+  /** The subset of `participants` expected to speak next. */
+  waiting_on?: string[]
+  /** Caller-relative: true when the dashboard user is in `waiting_on`. */
+  your_turn?: boolean
+  /** Legacy two-party turn field, derived from `waiting_on` by the API. */
   whose_turn?: 'user' | 'role'
   asked_at: number
   resolved_at?: number

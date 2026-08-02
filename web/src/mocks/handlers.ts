@@ -6,6 +6,7 @@
 // internal/api/tasks.go / questions.go.
 
 import { http, HttpResponse } from 'msw'
+import { isHuman } from '../lib/participants'
 import type {
   Agent,
   AgentInboxMessage,
@@ -181,6 +182,17 @@ function taskDetailFor(task: Task) {
       : undefined,
     open_questions: openQuestionsFor(task.id),
   }
+}
+
+// Mirrors waitingOn() in internal/api/threads.go for the fixture server: an
+// explicit `to` decides who must respond, otherwise it is every participant
+// except the author. `your_turn` is that set seen from the dashboard user.
+function applyTurn(question: Question, author: string, to?: string[]) {
+  const participants = question.participants ?? []
+  const isAuthor = (p: string) => (isHuman(author) ? isHuman(p) : p === author)
+  question.waiting_on = to ?? participants.filter((p) => !isAuthor(p))
+  question.your_turn = (question.waiting_on ?? []).some((p) => isHuman(p))
+  question.whose_turn = question.your_turn ? 'user' : 'orchestrator'
 }
 
 export const handlers = [
@@ -609,7 +621,7 @@ export const handlers = [
   // X-Rocket-Session, so asked_by is "" and whose_turn starts "orchestrator").
   http.post('/v1/tasks/:id/questions', async ({ params, request }) => {
     const taskId = Number(params.id)
-    const body = (await request.json()) as { body: string; context?: string }
+    const body = (await request.json()) as { body: string; context?: string; to?: string[] }
     const ordinal = questionsState.filter((q) => q.task_id === taskId).length + 1
     const question: Question = {
       id: nextQuestionId++,
@@ -619,10 +631,14 @@ export const handlers = [
       body: body.body,
       context: body.context,
       status: 'open',
+      participants: ['human', 's-billing-v2-orch'],
+      waiting_on: [],
+      your_turn: false,
       whose_turn: 'orchestrator',
       asked_at: nowSeconds(),
       messages: [],
     }
+    applyTurn(question, '', body.to)
     questionsState.push(question)
     return HttpResponse.json(question, { status: 201 })
   }),
@@ -640,11 +656,11 @@ export const handlers = [
     if (question.status !== 'open') {
       return HttpResponse.json({ error: { code: 'question_resolved', message: 'question is already resolved' } }, { status: 409 })
     }
-    const body = (await request.json()) as { body: string }
+    const body = (await request.json()) as { body: string; to?: string[] }
     // Dashboard sends no X-Rocket-Session, so it acts as the user: author "".
-    const message: QuestionMessage = { id: Date.now(), author: undefined, kind: 'reply', body: body.body, created_at: nowSeconds() }
+    const message: QuestionMessage = { id: Date.now(), author: undefined, kind: 'reply', body: body.body, addressed_to: body.to, created_at: nowSeconds() }
     question.messages.push(message)
-    question.whose_turn = 'orchestrator'
+    applyTurn(question, '', body.to)
     return HttpResponse.json(question, { status: 201 })
   }),
 
@@ -657,18 +673,23 @@ export const handlers = [
     if (question.status !== 'open') {
       return HttpResponse.json({ error: { code: 'question_resolved', message: 'question is already resolved' } }, { status: 409 })
     }
-    const body = (await request.json()) as { body?: string; dismiss?: boolean }
+    const body = (await request.json()) as { body?: string; dismiss?: boolean; to?: string[] }
     if (body.dismiss) {
       // Dismissing resolves the question without adding a thread message.
       question.status = 'resolved'
       question.resolution = 'dismissed'
+      question.waiting_on = []
+      question.your_turn = false
       question.whose_turn = ''
       question.resolved_at = nowSeconds()
       return HttpResponse.json(question)
     }
-    question.messages.push({ id: Date.now(), author: undefined, kind: 'answer', body: body.body ?? '', created_at: nowSeconds() })
+    question.messages.push({ id: Date.now(), author: undefined, kind: 'answer', body: body.body ?? '', addressed_to: body.to, created_at: nowSeconds() })
     question.status = 'resolved'
     question.resolution = 'answered'
+    // A resolved thread waits on nobody, whatever `to` said.
+    question.waiting_on = []
+    question.your_turn = false
     question.whose_turn = ''
     question.resolved_at = nowSeconds()
     return HttpResponse.json(question)
@@ -1022,7 +1043,8 @@ export const handlers = [
   }),
 
   http.post('/v1/agents/:id/questions', async ({ params, request }) => {
-    const body = (await request.json()) as { body: string; context?: string }
+    const body = (await request.json()) as { body: string; context?: string; to?: string[] }
+    const waiting = body.to ?? [params.id as string]
     return HttpResponse.json(
       {
         id: 92,
@@ -1032,6 +1054,9 @@ export const handlers = [
         body: body.body,
         context: body.context,
         status: 'open',
+        participants: ['human', params.id as string],
+        waiting_on: waiting,
+        your_turn: waiting.some((p) => isHuman(p)),
         whose_turn: 'role',
         asked_at: 1_800_000_000,
         messages: [],
@@ -1041,14 +1066,24 @@ export const handlers = [
   }),
 
   http.post('/v1/agent-questions/:id/reply', async ({ request }) => {
-    const body = (await request.json()) as { body: string }
+    const body = (await request.json()) as { body: string; to?: string[] }
+    const waiting = body.to ?? ['sre']
     return HttpResponse.json(
       {
         ...agentQuestions[0],
+        waiting_on: waiting,
+        your_turn: waiting.some((p) => isHuman(p)),
         whose_turn: 'role',
         messages: [
           ...agentQuestions[0].messages,
-          { id: 99, author: '', kind: 'reply', body: body.body, created_at: 1_800_000_000 },
+          {
+            id: 99,
+            author: '',
+            kind: 'reply',
+            body: body.body,
+            addressed_to: body.to,
+            created_at: 1_800_000_000,
+          },
         ],
       },
       { status: 201 },
@@ -1056,6 +1091,12 @@ export const handlers = [
   }),
 
   http.post('/v1/agent-questions/:id/answer', () =>
-    HttpResponse.json({ ...agentQuestions[0], status: 'resolved', whose_turn: undefined }),
+    HttpResponse.json({
+      ...agentQuestions[0],
+      status: 'resolved',
+      waiting_on: [],
+      your_turn: false,
+      whose_turn: undefined,
+    }),
   ),
 ]

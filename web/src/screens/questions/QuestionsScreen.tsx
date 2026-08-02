@@ -3,6 +3,7 @@
 // QuestionThread. Spec: docs/superpowers/specs/2026-07-21-questions-
 // visibility-design.md §2.
 
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { QuestionThread } from '../../components/QuestionThread'
 import { useOpenQuestions } from '../../lib/queries'
@@ -22,12 +23,26 @@ function GlobalThread({ q }: { q: GlobalQuestion }) {
 
 export function QuestionsScreen() {
   const { data: questions, isLoading } = useOpenQuestions()
-  const awaitingYou = (questions ?? []).filter((q) => q.whose_turn === 'user')
-  const awaitingOrch = (questions ?? []).filter((q) => q.whose_turn !== 'user')
+  // Off by default on purpose: the human sees every open thread until they
+  // ask for less. Threads are grouped by `your_turn`, the caller-relative
+  // field — a thread can wait on another participant without waiting on you.
+  const [onlyMine, setOnlyMine] = useState(false)
+  const awaitingYou = (questions ?? []).filter((q) => q.your_turn)
+  const awaitingOthers = onlyMine ? [] : (questions ?? []).filter((q) => !q.your_turn)
 
   return (
     <div className="questions-screen">
-      <h1 className="questions-screen__title">Open questions</h1>
+      <div className="questions-screen__head">
+        <h1 className="questions-screen__title">Open questions</h1>
+        <label className="questions-screen__filter">
+          <input
+            type="checkbox"
+            checked={onlyMine}
+            onChange={(e) => setOnlyMine(e.target.checked)}
+          />
+          Waiting on me
+        </label>
+      </div>
       {isLoading && <p className="questions-screen__empty">Loading…</p>}
       {!isLoading && (questions ?? []).length === 0 && (
         <p className="questions-screen__empty">No open questions.</p>
@@ -40,10 +55,10 @@ export function QuestionsScreen() {
           ))}
         </>
       )}
-      {awaitingOrch.length > 0 && (
+      {awaitingOthers.length > 0 && (
         <>
-          <div className="questions-screen__label">Awaiting orchestrator</div>
-          {awaitingOrch.map((q) => (
+          <div className="questions-screen__label">Awaiting others</div>
+          {awaitingOthers.map((q) => (
             <GlobalThread key={q.id} q={q} />
           ))}
         </>

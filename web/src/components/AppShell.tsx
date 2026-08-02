@@ -27,7 +27,9 @@ export function AppShell() {
   const agentsActive =
     location.pathname.startsWith('/agents') || (inProject && location.pathname.includes('/agents'))
   const kanbanActive = inProject && !location.pathname.includes('/agents')
-  const awaitingCount = (questions ?? []).filter((q) => q.whose_turn === 'user').length
+  // `your_turn` is caller-relative; `whose_turn` cannot distinguish "waiting
+  // on you" from "waiting on another participant".
+  const awaitingCount = (questions ?? []).filter((q) => q.your_turn).length
 
   return (
     <div style={{ minHeight: '100vh' }}>

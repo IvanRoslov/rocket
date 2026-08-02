@@ -447,15 +447,27 @@ export function useStartTask(): UseMutationResult<
   })
 }
 
+/**
+ * Attaches the addressee list to a thread payload. `to` decides who must
+ * RESPOND (`waiting_on`), never who gets NOTIFIED — every participant but the
+ * author is notified regardless. An empty pick must leave the key off the wire
+ * entirely: the API reads an absent `to` as "everyone except the author"
+ * (waitingOn in internal/api/threads.go).
+ */
+function withTo<T extends object>(payload: T, to?: string[]): T & { to?: string[] } {
+  return to && to.length > 0 ? { ...payload, to } : payload
+}
+
 /** `POST /v1/questions/{id}/reply` `{body}` -> bare questionResponse (201). Open questions only. */
 export function useReplyQuestion(): UseMutationResult<
   Question,
   Error,
-  { id: number; body: string; taskId: number }
+  { id: number; body: string; taskId: number; to?: string[] }
 > {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, body }) => api.post<Question>(`/v1/questions/${id}/reply`, { body }),
+    mutationFn: ({ id, body, to }) =>
+      api.post<Question>(`/v1/questions/${id}/reply`, withTo({ body }, to)),
     onSuccess: (_data, { taskId }) => {
       queryClient.invalidateQueries({ queryKey: ['task', taskId, 'questions'] })
       queryClient.invalidateQueries({ queryKey: ['task', taskId] })
@@ -471,12 +483,20 @@ export function useReplyQuestion(): UseMutationResult<
 export function useAnswerQuestion(): UseMutationResult<
   Question,
   Error,
-  { id: number; taskId: number } & ({ body: string; dismiss?: never } | { dismiss: true; body?: never })
+  { id: number; taskId: number; to?: string[] } & (
+    | { body: string; dismiss?: never }
+    | { dismiss: true; body?: never }
+  )
 > {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, body, dismiss }) =>
-      api.post<Question>(`/v1/questions/${id}/answer`, dismiss ? { dismiss: true } : { body }),
+    mutationFn: ({ id, body, dismiss, to }) =>
+      api.post<Question>(
+        `/v1/questions/${id}/answer`,
+        // A dismiss resolves the thread outright, so nobody is left to
+        // respond and an addressee list would be meaningless.
+        dismiss ? { dismiss: true } : withTo({ body }, to),
+      ),
     onSuccess: (_data, { taskId }) => {
       queryClient.invalidateQueries({ queryKey: ['task', taskId, 'questions'] })
       queryClient.invalidateQueries({ queryKey: ['task', taskId] })
@@ -801,12 +821,12 @@ export function useAskAgent(
 export function useReplyAgentQuestion(): UseMutationResult<
   AgentQuestion,
   Error,
-  { id: number; body: string; roleId: string }
+  { id: number; body: string; roleId: string; to?: string[] }
 > {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, body }) =>
-      api.post<AgentQuestion>(`/v1/agent-questions/${id}/reply`, { body }),
+    mutationFn: ({ id, body, to }) =>
+      api.post<AgentQuestion>(`/v1/agent-questions/${id}/reply`, withTo({ body }, to)),
     onSuccess: (_data, { roleId }) => {
       queryClient.invalidateQueries({ queryKey: ['agent', roleId, 'questions'] })
       queryClient.invalidateQueries({ queryKey: ['agent', roleId] })
@@ -819,17 +839,17 @@ export function useReplyAgentQuestion(): UseMutationResult<
 export function useAnswerAgentQuestion(): UseMutationResult<
   AgentQuestion,
   Error,
-  { id: number; roleId: string } & (
+  { id: number; roleId: string; to?: string[] } & (
     | { body: string; dismiss?: never }
     | { dismiss: true; body?: never }
   )
 > {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, body, dismiss }) =>
+    mutationFn: ({ id, body, dismiss, to }) =>
       api.post<AgentQuestion>(
         `/v1/agent-questions/${id}/answer`,
-        dismiss ? { dismiss: true } : { body },
+        dismiss ? { dismiss: true } : withTo({ body }, to),
       ),
     onSuccess: (_data, { roleId }) => {
       queryClient.invalidateQueries({ queryKey: ['agent', roleId, 'questions'] })

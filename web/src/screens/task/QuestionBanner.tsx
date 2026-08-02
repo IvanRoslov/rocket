@@ -11,13 +11,15 @@ export interface QuestionBannerProps {
 }
 
 export function QuestionBanner({ question, onOpen }: QuestionBannerProps) {
-  const awaitingUser = question.whose_turn === 'user'
+  // `your_turn` is the caller-relative field; `whose_turn` cannot tell "you"
+  // apart from "some other participant" in a multi-party thread.
+  const awaitingUser = question.your_turn === true
   const classes = ['question-banner', awaitingUser ? 'question-banner--warn' : 'question-banner--neutral']
 
   return (
     <button type="button" className={classes.join(' ')} onClick={onOpen}>
       <span className="question-banner__tag">
-        {awaitingUser ? '? awaiting you' : '? awaiting orchestrator'}
+        {awaitingUser ? '? awaiting you' : '? awaiting others'}
       </span>
       <span className="question-banner__ordinal">Q{question.ordinal}</span>
       <span className="question-banner__text">{question.body}</span>

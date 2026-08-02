@@ -467,7 +467,7 @@ describe('TaskScreen', () => {
       expect(screen.queryByText('billing-v2-w1 asked')).not.toBeInTheDocument()
     })
 
-    it('shows the right whose_turn badge for both a fresh and a replied-to user-opened thread', async () => {
+    it('names the participant being waited on, and "you" when it is your turn', async () => {
       renderTask('billing', 13)
       await screen.findByText('Migrate billing schema')
       await userEvent.click(screen.getByRole('tab', { name: /^Questions/ }))
@@ -477,7 +477,9 @@ describe('TaskScreen', () => {
       expect(within(tabPanel).getByText('Should we backfill existing rows or only handle new ones going forward?')).toBeInTheDocument()
       expect(within(tabPanel).getByText('Is the migration safe to run while the app is live, or does it need a maintenance window?')).toBeInTheDocument()
 
-      expect(within(tabPanel).getByText('awaiting orchestrator')).toBeInTheDocument()
+      // Q4 waits on the orchestrator session, now named rather than lumped
+      // under the generic "awaiting orchestrator"; Q5 waits on the human.
+      expect(within(tabPanel).getByText('awaiting billing-v2-w1')).toBeInTheDocument()
       expect(within(tabPanel).getByText('awaiting you')).toBeInTheDocument()
     })
 
@@ -493,6 +495,59 @@ describe('TaskScreen', () => {
 
       await waitFor(() => expect(document.querySelectorAll('.question-thread')).toHaveLength(1))
       expect(document.querySelector('.questions-tab__resolved-row')).toBeInTheDocument()
+    })
+  })
+
+  // Q3 on task #12 is the multi-participant showcase: human + the billing
+  // orchestrator + the "cto" persistent agent, with the human speaking under
+  // both wire spellings (see web/src/mocks/fixtures.ts).
+  describe('multi-participant threads', () => {
+    async function openQ3() {
+      renderTask('billing', 12)
+      await screen.findByText('Billing v2')
+      await userEvent.click(screen.getByRole('tab', { name: /^Questions/ }))
+      await screen.findByText('Discussion · 4 replies')
+      // Task #12 has exactly one open thread; the banner above the tabs
+      // repeats its text, so anchor on the card itself.
+      return document.querySelector('.question-thread') as HTMLElement
+    }
+
+    it('renders a human-authored entry as "you" for both "" and "human"', async () => {
+      const card = await openQ3()
+      const discussion = within(card).getByLabelText('Discussion')
+
+      // One entry per wire spelling of the human, both labelled "you".
+      expect(within(discussion).getAllByText('you')).toHaveLength(2)
+      expect(within(discussion).queryByText('human')).not.toBeInTheDocument()
+    })
+
+    it('lists the participants and the addressees of an addressed entry', async () => {
+      const card = await openQ3()
+
+      const row = within(card).getByLabelText('Participants')
+      expect(within(row).getByText('you')).toBeInTheDocument()
+      expect(within(row).getByText('cto')).toBeInTheDocument()
+      expect(within(row).getByText('s-billing-v2-orch')).toBeInTheDocument()
+
+      expect(within(card).getByText('\u2192 you')).toBeInTheDocument()
+    })
+
+    it('a picked addressee reaches the API as `to`', async () => {
+      const sent: Record<string, unknown>[] = []
+      server.use(
+        http.post('/v1/questions/:id/reply', async ({ request }) => {
+          sent.push((await request.json()) as Record<string, unknown>)
+          return HttpResponse.json({}, { status: 201 })
+        }),
+      )
+      const card = await openQ3()
+
+      await userEvent.click(within(card).getByRole('checkbox', { name: 'cto' }))
+      await userEvent.type(within(card).getByRole('textbox'), 'your call')
+      await userEvent.click(within(card).getByRole('button', { name: 'Clarify — keep open' }))
+
+      await waitFor(() => expect(sent).toHaveLength(1))
+      expect(sent[0]).toEqual({ body: 'your call', to: ['cto'] })
     })
   })
 })

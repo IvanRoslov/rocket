@@ -5,6 +5,7 @@
 import { useState } from 'react'
 import { Markdown } from '../../components/Markdown'
 import { QuestionThread, authorLabel } from '../../components/QuestionThread'
+import { isHuman } from '../../lib/participants'
 import { timeAgo } from '../../lib/format'
 import { useAskOrchestrator } from '../../lib/queries'
 import { usePasteImage } from '../../lib/usePasteImage'
@@ -153,7 +154,7 @@ function ResolvedThreadRow({ question, orchestratorName }: ResolvedThreadRowProp
           {question.messages.length > 0 && (
             <div className="question-thread__messages">
               {question.messages.map((m) => {
-                const isOrchestrator = !!m.author
+                const isOrchestrator = !isHuman(m.author)
                 return (
                   <div key={m.id} className="question-thread__message">
                     <div className="question-thread__message-head">
