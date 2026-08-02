@@ -4,8 +4,15 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
+
+// agentCaller builds the caller a persistent agent presents: a session
+// registered under the agent's own id with kind=agent.
+func agentCaller(id string) *store.Session {
+	return &store.Session{ID: id, Kind: session.AgentSessionKind}
+}
 
 func TestCallerParticipant_HumanIsCanonical(t *testing.T) {
 	if got := callerParticipant(nil); got != store.ParticipantHuman {
@@ -86,5 +93,65 @@ func TestWhoseTurnCompat(t *testing.T) {
 	}
 	if got := whoseTurnCompat(nil, "orchestrator"); got != "" {
 		t.Errorf("empty = %q, want empty", got)
+	}
+}
+
+func TestCanAnswerThread(t *testing.T) {
+	d := Deps{}
+	if !canAnswerThread(d, nil) {
+		t.Error("the human must be able to answer")
+	}
+	if !canAnswerThread(d, agentCaller("cto")) {
+		t.Error("a persistent agent must be able to answer")
+	}
+	if canAnswerThread(d, &store.Session{ID: "orch-1", Kind: "orchestrator"}) {
+		t.Error("an orchestrator must not be able to answer")
+	}
+	if canAnswerThread(d, &store.Session{ID: "w-1", Kind: "worker"}) {
+		t.Error("a worker must not be able to answer")
+	}
+}
+
+func TestCanPostToThread(t *testing.T) {
+	d := Deps{}
+	subj := threadSubject{TaskID: 7, Counterpart: "orch-1"}
+	parts := []string{"cto", "human", "orch-1"}
+
+	if !canPostToThread(d, nil, subj, parts) {
+		t.Error("the human must be able to post")
+	}
+	if !canPostToThread(d, agentCaller("cto"), subj, parts) {
+		t.Error("a participant agent must be able to post")
+	}
+	if !canPostToThread(d, &store.Session{ID: "orch-1", Kind: "orchestrator"}, subj, parts) {
+		t.Error("the task's own orchestrator must be able to post")
+	}
+	if canPostToThread(d, &store.Session{ID: "w-9", Kind: "worker"}, subj, parts) {
+		t.Error("a non-participant worker must not be able to post")
+	}
+	if !canPostToThread(d, &store.Session{ID: "w-9", Kind: "worker"},
+		subj, append(parts, "w-9")) {
+		t.Error("a worker that is a participant must be able to post")
+	}
+}
+
+func TestCanOpenThread(t *testing.T) {
+	d := Deps{}
+	subj := threadSubject{TaskID: 7, Counterpart: "orch-1"}
+
+	if !canOpenThread(d, nil, subj) {
+		t.Error("the human must be able to open a thread")
+	}
+	if !canOpenThread(d, agentCaller("cto"), subj) {
+		t.Error("a persistent agent must be able to open a thread")
+	}
+	if !canOpenThread(d, &store.Session{ID: "orch-1", Kind: "orchestrator"}, subj) {
+		t.Error("the task's own orchestrator must be able to open a thread")
+	}
+	if canOpenThread(d, &store.Session{ID: "orch-2", Kind: "orchestrator"}, subj) {
+		t.Error("another task's orchestrator must not be able to open a thread")
+	}
+	if canOpenThread(d, &store.Session{ID: "w-1", Kind: "worker"}, subj) {
+		t.Error("a worker must not be able to open a thread")
 	}
 }

@@ -7,6 +7,7 @@ package api
 import (
 	"sort"
 
+	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -104,4 +105,50 @@ func whoseTurnCompat(waiting []string, agentWord string) string {
 		return "user"
 	}
 	return agentWord
+}
+
+// callerIsPersistentAgent reports whether caller is an instance of a
+// registered kind=agent session — the class of caller that spec v1 §3 grants
+// the same thread rights as the human, including answer. d is unused today,
+// but is part of the signature so a later fallback to the agents table does
+// not have to touch every call site.
+func callerIsPersistentAgent(d Deps, caller *store.Session) bool {
+	return caller != nil && caller.Kind == session.AgentSessionKind
+}
+
+// canAnswerThread reports whether caller may resolve a thread (answer or
+// dismiss). Spec v1 §3: the human and persistent agents only — an orchestrator
+// or a worker gets 403 and is told to use reply instead, so a final decision
+// always has a human or a standing role behind it.
+func canAnswerThread(d Deps, caller *store.Session) bool {
+	return caller == nil || callerIsPersistentAgent(d, caller)
+}
+
+// callerIsCounterpart reports whether caller is the subject's own other side:
+// the orchestrator of the thread's task, or an instance of the thread's role.
+func callerIsCounterpart(caller *store.Session, subj threadSubject) bool {
+	if caller == nil || subj.Counterpart == "" {
+		return false
+	}
+	return caller.ID == subj.Counterpart
+}
+
+// canOpenThread reports whether caller may open a thread on subj. Spec v1 §3:
+// the human, any persistent agent, and the subject's own counterpart.
+func canOpenThread(d Deps, caller *store.Session, subj threadSubject) bool {
+	return caller == nil ||
+		callerIsPersistentAgent(d, caller) ||
+		callerIsCounterpart(caller, subj)
+}
+
+// canPostToThread reports whether caller may add a reply. Spec v1 §3: any
+// participant may post. The human is a participant of every thread by
+// construction, and the subject's counterpart is admitted even before it has
+// spoken, which preserves today's "the task's orchestrator may always reply"
+// behaviour on threads it has not yet touched.
+func canPostToThread(d Deps, caller *store.Session, subj threadSubject, participants []string) bool {
+	if caller == nil {
+		return true
+	}
+	return contains(participants, caller.ID) || callerIsCounterpart(caller, subj)
 }
