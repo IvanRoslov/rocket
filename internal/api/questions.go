@@ -22,10 +22,14 @@ type questionMessageResponse struct {
 }
 
 // wireAuthor renders a stored participant id for the current API contract.
-// The store canonicalised the human to store.ParticipantHuman in migration
-// 0009, but web and mobile still read an empty author as "you"; flipping the
-// wire is deliberately left to subtask #731, which lands it together with the
-// clients. Until then this keeps the contract byte-identical.
+//
+// This is a temporary compatibility shim (task #722). Migration 0009
+// canonicalised the human to store.ParticipantHuman in storage, but web
+// (QuestionThread.tsx) and mobile (app/task/[id].tsx) still read an empty
+// author as "you", so the wire keeps sending "" for now. The shim is removed —
+// and the wire starts sending "human" — only once both clients accept the
+// canonical id; until then every merge would otherwise open a window where the
+// human's own messages render as someone else's.
 func wireAuthor(author string) string {
 	if store.IsHuman(author) {
 		return ""
