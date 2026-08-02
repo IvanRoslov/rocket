@@ -50,11 +50,15 @@ func writeCallerErr(w http.ResponseWriter, err error) bool {
 }
 
 // canWriteTask reports whether caller has write access to task. caller ==
-// nil means a human user, who has full rights. An orchestrator can write to
-// its own task, or to a subtask whose parent task belongs to it. A worker
-// can only write to its own (sub)task.
+// nil means a human user, who has full rights. A registered persistent agent
+// has the same rights as the human user. An orchestrator can write to its own
+// task, or to a subtask whose parent task belongs to it. A worker can only
+// write to its own (sub)task.
 func canWriteTask(caller *store.Session, task store.Task, st *store.Store) bool {
 	if caller == nil {
+		return true
+	}
+	if caller.Kind == "agent" {
 		return true
 	}
 	if task.SessionID == caller.ID {
