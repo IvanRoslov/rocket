@@ -162,7 +162,7 @@ rocket task move <id> <status>
 rocket task doc put <id> --kind spec --title "..." --file <f.md>
 rocket task log <id> --kind decision|problem|note "<текст>"
 rocket task ask <id> "<вопрос>" [--context <md>] [--to a,b]   # открыть тред
-rocket task ask-orch <id> "<вопрос>" [--context <md>]  # пользователь: открыть вопрос оркестратору (доставляется сразу)
+rocket task ask-orch <id> "<вопрос>" [--context <md>] [--to a,b]  # пользователь: открыть вопрос оркестратору (доставляется сразу)
 rocket task questions [<id>] [--open]              # вопросы, их треды и участники
 rocket task reply <question-id> "<текст>" [--to a,b]   # реплика в тред (любой участник)
 rocket task answer <question-id> "<ответ>"         # финальный ответ, закрывает; человек и постоянный агент
@@ -170,7 +170,7 @@ rocket task answer <question-id> --dismiss         # закрыть как не�
 rocket task cancel <id>
 ```
 
-`--to` принимает идентификаторы участников (`human`, id постоянного агента, session id). Названные вступают в тред и получают уведомление; при `reply` и `answer` они же становятся `waiting_on`. Без `--to` поведение прежнее: ждут всех участников, кроме автора.
+`--to` принимает идентификаторы участников (`human`, id постоянного агента, session id) — через запятую, флаг можно и повторять. Названные вступают в тред и получают уведомление; при `reply` и `answer` они же становятся `waiting_on`. Без `--to` поведение прежнее: ждут всех участников, кроме автора.
 
 `rocket up "<описание>"` остаётся как шорткат: создаёт задачу и сразу делает `task start`.
 
