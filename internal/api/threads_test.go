@@ -155,3 +155,105 @@ func TestCanOpenThread(t *testing.T) {
 		t.Error("a worker must not be able to open a thread")
 	}
 }
+
+func TestThreadPrefix(t *testing.T) {
+	task := threadSubject{TaskID: 722, Counterpart: "orch-1"}
+	if got := threadPrefix(task, 3, "reply", "cto"); got != "[task #722 Q3 reply from cto]" {
+		t.Errorf("task prefix = %q", got)
+	}
+	role := threadSubject{RoleID: "cto", Counterpart: "cto"}
+	if got := threadPrefix(role, 2, "answer", "human"); got != "[role cto Q2 answer from human]" {
+		t.Errorf("role prefix = %q", got)
+	}
+}
+
+// TestParticipantFanOut_SkipsAuthorAndHuman drives the real delivery plumbing:
+// a live orchestrator session receives the framed body, the author does not,
+// and the human is never injected into.
+func TestParticipantFanOut_SkipsAuthorAndHuman(t *testing.T) {
+	d := messagesTestDeps(t)
+	addTestProject(t, d, "proj1")
+	addTestSession(t, d, "orch-1", "orchestrator", "proj1")
+	addLiveAgentSession(t, d, "cto")
+	if err := d.Store.AddAgent(store.Agent{ID: "cto", Dir: "/tmp/cto", Command: "claude", Enabled: true}); err != nil {
+		t.Fatalf("AddAgent: %v", err)
+	}
+
+	subj := threadSubject{TaskID: 7, Counterpart: "orch-1"}
+	if err := participantFanOut(d, subj, 1, "reply", "cto", "the body",
+		[]string{"cto", "human", "orch-1"}); err != nil {
+		t.Fatalf("participantFanOut: %v", err)
+	}
+
+	orchMsgs, err := d.Store.ListMessages("orch-1", 0)
+	if err != nil {
+		t.Fatalf("ListMessages(orch-1): %v", err)
+	}
+	if len(orchMsgs) != 1 {
+		t.Fatalf("orch-1 got %d messages, want 1", len(orchMsgs))
+	}
+	if want := "[task #7 Q1 reply from cto] the body"; orchMsgs[0].Body != want {
+		t.Errorf("orch-1 body = %q, want %q", orchMsgs[0].Body, want)
+	}
+
+	ctoMsgs, err := d.Store.ListMessages("cto", 0)
+	if err != nil {
+		t.Fatalf("ListMessages(cto): %v", err)
+	}
+	if len(ctoMsgs) != 0 {
+		t.Errorf("the author must not be delivered to, got %d messages", len(ctoMsgs))
+	}
+}
+
+// TestParticipantFanOut_DeadAgentGetsInbox covers acceptance criterion 2: an
+// agent with no live session finds the message in its inbox instead.
+func TestParticipantFanOut_DeadAgentGetsInbox(t *testing.T) {
+	d := messagesTestDeps(t)
+	addTestProject(t, d, "proj1")
+	addTestSession(t, d, "orch-1", "orchestrator", "proj1")
+	if err := d.Store.AddAgent(store.Agent{ID: "cto", Dir: "/tmp/cto", Command: "claude", Enabled: true}); err != nil {
+		t.Fatalf("AddAgent: %v", err)
+	}
+
+	subj := threadSubject{TaskID: 7, Counterpart: "orch-1"}
+	if err := participantFanOut(d, subj, 1, "question", "orch-1", "wake up",
+		[]string{"cto", "human", "orch-1"}); err != nil {
+		t.Fatalf("participantFanOut: %v", err)
+	}
+
+	inbox, err := d.Store.ListInboxMessages("cto", store.InboxUnread, 0)
+	if err != nil {
+		t.Fatalf("ListInboxMessages: %v", err)
+	}
+	if len(inbox) != 1 {
+		t.Fatalf("cto inbox has %d messages, want 1", len(inbox))
+	}
+	if want := "[task #7 Q1 question from orch-1] wake up"; inbox[0].Body != want {
+		t.Errorf("inbox body = %q, want %q", inbox[0].Body, want)
+	}
+}
+
+// TestParticipantFanOut_TerminalSessionSkipped: an ephemeral session has no
+// inbox, so a dead one is logged and skipped rather than queued forever.
+func TestParticipantFanOut_TerminalSessionSkipped(t *testing.T) {
+	d := messagesTestDeps(t)
+	addTestProject(t, d, "proj1")
+	sess := addTestSession(t, d, "orch-1", "orchestrator", "proj1")
+	if err := d.Store.UpdateSessionState(sess.ID, "done"); err != nil {
+		t.Fatalf("UpdateSessionState: %v", err)
+	}
+
+	subj := threadSubject{TaskID: 7, Counterpart: "orch-1"}
+	if err := participantFanOut(d, subj, 1, "answer", "human", "final",
+		[]string{"human", "orch-1"}); err != nil {
+		t.Fatalf("participantFanOut: %v", err)
+	}
+
+	msgs, err := d.Store.ListMessages("orch-1", 0)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 0 {
+		t.Errorf("a terminal session must not be queued to, got %d messages", len(msgs))
+	}
+}

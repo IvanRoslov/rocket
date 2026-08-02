@@ -5,6 +5,9 @@
 package api
 
 import (
+	"errors"
+	"fmt"
+	"log/slog"
 	"sort"
 
 	"github.com/IvanRoslov/rocket/internal/session"
@@ -151,4 +154,65 @@ func canPostToThread(d Deps, caller *store.Session, subj threadSubject, particip
 		return true
 	}
 	return contains(participants, caller.ID) || callerIsCounterpart(caller, subj)
+}
+
+// threadPrefix renders the frame every delivered thread entry carries, so a
+// recipient can tell a thread message from a plain one and see at a glance
+// which thread, which entry and which author it came from. Spec v1 §4 keeps
+// the pre-participant shapes and appends " from <id>" — uniformly, including
+// a human author: with several participants the frame is the only place the
+// author is named.
+func threadPrefix(subj threadSubject, ordinal int, kind, author string) string {
+	if subj.RoleID != "" {
+		return fmt.Sprintf("[role %s Q%d %s from %s]", subj.RoleID, ordinal, kind, author)
+	}
+	return fmt.Sprintf("[task #%d Q%d %s from %s]", subj.TaskID, ordinal, kind, author)
+}
+
+// participantFanOut delivers one thread entry to every participant except its
+// author (spec v1 §4, acceptance criterion 4). A persistent agent goes through
+// deliverToAgent, so a live one is injected and a dead one accumulates an
+// inbox row it is told about on wake-up; an ephemeral session goes through
+// deliverToSession; the human is never injected into — the thread itself is
+// where the human reads.
+//
+// The recipient list is deliberately never narrowed to a message's
+// addressed_to: "to" decides who must respond (waiting_on), not who is
+// notified.
+//
+// A participant that resolves to neither an agent nor a session is logged and
+// skipped: a vanished recipient must not fail a write already recorded in the
+// thread.
+func participantFanOut(d Deps, subj threadSubject, ordinal int, kind, author, body string, participants []string) error {
+	framed := threadPrefix(subj, ordinal, kind, author) + " " + body
+
+	for _, p := range participants {
+		if sameParticipant(p, author) || store.IsHuman(p) {
+			continue
+		}
+
+		_, err := d.Store.GetAgent(p)
+		if err == nil {
+			if _, _, err := deliverToAgent(d, p, author, framed); err != nil {
+				return err
+			}
+			continue
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+
+		if _, err := d.Store.GetSession(p); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				slog.Warn("api: thread participant is neither an agent nor a session, skipping",
+					"participant", p)
+				continue
+			}
+			return err
+		}
+		if err := deliverToSession(d, p, framed); err != nil {
+			return err
+		}
+	}
+	return nil
 }
