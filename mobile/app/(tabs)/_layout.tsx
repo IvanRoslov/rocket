@@ -69,7 +69,7 @@ function SettingsIcon({ color }: { color: import("react-native").ColorValue }) {
   )
 }
 
-/** A role: a head over a body, echoing the role cards' avatar. */
+/** An agent: a head over a body, echoing the agent cards' avatar. */
 function AgentsIcon({ color }: { color: import('react-native').ColorValue }) {
   return (
     <View style={{ width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }}>
@@ -91,7 +91,7 @@ function AgentsIcon({ color }: { color: import('react-native').ColorValue }) {
 }
 
 export default function TabsLayout() {
-  // Roles that owe the user nothing still matter, but a thread waiting on the
+  // Agents that owe the user nothing still matter, but a thread waiting on the
   // user is the one thing worth a badge — same rule as task questions.
   const agents = useAgents()
   const awaiting = awaitingUser(agents.data ?? [])
