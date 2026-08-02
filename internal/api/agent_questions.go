@@ -156,14 +156,23 @@ func handleGetAgentQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
-	out := make([]agentQuestionResponse, len(questions))
-	for i, q := range questions {
+	subj := threadSubject{RoleID: a.ID, Counterpart: a.ID}
+	out := make([]agentQuestionResponse, 0, len(questions))
+	for _, q := range questions {
+		participants, err := d.Store.ListParticipants(q.ID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		if !canReadThread(d, caller, subj, participants) {
+			continue
+		}
 		resp, err := buildAgentQuestionResponse(d, caller, q)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
-		out[i] = resp
+		out = append(out, resp)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"questions": out})
 }

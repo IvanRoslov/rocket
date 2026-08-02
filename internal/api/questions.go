@@ -172,6 +172,15 @@ func handleGetAllQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 			tasks[q.TaskID] = task
 		}
 
+		participants, err := d.Store.ListParticipants(q.ID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		if !canReadThread(d, caller, threadSubject{TaskID: task.ID, Counterpart: task.SessionID}, participants) {
+			continue
+		}
+
 		resp, err := buildQuestionResponse(d, caller, q)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -353,7 +362,8 @@ func handleGetTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 	if !ok {
 		return
 	}
-	if _, ok := getTaskOr404(w, d, id); !ok {
+	task, ok := getTaskOr404(w, d, id)
+	if !ok {
 		return
 	}
 
@@ -369,14 +379,25 @@ func handleGetTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
-	out := make([]questionResponse, len(questions))
-	for i, q := range questions {
+	// A listing drops the threads the caller may not see rather than 403-ing
+	// the whole request, so one unrelated thread never blocks a legitimate
+	// caller from its own.
+	out := make([]questionResponse, 0, len(questions))
+	for _, q := range questions {
+		participants, err := d.Store.ListParticipants(q.ID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		if !canReadThread(d, caller, threadSubject{TaskID: task.ID, Counterpart: task.SessionID}, participants) {
+			continue
+		}
 		resp, err := buildQuestionResponse(d, caller, q)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
-		out[i] = resp
+		out = append(out, resp)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"questions": out})
 }

@@ -257,3 +257,70 @@ func TestParticipantFanOut_TerminalSessionSkipped(t *testing.T) {
 		t.Errorf("a terminal session must not be queued to, got %d messages", len(msgs))
 	}
 }
+
+// TestCanReadThread_WorkerReadsItsRootTask is the clause that matters: a
+// worker owns a subtask, the thread hangs off the ROOT task above it, and the
+// worker must still be able to read it.
+func TestCanReadThread_WorkerReadsItsRootTask(t *testing.T) {
+	d := messagesTestDeps(t)
+	addTestProject(t, d, "proj1")
+	addTestSession(t, d, "orch-1", "orchestrator", "proj1")
+	addTestSession(t, d, "w-1", "worker", "proj1")
+
+	rootID, err := d.Store.AddTask(store.Task{
+		Title: "Root", ProjectID: "proj1", SessionID: "orch-1",
+	})
+	if err != nil {
+		t.Fatalf("AddTask root: %v", err)
+	}
+	if _, err := d.Store.AddTask(store.Task{
+		Title: "Sub", ProjectID: "proj1", ParentID: rootID, SessionID: "w-1",
+	}); err != nil {
+		t.Fatalf("AddTask sub: %v", err)
+	}
+
+	subj := threadSubject{TaskID: rootID, Counterpart: "orch-1"}
+	worker := &store.Session{ID: "w-1", Kind: "worker"}
+	if !canReadThread(d, worker, subj, []string{"human", "orch-1"}) {
+		t.Error("a worker must be able to read its root task's threads")
+	}
+}
+
+func TestCanReadThread_Matrix(t *testing.T) {
+	d := messagesTestDeps(t)
+	addTestProject(t, d, "proj1")
+	addTestSession(t, d, "orch-1", "orchestrator", "proj1")
+	addTestSession(t, d, "orch-2", "orchestrator", "proj1")
+
+	rootID, err := d.Store.AddTask(store.Task{
+		Title: "Root", ProjectID: "proj1", SessionID: "orch-1",
+	})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+	if _, err := d.Store.AddTask(store.Task{
+		Title: "Other", ProjectID: "proj1", SessionID: "orch-2",
+	}); err != nil {
+		t.Fatalf("AddTask other: %v", err)
+	}
+
+	subj := threadSubject{TaskID: rootID, Counterpart: "orch-1"}
+	parts := []string{"human", "orch-1"}
+
+	if !canReadThread(d, nil, subj, parts) {
+		t.Error("the human must read every thread")
+	}
+	if !canReadThread(d, agentCaller("cto"), subj, parts) {
+		t.Error("a persistent agent must read every thread")
+	}
+	if !canReadThread(d, &store.Session{ID: "orch-1", Kind: "orchestrator"}, subj, parts) {
+		t.Error("the task's own orchestrator must read its threads")
+	}
+	if canReadThread(d, &store.Session{ID: "orch-2", Kind: "orchestrator"}, subj, parts) {
+		t.Error("an unrelated orchestrator must not read another task's threads")
+	}
+	if !canReadThread(d, &store.Session{ID: "orch-2", Kind: "orchestrator"},
+		subj, append(parts, "orch-2")) {
+		t.Error("a participant reads the thread it takes part in, whatever its task")
+	}
+}

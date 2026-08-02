@@ -224,3 +224,43 @@ func participantFanOut(d Deps, subj threadSubject, ordinal int, kind, author, bo
 	}
 	return nil
 }
+
+// callerOwnsRootTask reports whether caller's session belongs to the root task
+// rootID — either directly, or as a worker on one of its subtasks. Questions
+// only ever hang off root tasks, so a worker's own subtask never matches by
+// id; its parent is what has to be compared. A session with no task at all (an
+// agent, or one whose task is gone) owns nothing.
+func callerOwnsRootTask(d Deps, caller *store.Session, rootID int64) bool {
+	if caller == nil || rootID == 0 {
+		return false
+	}
+	task, err := d.Store.GetTaskBySessionID(caller.ID)
+	if err != nil {
+		return false
+	}
+	return task.ID == rootID || (task.ParentID != 0 && task.ParentID == rootID)
+}
+
+// canReadThread reports whether caller may read a thread on subj:
+//
+//   - a human caller (no session header): every thread;
+//   - a kind=agent caller: every thread — persistent agents are org-wide roles,
+//     and they need to see what they may be pulled into;
+//   - an orchestrator or worker: a thread it participates in, or a thread of
+//     its own task, where own task means the ROOT task its session belongs to.
+//     For a worker that is the root task above its subtask, not only the
+//     subtask itself: questions only exist on root tasks, so comparing against
+//     the subtask alone would forbid every worker from reading its feature's
+//     threads for context, which is real current usage.
+//
+// The only thing this forbids that used to be allowed is cross-task snooping
+// by an unrelated session.
+func canReadThread(d Deps, caller *store.Session, subj threadSubject, participants []string) bool {
+	if caller == nil || callerIsPersistentAgent(d, caller) {
+		return true
+	}
+	if contains(participants, caller.ID) || callerIsCounterpart(caller, subj) {
+		return true
+	}
+	return callerOwnsRootTask(d, caller, subj.TaskID)
+}

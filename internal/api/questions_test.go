@@ -1079,3 +1079,32 @@ func TestQuestionThread_OrchestratorAsksAgentAnswers(t *testing.T) {
 		t.Errorf("whose_turn = %q, want empty for a resolved thread", final.WhoseTurn)
 	}
 }
+
+// TestGetTaskQuestions_UnrelatedSessionSeesNothing: cross-task snooping is the
+// one thing the read gate forbids. The thread is still there for its own
+// orchestrator.
+func TestGetTaskQuestions_UnrelatedSessionSeesNothing(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+	addTestSession(t, d, "orch-2", "orchestrator", "proj1")
+	if _, err := d.Store.AddTask(store.Task{
+		Title: "Other", ProjectID: "proj1", SessionID: "orch-2",
+	}); err != nil {
+		t.Fatalf("AddTask other: %v", err)
+	}
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
+		map[string]any{"body": "Which approach?"})
+	resp.Body.Close()
+
+	if got := getQuestions(t, srv, taskID, "orch-2"); len(got) != 0 {
+		t.Errorf("an unrelated orchestrator saw %d threads, want 0", len(got))
+	}
+	if got := getQuestions(t, srv, taskID, "orch-1"); len(got) != 1 {
+		t.Errorf("the task's own orchestrator saw %d threads, want 1", len(got))
+	}
+	if got := getQuestions(t, srv, taskID, ""); len(got) != 1 {
+		t.Errorf("the human saw %d threads, want 1", len(got))
+	}
+}
