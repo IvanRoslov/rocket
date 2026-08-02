@@ -31,14 +31,14 @@ function projectStats(project: Project, tasks: Task[] | undefined, agents: Agent
   if (project.live_sessions > 0) {
     stats.push({ tone: 'ok', label: `● ${project.live_sessions} live` })
   }
-  // Roles are the other thing that can be waiting on you (docs/10-agents.md):
-  // a thread the role opened that nobody has answered yet. Same visual
+  // Agents are the other thing that can be waiting on you (docs/10-agents.md):
+  // a thread the agent opened that nobody has answered yet. Same visual
   // language as the task "awaiting you" signal.
-  const rolesAwaiting = (agents ?? []).filter((a) => a.awaiting_user > 0).length
-  if (rolesAwaiting > 0) {
+  const agentsAwaiting = (agents ?? []).filter((a) => a.awaiting_user > 0).length
+  if (agentsAwaiting > 0) {
     stats.push({
       tone: 'warn',
-      label: `？${rolesAwaiting} role${rolesAwaiting > 1 ? 's' : ''} awaiting you`,
+      label: `？${agentsAwaiting} agent${agentsAwaiting > 1 ? 's' : ''} awaiting you`,
     })
   }
   if (stats.length === 0) {
