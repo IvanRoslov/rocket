@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
-import { NavLink, Outlet, useParams, useLocation } from 'react-router-dom'
+import { Link, NavLink, Outlet, useParams, useLocation } from 'react-router-dom'
+import { useLastProjectId } from '../lib/lastProject'
 import { useOpenQuestions } from '../lib/queries'
 import { ProjectSwitcher } from './ProjectSwitcher'
 
@@ -14,7 +15,14 @@ const navLinkStyle = ({ isActive }: { isActive: boolean }): CSSProperties => ({
 export function AppShell() {
   const { projectId } = useParams()
   const location = useLocation()
+  const navProjectId = useLastProjectId(projectId)
   const { data: questions } = useOpenQuestions()
+  // Project-scoped tabs use plain <Link>: NavLink's own prefix matching would
+  // light up Kanban on /p/:id/agents too, so we derive both the highlight and
+  // aria-current from the pathname ourselves.
+  const inProject = location.pathname.startsWith('/p/')
+  const agentsActive = inProject && location.pathname.includes('/agents')
+  const kanbanActive = inProject && !agentsActive
   const awaitingCount = (questions ?? []).filter((q) => q.whose_turn === 'user').length
 
   return (
@@ -60,27 +68,20 @@ export function AppShell() {
           <NavLink to="/" end style={navLinkStyle}>
             Projects
           </NavLink>
-          <NavLink
-            to={projectId ? `/p/${projectId}` : '/'}
-            style={({ isActive }) =>
-              navLinkStyle({
-                isActive:
-                  isActive &&
-                  location.pathname.startsWith('/p/') &&
-                  !location.pathname.includes('/agents'),
-              })
-            }
+          <Link
+            to={navProjectId ? `/p/${navProjectId}` : '/'}
+            aria-current={kanbanActive ? 'page' : undefined}
+            style={navLinkStyle({ isActive: kanbanActive })}
           >
             Kanban
-          </NavLink>
-          <NavLink
-            to={projectId ? `/p/${projectId}/agents` : '/'}
-            style={({ isActive }) =>
-              navLinkStyle({ isActive: isActive && location.pathname.includes('/agents') })
-            }
+          </Link>
+          <Link
+            to={navProjectId ? `/p/${navProjectId}/agents` : '/'}
+            aria-current={agentsActive ? 'page' : undefined}
+            style={navLinkStyle({ isActive: agentsActive })}
           >
             Agents
-          </NavLink>
+          </Link>
           <NavLink to="/questions" style={navLinkStyle}>
             Questions
             {awaitingCount > 0 && (
