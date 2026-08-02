@@ -594,7 +594,7 @@ const styles = StyleSheet.create({
   toChip: {
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: radius.pill,
+    borderRadius: radius.chip,
     borderWidth: 1,
     borderColor: colors.border,
   },
