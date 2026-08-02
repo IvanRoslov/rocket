@@ -77,9 +77,9 @@ directory and needs no checkout at all.
   it decides who must RESPOND, never who gets notified (everyone does). Prefer
   the standing role that owns the decision over escalating to the human: a
   persistent agent may give the final answer, the human may be asleep.
-  Note: on `ask` the addressees join and are notified, but the answer queue of
-  a thread with no replies still follows its participants — use `--to` on a
-  reply when you specifically need the turn to move.
+  `--to` works the same on `ask` and on `reply`, and it applies per entry, not
+  per thread: a later reply with no `--to` puts everyone back in the queue
+  rather than keeping the addressees you opened with.
 - Any participant may reply with a clarification request
   ("[task #{{task_id}} QN reply from <who>] ...") instead of an answer. When
   that happens, respond IN THE SAME THREAD — rephrase, expand, give examples:
