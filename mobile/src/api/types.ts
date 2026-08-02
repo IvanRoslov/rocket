@@ -181,69 +181,42 @@ export interface Question {
   messages: QuestionMessage[]
 }
 
-// Agent roles — docs/10-agents.md. A role is a durable definition (prompt,
-// subscriptions, cron); its runs are ephemeral sessions named "<role>-run-<n>".
-
-export interface AgentSubscription {
-  repo: string
-  labels?: string[]
-  mention_only?: boolean
-}
+// Agents — docs/10-agents.md. An agent is a registration plus a tmux session
+// named after it: rocket delivers messages to it and knows whether it is alive,
+// nothing more. Everything past the stored columns is derived by the daemon.
 
 export interface Agent {
   id: string
+  description: string
   project: string
-  prompt_path: string
-  /** Only present on GET /v1/agents/{id}; the list omits it. */
-  prompt?: string
-  subscriptions: AgentSubscription[]
-  cron: string
-  agent: string
+  /** Launcher pair, both optional: cwd and command for `POST /start`. */
+  dir: string
+  command: string
   enabled: boolean
-  inbox_queued: number
-  items: number
+  /** True while a tmux session named `id` is registered as live. */
+  session_alive: boolean
+  /** Unread inbox messages — what the agent has yet to pull. */
+  unread: number
   open_questions: number
   awaiting_user: number
   created_at: number
   updated_at: number
 }
 
-export type AgentInboxKind =
-  | 'message'
-  | 'issue_opened'
-  | 'issue_comment'
-  | 'task_update'
-  | 'snooze_expired'
-  | 'cron'
-  | 'question'
-  | 'terminal_opened'
+export type AgentInboxStatus = 'unread' | 'read'
 
-export type AgentInboxStatus = 'queued' | 'delivered' | 'done'
-
-export interface AgentInboxEvent {
+/** One inbox message — the only kind of row the inbox holds. */
+export interface AgentInboxMessage {
   id: number
-  kind: AgentInboxKind
-  payload: Record<string, unknown>
+  from: string
+  body: string
   status: AgentInboxStatus
   created_at: number
-  updated_at: number
+  /** Omitted while the message is unread. */
+  read_at?: number
 }
 
-export type AgentItemKind = 'issue' | 'task' | 'ping'
-
-export interface AgentItem {
-  id: number
-  kind: AgentItemKind
-  ref: string
-  state: string
-  note: string
-  task_id: number
-  snooze_until: number
-  created_at: number
-  updated_at: number
-}
-
-/** Role Q&A thread — mirrors `Question` with the role in place of the task. */
+/** Agent Q&A thread — mirrors `Question` with the agent in place of the task. */
 export interface AgentQuestion {
   id: number
   role_id: string
@@ -257,27 +230,6 @@ export interface AgentQuestion {
   asked_at: number
   resolved_at?: number
   messages: QuestionMessage[]
-}
-
-/**
- * Read-only view of the role's file memory. Served by
- * `GET /v1/agents/{id}/memory`, which ships with the dashboard work — a daemon
- * without it answers 404 and the app hides the memory tab.
- */
-export interface AgentMemoryFile {
-  name: string
-  size: number
-  /** Unix seconds. */
-  updated_at: number
-  body: string
-}
-
-export interface AgentMemory {
-  path: string
-  /** Full text of MEMORY.md; empty when the file does not exist. */
-  index: string
-  /** Sorted by name, MEMORY.md excluded, top-level regular files only. */
-  files: AgentMemoryFile[]
 }
 
 export interface GithubRepo {

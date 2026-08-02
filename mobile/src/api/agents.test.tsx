@@ -5,10 +5,13 @@ import {
   useAgentQuestionAnswer,
   useAgentQuestionDismiss,
   useAgentQuestionReply,
+  useAgentInbox,
   useAgents,
   useCreateAgentQuestion,
+  useSendAgentMessage,
   useSetAgentEnabled,
-  useWakeAgent,
+  useStartAgent,
+  useStopAgent,
 } from './queries'
 
 const BASE = 'http://192.168.1.10:4477'
@@ -42,31 +45,54 @@ function lastCall(): { url: string; init: RequestInit } {
   return { url, init }
 }
 
-describe('agent role hooks', () => {
+describe('agent hooks', () => {
   afterEach(() => jest.restoreAllMocks())
 
-  it('lists the roles of a project', async () => {
+  it('lists the agents of a project', async () => {
     await setup(() => useAgents('platform'))
     await waitFor(() => expect(lastCall().url).toBe(`${BASE}/v1/agents?project=platform`))
   })
 
-  it('lists all roles when no project is given', async () => {
+  it('lists all agents when no project is given', async () => {
     await setup(() => useAgents())
     await waitFor(() => expect(lastCall().url).toBe(`${BASE}/v1/agents`))
   })
 
-  it('wakes a role with text', async () => {
-    const r = await setup(useWakeAgent)
-    await act(async () => {
-      await r.current.hook.mutateAsync({ id: 'sre', text: 'ping' })
-    })
-    const { url, init } = lastCall()
-    expect(url).toBe(`${BASE}/v1/agents/sre/wake`)
-    expect(init.method).toBe('POST')
-    expect(JSON.parse(init.body as string)).toEqual({ kind: 'message', text: 'ping' })
+  it('reads the inbox of an agent', async () => {
+    await setup(() => useAgentInbox('sre', true))
+    await waitFor(() => expect(lastCall().url).toBe(`${BASE}/v1/agents/sre/inbox`))
   })
 
-  it('disables a role', async () => {
+  it('sends a message to an agent', async () => {
+    const r = await setup(useSendAgentMessage)
+    await act(async () => {
+      await r.current.hook.mutateAsync({ id: 'sre', body: 'db is down' })
+    })
+    const { url, init } = lastCall()
+    expect(url).toBe(`${BASE}/v1/agents/sre/messages`)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ body: 'db is down' })
+  })
+
+  it('starts an agent session', async () => {
+    const r = await setup(useStartAgent)
+    await act(async () => {
+      await r.current.hook.mutateAsync('sre')
+    })
+    const { url, init } = lastCall()
+    expect(url).toBe(`${BASE}/v1/agents/sre/start`)
+    expect(init.method).toBe('POST')
+  })
+
+  it('stops an agent session', async () => {
+    const r = await setup(useStopAgent)
+    await act(async () => {
+      await r.current.hook.mutateAsync('sre')
+    })
+    expect(lastCall().url).toBe(`${BASE}/v1/agents/sre/stop`)
+  })
+
+  it('disables an agent', async () => {
     const r = await setup(useSetAgentEnabled)
     await act(async () => {
       await r.current.hook.mutateAsync({ id: 'sre', enabled: false })
@@ -74,7 +100,7 @@ describe('agent role hooks', () => {
     expect(lastCall().url).toBe(`${BASE}/v1/agents/sre/disable`)
   })
 
-  it('enables a role', async () => {
+  it('enables an agent', async () => {
     const r = await setup(useSetAgentEnabled)
     await act(async () => {
       await r.current.hook.mutateAsync({ id: 'sre', enabled: true })
@@ -82,17 +108,17 @@ describe('agent role hooks', () => {
     expect(lastCall().url).toBe(`${BASE}/v1/agents/sre/enable`)
   })
 
-  it('opens a thread on a role', async () => {
+  it('opens a thread on an agent', async () => {
     const r = await setup(useCreateAgentQuestion)
     await act(async () => {
-      await r.current.hook.mutateAsync({ roleId: 'sre', body: 'status?' })
+      await r.current.hook.mutateAsync({ agentId: 'sre', body: 'status?' })
     })
     const { url, init } = lastCall()
     expect(url).toBe(`${BASE}/v1/agents/sre/questions`)
     expect(JSON.parse(init.body as string)).toEqual({ body: 'status?' })
   })
 
-  it('replies in a role thread', async () => {
+  it('replies in an agent thread', async () => {
     const r = await setup(useAgentQuestionReply)
     await act(async () => {
       await r.current.hook.mutateAsync({ id: 5, body: 'more' })
@@ -100,7 +126,7 @@ describe('agent role hooks', () => {
     expect(lastCall().url).toBe(`${BASE}/v1/agent-questions/5/reply`)
   })
 
-  it('answers a role thread', async () => {
+  it('answers an agent thread', async () => {
     const r = await setup(useAgentQuestionAnswer)
     await act(async () => {
       await r.current.hook.mutateAsync({ id: 5, body: 'yes' })
@@ -110,7 +136,7 @@ describe('agent role hooks', () => {
     expect(JSON.parse(init.body as string)).toEqual({ body: 'yes' })
   })
 
-  it('dismisses a role thread', async () => {
+  it('dismisses an agent thread', async () => {
     const r = await setup(useAgentQuestionDismiss)
     await act(async () => {
       await r.current.hook.mutateAsync(5)
