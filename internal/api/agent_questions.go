@@ -66,7 +66,7 @@ func buildAgentQuestionResponse(d Deps, caller *store.Session, q store.AgentQues
 		ID:           q.ID,
 		RoleID:       q.RoleID,
 		Ordinal:      ordinal,
-		AskedBy:      q.AskedBy,
+		AskedBy:      wireParticipant(q.AskedBy),
 		Body:         q.Body,
 		Context:      q.Context,
 		Status:       q.Status,

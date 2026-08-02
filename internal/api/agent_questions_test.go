@@ -63,7 +63,7 @@ func TestPostAgentQuestion_FromHumanEnqueuesInboxEvent(t *testing.T) {
 		t.Fatalf("status = %d, want 201", resp.StatusCode)
 	}
 	q := decodeAgentQuestion(t, resp)
-	if q.RoleID != "sre" || q.AskedBy != "" || q.Ordinal != 1 || q.WhoseTurn != "role" {
+	if q.RoleID != "sre" || q.AskedBy != store.ParticipantHuman || q.Ordinal != 1 || q.WhoseTurn != "role" {
 		t.Fatalf("question = %+v", q)
 	}
 
@@ -567,4 +567,30 @@ func agentQuestionCounters(t *testing.T, srv *httptest.Server, roleID string) (i
 	}
 	t.Fatalf("agent %q absent from %+v", roleID, agents)
 	return 0, 0
+}
+
+// TestAgentQuestion_HumanIsCanonicalOnTheWire is the role-thread half of the
+// post-#736 contract: asked_by and messages[].author name the human as
+// store.ParticipantHuman, never the legacy empty string.
+func TestAgentQuestion_HumanIsCanonicalOnTheWire(t *testing.T) {
+	d := agentQuestionsTestDeps(t)
+	srv := setupRoleForQuestions(t, d)
+
+	q := decodeAgentQuestion(t, postJSON(t, srv.URL+"/v1/agents/sre/questions",
+		map[string]any{"body": "почему упал деплой?"}))
+	if q.AskedBy != store.ParticipantHuman {
+		t.Errorf("asked_by = %q, want %q", q.AskedBy, store.ParticipantHuman)
+	}
+
+	after := decodeAgentQuestion(t, postJSON(t, srv.URL+"/v1/agent-questions/"+itoa(q.ID)+"/reply",
+		map[string]any{"body": "и ещё вопрос"}))
+	if after.AskedBy != store.ParticipantHuman {
+		t.Errorf("asked_by after reply = %q, want %q", after.AskedBy, store.ParticipantHuman)
+	}
+	if len(after.Messages) != 1 {
+		t.Fatalf("messages = %+v, want one", after.Messages)
+	}
+	if after.Messages[0].Author != store.ParticipantHuman {
+		t.Errorf("messages[0].author = %q, want %q", after.Messages[0].Author, store.ParticipantHuman)
+	}
 }

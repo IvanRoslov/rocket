@@ -942,8 +942,9 @@ func threadTurnArrow(waiting []string, yourTurn bool) string {
 }
 
 // threadAuthorLabel renders a message author for a thread line. The human is
-// spelled "" on the wire today and "human" once subtask #736 flips it; both
-// render as "user", the word the CLI has always shown.
+// spelled "human" on the wire since subtask #736; older daemons and cached
+// payloads still say "", so both render as "user", the word the CLI has
+// always shown.
 func threadAuthorLabel(author string) string {
 	if author == "" || author == "human" {
 		return "user"
