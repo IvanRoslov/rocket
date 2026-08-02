@@ -199,7 +199,7 @@ func TestPostTaskQuestions_HappyPath(t *testing.T) {
 
 // TestPostTaskQuestions_HumanOpensThreadToOrchestrator covers the new
 // direction: a human (no X-Rocket-Session header) opens a question thread
-// addressed to the task's orchestrator. It should succeed with AskedBy=="",
+// addressed to the task's orchestrator. It should succeed with AskedBy=="human",
 // whose_turn "orchestrator" (nothing has been said back yet), and the
 // question body should be injected into the orchestrator's message queue.
 func TestPostTaskQuestions_HumanOpensThreadToOrchestrator(t *testing.T) {
@@ -213,8 +213,8 @@ func TestPostTaskQuestions_HumanOpensThreadToOrchestrator(t *testing.T) {
 		t.Fatalf("status = %d, want 201", resp.StatusCode)
 	}
 	q := decodeQuestion(t, resp)
-	if q.AskedBy != "" {
-		t.Errorf("AskedBy = %q, want empty (user-opened)", q.AskedBy)
+	if q.AskedBy != store.ParticipantHuman {
+		t.Errorf("AskedBy = %q, want %q (user-opened)", q.AskedBy, store.ParticipantHuman)
 	}
 	if q.WhoseTurn != "orchestrator" {
 		t.Errorf("WhoseTurn = %q, want orchestrator", q.WhoseTurn)
@@ -438,7 +438,7 @@ func TestQuestionThread_FullLifecycle(t *testing.T) {
 	if afterUserReply.WhoseTurn != "orchestrator" {
 		t.Fatalf("after user reply: WhoseTurn = %q, want orchestrator", afterUserReply.WhoseTurn)
 	}
-	if len(afterUserReply.Messages) != 1 || afterUserReply.Messages[0].Body != "consider X" || afterUserReply.Messages[0].Author != "" {
+	if len(afterUserReply.Messages) != 1 || afterUserReply.Messages[0].Body != "consider X" || afterUserReply.Messages[0].Author != store.ParticipantHuman {
 		t.Fatalf("messages after user reply = %+v", afterUserReply.Messages)
 	}
 
@@ -1139,5 +1139,49 @@ func TestPostTaskQuestions_ToDoesNotBadgeTheHuman(t *testing.T) {
 	// And whose_turn no longer collapses to "user" for it.
 	if asHuman[0].WhoseTurn != "orchestrator" {
 		t.Errorf("whose_turn = %q, want orchestrator", asHuman[0].WhoseTurn)
+	}
+}
+
+// TestTaskQuestion_HumanIsCanonicalOnTheWire pins the post-#736 contract: the
+// human is spelled store.ParticipantHuman everywhere the API names a party —
+// asked_by on a human-opened thread and messages[].author on a human reply.
+// The legacy empty spelling is gone.
+func TestTaskQuestion_HumanIsCanonicalOnTheWire(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	askResp := postJSON(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions",
+		map[string]any{"body": "Status?"})
+	q := decodeQuestion(t, askResp)
+	askResp.Body.Close()
+	if q.AskedBy != store.ParticipantHuman {
+		t.Errorf("asked_by = %q, want %q", q.AskedBy, store.ParticipantHuman)
+	}
+
+	replyResp := postJSON(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/reply",
+		map[string]any{"body": "and one more thing"})
+	after := decodeQuestion(t, replyResp)
+	replyResp.Body.Close()
+	if after.AskedBy != store.ParticipantHuman {
+		t.Errorf("asked_by after reply = %q, want %q", after.AskedBy, store.ParticipantHuman)
+	}
+	if len(after.Messages) != 1 {
+		t.Fatalf("messages = %+v, want one", after.Messages)
+	}
+	if after.Messages[0].Author != store.ParticipantHuman {
+		t.Errorf("messages[0].author = %q, want %q", after.Messages[0].Author, store.ParticipantHuman)
+	}
+
+	// The listing endpoint renders the same thread the same way.
+	listed := getQuestions(t, srv, taskID, "")
+	if len(listed) != 1 {
+		t.Fatalf("got %d questions, want 1", len(listed))
+	}
+	if listed[0].AskedBy != store.ParticipantHuman {
+		t.Errorf("listed asked_by = %q, want %q", listed[0].AskedBy, store.ParticipantHuman)
+	}
+	if listed[0].Messages[0].Author != store.ParticipantHuman {
+		t.Errorf("listed messages[0].author = %q, want %q", listed[0].Messages[0].Author, store.ParticipantHuman)
 	}
 }

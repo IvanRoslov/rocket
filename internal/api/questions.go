@@ -22,22 +22,22 @@ type questionMessageResponse struct {
 	CreatedAt   int64    `json:"created_at"`
 }
 
-// wireAuthor renders a stored participant id for the current API contract.
-// The store canonicalised the human to store.ParticipantHuman in migration
-// 0009, but web and mobile still read an empty author as "you"; flipping the
-// wire is deliberately left to subtask #731, which lands it together with the
-// clients. Until then this keeps the contract byte-identical.
-func wireAuthor(author string) string {
-	if store.IsHuman(author) {
-		return ""
+// wireParticipant renders a stored author or participant id for the API. The
+// human is always spelled store.ParticipantHuman on the wire, whichever of the
+// two stored spellings a row carries: migration 0009 canonicalised
+// question_messages.author, but questions.asked_by is not a participant-id
+// column and still holds the legacy empty form for a human-opened thread.
+func wireParticipant(id string) string {
+	if store.IsHuman(id) {
+		return store.ParticipantHuman
 	}
-	return author
+	return id
 }
 
 func toQuestionMessageResponse(m store.QuestionMessage) questionMessageResponse {
 	return questionMessageResponse{
 		ID:          m.ID,
-		Author:      wireAuthor(m.Author),
+		Author:      wireParticipant(m.Author),
 		Kind:        m.Kind,
 		Body:        m.Body,
 		AddressedTo: m.AddressedTo,
@@ -96,7 +96,7 @@ func buildQuestionResponse(d Deps, caller *store.Session, q store.Question) (que
 		ID:           q.ID,
 		TaskID:       q.TaskID,
 		Ordinal:      ordinal,
-		AskedBy:      q.AskedBy,
+		AskedBy:      wireParticipant(q.AskedBy),
 		Body:         q.Body,
 		Context:      q.Context,
 		Status:       q.Status,
