@@ -1017,3 +1017,65 @@ func TestPostQuestionReply_NonParticipantWorkerForbidden(t *testing.T) {
 		t.Errorf("non-participant worker reply = %d, want 403", rep.StatusCode)
 	}
 }
+
+// TestQuestionThread_OrchestratorAsksAgentAnswers walks acceptance criteria 1,
+// 2 and 4 end to end: the orchestrator addresses cto, cto is notified and
+// becomes a participant, cto replies (which notifies the orchestrator), and
+// cto's answer closes the thread.
+func TestQuestionThread_OrchestratorAsksAgentAnswers(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+	setupQuestionAgent(t, d)
+	addLiveAgentSession(t, d, "cto")
+
+	ask := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
+		map[string]any{"body": "Approve the schema?", "to": []string{"cto"}})
+	q := decodeQuestion(t, ask)
+	ask.Body.Close()
+	if !contains(q.WaitingOn, "cto") {
+		t.Fatalf("after ask waiting_on = %v, want cto included", q.WaitingOn)
+	}
+
+	ctoMsgs, err := d.Store.ListMessages("cto", 0)
+	if err != nil {
+		t.Fatalf("ListMessages(cto): %v", err)
+	}
+	if len(ctoMsgs) != 1 {
+		t.Fatalf("cto got %d queued messages after ask, want 1", len(ctoMsgs))
+	}
+
+	rep := postJSONWithHeader(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/reply", "cto",
+		map[string]any{"body": "One question first."})
+	got := decodeQuestion(t, rep)
+	rep.Body.Close()
+	if !reflect.DeepEqual(got.WaitingOn, []string{"human", "orch-1"}) {
+		t.Errorf("after cto reply waiting_on = %v, want [human orch-1]", got.WaitingOn)
+	}
+
+	orchMsgs, err := d.Store.ListMessages("orch-1", 0)
+	if err != nil {
+		t.Fatalf("ListMessages(orch-1): %v", err)
+	}
+	if len(orchMsgs) == 0 {
+		t.Fatal("the orchestrator was not notified of cto's reply")
+	}
+	want := "[task #" + itoa(taskID) + " Q1 reply from cto] One question first."
+	if last := orchMsgs[len(orchMsgs)-1].Body; last != want {
+		t.Errorf("orchestrator body = %q, want %q", last, want)
+	}
+
+	ans := postJSONWithHeader(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/answer", "cto",
+		map[string]any{"body": "Approved."})
+	final := decodeQuestion(t, ans)
+	ans.Body.Close()
+	if final.Status != "resolved" || final.Resolution != "answered" {
+		t.Fatalf("status/resolution = %q/%q, want resolved/answered", final.Status, final.Resolution)
+	}
+	if len(final.WaitingOn) != 0 {
+		t.Errorf("waiting_on = %v, want empty", final.WaitingOn)
+	}
+	if final.WhoseTurn != "" {
+		t.Errorf("whose_turn = %q, want empty for a resolved thread", final.WhoseTurn)
+	}
+}
