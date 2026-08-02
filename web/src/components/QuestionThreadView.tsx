@@ -7,15 +7,22 @@
 import { useState } from 'react'
 import { Markdown } from './Markdown'
 import { timeAgo } from '../lib/format'
+import { isHuman, threadParticipantLabel } from '../lib/participants'
 import { usePasteImage } from '../lib/usePasteImage'
 import './questionthread.css'
 
-/** One thread entry. `author === ''` (or undefined) means the human. */
+/**
+ * One thread entry. `author` is a participant id — `''`/undefined today and
+ * `'human'` after subtask #736 both mean the human, so it is only ever read
+ * through `isHuman()`.
+ */
 export interface ThreadEntry {
   id: number
   author?: string
   body: string
   created_at: number
+  /** Who must respond to this entry. Absent/empty = everyone but the author. */
+  addressed_to?: string[]
 }
 
 export interface QuestionThreadViewProps {
@@ -28,14 +35,20 @@ export interface QuestionThreadViewProps {
   /** true renders the turn chip in the warning tone ("awaiting you"). */
   turnWarn: boolean
   askerLabel: string
+  /**
+   * Everyone taking part in the thread. Drives the participants row and the
+   * addressee picker; absent (a pre-participants API) hides both.
+   */
+  participants?: string[]
   /** Display name for agent-authored entries (orchestrator name / role id). */
   agentName?: string
   /** Avatar letter for agent-authored entries: 'O' orchestrator, 'A' role. */
   agentInitial?: string
   placeholder?: string
   busy?: boolean
-  onClarify: (body: string) => void
-  onAnswer: (body: string) => void
+  /** `to` is who must RESPOND next; empty means "everyone but you". */
+  onClarify: (body: string, to: string[]) => void
+  onAnswer: (body: string, to: string[]) => void
   onDismiss: () => void
 }
 
@@ -47,6 +60,7 @@ export function QuestionThreadView({
   turnLabel,
   turnWarn,
   askerLabel,
+  participants,
   agentName,
   agentInitial = 'O',
   placeholder = 'Write a reply, ask for a rephrase, or give your final answer…',
@@ -57,11 +71,20 @@ export function QuestionThreadView({
 }: QuestionThreadViewProps) {
   const [ctxOpen, setCtxOpen] = useState(true)
   const [body, setBody] = useState('')
+  const [to, setTo] = useState<string[]>([])
   const paste = usePasteImage(setBody)
 
-  function submit(handler: (body: string) => void) {
+  // You are never your own addressee, so the human is not a candidate.
+  const addressees = (participants ?? []).filter((p) => !isHuman(p))
+  const label = (id: string | undefined) => threadParticipantLabel(id, agentName, participants)
+
+  function toggleAddressee(id: string) {
+    setTo((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]))
+  }
+
+  function submit(handler: (body: string, to: string[]) => void) {
     if (!body.trim()) return
-    handler(body)
+    handler(body, to)
     setBody('')
   }
 
@@ -83,6 +106,16 @@ export function QuestionThreadView({
         <div className="question-thread__spacer" />
         <span className="question-thread__asker">{askerLabel}</span>
       </div>
+      {participants && participants.length > 0 && (
+        <div className="question-thread__participants" aria-label="Participants">
+          <span className="question-thread__participants-label">In this thread</span>
+          {participants.map((id) => (
+            <span key={id} className="question-thread__participant">
+              {label(id)}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="question-thread__body">
         <div className="question-thread__question">
           <Markdown>{question}</Markdown>
@@ -114,9 +147,9 @@ export function QuestionThreadView({
         <div className="question-thread__discussion-label">
           Discussion · {messages.length} replies
         </div>
-        <div className="question-thread__messages">
+        <div className="question-thread__messages" aria-label="Discussion">
           {messages.map((m) => {
-            const fromAgent = !!m.author
+            const fromAgent = !isHuman(m.author)
             return (
               <div key={m.id} className="question-thread__message">
                 <div className="question-thread__message-head">
@@ -130,8 +163,13 @@ export function QuestionThreadView({
                     {fromAgent ? agentInitial : 'Y'}
                   </span>
                   <span className="question-thread__message-author">
-                    {fromAgent ? (agentName ?? m.author) : 'you'}
+                    {label(m.author)}
                   </span>
+                  {m.addressed_to && m.addressed_to.length > 0 && (
+                    <span className="question-thread__addressees">
+                      {`\u2192 ${m.addressed_to.map((id) => label(id)).join(', ')}`}
+                    </span>
+                  )}
                   <span className="question-thread__message-meta">{timeAgo(m.created_at)}</span>
                 </div>
                 <div className="question-thread__message-body">
@@ -153,6 +191,24 @@ export function QuestionThreadView({
           />
           {paste.error && (
             <div className="question-thread__paste-error">Upload failed: {paste.error}</div>
+          )}
+          {addressees.length > 0 && (
+            <div className="question-thread__to">
+              <span className="question-thread__to-label">Must respond</span>
+              {addressees.map((id) => (
+                <label key={id} className="question-thread__to-option">
+                  <input
+                    type="checkbox"
+                    checked={to.includes(id)}
+                    onChange={() => toggleAddressee(id)}
+                  />
+                  {label(id)}
+                </label>
+              ))}
+              <span className="question-thread__to-hint">
+                Everyone is notified either way — this picks who must answer.
+              </span>
+            </div>
           )}
           <div className="question-thread__actions">
             <button

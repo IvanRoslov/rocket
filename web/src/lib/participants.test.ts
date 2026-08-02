@@ -1,4 +1,4 @@
-import { HUMAN, isHuman, messageAuthorLabel, participantLabel } from './participants'
+import { HUMAN, isHuman, threadParticipantLabel, participantLabel } from './participants'
 
 describe('isHuman', () => {
   it('accepts both the legacy empty author and the canonical "human"', () => {
@@ -23,16 +23,16 @@ describe('participantLabel', () => {
   })
 })
 
-describe('messageAuthorLabel', () => {
+describe('threadParticipantLabel', () => {
   it('uses the agent display name only while there is a single non-human participant', () => {
-    expect(messageAuthorLabel('s-orch', 'billing-orch', ['human', 's-orch'])).toBe('billing-orch')
-    expect(messageAuthorLabel('s-orch', 'billing-orch', undefined)).toBe('billing-orch')
-    expect(messageAuthorLabel('s-orch', 'billing-orch', ['human', 's-orch', 'cto'])).toBe('s-orch')
-    expect(messageAuthorLabel('cto', 'billing-orch', ['human', 's-orch', 'cto'])).toBe('cto')
+    expect(threadParticipantLabel('s-orch', 'billing-orch', ['human', 's-orch'])).toBe('billing-orch')
+    expect(threadParticipantLabel('s-orch', 'billing-orch', undefined)).toBe('billing-orch')
+    expect(threadParticipantLabel('s-orch', 'billing-orch', ['human', 's-orch', 'cto'])).toBe('s-orch')
+    expect(threadParticipantLabel('cto', 'billing-orch', ['human', 's-orch', 'cto'])).toBe('cto')
   })
 
   it('labels the human "you" whichever wire spelling arrives', () => {
-    expect(messageAuthorLabel('', 'billing-orch', ['human', 's-orch', 'cto'])).toBe('you')
-    expect(messageAuthorLabel(HUMAN, 'billing-orch', ['human', 's-orch', 'cto'])).toBe('you')
+    expect(threadParticipantLabel('', 'billing-orch', ['human', 's-orch', 'cto'])).toBe('you')
+    expect(threadParticipantLabel(HUMAN, 'billing-orch', ['human', 's-orch', 'cto'])).toBe('you')
   })
 })

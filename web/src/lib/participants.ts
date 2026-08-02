@@ -26,20 +26,22 @@ export function participantLabel(id: string | undefined, agentName?: string): st
 }
 
 /**
- * Display name for a message's author.
+ * Display name for a participant id inside a known thread.
  *
  * `agentName` names ONE counterpart. In a thread with several agent
- * participants it would stamp that one name onto every agent-authored message,
- * so it only applies while the thread has at most one non-human participant.
- * Beyond that everyone shows under their own participant id.
+ * participants it would stamp that one name onto everybody, so it only applies
+ * while the thread has at most one non-human participant. Beyond that everyone
+ * shows under their own participant id. Every label the thread renders — the
+ * participants row, message authors, addressees, the picker — goes through
+ * this, so one participant never appears under two different names.
  */
-export function messageAuthorLabel(
-  author: string | undefined,
+export function threadParticipantLabel(
+  id: string | undefined,
   agentName: string | undefined,
   participants: string[] | undefined,
 ): string {
-  if (isHuman(author)) return 'you'
-  if (!participants) return agentName ?? author!
+  if (isHuman(id)) return 'you'
+  if (!participants) return agentName ?? id!
   const agents = participants.filter((p) => !isHuman(p))
-  return agents.length <= 1 ? (agentName ?? author!) : author!
+  return agents.length <= 1 ? (agentName ?? id!) : id!
 }
