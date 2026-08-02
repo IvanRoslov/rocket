@@ -42,16 +42,17 @@ func TestAgentQuestionCommandUsageErrors(t *testing.T) {
 	}
 }
 
-// TestAgentQuestionsRoleDefaultsToInstance covers the no-argument form: inside
-// a role instance the role is taken from ROCKET_SESSION_ID, outside one the
-// command is a usage error.
-func TestAgentQuestionsRoleDefaultsToInstance(t *testing.T) {
-	t.Setenv("ROCKET_SESSION_ID", "sre-run-2")
-	if role, err := resolveRole(""); err != nil || role != "sre" {
-		t.Fatalf("resolveRole = %q, %v; want sre", role, err)
+// TestAgentQuestionsAgentDefaultsToTheSession covers the no-argument form:
+// inside an agent's session the agent is its session name, outside one (and
+// outside tmux) the command is a usage error.
+func TestAgentQuestionsAgentDefaultsToTheSession(t *testing.T) {
+	t.Setenv("ROCKET_SESSION_ID", "sre")
+	if agent, err := resolveAgentID(""); err != nil || agent != "sre" {
+		t.Fatalf("resolveAgentID = %q, %v; want sre", agent, err)
 	}
 
 	t.Setenv("ROCKET_SESSION_ID", "")
+	t.Setenv("TMUX", "")
 	cmd := newAgentQuestionsCmd()
 	cmd.SetArgs(nil)
 	err := cmd.Execute()
