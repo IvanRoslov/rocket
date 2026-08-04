@@ -27,7 +27,19 @@ type taskRow struct {
 	PRNumber    int    `json:"pr_number,omitempty"`
 	PRState     string `json:"pr_state,omitempty"`
 	CIState     string `json:"ci_state,omitempty"`
+	// WaitingTerminal is the API's derived flag: the task's session has been
+	// sitting on interactive input long enough that nothing moves until
+	// somebody types.
+	WaitingTerminal bool `json:"waiting_terminal,omitempty"`
 }
+
+// waitingTerminalGlyph flags a task or session stalled waiting for a
+// keystroke; waitingTerminalMark is its spelled-out form, used where there is
+// room for one (the free-form task board line) rather than in a table cell.
+const (
+	waitingTerminalGlyph = "⏳"
+	waitingTerminalMark  = waitingTerminalGlyph + " ждёт ответа в терминале"
+)
 
 // taskDetailRow represents a full task detail as returned by GET /v1/tasks/{id}.
 type taskDetailRow struct {
@@ -1049,6 +1061,9 @@ func renderTaskBoard(board map[string][]taskRow, w io.Writer, statusFiltered boo
 			}
 			if t.SessionID != "" {
 				line += fmt.Sprintf(" [%s]", t.SessionID)
+			}
+			if t.WaitingTerminal {
+				line += " " + waitingTerminalMark
 			}
 			fmt.Fprintf(w, "%s\n", line)
 		}

@@ -156,7 +156,7 @@
 
 ```
 rocket task add "<title>" [--project <id>] [--desc <md>|--desc-file <f>]
-rocket task ls [--status <s>] [--project <id>]     # канбан в терминале
+rocket task ls [--status <s>] [--project <id>]     # канбан в терминале; «⏳ ждёт ответа в терминале» — сессия задачи висит на интерактивном вопросе
 rocket task show <id>                              # карточка: статус, сессия, подзадачи, доки, журнал
 rocket task start <id> [--agent <name>]            # создать оркестратора и назначить на задачу
 rocket task move <id> <status>

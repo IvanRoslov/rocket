@@ -9,6 +9,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// DefaultInputStallThreshold is the built-in value of
+// Config.InputStallThreshold — how long a session may sit on interactive
+// input before it counts as stalled.
+const DefaultInputStallThreshold = 10 * time.Minute
+
 // Config represents the rocket daemon configuration.
 type Config struct {
 	Port int    `yaml:"port"`
@@ -44,6 +49,9 @@ type Config struct {
 	// the heartbeat sweep escalates it to the cto agent's inbox. Unlike a
 	// stalled worker, such a session cannot be nudged by messaging its
 	// orchestrator: it is waiting for a keystroke nobody is there to press.
+	// A zero value means "unset": consumers that need a threshold outside a
+	// loaded config (the API's derived waiting_terminal flag, say) fall back
+	// to DefaultInputStallThreshold.
 	InputStallThreshold time.Duration `yaml:"input_stall_threshold"`
 	GithubAPIBase       string        `yaml:"github_api_base"`
 	GithubCloneBase     string        `yaml:"github_clone_base"`
@@ -105,7 +113,7 @@ func Load(home string) (*Config, error) {
 		LargeMessageThreshold:     2048,
 		WorkerStallThreshold:      15 * time.Minute,
 		QuestionReminderThreshold: 30 * time.Minute,
-		InputStallThreshold:       10 * time.Minute,
+		InputStallThreshold:       DefaultInputStallThreshold,
 		GithubAPIBase:             "https://api.github.com",
 		GithubCloneBase:           "",
 		MergeGrace:                5 * time.Minute,

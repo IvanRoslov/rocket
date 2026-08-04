@@ -279,6 +279,9 @@ export const tasks: Task[] = [
     status: 'in_progress',
     feature_slug: 'billing-v2',
     session_id: 's-billing-v2-orch',
+    // Showcase for the waiting badge: the orchestrator sits on a question
+    // nobody has answered, so the card warns that it needs a keystroke.
+    waiting_terminal: true,
     created_by: 'user',
     created_at: NOW - 3 * DAY,
     updated_at: NOW - 2 * MIN,
