@@ -58,11 +58,11 @@ func TestRenderStatusWaitingTerminal(t *testing.T) {
 	for _, line := range strings.Split(out, "\n") {
 		switch {
 		case strings.HasPrefix(line, "orchestrator:"), strings.HasPrefix(line, "wk-stalled"):
-			if !strings.Contains(line, waitingTerminalMark) {
-				t.Errorf("line %q, want the %q marker", line, waitingTerminalMark)
+			if !strings.Contains(line, "waiting_input "+waitingTerminalGlyph) {
+				t.Errorf("line %q, want the activity cell tagged with %q", line, waitingTerminalGlyph)
 			}
 		case strings.HasPrefix(line, "wk-busy"):
-			if strings.Contains(line, waitingTerminalMark) {
+			if strings.Contains(line, waitingTerminalGlyph) {
 				t.Errorf("line %q, want no marker", line)
 			}
 		}

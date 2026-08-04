@@ -33,9 +33,13 @@ type taskRow struct {
 	WaitingTerminal bool `json:"waiting_terminal,omitempty"`
 }
 
-// waitingTerminalMark is the marker rendered next to a task or session that
-// is stalled waiting for a keystroke.
-const waitingTerminalMark = "⏳ waiting"
+// waitingTerminalGlyph flags a task or session stalled waiting for a
+// keystroke; waitingTerminalMark is its spelled-out form, used where there is
+// room for one (the free-form task board line) rather than in a table cell.
+const (
+	waitingTerminalGlyph = "⏳"
+	waitingTerminalMark  = waitingTerminalGlyph + " ждёт ответа в терминале"
+)
 
 // taskDetailRow represents a full task detail as returned by GET /v1/tasks/{id}.
 type taskDetailRow struct {

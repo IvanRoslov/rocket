@@ -41,7 +41,7 @@ type sessionResponse struct {
 	// WaitingTerminal reports that this session has been stalled on
 	// interactive input longer than the configured threshold. Derived on
 	// every read from activity and the clock, never persisted.
-	WaitingTerminal bool `json:"waiting_terminal"`
+	WaitingTerminal bool `json:"waiting_terminal,omitempty"`
 }
 
 func toSessionResponse(s store.Session, threshold time.Duration) sessionResponse {

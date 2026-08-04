@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/activity"
+	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -93,8 +94,11 @@ func TestListTasks_WaitingTerminalBoard(t *testing.T) {
 	}
 }
 
-// TestListTasks_WaitingTerminalWithoutSession: a task with no session (or a
-// session that isn't waiting on input) is never flagged.
+// TestListTasks_WaitingTerminalWithoutSession: a task with no session is
+// never flagged. (A task pointing at a session that no longer exists isn't a
+// reachable state: tasks.session_id is a foreign key into sessions, and the
+// store has no DeleteSession — dead sessions merely change state, which
+// TestListTasks_WaitingTerminalIgnoresDeadSession covers.)
 func TestListTasks_WaitingTerminalWithoutSession(t *testing.T) {
 	d := waitingTaskDeps(t)
 	srv := newTestServer(t, d)
@@ -174,5 +178,76 @@ func TestListSessions_WaitingTerminal(t *testing.T) {
 	}
 	if got["orch-fresh"] {
 		t.Errorf("waiting_terminal = true for orch-fresh, want false")
+	}
+}
+
+// TestListTasks_WaitingTerminalPendingQuiz: a stale AskUserQuestion quiz is
+// the other half of the predicate — the activity timestamp keeps moving while
+// a quiz is open, so the quiz's asked_at is what counts.
+func TestListTasks_WaitingTerminalPendingQuiz(t *testing.T) {
+	d := waitingTaskDeps(t)
+	srv := newTestServer(t, d)
+
+	addTestSession(t, d, "orch-quiz", "orchestrator", "proj1")
+	if err := d.Store.UpdateSessionActivity("orch-quiz", "thinking", time.Now().Unix()); err != nil {
+		t.Fatalf("UpdateSessionActivity: %v", err)
+	}
+	quiz := session.Quiz{
+		Questions: []session.QuizQuestion{{Question: "Which schema?"}},
+		AskedAt:   time.Now().Add(-25 * time.Minute).Unix(),
+	}
+	raw, err := json.Marshal(quiz)
+	if err != nil {
+		t.Fatalf("marshal quiz: %v", err)
+	}
+	if err := d.Store.SetPendingQuiz("orch-quiz", string(raw)); err != nil {
+		t.Fatalf("SetPendingQuiz: %v", err)
+	}
+	id, err := d.Store.AddTask(store.Task{Title: "Quizzed", ProjectID: "proj1", SessionID: "orch-quiz"})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	if !listWaitingRows(t, srv, "")[id] {
+		t.Errorf("waiting_terminal = false for a task whose session holds a stale quiz, want true")
+	}
+}
+
+// TestListTasks_WaitingTerminalOmittedWhenHealthy: the flag is omitempty —
+// a healthy task carries no waiting_terminal key at all.
+func TestListTasks_WaitingTerminalOmittedWhenHealthy(t *testing.T) {
+	d := waitingTaskDeps(t)
+	srv := newTestServer(t, d)
+	addWaitingTask(t, d, "orch-fresh", "Fresh", time.Minute)
+
+	resp := getJSON(t, srv.URL+"/v1/tasks")
+	defer resp.Body.Close()
+	var body struct {
+		Tasks []map[string]any `json:"tasks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode tasks: %v", err)
+	}
+	if len(body.Tasks) != 1 {
+		t.Fatalf("tasks len = %d, want 1", len(body.Tasks))
+	}
+	if _, present := body.Tasks[0]["waiting_terminal"]; present {
+		t.Errorf("waiting_terminal present on a healthy task: %+v", body.Tasks[0])
+	}
+}
+
+// TestListTasks_WaitingTerminalIgnoresDeadSession: a killed session isn't
+// waiting for a keystroke, however stale its last activity is.
+func TestListTasks_WaitingTerminalIgnoresDeadSession(t *testing.T) {
+	d := waitingTaskDeps(t)
+	srv := newTestServer(t, d)
+
+	id := addWaitingTask(t, d, "orch-dead", "Dead", 20*time.Minute)
+	if err := d.Store.UpdateSessionState("orch-dead", "killed"); err != nil {
+		t.Fatalf("UpdateSessionState: %v", err)
+	}
+
+	if listWaitingRows(t, srv, "")[id] {
+		t.Errorf("waiting_terminal = true for a killed session, want false")
 	}
 }

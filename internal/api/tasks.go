@@ -55,8 +55,8 @@ type taskResponse struct {
 	// interactive input (a pending quiz, or activity "waiting_input") longer
 	// than the configured threshold — nothing moves until somebody types.
 	// Derived on every read from the session's activity and the clock, never
-	// persisted.
-	WaitingTerminal bool `json:"waiting_terminal"`
+	// persisted, and omitted entirely when false.
+	WaitingTerminal bool `json:"waiting_terminal,omitempty"`
 }
 
 func toTaskResponse(t store.Task) taskResponse {
