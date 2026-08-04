@@ -17,9 +17,13 @@ rocket task log <id> --kind decision|problem|note "<текст>"
 rocket task ask-orch <id> "<вопрос>" [--context <md>] [--to a,b]
                                                  # открыть тред оркестратору
 rocket task questions [<id>] [--open]            # вопросы, треды и участники
-rocket task reply <question-id> "<уточнение>" [--to a,b]  # реплика, вопрос открыт
-rocket task answer <question-id> "<ответ>" [--to a,b]     # финальный ответ, закрывает
-rocket task answer <question-id> --dismiss       # закрыть как неактуальный
+rocket task reply <вопрос> "<уточнение>" [--to a,b]      # реплика, вопрос открыт
+rocket task answer <вопрос> "<ответ>" [--to a,b]         # финальный ответ, закрывает
+rocket task answer <вопрос> --dismiss            # закрыть как неактуальный
+    <вопрос> — это либо глобальный id (372, как раньше), либо локальный
+    номер треда, который печатает `rocket task questions`: 799/Q1 или
+    --task 799 Q1 (регистр Q не важен: q1 == Q1). Локальная ссылка
+    избавляет от путаницы между "Q1" и "#372" в одной строке вывода.
 rocket task cancel <id>
     Подробности — 12-tasks.md.
 
@@ -100,8 +104,10 @@ rocket agent ask <id> "<вопрос>" [--context <md>] [--to a,b]
     открывает тред человеку.
 rocket agent questions [<id>] [--open]
     Треды агента и их участники (без аргумента — агент текущей сессии).
-rocket agent reply <qid> "<текст>" [--to a,b]   # реплика; любой участник треда
-rocket agent answer <qid> "<ответ>" | --dismiss
+rocket agent reply <вопрос> "<текст>" [--to a,b]   # реплика; любой участник треда
+rocket agent answer <вопрос> "<ответ>" | --dismiss
+    <вопрос> — глобальный id (372) либо локальный номер треда агента:
+    sre/Q1, --agent sre Q1, а изнутри сессии агента — просто Q1.
     Закрыть тред; человек и постоянный агент (оркестратору и воркеру — 403,
     им остаётся reply). Любой участник, кроме человека, может оспорить
     закрытый тред своим reply — тред переоткроется.
