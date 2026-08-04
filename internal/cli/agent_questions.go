@@ -126,16 +126,15 @@ func newAgentQuestionsCmd() *cobra.Command {
 // side. A role instance's reply into a resolved thread reopens it.
 func newAgentReplyCmd() *cobra.Command {
 	var to []string
-	var agentFlag string
 
 	cmd := &cobra.Command{
 		Use:   "reply <question-id>|<role>/Q<n> \"<текст>\"",
 		Short: "Ответить в тред роли",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 2 {
-				return &usageError{message: "usage: rocket agent reply <question-id>|<role>/Q<n> \"<текст>\" [--agent <role>] [--to <id,...>]"}
+				return &usageError{message: "usage: rocket agent reply <question-id>|<role>/Q<n> \"<текст>\" [--to <id,...>]"}
 			}
-			id, err := resolveAgentQuestionRef(args[0], agentFlag)
+			id, err := resolveAgentQuestionRef(args[0])
 			if err != nil {
 				return err
 			}
@@ -162,7 +161,6 @@ func newAgentReplyCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
-	cmd.Flags().StringVar(&agentFlag, "agent", "", agentFlagUsage)
 	return cmd
 }
 
@@ -171,7 +169,6 @@ func newAgentReplyCmd() *cobra.Command {
 func newAgentAnswerCmd() *cobra.Command {
 	var dismiss bool
 	var to []string
-	var agentFlag string
 
 	cmd := &cobra.Command{
 		Use:   "answer <question-id>|<role>/Q<n> [\"<ответ>\"]",
@@ -187,7 +184,7 @@ func newAgentAnswerCmd() *cobra.Command {
 				return usage
 			}
 
-			id, err := resolveAgentQuestionRef(args[0], agentFlag)
+			id, err := resolveAgentQuestionRef(args[0])
 			if err != nil {
 				return err
 			}
@@ -223,7 +220,6 @@ func newAgentAnswerCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&dismiss, "dismiss", false, "закрыть тред без ответа")
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
-	cmd.Flags().StringVar(&agentFlag, "agent", "", agentFlagUsage)
 	return cmd
 }
 

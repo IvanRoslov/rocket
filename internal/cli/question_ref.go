@@ -24,16 +24,14 @@ type questionRef struct {
 	Ordinal int
 }
 
-// taskFlagUsage and agentFlagUsage document the scope flags on the thread
-// commands. The agent dimension is spelled --agent everywhere in the CLI
-// (rocket inbox --agent), so it is spelled that way here too.
+// taskFlagUsage documents --task, the only scope flag: task threads have no
+// other way to name their task, while role threads already infer the role
+// from the calling session (resolveAgentID), so they get no flag.
 const taskFlagUsage = "задача, внутри которой считается Q<n> (для локальной ссылки вида Q1)"
-const agentFlagUsage = "агент, внутри которого считается Q<n> (для локальной ссылки вида Q1)"
 
-// agentRefUsage lists the explicit agent-scoped forms, shown when the agent
+// agentRefUsage shows the explicit agent-scoped form, printed when the agent
 // cannot be inferred from the calling session.
-const agentRefUsage = `укажите агента: --agent <role> Q<n> или <role>/Q<n> ` +
-	`(например: --agent sre Q1 или sre/Q1)`
+const agentRefUsage = "укажите агента: <role>/Q<n> (например: sre/Q1)"
 
 // refUsage lists both local forms. A user who typed "Q1" without a scope
 // learns them from nowhere else.
@@ -143,14 +141,14 @@ func resolveQuestionRef(arg string, taskFlag int64) (globalID string, err error)
 }
 
 // resolveAgentQuestionRef is resolveQuestionRef for role threads, whose
-// ordinals count inside an agent rather than a task. The scope comes from
-// --agent, from an inline "sre/Q1", or — for a bare "Q1" — from the calling
-// session, the same default "rocket agent questions" uses. agentFlag is ""
-// when --agent was not given.
-func resolveAgentQuestionRef(arg, agentFlag string) (globalID string, err error) {
-	ref, err := parseQuestionRef(arg, agentFlag)
+// ordinals count inside an agent rather than a task. The command takes no
+// scope flag — the scope is either inline ("sre/Q1") or, for a bare "Q1", the
+// agent of the calling session, the same default "rocket agent questions"
+// uses.
+func resolveAgentQuestionRef(arg string) (globalID string, err error) {
+	ref, err := parseQuestionRef(arg, "")
 	if err != nil {
-		if agentFlag == "" && ordinalWithoutScope(arg) {
+		if ordinalWithoutScope(arg) {
 			return resolveAgentOrdinalInSession(arg)
 		}
 		return "", err

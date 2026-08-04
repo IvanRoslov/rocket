@@ -207,8 +207,6 @@ func TestAgentReplyAcceptsLocalRefs(t *testing.T) {
 		{"reply global", []string{"372", "text"}},
 		{"reply inline role", []string{"sre/Q1", "text"}},
 		{"reply inline role lowercase", []string{"sre/q1", "text"}},
-		{"reply agent flag", []string{"--agent", "sre", "Q1", "text"}},
-		{"reply agent flag bare number", []string{"--agent", "sre", "2", "text"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -231,7 +229,7 @@ func TestAgentReplyAcceptsLocalRefs(t *testing.T) {
 // TestResolveAgentQuestionRefGlobalSkipsLookup mirrors the task-side check for
 // role threads.
 func TestResolveAgentQuestionRefGlobalSkipsLookup(t *testing.T) {
-	got, err := resolveAgentQuestionRef("372", "")
+	got, err := resolveAgentQuestionRef("372")
 	if err != nil {
 		t.Fatalf("resolveAgentQuestionRef(372) error: %v", err)
 	}
@@ -241,11 +239,11 @@ func TestResolveAgentQuestionRefGlobalSkipsLookup(t *testing.T) {
 }
 
 // TestResolveAgentQuestionRefNoAgent tests that a bare ordinal outside an
-// agent session is a usageError naming both explicit forms — never a guess.
+// agent session is a usageError naming the explicit form — never a guess.
 func TestResolveAgentQuestionRefNoAgent(t *testing.T) {
 	t.Setenv("ROCKET_SESSION_ID", "")
 	t.Setenv("TMUX", "")
-	_, err := resolveAgentQuestionRef("Q1", "")
+	_, err := resolveAgentQuestionRef("Q1")
 	if err == nil {
 		t.Fatal("want an error for Q1 with no agent to infer")
 	}
@@ -253,7 +251,7 @@ func TestResolveAgentQuestionRefNoAgent(t *testing.T) {
 	if !errors.As(err, &usageErr) {
 		t.Fatalf("error is %T (%v), want *usageError", err, err)
 	}
-	if !strings.Contains(err.Error(), "--agent") || !strings.Contains(err.Error(), "/Q1") {
-		t.Errorf("error %q should show both explicit forms", err)
+	if !strings.Contains(err.Error(), "<role>/Q<n>") {
+		t.Errorf("error %q should show the <role>/Q<n> form", err)
 	}
 }
