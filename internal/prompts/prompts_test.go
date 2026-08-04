@@ -550,6 +550,10 @@ func TestNoInteractiveQuestionsRule(t *testing.T) {
 				if !strings.Contains(text, "selection widget") {
 					t.Errorf("%s template does not ban TUI selection widgets", tc.template)
 				}
+				// The reason must be spelled out, not just the prohibition.
+				if !strings.Contains(text, "INVISIBLE STALL") {
+					t.Errorf("%s template does not explain the invisible-stall reason", tc.template)
+				}
 			}
 
 			if !strings.Contains(result, tc.channel) {
