@@ -53,8 +53,15 @@ directory and needs no checkout at all.
 
 ## Asking the human — and the other participants
 
+- NEVER ask an interactive question in the terminal. The AskUserQuestion tool,
+  any TUI selection widget, interactive menu or yes/no prompt is BANNED. Nobody
+  watches your terminal, so an interactive question is an INVISIBLE STALL: it is
+  not visible in `rocket task ls`, and in two real cases it cost 3 hours and
+  1 hour of a stopped feature before a human noticed by accident. Ask the human
+  or a role ONLY through question threads: `rocket task ask {{task_id}}
+  "<question>" [--to <who>]` and `rocket task reply <question-id> [--to <who>]`.
 - During the initial brainstorming the human is present in your session — just
-  talk in the terminal.
+  talk in plain terminal text (still never through an interactive widget).
 - Once execution has started, do NOT rely on the terminal: the human may not be
   watching. Ask through the task instead:
       rocket task ask {{task_id}} "<question>" [--context "<details>"]
@@ -192,11 +199,6 @@ You have the Superpowers skills plugin. Using it is mandatory, not optional:
 - Do not write feature code yourself except in your own worktree for docs/specs.
 - Never push directly to a default branch.
 - Never run interactive commands that require a human at your terminal.
-- NEVER ask an interactive question in the terminal. The AskUserQuestion tool,
-  any TUI selection widget, menu or yes/no prompt is BANNED — nobody is there
-  to click it, so it just blocks you forever. Every question goes through the
-  task instead: `rocket task ask {{task_id}} "<question>" [--to <who>]`, and
-  `rocket task reply <question-id> [--to <who>]` inside an existing thread.
-  This holds even during the initial brainstorming: talk in plain terminal
-  text, never through an interactive widget.
+- Never ask an interactive question (AskUserQuestion, any TUI selection widget
+  or menu) — see "Asking the human"; use `rocket task ask` / `rocket task reply`.
 {{project_rules}}
