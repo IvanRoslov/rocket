@@ -499,6 +499,79 @@ func TestTick_ExitedWorker_QueuesSummaryWithExitedLine(t *testing.T) {
 	}
 }
 
+func TestTick_KilledWorker_NoHeartbeat(t *testing.T) {
+	st := openTestStore(t)
+	b := bus.New(st)
+	cfg := testConfig()
+
+	seedOrchAndTask(t, st, "orch1", "in_progress")
+	// A killed worker keeps its last Activity ("exited" after the pane died),
+	// but it is gone on purpose — it must not be reported as stalled forever.
+	addWorker(t, st, "worker1", "orch1", "killed", "exited", 0)
+
+	hb := New(st, b, cfg, unknownActivity, func(string) {})
+
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	msgs, err := st.ListMessages("orch1", 0)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 0 {
+		t.Fatalf("expected no messages for a killed worker, got %d: %+v", len(msgs), msgs)
+	}
+}
+
+func TestTick_DoneWorkerIdleOverThreshold_NoHeartbeat(t *testing.T) {
+	st := openTestStore(t)
+	b := bus.New(st)
+	cfg := testConfig()
+
+	seedOrchAndTask(t, st, "orch1", "in_progress")
+	staleTS := time.Now().Add(-30 * time.Minute).Unix()
+	addWorker(t, st, "worker1", "orch1", "done", "idle", staleTS)
+
+	hb := New(st, b, cfg, unknownActivity, func(string) {})
+
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	msgs, err := st.ListMessages("orch1", 0)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 0 {
+		t.Fatalf("expected no messages for a finished worker, got %d: %+v", len(msgs), msgs)
+	}
+}
+
+func TestTick_SpawningWorkerIdleOverThreshold_QueuesSummary(t *testing.T) {
+	st := openTestStore(t)
+	b := bus.New(st)
+	cfg := testConfig()
+
+	seedOrchAndTask(t, st, "orch1", "in_progress")
+	staleTS := time.Now().Add(-30 * time.Minute).Unix()
+	addWorker(t, st, "worker1", "orch1", "spawning", "idle", staleTS)
+
+	hb := New(st, b, cfg, unknownActivity, func(string) {})
+
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	msgs, err := st.ListMessages("orch1", 0)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+}
+
 func TestTick_OrchestratorActive_Skipped(t *testing.T) {
 	st := openTestStore(t)
 	b := bus.New(st)
