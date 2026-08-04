@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -112,7 +113,7 @@ func TestReposWithMirrorJSON(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected a mirror field on the first repo, got: %v", got[0]["mirror"])
 	}
-	if m.BehindCommits != 3 || !m.Stale {
+	if m.BehindCommits == nil || *m.BehindCommits != 3 || m.Stale == nil || !*m.Stale {
 		t.Errorf("expected behind=3 stale=true, got: %+v", m)
 	}
 	if m.LastFetch == "" {
@@ -124,5 +125,34 @@ func TestReposWithMirrorJSON(t *testing.T) {
 	}
 	if broken.Error != "boom" {
 		t.Errorf("expected the check error in JSON, got: %+v", broken)
+	}
+}
+
+// TestMirrorJSONOmitsStaleWhenUnknown: a mirror whose freshness could not be
+// computed must not serialize as "stale": false. A machine reader would take
+// that as "checked, and fine" — the exact silent misread this feature exists
+// to prevent. The field is omitted, so only "error" is there to be seen.
+func TestMirrorJSONOmitsStaleWhenUnknown(t *testing.T) {
+	b, err := json.Marshal(toMirrorJSON(mirrorRow{RepoID: "broken", Err: errors.New("boom")}))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	got := string(b)
+	if strings.Contains(got, "stale") {
+		t.Errorf("expected no stale field when freshness is unknown, got: %s", got)
+	}
+	if strings.Contains(got, "behind_commits") {
+		t.Errorf("expected no behind_commits when freshness is unknown, got: %s", got)
+	}
+	if !strings.Contains(got, "boom") {
+		t.Errorf("expected the error in JSON, got: %s", got)
+	}
+
+	b, err = json.Marshal(toMirrorJSON(mirrorRow{RepoID: "ok", Fresh: mirror.Freshness{Stale: false}}))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(b), `"stale":false`) {
+		t.Errorf("expected an explicit stale:false for a checked mirror, got: %s", b)
 	}
 }

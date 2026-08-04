@@ -135,11 +135,16 @@ func reposFromMaps(raw []map[string]any) []repoRow {
 }
 
 // mirrorJSON is one mirror's freshness in --json output.
+//
+// Every measured field is a pointer so that a mirror whose freshness could
+// not be computed serializes as nothing but an error. A plain bool would
+// marshal to "stale": false, which a machine reader would take as "checked,
+// and fine" — the silent misread this whole feature exists to prevent.
 type mirrorJSON struct {
-	BehindCommits int    `json:"behind_commits"`
+	BehindCommits *int   `json:"behind_commits,omitempty"`
 	LastFetch     string `json:"last_fetch,omitempty"`
 	Blocked       string `json:"blocked,omitempty"`
-	Stale         bool   `json:"stale"`
+	Stale         *bool  `json:"stale,omitempty"`
 	Error         string `json:"error,omitempty"`
 }
 
@@ -168,16 +173,16 @@ func reposWithMirror(raw []map[string]any, mirrors []mirrorRow) []map[string]any
 }
 
 func toMirrorJSON(m mirrorRow) mirrorJSON {
+	if m.Err != nil {
+		return mirrorJSON{Error: m.Err.Error()}
+	}
 	out := mirrorJSON{
-		BehindCommits: m.Fresh.BehindCommits,
+		BehindCommits: &m.Fresh.BehindCommits,
 		Blocked:       m.Fresh.Blocked,
-		Stale:         m.Fresh.Stale,
+		Stale:         &m.Fresh.Stale,
 	}
 	if !m.Fresh.LastFetch.IsZero() {
 		out.LastFetch = m.Fresh.LastFetch.Format(time.RFC3339)
-	}
-	if m.Err != nil {
-		out.Error = m.Err.Error()
 	}
 	return out
 }
