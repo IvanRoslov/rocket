@@ -8,6 +8,7 @@ package heartbeat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -17,8 +18,18 @@ import (
 	"github.com/IvanRoslov/rocket/internal/activity"
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
+	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
+
+// escalationAgent is the persistent agent an input-stalled orchestrator is
+// escalated to. Its inbox — not the message queue — is the target: the agent
+// may well not be running, and an escalation must not be lost when it isn't.
+const escalationAgent = "cto"
+
+// escalationKeyPrefix namespaces input-stall entries in lastSent so an
+// ordinary heartbeat summary and an escalation never suppress each other.
+const escalationKeyPrefix = "input-stall:"
 
 // Heartbeat runs the periodic stall-detection and question-reminder sweep.
 type Heartbeat struct {
@@ -101,6 +112,12 @@ func (h *Heartbeat) tickOne(orch store.Session) error {
 		return nil
 	}
 
+	// The orchestrator's own input stall is escalated outward, independently
+	// of the worker/question summary below: that summary is addressed to the
+	// orchestrator itself, which is exactly the party that cannot act while
+	// it waits for a keystroke.
+	h.escalateInputStall(orch, task)
+
 	workers, err := h.st.ListSessions(store.SessionFilter{Kind: "worker", All: true})
 	if err != nil {
 		return fmt.Errorf("list workers: %w", err)
@@ -170,6 +187,109 @@ func (h *Heartbeat) tickOne(orch store.Session) error {
 	}
 
 	return nil
+}
+
+// InputStalled reports how long sess has been stalled on interactive input
+// and whether that exceeds threshold. A session is stalled on interactive
+// input while it holds a pending AskUserQuestion quiz, or while its activity
+// is waiting_input — in both cases nothing moves until somebody types.
+//
+// The reference point is the quiz's asked_at when a quiz is present (the
+// activity timestamp keeps moving while a quiz is open, so it would
+// understate the wait), otherwise the activity timestamp. Without a usable
+// reference point the session is reported as not stalled rather than stalled
+// since the epoch.
+func InputStalled(sess store.Session, now time.Time, threshold time.Duration) (since time.Duration, ok bool) {
+	var ref int64
+	switch {
+	case sess.PendingQuiz != "":
+		var quiz session.Quiz
+		if err := json.Unmarshal([]byte(sess.PendingQuiz), &quiz); err == nil && quiz.AskedAt > 0 {
+			ref = quiz.AskedAt
+		} else {
+			ref = sess.ActivityTS
+		}
+	case activity.State(sess.Activity) == activity.WaitingInput:
+		ref = sess.ActivityTS
+	default:
+		return 0, false
+	}
+
+	if ref <= 0 {
+		return 0, false
+	}
+	since = now.Sub(time.Unix(ref, 0))
+	return since, since > threshold
+}
+
+// escalateInputStall writes an escalation to the cto agent's inbox and
+// publishes orchestrator.input_stalled when orch has been waiting on
+// interactive input longer than the configured threshold. Failures are
+// logged, never returned: one unreachable escalation must not abort the
+// sweep over the remaining orchestrators.
+func (h *Heartbeat) escalateInputStall(orch store.Session, task store.Task) {
+	now := h.nowFunc()
+	since, stalled := InputStalled(orch, now, h.cfg.InputStallThreshold)
+	if !stalled {
+		return
+	}
+	if !h.antiSpamOK(escalationKeyPrefix+orch.ID, now) {
+		return
+	}
+
+	kind := "prompt"
+	question := ""
+	if orch.PendingQuiz != "" {
+		kind = "quiz"
+		var quiz session.Quiz
+		if err := json.Unmarshal([]byte(orch.PendingQuiz), &quiz); err == nil && len(quiz.Questions) > 0 {
+			question = quiz.Questions[0].Question
+		}
+	}
+
+	if _, err := h.st.AddInboxMessage(store.InboxMessage{
+		AgentID: escalationAgent,
+		From:    orch.ID,
+		Body:    escalationBody(orch, task, since, kind, question),
+	}); err != nil {
+		// Most likely the cto agent is not registered (agent_inbox has a
+		// foreign key to agents): the bus event below still carries the
+		// signal to the dashboard and `rocket events`.
+		slog.Warn("heartbeat: escalate input stall to agent inbox",
+			"agent", escalationAgent, "orchestrator", orch.ID, "error", err)
+	}
+
+	h.mu.Lock()
+	h.lastSent[escalationKeyPrefix+orch.ID] = now
+	h.mu.Unlock()
+
+	if h.bus != nil {
+		h.bus.Publish("orchestrator.input_stalled", orch.ID, map[string]any{
+			"task_id":       task.ID,
+			"session_id":    orch.ID,
+			"since_seconds": int64(since.Seconds()),
+			"kind":          kind,
+		})
+	}
+}
+
+// escalationBody assembles the inbox message: what is stuck, for how long,
+// what it is being asked, and how to unstick it.
+func escalationBody(orch store.Session, task store.Task, since time.Duration, kind, question string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[rocket input stall] Orchestrator %s (task #%d %q, feature %s) has been waiting on interactive input for %dm.\n",
+		orch.ID, task.ID, task.Title, orch.FeatureSlug, int(since.Minutes()))
+	if kind == "quiz" {
+		b.WriteString("It is showing an AskUserQuestion quiz")
+		if question != "" {
+			fmt.Fprintf(&b, ": %q", question)
+		}
+		b.WriteString("\n")
+	} else {
+		b.WriteString("It is sitting at a text prompt (activity waiting_input).\n")
+	}
+	fmt.Fprintf(&b, "Answer it: `rocket attach %s`, or use the quiz bubble in the dashboard chat.", orch.ID)
+	return b.String()
 }
 
 // rootTask returns the root task (parent_id IS NULL) whose session_id

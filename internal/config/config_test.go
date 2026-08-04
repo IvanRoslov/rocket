@@ -61,6 +61,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Home != tempDir {
 		t.Errorf("expected Home %s, got %s", tempDir, cfg.Home)
 	}
+	if cfg.InputStallThreshold != 10*time.Minute {
+		t.Errorf("expected InputStallThreshold 10m, got %v", cfg.InputStallThreshold)
+	}
 }
 
 func TestLoadWithConfig(t *testing.T) {
@@ -80,6 +83,7 @@ ready_to_idle: 10m
 queue_timeout: 1h
 github_api_base: https://ghe.example.com/api/v3
 merge_grace: 10m
+input_stall_threshold: 3m
 `
 	configPath := filepath.Join(tempDir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
@@ -126,6 +130,9 @@ merge_grace: 10m
 	}
 	if cfg.MergeGrace != 10*time.Minute {
 		t.Errorf("expected MergeGrace 10m, got %v", cfg.MergeGrace)
+	}
+	if cfg.InputStallThreshold != 3*time.Minute {
+		t.Errorf("expected InputStallThreshold 3m, got %v", cfg.InputStallThreshold)
 	}
 }
 

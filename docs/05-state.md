@@ -59,6 +59,7 @@ worktrees_dir: ~/.rocket/worktrees  # где создавать worktree сес�
 mirror_sync_interval: 5m  # как часто демон синхронизирует зеркала в repos_dir (0 — выключить)
 attachments_dir: ~/.rocket/attachments  # куда сохранять вложения (POST /v1/attachments)
 agent_notify_interval: 5m # не чаще этого агенту повторно сообщают о непрочитанных
+input_stall_threshold: 10m # сколько сессия может ждать интерактивного ввода до эскалации агенту cto
 ```
 
 ## Схема SQLite
