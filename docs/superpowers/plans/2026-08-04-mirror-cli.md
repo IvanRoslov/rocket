@@ -18,7 +18,8 @@
 - Приоритет причин: `Blocked` → отставание на N коммитов → давность fetch.
 - Строки `Blocked` приходят из `internal/mirror` дословно (`BlockedDirty`, `BlockedNoFF`, `BlockedNotOnDefault`), CLI их не переписывает.
 - Ошибка `Check` печатает строку «свежесть неизвестна» и **не роняет команду** (exit 0).
-- Возраст форматируется существующим `humanAge` (internal/cli/sessions.go:112).
+- Возраст форматируется в русских единицах, как в замороженных строках («2 мин», «3 дня»). `humanAge` (internal/cli/sessions.go:112) даёт латиницу («2m», «3d») и остаётся нетронутым — он держит колонки таблиц сессий; для этого вывода рядом заводится `humanAgeRU` с теми же порогами.
+- Свежесть печатается только для репо под `cfg.ReposDir`. Реестр хранит и служебные клоны демона (зеркала), и собственные рабочие копии пользователя, добавленные через `repo add <path>`, — в последних rocket ничего не меняет (docs/05-state.md), и чекаут на фиче-ветке совершенно здоров. «ПРОТУХЛО — HEAD не на ветке main» про него было бы ложной тревогой. Фильтра по фиче при этом нет: показываем все зеркала.
 - Никаких сетевых вызовов из CLI; `mirror.Sync` из CLI не зовётся никогда.
 - Запрещено трогать `internal/mirror`, `internal/config`, `internal/daemon` — их владеет параллельный воркер.
 - Новых зависимостей модуля нет.
@@ -32,13 +33,14 @@
 - Test: `internal/cli/mirror_test.go`
 
 **Interfaces:**
-- Consumes: `mirror.Freshness` (`internal/mirror`), `humanAge(unixSec int64, now time.Time) string`.
+- Consumes: `mirror.Freshness` (`internal/mirror`).
 - Produces:
   - `type mirrorRow struct { RepoID string; Fresh mirror.Freshness; Err error }`
   - `func mirrorLine(row mirrorRow, now time.Time) string`
   - `func renderMirrors(rows []mirrorRow, w io.Writer, now time.Time)`
   - `const mirrorStaleFallback = 10 * time.Minute`
-  - `func mirrorStaleAfter(cfg *config.Config) time.Duration`
+  - `func mirrorStaleAfter(syncInterval time.Duration) time.Duration`
+  - `func humanAgeRU(d time.Duration) string`, `func pluralCommits(n int) string`
 
 - [ ] **Step 1: Написать падающий тест на все четыре случая и приоритет**
 
@@ -53,14 +55,14 @@ func TestMirrorLine(t *testing.T) {
 		{
 			name: "fresh",
 			row:  mirrorRow{RepoID: "rocket", Fresh: mirror.Freshness{LastFetch: now.Add(-2 * time.Minute)}},
-			want: "mirror rocket: свежее (последний fetch 2m назад)",
+			want: "mirror rocket: свежее (последний fetch 2 мин назад)",
 		},
 		{
 			name: "behind",
 			row: mirrorRow{RepoID: "docs-source", Fresh: mirror.Freshness{
 				BehindCommits: 37, LastFetch: now.Add(-72 * time.Hour), Stale: true,
 			}},
-			want: "mirror docs-source: ПРОТУХЛО — рабочее дерево отстаёт на 37 коммитов, последний fetch 3d назад",
+			want: "mirror docs-source: ПРОТУХЛО — рабочее дерево отстаёт на 37 коммитов, последний fetch 3 дня назад",
 		},
 		{
 			name: "blocked wins over behind",
@@ -72,7 +74,7 @@ func TestMirrorLine(t *testing.T) {
 		{
 			name: "stale by fetch age only",
 			row:  mirrorRow{RepoID: "old", Fresh: mirror.Freshness{LastFetch: now.Add(-3 * time.Hour), Stale: true}},
-			want: "mirror old: ПРОТУХЛО — последний fetch 3h назад",
+			want: "mirror old: ПРОТУХЛО — последний fetch 3 часа назад",
 		},
 		{
 			name: "never fetched",
@@ -124,15 +126,15 @@ func mirrorLine(row mirrorRow, now time.Time) string {
 	case row.Fresh.Blocked != "":
 		return fmt.Sprintf("mirror %s: ПРОТУХЛО — синхронизация не может обновить дерево: %s", row.RepoID, row.Fresh.Blocked)
 	case row.Fresh.BehindCommits > 0:
-		return fmt.Sprintf("mirror %s: ПРОТУХЛО — рабочее дерево отстаёт на %d %s, %s",
-			row.RepoID, row.Fresh.BehindCommits, pluralCommits(row.Fresh.BehindCommits), lastFetchPhrase(row.Fresh.LastFetch, now))
+		return fmt.Sprintf("mirror %s: ПРОТУХЛО — рабочее дерево отстаёт на %s, %s",
+			row.RepoID, pluralCommits(row.Fresh.BehindCommits), lastFetchPhrase(row.Fresh.LastFetch, now))
 	default:
 		return fmt.Sprintf("mirror %s: ПРОТУХЛО — %s", row.RepoID, lastFetchPhrase(row.Fresh.LastFetch, now))
 	}
 }
 ```
 
-`lastFetchPhrase` возвращает `"последний fetch <humanAge> назад"`, а для нулевого времени — `"fetch ни разу не выполнялся"`. `pluralCommits` даёт коммит/коммита/коммитов. `renderMirrors` печатает строки по порядку и ничего не печатает на пустом срезе.
+`lastFetchPhrase` возвращает `"последний fetch <humanAgeRU> назад"`, а для нулевого времени — `"fetch ни разу не выполнялся"`. `pluralCommits(37)` даёт `"37 коммитов"` — число вместе с формой, с исключением для 11–14. `renderMirrors` печатает строки по порядку и ничего не печатает на пустом срезе.
 
 - [ ] **Step 4: Убедиться, что тест зелёный**
 
@@ -158,6 +160,7 @@ git commit -m "cli: рендер строк свежести зеркал (#795)
 - Produces:
   - `type repoRow struct { ID, Path, DefaultBranch string }` с json-тегами `id`, `path`, `default_branch`
   - `func checkMirrors(ctx context.Context, repos []repoRow, staleAfter time.Duration, now time.Time) []mirrorRow`
+  - `func mirrorsOnly(repos []repoRow, reposDir string) []repoRow` — оставляет только зеркала под `repos_dir`; при пустом `repos_dir` не оставляет ничего
 
 - [ ] **Step 1: Написать падающий тест**
 
@@ -181,7 +184,7 @@ git commit -m "cli: рендер строк свежести зеркал (#795)
 
 - [ ] **Step 1: Тест на рендер таблицы + блока зеркал** (чистая функция рендера, без обращения к демону).
 - [ ] **Step 2: Убедиться, что падает.**
-- [ ] **Step 3: Реализация:** `repo ls` декодирует ответ в `[]repoRow`, печатает существующую таблицу ID/PATH/BRANCH, затем `renderMirrors`. В `--json` каждый объект получает дополнительное поле `mirror` со структурой свежести (`behind_commits`, `last_fetch`, `blocked`, `stale`, `error`) — машинный вывод не должен молчать о том, о чём говорит человеческий.
+- [ ] **Step 3: Реализация:** `repo ls` декодирует ответ в `[]repoRow`, печатает существующую таблицу ID/PATH/BRANCH, затем `renderMirrors`. В `--json` каждый объект получает дополнительное поле `mirror` со структурой свежести (`behind_commits`, `last_fetch`, `blocked`, `stale`, `error`) — машинный вывод не должен молчать о том, о чём говорит человеческий. У непроверенного зеркала там остаётся ТОЛЬКО `error`: `"stale": false` машинный читатель понял бы как «проверено, всё в порядке».
 - [ ] **Step 4: Тест зелёный.**
 - [ ] **Step 5: Коммит.**
 
@@ -205,7 +208,7 @@ git commit -m "cli: рендер строк свежести зеркал (#795)
 
 Ждёт мержа параллельной задачи mirror-daemon (поля в `internal/config` пока нет, трогать его нельзя).
 
-- [ ] **Step 1:** Заменить тело `mirrorStaleAfter` на `2 * cfg.MirrorSyncInterval`, оставив фолбэк 10m при нуле.
+- [ ] **Step 1:** Заменить тело `mirrorSyncInterval` на `return cfg.MirrorSyncInterval`. Порог считает `mirrorStaleAfter` (2× интервала, фолбэк 10m при нуле) — его трогать не нужно.
 - [ ] **Step 2:** `go build ./... && go test ./internal/cli/...`
 - [ ] **Step 3:** Коммит в этот же PR.
 
