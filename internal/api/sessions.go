@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -36,9 +37,14 @@ type sessionResponse struct {
 	// PendingQuiz is the session's currently pending AskUserQuestion quiz
 	// (see internal/api's internal_quiz.go), nil when there is none.
 	PendingQuiz *quizResponse `json:"pending_quiz,omitempty"`
+
+	// WaitingTerminal reports that this session has been stalled on
+	// interactive input longer than the configured threshold. Derived on
+	// every read from activity and the clock, never persisted.
+	WaitingTerminal bool `json:"waiting_terminal"`
 }
 
-func toSessionResponse(s store.Session) sessionResponse {
+func toSessionResponse(s store.Session, threshold time.Duration) sessionResponse {
 	return sessionResponse{
 		ID:           s.ID,
 		Kind:         s.Kind,
@@ -60,6 +66,8 @@ func toSessionResponse(s store.Session) sessionResponse {
 		CreatedAt:    s.CreatedAt,
 		UpdatedAt:    s.UpdatedAt,
 		PendingQuiz:  parseQuizResponse(s.PendingQuiz),
+
+		WaitingTerminal: sessionWaitingTerminal(s, time.Now(), threshold),
 	}
 }
 
@@ -304,7 +312,7 @@ func handleListSessions(w http.ResponseWriter, r *http.Request, d Deps) {
 
 	out := make([]sessionResponse, len(sessions))
 	for i, s := range sessions {
-		out[i] = toSessionResponse(s)
+		out[i] = toSessionResponse(s, inputStallThreshold(d.Cfg))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -321,7 +329,7 @@ func handleGetSession(w http.ResponseWriter, r *http.Request, d Deps) {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, toSessionResponse(s))
+	writeJSON(w, http.StatusOK, toSessionResponse(s, inputStallThreshold(d.Cfg)))
 }
 
 // canKillOrRestoreSession reports whether caller may kill/restore the
