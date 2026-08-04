@@ -39,9 +39,15 @@ type Config struct {
 	LargeMessageThreshold     int           `yaml:"large_message_threshold"`
 	WorkerStallThreshold      time.Duration `yaml:"worker_stall_threshold"`
 	QuestionReminderThreshold time.Duration `yaml:"question_reminder_threshold"`
-	GithubAPIBase             string        `yaml:"github_api_base"`
-	GithubCloneBase           string        `yaml:"github_clone_base"`
-	MergeGrace                time.Duration `yaml:"merge_grace"`
+	// InputStallThreshold is how long a session may sit on interactive input
+	// — a pending AskUserQuestion quiz, or activity "waiting_input" — before
+	// the heartbeat sweep escalates it to the cto agent's inbox. Unlike a
+	// stalled worker, such a session cannot be nudged by messaging its
+	// orchestrator: it is waiting for a keystroke nobody is there to press.
+	InputStallThreshold time.Duration `yaml:"input_stall_threshold"`
+	GithubAPIBase       string        `yaml:"github_api_base"`
+	GithubCloneBase     string        `yaml:"github_clone_base"`
+	MergeGrace          time.Duration `yaml:"merge_grace"`
 	// AgentNotifyInterval is the anti-spam floor between two "N unread"
 	// notifications injected into the same live agent session. A fresh
 	// notification is only due at all once new unread messages have arrived
@@ -99,6 +105,7 @@ func Load(home string) (*Config, error) {
 		LargeMessageThreshold:     2048,
 		WorkerStallThreshold:      15 * time.Minute,
 		QuestionReminderThreshold: 30 * time.Minute,
+		InputStallThreshold:       10 * time.Minute,
 		GithubAPIBase:             "https://api.github.com",
 		GithubCloneBase:           "",
 		MergeGrace:                5 * time.Minute,
