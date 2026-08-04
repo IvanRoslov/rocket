@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -178,6 +179,80 @@ func TestRunFailsWhenAlreadyRunning(t *testing.T) {
 	if err := Run(cfg); err == nil {
 		t.Fatal("expected second Run to fail, got nil")
 	}
+}
+
+// TestRunWithForeignHomeCannotKillLiveSocket reproduces the 2026-08-04
+// outage: a daemon started with its own ROCKET_HOME (so claimPidFile sees
+// no conflict and lets it through) but with the socket path of a live
+// daemon — which is what happens when --socket or the inherited
+// $ROCKET_SOCKET points at another instance. The pid file cannot guard
+// that; the socket claim must. The intruders have to fail while the
+// leader's socket keeps answering.
+func TestRunWithForeignHomeCannotKillLiveSocket(t *testing.T) {
+	leaderCfg := loadCfg(t, shortHomeDir(t))
+	leaderCfg.Port = freeTestPort(t)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Run(leaderCfg)
+	}()
+	waitForHealth(t, leaderCfg, 5*time.Second)
+
+	const intruders = 3
+	var wg sync.WaitGroup
+	errs := make([]error, intruders)
+	for i := 0; i < intruders; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			// Own home (so claimPidFile is happy) and own port (so there
+			// is no TCP collision either), but the leader's socket.
+			cfg := loadCfg(t, shortHomeDir(t))
+			cfg.Port = freeTestPort(t)
+			cfg.SocketOverride = leaderCfg.SocketPath()
+			errs[i] = Run(cfg)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err == nil {
+			t.Errorf("intruder %d: Run returned nil, want a refusal", i)
+		}
+	}
+
+	// The leader is still serving on its socket — the whole point.
+	c := client.New(leaderCfg.SocketPath())
+	var health map[string]string
+	if err := c.Get("/v1/health", nil, &health); err != nil {
+		t.Fatalf("leader health after %d foreign-home starts: %v", intruders, err)
+	}
+	if health["status"] != "ok" {
+		t.Fatalf("leader health = %v, want status ok", health)
+	}
+
+	if err := c.Post("/v1/shutdown", nil, nil); err != nil {
+		t.Fatalf("POST /v1/shutdown: %v", err)
+	}
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("leader Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("leader Run did not exit after shutdown")
+	}
+}
+
+// loadCfg loads a config rooted at home, the way `rocket daemon run` does,
+// so every interval and path is populated.
+func loadCfg(t *testing.T, home string) *config.Config {
+	t.Helper()
+	cfg, err := config.Load(home)
+	if err != nil {
+		t.Fatalf("config.Load(%s): %v", home, err)
+	}
+	return cfg
 }
 
 func TestReadPid(t *testing.T) {
