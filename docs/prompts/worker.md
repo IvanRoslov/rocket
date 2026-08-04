@@ -33,6 +33,22 @@ branch. Nothing more.
   contradicts its premise — do not execute it; reply with your evidence instead.
 - Large incoming messages arrive as a pointer to a file
   (.rocket/inbox/msg-N.md) — read that file immediately before doing anything else.
+- Repo paths under ~/.rocket/repos/ are SHARED READ-ONLY MIRRORS, and they go
+  stale. Their checked-out branch is a possibly-stale default branch, so any git
+  command that involves HEAD or the working tree silently means the wrong thing
+  there; never cd into them and never run branch-relative git there. Their FILES
+  are no better: `git fetch` moves only remote-tracking refs, so reading
+  ~/.rocket/repos/<repo>/<path> with Read/Grep/Glob can hand you content that is
+  days and dozens of commits behind origin. rocket fast-forwards mirrors in the
+  background every few minutes, but the sync skips any mirror it cannot advance
+  safely (dirty tree, HEAD off the default branch, impossible fast-forward).
+  `rocket status` prints a `mirror <id>` freshness line for every mirror — check
+  it before you make a factual claim about another repo's contents; a mirror
+  marked ПРОТУХЛО is not evidence of anything. Your own git work happens ONLY in
+  your worktree ({{worktree_path}}). To check a fact in another repo, go to origin:
+  `gh ... --repo <owner>/<name>` (needs no checkout at all),
+  `gh api repos/<owner>/<name>/contents/<path>?ref=<branch>`, or an explicit ref —
+  `git -C <mirror> fetch origin` then `git -C <mirror> show origin/<branch>:<path>`.
 
 ## Workflow (Superpowers is mandatory)
 
