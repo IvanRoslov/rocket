@@ -26,6 +26,8 @@ type sessionRow struct {
 	PRState   string `json:"pr_state,omitempty"`
 	CIState   string `json:"ci_state,omitempty"`
 	CreatedAt int64  `json:"created_at"`
+	// WaitingTerminal is the API's derived stalled-on-input flag.
+	WaitingTerminal bool `json:"waiting_terminal,omitempty"`
 }
 
 func newLsCmd() *cobra.Command {

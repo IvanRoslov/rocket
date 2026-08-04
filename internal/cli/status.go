@@ -73,7 +73,8 @@ func renderStatus(slug string, sessions []sessionRow, w io.Writer, now time.Time
 		if activity == "" {
 			activity = "-"
 		}
-		fmt.Fprintf(w, "orchestrator: %s [%s] %s (%s ago)\n", orch.ID, orch.State, activity, humanAge(orch.CreatedAt, now))
+		fmt.Fprintf(w, "orchestrator: %s [%s] %s (%s ago)%s\n", orch.ID, orch.State, activity,
+			humanAge(orch.CreatedAt, now), waitingSuffix(orch.WaitingTerminal))
 	} else {
 		fmt.Fprintf(w, "orchestrator: -\n")
 	}
@@ -95,8 +96,19 @@ func renderStatus(slug string, sessions []sessionRow, w io.Writer, now time.Time
 			if ci == "" {
 				ci = "-"
 			}
-			_, _ = tw.Write([]byte(fmt.Sprintf("%s\t%s\t%s\t%s\t%s\n", wk.ID, activity, pr, ci, humanAge(wk.CreatedAt, now))))
+			_, _ = tw.Write([]byte(fmt.Sprintf("%s\t%s\t%s\t%s\t%s%s\n", wk.ID, activity, pr, ci,
+				humanAge(wk.CreatedAt, now), waitingSuffix(wk.WaitingTerminal))))
 		}
 		_ = tw.Flush()
 	}
+}
+
+// waitingSuffix renders the stalled-on-input marker, or "" when the session
+// isn't waiting. Appended rather than given its own column so the existing
+// status layout stays intact for the common case.
+func waitingSuffix(waiting bool) string {
+	if !waiting {
+		return ""
+	}
+	return "  " + waitingTerminalMark
 }
