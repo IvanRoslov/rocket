@@ -23,6 +23,7 @@ import (
 	"github.com/IvanRoslov/rocket/internal/ghpoller"
 	"github.com/IvanRoslov/rocket/internal/github"
 	"github.com/IvanRoslov/rocket/internal/heartbeat"
+	"github.com/IvanRoslov/rocket/internal/mirror"
 	"github.com/IvanRoslov/rocket/internal/monitor"
 	"github.com/IvanRoslov/rocket/internal/queue"
 	"github.com/IvanRoslov/rocket/internal/runtime"
@@ -74,6 +75,7 @@ func Run(cfg *config.Config) error {
 	mon := monitor.New(st, b, rt, cfg, agent.Get)
 	q := queue.New(st, b, rt, cfg, mon.Activity)
 	hb := heartbeat.New(st, b, cfg, mon.Activity, q.Wake)
+	ms := mirror.NewSyncer(st, cfg)
 	agentWatch := agentwatch.New(st, rt, cfg, mgr, q.Wake)
 	reactions := ghpoller.NewReactions(st, b, q.Wake, mgr, mon.Activity, cfg)
 	defer reactions.Stop()
@@ -111,6 +113,11 @@ func Run(cfg *config.Config) error {
 	// agent how much unread mail is waiting for it.
 	go agentWatch.Run(ctx)
 	go ghp.Run(ctx)
+	// Keep the shared repo mirrors under cfg.ReposDir fresh: agents read
+	// those working trees directly, so without this sweep they serve
+	// whatever commit the mirror was cloned at. The sweep never clobbers —
+	// see internal/mirror.
+	go ms.Run(ctx)
 
 	shutdownCalled := make(chan struct{})
 	var shutdownOnce func()

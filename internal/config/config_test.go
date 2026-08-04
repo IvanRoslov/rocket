@@ -308,3 +308,49 @@ func TestAgentRuntimeOverrides(t *testing.T) {
 		t.Errorf("AgentNotifyInterval = %v, want 90s", cfg.AgentNotifyInterval)
 	}
 }
+
+func TestMirrorSyncIntervalDefault(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MirrorSyncInterval != 5*time.Minute {
+		t.Errorf("MirrorSyncInterval = %v, want 5m", cfg.MirrorSyncInterval)
+	}
+}
+
+func TestMirrorSyncIntervalOverride(t *testing.T) {
+	home := t.TempDir()
+	yaml := "mirror_sync_interval: 30s\n"
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(yaml), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(home)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MirrorSyncInterval != 30*time.Second {
+		t.Errorf("MirrorSyncInterval = %v, want 30s", cfg.MirrorSyncInterval)
+	}
+}
+
+// A zero interval must survive Load untouched: it is how a user disables
+// background mirror syncing, not a missing value to be defaulted. It is
+// spelled "0s" — yaml.v3 parses time.Duration from a string, so a bare 0 is
+// a parse error here exactly as it is for every other duration key.
+func TestMirrorSyncIntervalZeroDisables(t *testing.T) {
+	home := t.TempDir()
+	yaml := "mirror_sync_interval: 0s\n"
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(yaml), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(home)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MirrorSyncInterval != 0 {
+		t.Errorf("MirrorSyncInterval = %v, want 0", cfg.MirrorSyncInterval)
+	}
+}
