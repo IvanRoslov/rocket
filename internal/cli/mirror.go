@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 
+	"github.com/IvanRoslov/rocket/internal/client"
+	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/mirror"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
@@ -56,6 +59,18 @@ func mirrorStaleAfter(syncInterval time.Duration) time.Duration {
 	return 2 * syncInterval
 }
 
+// mirrorSyncInterval reports how often the daemon fast-forwards the mirrors,
+// which is what makes a given fetch age normal or alarming.
+//
+// The config key it will read (mirror_sync_interval, default 5m) is owned by
+// the daemon-side half of this feature and is not on main yet; until it
+// lands this reports 0, i.e. "unknown", and mirrorStaleAfter falls back to a
+// fixed threshold. Wiring it up is a one-line change here.
+func mirrorSyncInterval(cfg *config.Config) time.Duration {
+	_ = cfg
+	return 0
+}
+
 // checkMirrors computes freshness for every repo, in the order given. A repo
 // whose check fails yields a row carrying the error, so one broken mirror
 // never hides the others.
@@ -71,6 +86,30 @@ func checkMirrors(ctx context.Context, repos []repoRow, staleAfter time.Duration
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+// mirrorFreshness fetches the repo registry and computes freshness for every
+// registered mirror — deliberately unfiltered by feature or project, since
+// the misreads this exists to prevent came from agents reading repos their
+// own feature did not own.
+//
+// A failure to reach the registry is not fatal: it returns no rows and no
+// error, because a command must still print what it does know. Per-mirror
+// failures are carried in the rows themselves.
+func mirrorFreshness(ctx context.Context, c *client.Client, syncInterval time.Duration, now time.Time) []mirrorRow {
+	var repos []repoRow
+	if err := c.Get("/v1/repos", nil, &repos); err != nil {
+		slog.Debug("cli: cannot list repos for mirror freshness", "error", err)
+		return nil
+	}
+	return checkMirrorsWithTimeout(ctx, repos, syncInterval, now)
+}
+
+// checkMirrorsWithTimeout runs checkMirrors under mirrorCheckTimeout.
+func checkMirrorsWithTimeout(ctx context.Context, repos []repoRow, syncInterval time.Duration, now time.Time) []mirrorRow {
+	ctx, cancel := context.WithTimeout(ctx, mirrorCheckTimeout)
+	defer cancel()
+	return checkMirrors(ctx, repos, mirrorStaleAfter(syncInterval), now)
 }
 
 // renderMirrors writes one freshness line per mirror, in the order given.

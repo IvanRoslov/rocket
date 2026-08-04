@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/IvanRoslov/rocket/internal/mirror"
 )
 
 // TestStatusUsage tests usage violations for status.
@@ -44,7 +46,7 @@ func TestRenderStatusOrchestratorAndWorkers(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	renderStatus("demo-feature", sessions, &buf, now)
+	renderStatus("demo-feature", sessions, nil, &buf, now)
 	out := buf.String()
 
 	if !strings.Contains(out, "feature: demo-feature") {
@@ -76,7 +78,7 @@ func TestRenderStatusWorkerWithPRAndCI(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	renderStatus("demo-feature", sessions, &buf, now)
+	renderStatus("demo-feature", sessions, nil, &buf, now)
 	out := buf.String()
 
 	if !strings.Contains(out, "#42") {
@@ -96,7 +98,7 @@ func TestRenderStatusNoOrchestrator(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	renderStatus("demo-feature", sessions, &buf, now)
+	renderStatus("demo-feature", sessions, nil, &buf, now)
 	out := buf.String()
 
 	if !strings.Contains(out, "orchestrator: -") {
@@ -113,10 +115,53 @@ func TestRenderStatusNoWorkersNoTable(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	renderStatus("demo-feature", sessions, &buf, now)
+	renderStatus("demo-feature", sessions, nil, &buf, now)
 	out := buf.String()
 
 	if strings.Contains(out, "SESSION") {
 		t.Errorf("expected no worker table when there are no workers, got: %q", out)
+	}
+}
+
+// TestRenderStatusMirrorBlock checks that the mirror freshness block is
+// printed after the worker table, covers every registered mirror (not just
+// the feature's own repos — the incidents behind task #795 were agents
+// reading repos their feature did not own), and that a mirror whose
+// freshness could not be computed does not swallow the rest of the output.
+func TestRenderStatusMirrorBlock(t *testing.T) {
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	sessions := []sessionRow{
+		{ID: "demo-orch", Kind: "orchestrator", State: "running", Activity: "planning", CreatedAt: now.Unix()},
+		{ID: "demo-worker-1", Kind: "worker", State: "running", Activity: "editing foo.go", CreatedAt: now.Unix()},
+	}
+	mirrors := []mirrorRow{
+		{RepoID: "rocket", Fresh: mirror.Freshness{LastFetch: now.Add(-2 * time.Minute)}},
+		{RepoID: "docs-source", Fresh: mirror.Freshness{BehindCommits: 37, LastFetch: now.Add(-72 * time.Hour), Stale: true}},
+		{RepoID: "app", Fresh: mirror.Freshness{Blocked: mirror.BlockedDirty, Stale: true}},
+		{RepoID: "broken", Err: errors.New("not a git repository")},
+	}
+
+	var buf bytes.Buffer
+	renderStatus("demo-feature", sessions, mirrors, &buf, now)
+	out := buf.String()
+
+	for _, want := range []string{
+		"mirror rocket: свежее (последний fetch 2 мин назад)",
+		"mirror docs-source: ПРОТУХЛО — рабочее дерево отстаёт на 37 коммитов, последний fetch 3 дня назад",
+		"mirror app: ПРОТУХЛО — синхронизация не может обновить дерево: локальные изменения в зеркале",
+		"mirror broken: свежесть неизвестна (not a git repository)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected line %q, got:\n%s", want, out)
+		}
+	}
+
+	// The sessions must still be there — a broken mirror is exactly when the
+	// rest of the output matters most.
+	if !strings.Contains(out, "demo-worker-1") {
+		t.Errorf("expected the worker table to survive alongside mirrors, got:\n%s", out)
+	}
+	if strings.Index(out, "SESSION") > strings.Index(out, "mirror rocket") {
+		t.Errorf("expected the mirror block after the session table, got:\n%s", out)
 	}
 }
