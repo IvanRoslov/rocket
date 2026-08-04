@@ -353,3 +353,16 @@ test('no GitHub token configured shows the Settings hint', async () => {
   await waitFor(() => expect(within(dialog).getByText(/Settings/)).toBeInTheDocument())
   expect(within(dialog).getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/settings')
 })
+
+test('waiting badge: shown when the task\'s session is stalled on interactive input', async () => {
+  renderKanban()
+  await waitFor(() => expect(screen.getByText('Billing v2')).toBeInTheDocument())
+
+  // #12 "Billing v2" (fixtures.ts) carries the derived waiting_terminal flag;
+  // #10 "Invoice PDF export" does not.
+  const stalled = screen.getByText('Billing v2').closest('.kanban-card') as HTMLElement
+  expect(within(stalled).getByText(/waiting for input/)).toBeInTheDocument()
+
+  const moving = screen.getByText('Invoice PDF export').closest('.kanban-card') as HTMLElement
+  expect(within(moving).queryByText(/waiting for input/)).not.toBeInTheDocument()
+})

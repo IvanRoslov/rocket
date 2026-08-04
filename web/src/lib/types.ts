@@ -297,6 +297,12 @@ export interface Task {
   /** Open-question annotations (list/board/detail all carry them). */
   open_questions: number
   questions_awaiting_user: number
+  /**
+   * Derived, never persisted: the task's session has been sitting on
+   * interactive input (a pending quiz, or activity "waiting_input") longer
+   * than the daemon's threshold — nothing moves until somebody types.
+   */
+  waiting_terminal?: boolean
 }
 
 /**
