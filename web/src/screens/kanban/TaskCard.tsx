@@ -121,6 +121,12 @@ export function TaskCard({
         </div>
       )}
 
+      {task.waiting_terminal && (
+        <div className="kanban-card__questions">
+          <Badge tone="warn">⏳ waiting for input</Badge>
+        </div>
+      )}
+
       {task.questions_awaiting_user > 0 ? (
         <div className="kanban-card__questions">
           <Badge tone="warn">? {task.questions_awaiting_user} awaiting you</Badge>

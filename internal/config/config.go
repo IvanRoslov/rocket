@@ -9,6 +9,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// DefaultInputStallThreshold is the built-in value of
+// Config.InputStallThreshold — how long a session may sit on interactive
+// input before it counts as stalled.
+const DefaultInputStallThreshold = 10 * time.Minute
+
 // Config represents the rocket daemon configuration.
 type Config struct {
 	Port int    `yaml:"port"`
@@ -39,15 +44,30 @@ type Config struct {
 	LargeMessageThreshold     int           `yaml:"large_message_threshold"`
 	WorkerStallThreshold      time.Duration `yaml:"worker_stall_threshold"`
 	QuestionReminderThreshold time.Duration `yaml:"question_reminder_threshold"`
-	GithubAPIBase             string        `yaml:"github_api_base"`
-	GithubCloneBase           string        `yaml:"github_clone_base"`
-	MergeGrace                time.Duration `yaml:"merge_grace"`
+	// InputStallThreshold is how long a session may sit on interactive input
+	// — a pending AskUserQuestion quiz, or activity "waiting_input" — before
+	// the heartbeat sweep escalates it to the cto agent's inbox. Unlike a
+	// stalled worker, such a session cannot be nudged by messaging its
+	// orchestrator: it is waiting for a keystroke nobody is there to press.
+	// A zero value means "unset": consumers that need a threshold outside a
+	// loaded config (the API's derived waiting_terminal flag, say) fall back
+	// to DefaultInputStallThreshold.
+	InputStallThreshold time.Duration `yaml:"input_stall_threshold"`
+	GithubAPIBase       string        `yaml:"github_api_base"`
+	GithubCloneBase     string        `yaml:"github_clone_base"`
+	MergeGrace          time.Duration `yaml:"merge_grace"`
 	// AgentNotifyInterval is the anti-spam floor between two "N unread"
 	// notifications injected into the same live agent session. A fresh
 	// notification is only due at all once new unread messages have arrived
 	// since the last one (see internal/agentwatch).
 	AgentNotifyInterval time.Duration `yaml:"agent_notify_interval"`
-	Home                string        `yaml:"-"`
+	// MirrorSyncInterval is how often rocketd refreshes the shared repo
+	// mirrors under ReposDir (fetch --prune plus a strictly fast-forward
+	// advance of the working tree; see internal/mirror). Agents read those
+	// mirrors directly, so without a sweep they serve whatever commit they
+	// were cloned at. "0s" disables background syncing.
+	MirrorSyncInterval time.Duration `yaml:"mirror_sync_interval"`
+	Home               string        `yaml:"-"`
 
 	// SocketOverride, when non-empty, takes precedence over the default
 	// <home>/rocket.sock path returned by SocketPath. It is populated from
@@ -99,10 +119,12 @@ func Load(home string) (*Config, error) {
 		LargeMessageThreshold:     2048,
 		WorkerStallThreshold:      15 * time.Minute,
 		QuestionReminderThreshold: 30 * time.Minute,
+		InputStallThreshold:       DefaultInputStallThreshold,
 		GithubAPIBase:             "https://api.github.com",
 		GithubCloneBase:           "",
 		MergeGrace:                5 * time.Minute,
 		AgentNotifyInterval:       5 * time.Minute,
+		MirrorSyncInterval:        5 * time.Minute,
 		Home:                      home,
 	}
 

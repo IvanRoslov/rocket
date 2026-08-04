@@ -45,7 +45,7 @@ HTTP+JSON, префикс `/v1`. Листенеры: Unix-сокет `~/.rocket/
 
 | Метод | Путь | Описание |
 |---|---|---|
-| GET | `/v1/sessions` | Список; фильтры `?kind=&project=&feature=&state=` |
+| GET | `/v1/sessions` | Список; фильтры `?kind=&project=&feature=&state=`; у элемента `waiting_terminal` (см. ниже) |
 | GET | `/v1/sessions/{id}` | Полная карточка сессии |
 | POST | `/v1/orchestrators` | `{description, project, agent?}` → спавн оркестратора; ответ `{id, feature_slug}` |
 | POST | `/v1/workers` | `{caller, task, repo, prompt, agent?}` → спавн воркера; caller обязан быть живым оркестратором, repo ∈ репозитории проекта caller (main + linked) |
@@ -56,6 +56,8 @@ HTTP+JSON, префикс `/v1`. Листенеры: Unix-сокет `~/.rocket/
 | POST | `/v1/sessions/{id}/quiz/answer` | Удалённый ответ на pending-квиз AskUserQuestion: `{answers:[{question_index, option_indices?[], text?}]}` → `202 {status:"answering"}`; `409 no_pending_quiz|quiz_answer_in_flight`, `400 quiz_answer_invalid`. См. [13-chat.md](13-chat.md), раздел «Квизы» |
 | GET | `/v1/sessions/{id}/attach` | `{command: ["tmux","attach","-t","=..."]}` |
 | WS | `/v1/sessions/{id}/term` | Живой терминал сессии (см. ниже) |
+
+`waiting_terminal` (в ответах сессии и задачи) — производный флаг «висит на интерактивном вводе»: сессия держит незакрытый quiz `AskUserQuestion` либо её `activity = waiting_input`, и так дольше `input_stall_threshold` (yaml, по умолчанию 10 минут). Тот же предикат, что у эскалации хартбита (`heartbeat.InputStalled`), тот же порог; считается на каждом чтении поверх живых сессий и никогда не хранится в базе (`omitempty` — у здоровых поля просто нет, оно гаснет само, как только квиз закрыт). У задачи флаг берётся с её собственной сессии; задача без сессии не помечается никогда. Рендерится как `⏳ ждёт ответа в терминале` в `rocket task ls`, как `waiting_input ⏳` в колонке ACTIVITY у `rocket status` и бейджем на карточке в дашборде.
 
 ### WebSocket-терминал
 
@@ -82,7 +84,7 @@ tmux рендерит окно ровно в **одном** размере; пр
 
 | Метод | Путь | Описание |
 |---|---|---|
-| GET | `/v1/tasks` | Список; фильтры `?status=&project=&parent=`; `?board=true` — сгруппировано по колонкам |
+| GET | `/v1/tasks` | Список; фильтры `?status=&project=&parent=`; `?board=true` — сгруппировано по колонкам; у элемента `waiting_terminal` (см. «Сессии») |
 | POST | `/v1/tasks` | `{title, description?, project, parent_id?}`. Человек и постоянный агент (`kind='agent'`) создают любые задачи (`created_by` = `user`/`agent`); оркестратор — только подзадачи своей задачи (иначе `403 agents may only create subtasks` / `parent task does not belong to caller`); воркер — `403 workers may not create tasks` |
 | GET | `/v1/tasks/{id}` | Карточка: поля + подзадачи + привязанная сессия (с `tmux_name` и attach-командой) |
 | PATCH | `/v1/tasks/{id}` | `{status?, title?, description?}` — ручной move и правки |
@@ -159,7 +161,7 @@ tmux рендерит окно ровно в **одном** размере; пр
 | GET | `/v1/events?since=<id>&limit=N&session=` | Журнал |
 | GET | `/v1/events/stream` | SSE; `?session=` — фильтр |
 
-Формат события: `{id, ts, type, session_id?, data{}}`. Типы: `session.spawned|state_changed|activity_changed|killed|restored|chat_updated`, `message.queued|delivered|failed`, `pr.opened|ci_changed|merged`, `orchestrator.heartbeat_sent`, `workspace.branch_collision|cleanup`, `repo.clone_started|clone_done|clone_failed`, `task.question_asked|question_replied|question_resolved|question_reopened` и т.д. `session.chat_updated` — пинг о том, что транскрипт сессии изменился; поле `data` у этого события отсутствует целиком, см. [13-chat.md](13-chat.md). `session.quiz_asked|quiz_resolved|quiz_answer_unconfirmed` — квиз-пинги того же формата (без `data`): показан pending-квиз AskUserQuestion / квиз закрыт (отвечен или отменён, в т.ч. в терминале) / удалённый ответ напечатан, но закрытие не подтвердилось за таймаут — см. [13-chat.md](13-chat.md), раздел «Квизы».
+Формат события: `{id, ts, type, session_id?, data{}}`. Типы: `session.spawned|state_changed|activity_changed|killed|restored|chat_updated`, `message.queued|delivered|failed`, `pr.opened|ci_changed|merged`, `orchestrator.heartbeat_sent`, `orchestrator.input_stalled` (оркестратор дольше `input_stall_threshold` ждёт интерактивного ввода: `data{task_id, session_id, since_seconds, kind: quiz|prompt}`, см. [08-orchestrators.md](08-orchestrators.md)), `workspace.branch_collision|cleanup`, `repo.clone_started|clone_done|clone_failed`, `task.question_asked|question_replied|question_resolved|question_reopened` и т.д. `session.chat_updated` — пинг о том, что транскрипт сессии изменился; поле `data` у этого события отсутствует целиком, см. [13-chat.md](13-chat.md). `session.quiz_asked|quiz_resolved|quiz_answer_unconfirmed` — квиз-пинги того же формата (без `data`): показан pending-квиз AskUserQuestion / квиз закрыт (отвечен или отменён, в т.ч. в терминале) / удалённый ответ напечатан, но закрытие не подтвердилось за таймаут — см. [13-chat.md](13-chat.md), раздел «Квизы».
 
 ## Система
 

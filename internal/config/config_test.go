@@ -61,6 +61,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Home != tempDir {
 		t.Errorf("expected Home %s, got %s", tempDir, cfg.Home)
 	}
+	if cfg.InputStallThreshold != 10*time.Minute {
+		t.Errorf("expected InputStallThreshold 10m, got %v", cfg.InputStallThreshold)
+	}
 }
 
 func TestLoadWithConfig(t *testing.T) {
@@ -80,6 +83,7 @@ ready_to_idle: 10m
 queue_timeout: 1h
 github_api_base: https://ghe.example.com/api/v3
 merge_grace: 10m
+input_stall_threshold: 3m
 `
 	configPath := filepath.Join(tempDir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
@@ -126,6 +130,9 @@ merge_grace: 10m
 	}
 	if cfg.MergeGrace != 10*time.Minute {
 		t.Errorf("expected MergeGrace 10m, got %v", cfg.MergeGrace)
+	}
+	if cfg.InputStallThreshold != 3*time.Minute {
+		t.Errorf("expected InputStallThreshold 3m, got %v", cfg.InputStallThreshold)
 	}
 }
 
@@ -306,5 +313,51 @@ func TestAgentRuntimeOverrides(t *testing.T) {
 	}
 	if cfg.AgentNotifyInterval != 90*time.Second {
 		t.Errorf("AgentNotifyInterval = %v, want 90s", cfg.AgentNotifyInterval)
+	}
+}
+
+func TestMirrorSyncIntervalDefault(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MirrorSyncInterval != 5*time.Minute {
+		t.Errorf("MirrorSyncInterval = %v, want 5m", cfg.MirrorSyncInterval)
+	}
+}
+
+func TestMirrorSyncIntervalOverride(t *testing.T) {
+	home := t.TempDir()
+	yaml := "mirror_sync_interval: 30s\n"
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(yaml), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(home)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MirrorSyncInterval != 30*time.Second {
+		t.Errorf("MirrorSyncInterval = %v, want 30s", cfg.MirrorSyncInterval)
+	}
+}
+
+// A zero interval must survive Load untouched: it is how a user disables
+// background mirror syncing, not a missing value to be defaulted. It is
+// spelled "0s" — yaml.v3 parses time.Duration from a string, so a bare 0 is
+// a parse error here exactly as it is for every other duration key.
+func TestMirrorSyncIntervalZeroDisables(t *testing.T) {
+	home := t.TempDir()
+	yaml := "mirror_sync_interval: 0s\n"
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(yaml), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(home)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MirrorSyncInterval != 0 {
+		t.Errorf("MirrorSyncInterval = %v, want 0", cfg.MirrorSyncInterval)
 	}
 }

@@ -88,7 +88,8 @@ func renderStatus(slug string, sessions []sessionRow, mirrors []mirrorRow, w io.
 		if activity == "" {
 			activity = "-"
 		}
-		fmt.Fprintf(w, "orchestrator: %s [%s] %s (%s ago)\n", orch.ID, orch.State, activity, humanAge(orch.CreatedAt, now))
+		fmt.Fprintf(w, "orchestrator: %s [%s] %s (%s ago)\n", orch.ID, orch.State,
+			withWaitingGlyph(activity, orch.WaitingTerminal), humanAge(orch.CreatedAt, now))
 	} else {
 		fmt.Fprintf(w, "orchestrator: -\n")
 	}
@@ -110,7 +111,8 @@ func renderStatus(slug string, sessions []sessionRow, mirrors []mirrorRow, w io.
 			if ci == "" {
 				ci = "-"
 			}
-			_, _ = tw.Write([]byte(fmt.Sprintf("%s\t%s\t%s\t%s\t%s\n", wk.ID, activity, pr, ci, humanAge(wk.CreatedAt, now))))
+			_, _ = tw.Write([]byte(fmt.Sprintf("%s\t%s\t%s\t%s\t%s\n", wk.ID,
+				withWaitingGlyph(activity, wk.WaitingTerminal), pr, ci, humanAge(wk.CreatedAt, now))))
 		}
 		_ = tw.Flush()
 	}
@@ -119,4 +121,15 @@ func renderStatus(slug string, sessions []sessionRow, mirrors []mirrorRow, w io.
 		fmt.Fprintf(w, "\n")
 		renderMirrors(mirrors, w, now)
 	}
+}
+
+// withWaitingGlyph tags an activity cell with the stalled-on-input glyph.
+// The flag rides in the existing ACTIVITY column — it already carries the
+// activity vocabulary, and a column of its own would cost every reader width
+// on every run for a rare condition.
+func withWaitingGlyph(activity string, waiting bool) string {
+	if !waiting {
+		return activity
+	}
+	return activity + " " + waitingTerminalGlyph
 }

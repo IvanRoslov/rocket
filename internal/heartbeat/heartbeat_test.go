@@ -3,6 +3,7 @@ package heartbeat
 import (
 	"context"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +31,292 @@ func testConfig() *config.Config {
 		HeartbeatInterval:         5 * time.Minute,
 		WorkerStallThreshold:      15 * time.Minute,
 		QuestionReminderThreshold: 30 * time.Minute,
+		InputStallThreshold:       10 * time.Minute,
+	}
+}
+
+// addCTOAgent registers the persistent agent input-stall escalations go to.
+// agent_inbox rows carry a foreign key to agents(id), so the row must exist.
+func addCTOAgent(t *testing.T, st *store.Store) {
+	t.Helper()
+	if err := st.AddAgent(store.Agent{ID: escalationAgent, Enabled: true}); err != nil {
+		t.Fatalf("AddAgent(%s): %v", escalationAgent, err)
+	}
+}
+
+// setOrchInputState puts the orchestrator session into an interactive-input
+// state: activity (with its timestamp) and, optionally, a pending quiz.
+func setOrchInputState(t *testing.T, st *store.Store, id, activityState string, activityTS int64, quiz string) {
+	t.Helper()
+	if err := st.UpdateSessionActivity(id, activityState, activityTS); err != nil {
+		t.Fatalf("UpdateSessionActivity: %v", err)
+	}
+	if quiz != "" {
+		if err := st.SetPendingQuiz(id, quiz); err != nil {
+			t.Fatalf("SetPendingQuiz: %v", err)
+		}
+	}
+}
+
+func inboxBodies(t *testing.T, st *store.Store) []string {
+	t.Helper()
+	msgs, err := st.ListInboxMessages(escalationAgent, "", 0)
+	if err != nil {
+		t.Fatalf("ListInboxMessages: %v", err)
+	}
+	var out []string
+	for _, m := range msgs {
+		out = append(out, m.Body)
+	}
+	return out
+}
+
+func eventTypes(t *testing.T, st *store.Store) []string {
+	t.Helper()
+	evs, err := st.ListEvents(0, 0, "")
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	var out []string
+	for _, e := range evs {
+		out = append(out, e.Type)
+	}
+	return out
+}
+
+func hasEvent(types []string, want string) bool {
+	for _, t := range types {
+		if t == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestTick_OrchestratorPendingQuizOverThreshold_EscalatesToCTOInbox(t *testing.T) {
+	st := openTestStore(t)
+	b := bus.New(st)
+	cfg := testConfig()
+	addCTOAgent(t, st)
+
+	taskID := seedOrchAndTask(t, st, "orch1", "in_progress")
+	askedAt := time.Now().Add(-20 * time.Minute).Unix()
+	setOrchInputState(t, st, "orch1", "active", time.Now().Unix(),
+		`{"questions":[{"question":"Ship or hold?"}],"asked_at":`+strconv.FormatInt(askedAt, 10)+`}`)
+
+	hb := New(st, b, cfg, unknownActivity, func(string) {})
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	bodies := inboxBodies(t, st)
+	if len(bodies) != 1 {
+		t.Fatalf("expected 1 inbox message for %s, got %d", escalationAgent, len(bodies))
+	}
+	for _, want := range []string{"orch1", "#" + strconv.FormatInt(taskID, 10), "root task", "Ship or hold?", "rocket attach orch1"} {
+		if !strings.Contains(bodies[0], want) {
+			t.Errorf("expected body to contain %q, got %q", want, bodies[0])
+		}
+	}
+	if !hasEvent(eventTypes(t, st), "orchestrator.input_stalled") {
+		t.Errorf("expected an orchestrator.input_stalled event, got %v", eventTypes(t, st))
+	}
+}
+
+func TestTick_OrchestratorWaitingInputOverThreshold_EscalatesToCTOInbox(t *testing.T) {
+	st := openTestStore(t)
+	b := bus.New(st)
+	cfg := testConfig()
+	addCTOAgent(t, st)
+
+	seedOrchAndTask(t, st, "orch1", "in_progress")
+	setOrchInputState(t, st, "orch1", "waiting_input", time.Now().Add(-20*time.Minute).Unix(), "")
+
+	hb := New(st, b, cfg, unknownActivity, func(string) {})
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	bodies := inboxBodies(t, st)
+	if len(bodies) != 1 {
+		t.Fatalf("expected 1 inbox message, got %d", len(bodies))
+	}
+	if !strings.Contains(bodies[0], "orch1") || !strings.Contains(bodies[0], "20m") {
+		t.Errorf("expected body to name the session and the duration, got %q", bodies[0])
+	}
+
+	evs, err := st.ListEvents(0, 0, "")
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	var found bool
+	for _, e := range evs {
+		if e.Type != "orchestrator.input_stalled" {
+			continue
+		}
+		found = true
+		if e.Data["kind"] != "prompt" {
+			t.Errorf("event kind = %v, want prompt", e.Data["kind"])
+		}
+		if e.SessionID != "orch1" {
+			t.Errorf("event session_id = %q, want orch1", e.SessionID)
+		}
+	}
+	if !found {
+		t.Error("expected an orchestrator.input_stalled event")
+	}
+}
+
+func TestTick_OrchestratorWaitingInputBelowThreshold_NoEscalation(t *testing.T) {
+	st := openTestStore(t)
+	b := bus.New(st)
+	cfg := testConfig()
+	addCTOAgent(t, st)
+
+	seedOrchAndTask(t, st, "orch1", "in_progress")
+	setOrchInputState(t, st, "orch1", "waiting_input", time.Now().Add(-2*time.Minute).Unix(), "")
+
+	hb := New(st, b, cfg, unknownActivity, func(string) {})
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	if bodies := inboxBodies(t, st); len(bodies) != 0 {
+		t.Fatalf("expected no escalation below threshold, got %v", bodies)
+	}
+}
+
+// A session waiting on input is by definition not doing anything, but its
+// last known activity may still be reported as active by the poller; the
+// escalation must not be suppressed by the "don't interrupt an active
+// orchestrator" rule that guards the ordinary heartbeat summary, because the
+// summary goes to the stalled orchestrator itself and the escalation does not.
+func TestTick_InputStalledOrchestratorReportedActive_StillEscalates(t *testing.T) {
+	st := openTestStore(t)
+	b := bus.New(st)
+	cfg := testConfig()
+	addCTOAgent(t, st)
+
+	seedOrchAndTask(t, st, "orch1", "in_progress")
+	setOrchInputState(t, st, "orch1", "waiting_input", time.Now().Add(-20*time.Minute).Unix(), "")
+
+	hb := New(st, b, cfg, fixedActivity(activity.Active), func(string) {})
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	if bodies := inboxBodies(t, st); len(bodies) != 1 {
+		t.Fatalf("expected 1 escalation, got %d", len(bodies))
+	}
+}
+
+func TestTick_InputStallAntiSpam_TwoTicksWithinIntervalEscalateOnce(t *testing.T) {
+	st := openTestStore(t)
+	b := bus.New(st)
+	cfg := testConfig()
+	addCTOAgent(t, st)
+
+	seedOrchAndTask(t, st, "orch1", "in_progress")
+	setOrchInputState(t, st, "orch1", "waiting_input", time.Now().Add(-20*time.Minute).Unix(), "")
+
+	hb := New(st, b, cfg, unknownActivity, func(string) {})
+	now := time.Now()
+	hb.nowFunc = func() time.Time { return now }
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick 1: %v", err)
+	}
+	hb.nowFunc = func() time.Time { return now.Add(1 * time.Minute) }
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick 2: %v", err)
+	}
+
+	if bodies := inboxBodies(t, st); len(bodies) != 1 {
+		t.Fatalf("expected 1 escalation after two ticks within the interval, got %d", len(bodies))
+	}
+}
+
+func TestTick_InputStallAntiSpam_EscalatesAgainAfterInterval(t *testing.T) {
+	st := openTestStore(t)
+	b := bus.New(st)
+	cfg := testConfig()
+	addCTOAgent(t, st)
+
+	seedOrchAndTask(t, st, "orch1", "in_progress")
+	setOrchInputState(t, st, "orch1", "waiting_input", time.Now().Add(-20*time.Minute).Unix(), "")
+
+	hb := New(st, b, cfg, unknownActivity, func(string) {})
+	now := time.Now()
+	hb.nowFunc = func() time.Time { return now }
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick 1: %v", err)
+	}
+	hb.nowFunc = func() time.Time { return now.Add(cfg.HeartbeatInterval + time.Minute) }
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick 2: %v", err)
+	}
+
+	if bodies := inboxBodies(t, st); len(bodies) != 2 {
+		t.Fatalf("expected 2 escalations once the anti-spam window passed, got %d", len(bodies))
+	}
+}
+
+// The cto agent is a convention, not a guarantee: when it isn't registered
+// there is no inbox to write to (agent_inbox has a foreign key to agents),
+// and the sweep must degrade to the bus event instead of failing the tick.
+func TestTick_InputStalled_NoCTOAgent_PublishesEventWithoutError(t *testing.T) {
+	st := openTestStore(t)
+	b := bus.New(st)
+	cfg := testConfig()
+
+	seedOrchAndTask(t, st, "orch1", "in_progress")
+	setOrchInputState(t, st, "orch1", "waiting_input", time.Now().Add(-20*time.Minute).Unix(), "")
+
+	hb := New(st, b, cfg, unknownActivity, func(string) {})
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	if !hasEvent(eventTypes(t, st), "orchestrator.input_stalled") {
+		t.Errorf("expected an orchestrator.input_stalled event, got %v", eventTypes(t, st))
+	}
+}
+
+func TestInputStall(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	old := now.Add(-20 * time.Minute).Unix()
+	fresh := now.Add(-1 * time.Minute).Unix()
+	quiz := func(askedAt int64) string {
+		return `{"questions":[{"question":"q"}],"asked_at":` + strconv.FormatInt(askedAt, 10) + `}`
+	}
+
+	tests := []struct {
+		name   string
+		sess   store.Session
+		wantOK bool
+	}{
+		{"idle orchestrator", store.Session{Activity: "idle", ActivityTS: old}, false},
+		{"active orchestrator", store.Session{Activity: "active", ActivityTS: old}, false},
+		{"ready orchestrator", store.Session{Activity: "ready", ActivityTS: old}, false},
+		{"fresh waiting_input", store.Session{Activity: "waiting_input", ActivityTS: fresh}, false},
+		{"stale waiting_input", store.Session{Activity: "waiting_input", ActivityTS: old}, true},
+		{"waiting_input without timestamp", store.Session{Activity: "waiting_input"}, false},
+		{"stale quiz while active", store.Session{Activity: "active", ActivityTS: now.Unix(), PendingQuiz: quiz(old)}, true},
+		{"fresh quiz", store.Session{Activity: "active", ActivityTS: now.Unix(), PendingQuiz: quiz(fresh)}, false},
+		{"quiz without asked_at falls back to activity ts", store.Session{Activity: "active", ActivityTS: old, PendingQuiz: `{"questions":[]}`}, true},
+		{"quiz without any timestamp", store.Session{PendingQuiz: `{"questions":[]}`}, false},
+		{"unparseable quiz falls back to activity ts", store.Session{Activity: "active", ActivityTS: old, PendingQuiz: `not json`}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			since, ok := InputStalled(tt.sess, now, 10*time.Minute)
+			if ok != tt.wantOK {
+				t.Fatalf("InputStalled ok = %v, want %v", ok, tt.wantOK)
+			}
+			if ok && since <= 10*time.Minute {
+				t.Errorf("since = %v, want over the threshold", since)
+			}
+		})
 	}
 }
 
