@@ -58,6 +58,9 @@ type Runtime interface {
 - Destroy: `git worktree remove --force`; **ветку не удаляем никогда**. Фолбэк — `rm -rf` + `git worktree prune`.
 - Restore (после ребута/рестарта демона): `worktree prune` → `fetch` → переприкрепить существующую ветку без потери коммитов.
 
+### mirror (свежесть зеркал)
+Фоновый тикер (`mirror_sync_interval`, по умолчанию 5m) обходит зеркала в `repos_dir`: `git fetch --prune origin` плюс подтягивание рабочего дерева до `origin/<default_branch>` строго `merge --ff-only`. Fetch при спавне сессии двигал только remote-tracking ref'ы, оставляя файлы зеркала на давнем коммите — именно из этого агенты делали неверные выводы о чужих репозиториях. Зеркало, которое подтянуть нельзя (грязное дерево, HEAD не на default-ветке, невозможный FF), не перетирается: warn в лог, флаг `Blocked` и отдельная строка ПРОТУХЛО в `rocket status`. Детали — [05-state.md](05-state.md#свежесть-зеркал).
+
 ### agents
 Интерфейс `Agent` и адаптеры `claude-code`, `codex` — см. [10-agents.md](10-agents.md).
 

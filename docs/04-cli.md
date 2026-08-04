@@ -33,6 +33,12 @@ rocket ls [--project <id>] [--feature <slug>] [--all]
 
 rocket status <feature-slug>
     Сводка фичи: оркестратор + его воркеры со статусами, PR, CI.
+    Плюс свежесть зеркал (~/.rocket/repos/) задействованных репозиториев:
+    насколько рабочее дерево зеркала отстаёт от origin/<default-branch>
+    и когда был последний fetch. Зеркало, которое демон не смог подтянуть
+    (грязное дерево, HEAD не на default-ветке, невозможный fast-forward),
+    печатается отдельной строкой ПРОТУХЛО — чтобы протухшее зеркало нельзя
+    было прочитать молча. См. [05-state.md](05-state.md#свежесть-зеркал).
 
 rocket verify-merge <subtask-id | worker-session-id>
     Контент-проверка мержа PR подзадачи: сравнивает origin/<default-branch>
