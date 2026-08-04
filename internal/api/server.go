@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -107,33 +106,34 @@ func NewHandler(d Deps) http.Handler {
 // to expose the API on the LAN, e.g. for the mobile app), serving the same
 // handler on both. It blocks until
 // ctx is cancelled, at which point it gracefully shuts down both servers,
-// removes the socket file, and returns nil. If either listener fails to
-// start, or either server exits with a fatal error before ctx is cancelled,
-// Serve returns that error.
+// unlinks the socket file it created, and returns nil. If either listener
+// fails to start, or either server exits with a fatal error before ctx is
+// cancelled, Serve returns that error.
+//
+// The unix socket doubles as the singleton claim: if a live daemon is
+// already answering on the socket path, Serve returns ErrSocketInUse and
+// leaves everything on disk untouched. See listenUnixSingleton.
 func Serve(ctx context.Context, d Deps) error {
 	sockPath := d.Cfg.SocketPath()
 
-	// Remove a stale socket file left behind by a previous, uncleanly
-	// terminated process.
-	if err := os.Remove(sockPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove stale socket: %w", err)
-	}
-
-	unixLn, err := net.Listen("unix", sockPath)
+	// The unix socket IS the singleton claim: listenUnixSingleton refuses
+	// (ErrSocketInUse) when a live daemon is already answering on this path
+	// and unlinks only a socket it proved dead. The pid file guard in
+	// daemon.Run does not cover this, because the socket path can be set
+	// independently of ROCKET_HOME (--socket / $ROCKET_SOCKET), so two
+	// daemons with different pid files can aim at the same socket.
+	unixLn, err := listenUnixSingleton(sockPath)
 	if err != nil {
-		return fmt.Errorf("listen unix %s: %w", sockPath, err)
+		return err
 	}
-	if err := os.Chmod(sockPath, 0600); err != nil {
-		unixLn.Close()
-		os.Remove(sockPath)
-		return fmt.Errorf("chmod socket: %w", err)
-	}
+	// From here on the socket file is ours: closing unixLn unlinks it (Go
+	// unlinks unix sockets it created on Close), so no code path below may
+	// os.Remove a path it merely found.
 
 	tcpAddr := fmt.Sprintf("%s:%d", d.Cfg.Host, d.Cfg.Port)
 	tcpLn, err := net.Listen("tcp", tcpAddr)
 	if err != nil {
 		unixLn.Close()
-		os.Remove(sockPath)
 		return fmt.Errorf("listen tcp %s: %w", tcpAddr, err)
 	}
 
@@ -200,7 +200,11 @@ func Serve(ctx context.Context, d Deps) error {
 	if tlsSrv != nil {
 		_ = tlsSrv.Shutdown(shutdownCtx)
 	}
-	os.Remove(sockPath)
+	// Closing our own unix listener unlinks the socket file it created;
+	// unixSrv.Shutdown above normally does it already, this is the belt to
+	// that suspenders. Deliberately not an os.Remove(sockPath): by the time
+	// we get here the path may already belong to a successor daemon.
+	_ = unixLn.Close()
 
 	return fatalErr
 }
