@@ -62,15 +62,14 @@ func mirrorStaleAfter(syncInterval time.Duration) time.Duration {
 }
 
 // mirrorSyncInterval reports how often the daemon fast-forwards the mirrors,
-// which is what makes a given fetch age normal or alarming.
-//
-// The config key it will read (mirror_sync_interval, default 5m) is owned by
-// the daemon-side half of this feature and is not on main yet; until it
-// lands this reports 0, i.e. "unknown", and mirrorStaleAfter falls back to a
-// fixed threshold. Wiring it up is a one-line change here.
+// which is what makes a given fetch age normal or alarming. "0s" in the
+// config disables background syncing, and mirrorStaleAfter treats that as
+// the loudest case rather than the quietest.
 func mirrorSyncInterval(cfg *config.Config) time.Duration {
-	_ = cfg
-	return 0
+	if cfg == nil {
+		return 0
+	}
+	return cfg.MirrorSyncInterval
 }
 
 // checkMirrors computes freshness for every repo, in the order given. A repo

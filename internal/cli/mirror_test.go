@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/mirror"
 )
 
@@ -232,5 +233,21 @@ func TestMirrorsOnlyWithoutReposDir(t *testing.T) {
 	repos := []repoRow{{ID: "a", Path: "/anywhere/a"}}
 	if got := mirrorsOnly(repos, ""); len(got) != 0 {
 		t.Errorf("mirrorsOnly(_, \"\") = %v, want none", got)
+	}
+}
+
+// TestMirrorSyncIntervalFromConfig pins the seam to the daemon's configured
+// sweep interval, including the disabled case: "0s" means nothing is keeping
+// the mirrors fresh, which mirrorStaleAfter turns into the fixed fallback
+// rather than into silence.
+func TestMirrorSyncIntervalFromConfig(t *testing.T) {
+	if got := mirrorSyncInterval(&config.Config{MirrorSyncInterval: 5 * time.Minute}); got != 5*time.Minute {
+		t.Errorf("mirrorSyncInterval(5m) = %s, want 5m", got)
+	}
+	if got := mirrorStaleAfter(mirrorSyncInterval(&config.Config{MirrorSyncInterval: 30 * time.Minute})); got != time.Hour {
+		t.Errorf("staleAfter for a 30m sweep = %s, want 1h", got)
+	}
+	if got := mirrorStaleAfter(mirrorSyncInterval(&config.Config{MirrorSyncInterval: 0})); got != mirrorStaleFallback {
+		t.Errorf("staleAfter with syncing disabled = %s, want %s", got, mirrorStaleFallback)
 	}
 }
