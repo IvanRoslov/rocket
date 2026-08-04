@@ -833,16 +833,18 @@ func newTaskQuestionsCmd() *cobra.Command {
 
 func newTaskReplyCmd() *cobra.Command {
 	var to []string
+	var taskFlag int64
 
 	cmd := &cobra.Command{
-		Use:   "reply <question-id> \"<текст>\"",
+		Use:   "reply <question-id>|<task-id>/Q<n> \"<текст>\"",
 		Short: "Ответить в тред вопроса",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 2 {
-				return &usageError{message: "usage: rocket task reply <question-id> \"<текст>\" [--to <id,...>]"}
+				return &usageError{message: "usage: rocket task reply <question-id>|<task-id>/Q<n> \"<текст>\" [--task <task-id>] [--to <id,...>]"}
 			}
-			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
-				return &usageError{message: "invalid question id"}
+			id, err := resolveQuestionRef(args[0], taskFlag)
+			if err != nil {
+				return err
 			}
 
 			c, _, err := connect(true)
@@ -852,7 +854,7 @@ func newTaskReplyCmd() *cobra.Command {
 
 			reqBody := map[string]any{"body": args[1]}
 			setTo(reqBody, parseTo(to))
-			path := apiPath("v1", "questions", args[0], "reply")
+			path := apiPath("v1", "questions", id, "reply")
 			var resp questionRow
 			if err := c.Post(path, reqBody, &resp); err != nil {
 				return err
@@ -866,28 +868,32 @@ func newTaskReplyCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
+	cmd.Flags().Int64Var(&taskFlag, "task", 0, taskFlagUsage)
 	return cmd
 }
 
 func newTaskAnswerCmd() *cobra.Command {
 	var dismiss bool
 	var to []string
+	var taskFlag int64
 
 	cmd := &cobra.Command{
-		Use:   "answer <question-id> [\"<ответ>\"]",
+		Use:   "answer <question-id>|<task-id>/Q<n> [\"<ответ>\"]",
 		Short: "Ответить на вопрос или закрыть его без ответа",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			usage := &usageError{message: "usage: rocket task answer <question-id> \"<ответ>\" | --dismiss (exactly one)"}
+			usage := &usageError{message: "usage: rocket task answer <question-id>|<task-id>/Q<n> \"<ответ>\" | --dismiss (exactly one)"}
 			if len(args) < 1 || len(args) > 2 {
 				return usage
-			}
-			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
-				return &usageError{message: "invalid question id"}
 			}
 
 			hasBody := len(args) == 2
 			if hasBody == dismiss {
 				return usage
+			}
+
+			id, err := resolveQuestionRef(args[0], taskFlag)
+			if err != nil {
+				return err
 			}
 
 			c, _, err := connect(true)
@@ -903,7 +909,7 @@ func newTaskAnswerCmd() *cobra.Command {
 			}
 			setTo(reqBody, parseTo(to))
 
-			path := apiPath("v1", "questions", args[0], "answer")
+			path := apiPath("v1", "questions", id, "answer")
 			var resp questionRow
 			if err := c.Post(path, reqBody, &resp); err != nil {
 				return err
@@ -922,6 +928,7 @@ func newTaskAnswerCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&dismiss, "dismiss", false, "закрыть вопрос без ответа")
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
+	cmd.Flags().Int64Var(&taskFlag, "task", 0, taskFlagUsage)
 	return cmd
 }
 
