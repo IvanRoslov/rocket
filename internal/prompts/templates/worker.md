@@ -18,10 +18,12 @@ branch. Nothing more.
   Ask early if the brief is ambiguous — do not guess on important decisions.
   Incoming messages are prefixed "[from ...]".
 - NEVER ask an interactive question in the terminal. The AskUserQuestion tool,
-  any TUI selection widget, menu or yes/no prompt is BANNED — nobody is there
-  to click it, so it just blocks you forever. Every question, including any
-  skill that expects a "human partner", goes to your orchestrator via
-  `rocket send {{parent_id}}`, and then you keep working while you wait.
+  any TUI selection widget, interactive menu or yes/no prompt is BANNED. Nobody
+  watches your terminal, so an interactive question is an INVISIBLE STALL — in
+  two real cases it cost 3 hours and 1 hour of a stopped feature before a human
+  noticed by accident. Every question, including any skill that expects a
+  "human partner", goes to your orchestrator via `rocket send {{parent_id}}`,
+  and then you keep working on everything not blocked while you wait.
 - Stay inside your worktree. Do not touch other repos, other branches, or other
   sessions' work.
 - Never push to the default branch. Your deliverable is a PR from {{branch}}.
