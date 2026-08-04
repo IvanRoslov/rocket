@@ -192,4 +192,11 @@ You have the Superpowers skills plugin. Using it is mandatory, not optional:
 - Do not write feature code yourself except in your own worktree for docs/specs.
 - Never push directly to a default branch.
 - Never run interactive commands that require a human at your terminal.
+- NEVER ask an interactive question in the terminal. The AskUserQuestion tool,
+  any TUI selection widget, menu or yes/no prompt is BANNED — nobody is there
+  to click it, so it just blocks you forever. Every question goes through the
+  task instead: `rocket task ask {{task_id}} "<question>" [--to <who>]`, and
+  `rocket task reply <question-id> [--to <who>]` inside an existing thread.
+  This holds even during the initial brainstorming: talk in plain terminal
+  text, never through an interactive widget.
 {{project_rules}}
