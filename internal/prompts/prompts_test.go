@@ -518,3 +518,43 @@ func TestStripMarkersOnlyRemovesMarkerLines(t *testing.T) {
 		t.Errorf("StripMarkers() = %q, want %q", got, want)
 	}
 }
+
+// The ban on interactive terminal questions must survive both the full render
+// and the skills-stripped render: it is a hard rule, not a Superpowers detail.
+func TestNoInteractiveQuestionsRule(t *testing.T) {
+	vars := completeVars()
+
+	cases := []struct {
+		template string
+		channel  string // the sanctioned alternative channel
+	}{
+		{"orchestrator", "rocket task ask"},
+		{"worker", "rocket send sess-002"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.template, func(t *testing.T) {
+			result, err := Render("", tc.template, vars)
+			if err != nil {
+				t.Fatalf("Render %s failed: %v", tc.template, err)
+			}
+			stripped := StripSkills(rawTemplate(t, tc.template))
+
+			for _, text := range []string{result, stripped} {
+				if !strings.Contains(text, "AskUserQuestion") {
+					t.Errorf("%s template does not name AskUserQuestion in the ban", tc.template)
+				}
+				if !strings.Contains(text, "interactive question") {
+					t.Errorf("%s template missing the interactive-question ban", tc.template)
+				}
+				if !strings.Contains(text, "selection widget") {
+					t.Errorf("%s template does not ban TUI selection widgets", tc.template)
+				}
+			}
+
+			if !strings.Contains(result, tc.channel) {
+				t.Errorf("%s template does not point at %q as the question channel", tc.template, tc.channel)
+			}
+		})
+	}
+}
