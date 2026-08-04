@@ -33,12 +33,16 @@ rocket ls [--project <id>] [--feature <slug>] [--all]
 
 rocket status <feature-slug>
     Сводка фичи: оркестратор + его воркеры со статусами, PR, CI.
-    Плюс свежесть зеркал (~/.rocket/repos/) задействованных репозиториев:
-    насколько рабочее дерево зеркала отстаёт от origin/<default-branch>
-    и когда был последний fetch. Зеркало, которое демон не смог подтянуть
-    (грязное дерево, HEAD не на default-ветке, невозможный fast-forward),
-    печатается отдельной строкой ПРОТУХЛО — чтобы протухшее зеркало нельзя
-    было прочитать молча. См. [05-state.md](05-state.md#свежесть-зеркал).
+    Плюс строка свежести на каждое зеркало (~/.rocket/repos/) задействованных
+    репозиториев — чтобы протухшее зеркало нельзя было прочитать молча:
+
+        mirror rocket: свежее (последний fetch 2 мин назад)
+        mirror docs-source: ПРОТУХЛО — рабочее дерево отстаёт на 37 коммитов, последний fetch 3 дня назад
+        mirror app: ПРОТУХЛО — синхронизация не может обновить дерево: локальные изменения в зеркале
+
+    ПРОТУХЛО — это либо отставание дерева от origin/<default-branch>, либо
+    заблокированная синхронизация (грязное дерево, HEAD не на default-ветке,
+    невозможный fast-forward). См. [05-state.md](05-state.md#свежесть-зеркал).
 
 rocket verify-merge <subtask-id | worker-session-id>
     Контент-проверка мержа PR подзадачи: сравнивает origin/<default-branch>
@@ -66,6 +70,8 @@ rocket restore <session>
 rocket repo add <path> [--id <id>]      # зарегистрировать локальный чекаут
 rocket repo add --github <owner/name>   # склонировать в ~/.rocket/repos и зарегистрировать
 rocket repo ls / rocket repo rm <id>
+    `repo ls` для склонированных репо показывает свежесть зеркала — ту же,
+    что `rocket status` (см. ниже и [05-state.md](05-state.md#свежесть-зеркал)).
 
 rocket github auth <token>              # сохранить GitHub-токен (то же, что Settings в UI)
 

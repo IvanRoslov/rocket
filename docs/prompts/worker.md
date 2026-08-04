@@ -39,11 +39,13 @@ branch. Nothing more.
   there; never cd into them and never run branch-relative git there. Their FILES
   are no better: `git fetch` moves only remote-tracking refs, so reading
   ~/.rocket/repos/<repo>/<path> with Read/Grep/Glob can hand you content that is
-  days and dozens of commits behind origin. rocket refreshes mirrors in the
-  background, but a mirror can be stuck (dirty tree, HEAD off the default branch,
-  impossible fast-forward) — `rocket status` marks such a mirror as stale, and a
-  stale mirror is not evidence of anything. Your own git work happens ONLY in your
-  worktree ({{worktree_path}}). To check a fact in another repo, go to origin:
+  days and dozens of commits behind origin. rocket fast-forwards mirrors in the
+  background every few minutes, but the sync skips any mirror it cannot advance
+  safely (dirty tree, HEAD off the default branch, impossible fast-forward).
+  `rocket status` prints a `mirror <id>` freshness line for every mirror — check
+  it before you make a factual claim about another repo's contents; a mirror
+  marked ПРОТУХЛО is not evidence of anything. Your own git work happens ONLY in
+  your worktree ({{worktree_path}}). To check a fact in another repo, go to origin:
   `gh ... --repo <owner>/<name>` (needs no checkout at all),
   `gh api repos/<owner>/<name>/contents/<path>?ref=<branch>`, or an explicit ref —
   `git -C <mirror> fetch origin` then `git -C <mirror> show origin/<branch>:<path>`.

@@ -33,11 +33,13 @@ directory and needs no checkout at all.
 The FILES in a mirror are as unreliable as its HEAD. `git fetch` moves only
 remote-tracking refs; the working tree stays where it was, so reading
 ~/.rocket/repos/<repo>/<path> with Read/Grep/Glob can hand you content that
-is days and dozens of commits behind origin. rocket refreshes mirrors in the
-background, but a mirror can be stuck (dirty tree, HEAD off the default
-branch, impossible fast-forward) — `rocket status` marks such a mirror as
-stale, and a stale mirror is not evidence of anything. Never state a fact
-about another repo ("this file does not exist", "that branch was never
+is days and dozens of commits behind origin. rocket fast-forwards mirrors in
+the background every few minutes, but the sync skips any mirror it cannot
+advance safely (local modifications, HEAD off the default branch, impossible
+fast-forward). `rocket status` prints a `mirror <id>` freshness line for every
+mirror — check it before drawing conclusions about another repository's
+contents; a mirror marked ПРОТУХЛО is not evidence of anything. Never state a
+fact about another repo ("this file does not exist", "that branch was never
 merged") on the strength of a mirror read alone. Confirm against origin:
 `gh api repos/<owner>/<name>/contents/<path>?ref=<branch>`, `gh pr view`, or
 an explicit ref — `git -C <mirror> fetch origin` then
