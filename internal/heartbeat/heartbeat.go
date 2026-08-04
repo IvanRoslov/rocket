@@ -307,13 +307,29 @@ func (h *Heartbeat) rootTask(orchID string) (store.Task, bool, error) {
 	return store.Task{}, false, nil
 }
 
+// liveSession reports whether s is still a live session — one that can
+// still make progress or stall. Mirrors sessionWaitingTerminal in
+// internal/api/waiting.go: the two must share the same notion of "live"
+// so the stall vocabulary does not drift.
+func liveSession(s store.Session) bool {
+	return s.State == "spawning" || s.State == "running"
+}
+
 // stalledWorkerLine reports whether w counts as stalled and, if so, its
-// summary line. A worker is stalled if its activity is "exited" (its tmux
-// pane died; store.Session.State stays "running" until the reconciler
-// later promotes it to "errored", so State is not the field to check
-// here), or if its activity is idle/blocked/waiting_input and it has been
-// that way longer than threshold.
+// summary line. Only a live session (State spawning/running) can stall: a
+// killed or finished worker keeps its last Activity forever and would
+// otherwise be re-reported on every tick until the root task leaves
+// in_progress. Within a live session, a worker is stalled if its activity
+// is "exited" (its tmux pane died; store.Session.State stays "running"
+// until the reconciler later promotes it to "errored", so State alone is
+// not the field to check here), or if its activity is
+// idle/blocked/waiting_input and it has been that way longer than
+// threshold.
 func stalledWorkerLine(w store.Session, now time.Time, threshold time.Duration) (string, bool) {
+	if !liveSession(w) {
+		return "", false
+	}
+
 	if activity.State(w.Activity) == activity.Exited {
 		return fmt.Sprintf("- %s: exited", w.ID), true
 	}

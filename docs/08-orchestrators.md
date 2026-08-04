@@ -43,15 +43,16 @@ rocket up "перенести биллинг на v2 API" --project billing
 Цикл демона (каждые 5m, конфигурируемо) для каждого живого оркестратора, **чья задача в статусе `in_progress`** — задачи в `review` (ждут приёмки человеком), `done` и `cancelled` heartbeat не трогает:
 
 1. Собирает воркеров (`parent_id`), их `activity`, PR/CI, время последней активности.
-2. Определяет застрявших: воркер в `idle`/`blocked`/`waiting_input` дольше 15m, или `exited` без merged PR, или `ci_state=failing` без движения.
-3. Если есть застрявшие, а сам оркестратор не `active` — кладёт ему в очередь сводку:
+2. Отбрасывает неживых: застрять может только сессия в состоянии `spawning`/`running`. Убитый или завершённый воркер навсегда сохраняет свою последнюю `activity` (обычно `exited`), и без этого фильтра он попадал бы в сводку на каждом тике до конца задачи.
+3. Определяет застрявших среди живых: воркер в `idle`/`blocked`/`waiting_input` дольше 15m, или `exited` без merged PR (агент умер, сессия ещё жива), или `ci_state=failing` без движения.
+4. Если есть застрявшие, а сам оркестратор не `active` — кладёт ему в очередь сводку:
    ```
    [rocket heartbeat] Feature billing-v2 status:
    - billing-v2-backend: blocked 22m, PR #14 CI failing
    - billing-v2-ui: idle 40m, no PR
    Act autonomously: unblock, restart or replace stalled workers.
    ```
-4. Анти-спам: не чаще одного heartbeat на оркестратора за интервал; событие `orchestrator.heartbeat_sent`.
+5. Анти-спам: не чаще одного heartbeat на оркестратора за интервал; событие `orchestrator.heartbeat_sent`.
 
 Оркестраторы в `blocked`/`exited` heartbeat не будит — это сигнал человеку (`rocket ls` подсветит; дашборд/нотификации позже).
 
