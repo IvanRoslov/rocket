@@ -52,7 +52,7 @@ func TestRenderStatusWaitingTerminal(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	renderStatus("demo-feature", sessions, &buf, now)
+	renderStatus("demo-feature", sessions, nil, &buf, now)
 	out := buf.String()
 
 	for _, line := range strings.Split(out, "\n") {

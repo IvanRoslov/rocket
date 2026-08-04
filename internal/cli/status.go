@@ -20,7 +20,7 @@ func newStatusCmd() *cobra.Command {
 			}
 			slug := args[0]
 
-			c, _, err := connect(true)
+			c, cfg, err := connect(true)
 			if err != nil {
 				return err
 			}
@@ -38,12 +38,22 @@ func newStatusCmd() *cobra.Command {
 				return printJSON(cmd, sessions)
 			}
 
+			now := time.Now()
+			mirrors := mirrorFreshness(cmd.Context(), c, cfg, now)
+
+			// The mirror block is printed even with no live sessions: a
+			// stale mirror misleads whoever reads it regardless of whether
+			// this particular feature has anything running.
 			if len(sessions) == 0 {
 				cmd.Printf("no live sessions for feature %s\n", slug)
+				if len(mirrors) > 0 {
+					cmd.Printf("\n")
+					renderMirrors(mirrors, cmd.OutOrStdout(), now)
+				}
 				return nil
 			}
 
-			renderStatus(slug, sessions, cmd.OutOrStdout(), time.Now())
+			renderStatus(slug, sessions, mirrors, cmd.OutOrStdout(), now)
 			return nil
 		},
 	}
@@ -53,8 +63,13 @@ func newStatusCmd() *cobra.Command {
 // renderStatus writes a feature status view to w: a header line naming the
 // slug, then the orchestrator's own line ("orchestrator: <id> [state]
 // <activity> (<age> ago)", or "orchestrator: -" if none is live), followed
-// by a worker table (SESSION, ACTIVITY, PR, CI, AGE) when any workers are present.
-func renderStatus(slug string, sessions []sessionRow, w io.Writer, now time.Time) {
+// by a worker table (SESSION, ACTIVITY, PR, CI, AGE) when any workers are
+// present, and finally a freshness line per mirror.
+//
+// The mirror block covers every registered mirror, deliberately unfiltered
+// by feature: the wrong conclusions this exists to prevent (task #795) came
+// from agents reading repos their own feature did not own.
+func renderStatus(slug string, sessions []sessionRow, mirrors []mirrorRow, w io.Writer, now time.Time) {
 	var orch *sessionRow
 	var workers []sessionRow
 	for i := range sessions {
@@ -100,6 +115,11 @@ func renderStatus(slug string, sessions []sessionRow, w io.Writer, now time.Time
 				withWaitingGlyph(activity, wk.WaitingTerminal), pr, ci, humanAge(wk.CreatedAt, now))))
 		}
 		_ = tw.Flush()
+	}
+
+	if len(mirrors) > 0 {
+		fmt.Fprintf(w, "\n")
+		renderMirrors(mirrors, w, now)
 	}
 }
 
