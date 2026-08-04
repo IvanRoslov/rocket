@@ -61,7 +61,13 @@ type Config struct {
 	// notification is only due at all once new unread messages have arrived
 	// since the last one (see internal/agentwatch).
 	AgentNotifyInterval time.Duration `yaml:"agent_notify_interval"`
-	Home                string        `yaml:"-"`
+	// MirrorSyncInterval is how often rocketd refreshes the shared repo
+	// mirrors under ReposDir (fetch --prune plus a strictly fast-forward
+	// advance of the working tree; see internal/mirror). Agents read those
+	// mirrors directly, so without a sweep they serve whatever commit they
+	// were cloned at. "0s" disables background syncing.
+	MirrorSyncInterval time.Duration `yaml:"mirror_sync_interval"`
+	Home               string        `yaml:"-"`
 
 	// SocketOverride, when non-empty, takes precedence over the default
 	// <home>/rocket.sock path returned by SocketPath. It is populated from
@@ -118,6 +124,7 @@ func Load(home string) (*Config, error) {
 		GithubCloneBase:           "",
 		MergeGrace:                5 * time.Minute,
 		AgentNotifyInterval:       5 * time.Minute,
+		MirrorSyncInterval:        5 * time.Minute,
 		Home:                      home,
 	}
 
