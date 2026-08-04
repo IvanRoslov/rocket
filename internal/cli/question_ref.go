@@ -24,6 +24,17 @@ type questionRef struct {
 	Ordinal int
 }
 
+// taskFlagUsage and agentFlagUsage document the scope flags on the thread
+// commands. The agent dimension is spelled --agent everywhere in the CLI
+// (rocket inbox --agent), so it is spelled that way here too.
+const taskFlagUsage = "задача, внутри которой считается Q<n> (для локальной ссылки вида Q1)"
+const agentFlagUsage = "агент, внутри которого считается Q<n> (для локальной ссылки вида Q1)"
+
+// agentRefUsage lists the explicit agent-scoped forms, shown when the agent
+// cannot be inferred from the calling session.
+const agentRefUsage = `укажите агента: --agent <role> Q<n> или <role>/Q<n> ` +
+	`(например: --agent sre Q1 или sre/Q1)`
+
 // refUsage lists both local forms. A user who typed "Q1" without a scope
 // learns them from nowhere else.
 const refUsage = `укажите задачу: --task <task-id> Q<n> или <task-id>/Q<n> ` +
@@ -132,13 +143,14 @@ func resolveQuestionRef(arg string, taskFlag int64) (globalID string, err error)
 }
 
 // resolveAgentQuestionRef is resolveQuestionRef for role threads, whose
-// ordinals count inside a role rather than a task. The command has no scope
-// flag, so the scope is either inline ("sre/Q1") or the role of the calling
-// session (a bare "Q1"), the same default "rocket agent questions" uses.
-func resolveAgentQuestionRef(arg string) (globalID string, err error) {
-	ref, err := parseQuestionRef(arg, "")
+// ordinals count inside an agent rather than a task. The scope comes from
+// --agent, from an inline "sre/Q1", or — for a bare "Q1" — from the calling
+// session, the same default "rocket agent questions" uses. agentFlag is ""
+// when --agent was not given.
+func resolveAgentQuestionRef(arg, agentFlag string) (globalID string, err error) {
+	ref, err := parseQuestionRef(arg, agentFlag)
 	if err != nil {
-		if ordinalWithoutScope(arg) {
+		if agentFlag == "" && ordinalWithoutScope(arg) {
 			return resolveAgentOrdinalInSession(arg)
 		}
 		return "", err
@@ -164,7 +176,9 @@ func isGlobalID(arg string) bool {
 func resolveAgentOrdinalInSession(arg string) (string, error) {
 	role, err := resolveAgentID("")
 	if err != nil {
-		return "", &usageError{message: "укажите агента: <role>/Q<n> (например: sre/Q1)"}
+		// Outside an agent session there is nothing to guess from: name the
+		// agent explicitly, either way.
+		return "", &usageError{message: agentRefUsage}
 	}
 	ord, err := parseOrdinal(arg)
 	if err != nil {

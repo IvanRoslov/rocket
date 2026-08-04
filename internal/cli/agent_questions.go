@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -127,16 +126,18 @@ func newAgentQuestionsCmd() *cobra.Command {
 // side. A role instance's reply into a resolved thread reopens it.
 func newAgentReplyCmd() *cobra.Command {
 	var to []string
+	var agentFlag string
 
 	cmd := &cobra.Command{
-		Use:   "reply <question-id> \"<текст>\"",
+		Use:   "reply <question-id>|<role>/Q<n> \"<текст>\"",
 		Short: "Ответить в тред роли",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 2 {
-				return &usageError{message: "usage: rocket agent reply <question-id> \"<текст>\" [--to <id,...>]"}
+				return &usageError{message: "usage: rocket agent reply <question-id>|<role>/Q<n> \"<текст>\" [--agent <role>] [--to <id,...>]"}
 			}
-			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
-				return &usageError{message: "invalid question id"}
+			id, err := resolveAgentQuestionRef(args[0], agentFlag)
+			if err != nil {
+				return err
 			}
 
 			c, _, err := connect(true)
@@ -148,7 +149,7 @@ func newAgentReplyCmd() *cobra.Command {
 			setTo(reqBody, parseTo(to))
 
 			var resp agentQuestionRow
-			if err := c.Post(apiPath("v1", "agent-questions", args[0], "reply"),
+			if err := c.Post(apiPath("v1", "agent-questions", id, "reply"),
 				reqBody, &resp); err != nil {
 				return err
 			}
@@ -161,6 +162,7 @@ func newAgentReplyCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
+	cmd.Flags().StringVar(&agentFlag, "agent", "", agentFlagUsage)
 	return cmd
 }
 
@@ -169,22 +171,25 @@ func newAgentReplyCmd() *cobra.Command {
 func newAgentAnswerCmd() *cobra.Command {
 	var dismiss bool
 	var to []string
+	var agentFlag string
 
 	cmd := &cobra.Command{
-		Use:   "answer <question-id> [\"<ответ>\"]",
+		Use:   "answer <question-id>|<role>/Q<n> [\"<ответ>\"]",
 		Short: "Закрыть тред роли ответом или без ответа",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			usage := &usageError{message: "usage: rocket agent answer <question-id> \"<ответ>\" | --dismiss (exactly one)"}
+			usage := &usageError{message: "usage: rocket agent answer <question-id>|<role>/Q<n> \"<ответ>\" | --dismiss (exactly one)"}
 			if len(args) < 1 || len(args) > 2 {
 				return usage
-			}
-			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
-				return &usageError{message: "invalid question id"}
 			}
 
 			hasBody := len(args) == 2
 			if hasBody == dismiss {
 				return usage
+			}
+
+			id, err := resolveAgentQuestionRef(args[0], agentFlag)
+			if err != nil {
+				return err
 			}
 
 			c, _, err := connect(true)
@@ -201,7 +206,7 @@ func newAgentAnswerCmd() *cobra.Command {
 			setTo(reqBody, parseTo(to))
 
 			var resp agentQuestionRow
-			if err := c.Post(apiPath("v1", "agent-questions", args[0], "answer"), reqBody, &resp); err != nil {
+			if err := c.Post(apiPath("v1", "agent-questions", id, "answer"), reqBody, &resp); err != nil {
 				return err
 			}
 
@@ -218,6 +223,7 @@ func newAgentAnswerCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&dismiss, "dismiss", false, "закрыть тред без ответа")
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
+	cmd.Flags().StringVar(&agentFlag, "agent", "", agentFlagUsage)
 	return cmd
 }
 

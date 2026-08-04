@@ -2,8 +2,11 @@ package cli
 
 import (
 	"errors"
+	"io"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 // TestParseQuestionRefGlobal tests that a bare global id passes through
@@ -134,14 +137,123 @@ func TestResolveQuestionRefGlobalSkipsLookup(t *testing.T) {
 	}
 }
 
+// TestTaskThreadCommandsAcceptLocalRefs tests that reply and answer take a
+// local reference: parsing must succeed and only then fail on connect(), which
+// is disabled under go test. A usageError here would mean the form was
+// rejected outright.
+func TestTaskThreadCommandsAcceptLocalRefs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"reply global", []string{"372", "text"}},
+		{"reply inline scope", []string{"799/Q1", "text"}},
+		{"reply flag scope", []string{"--task", "799", "Q1", "text"}},
+		{"reply flag scope lowercase", []string{"--task", "799", "q1", "text"}},
+		{"answer global", []string{"372", "text"}},
+		{"answer inline scope", []string{"799/Q1", "text"}},
+		{"answer flag scope", []string{"--task", "799", "Q1", "text"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newTaskReplyCmd()
+			if strings.HasPrefix(tt.name, "answer") {
+				cmd = newTaskAnswerCmd()
+			}
+			cmd.SetArgs(tt.args)
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatal("want the connect() error under go test")
+			}
+			var usageErr *usageError
+			if errors.As(err, &usageErr) {
+				t.Fatalf("reference %v rejected: %v", tt.args, err)
+			}
+			if !strings.Contains(err.Error(), "connect()") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// TestTaskThreadCommandsRejectScopelessOrdinal tests that a bare Q1 with no
+// task named is a usage error naming both local forms.
+func TestTaskThreadCommandsRejectScopelessOrdinal(t *testing.T) {
+	for _, newCmd := range []func() *cobra.Command{newTaskReplyCmd, newTaskAnswerCmd} {
+		cmd := newCmd()
+		cmd.SetArgs([]string{"Q1", "text"})
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		err := cmd.Execute()
+		var usageErr *usageError
+		if !errors.As(err, &usageErr) {
+			t.Fatalf("error is %T (%v), want *usageError", err, err)
+		}
+		if !strings.Contains(err.Error(), "--task") {
+			t.Errorf("error %q should show the --task form", err)
+		}
+	}
+}
+
+// TestAgentReplyAcceptsLocalRefs tests the role-scoped forms of agent reply
+// and agent answer.
+func TestAgentReplyAcceptsLocalRefs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"reply global", []string{"372", "text"}},
+		{"reply inline role", []string{"sre/Q1", "text"}},
+		{"reply inline role lowercase", []string{"sre/q1", "text"}},
+		{"reply agent flag", []string{"--agent", "sre", "Q1", "text"}},
+		{"reply agent flag bare number", []string{"--agent", "sre", "2", "text"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newAgentReplyCmd()
+			cmd.SetArgs(tt.args)
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			err := cmd.Execute()
+			var usageErr *usageError
+			if errors.As(err, &usageErr) {
+				t.Fatalf("reference %v rejected: %v", tt.args, err)
+			}
+			if err == nil || !strings.Contains(err.Error(), "connect()") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 // TestResolveAgentQuestionRefGlobalSkipsLookup mirrors the task-side check for
 // role threads.
 func TestResolveAgentQuestionRefGlobalSkipsLookup(t *testing.T) {
-	got, err := resolveAgentQuestionRef("372")
+	got, err := resolveAgentQuestionRef("372", "")
 	if err != nil {
 		t.Fatalf("resolveAgentQuestionRef(372) error: %v", err)
 	}
 	if got != "372" {
 		t.Errorf("resolveAgentQuestionRef(372) = %q, want 372", got)
+	}
+}
+
+// TestResolveAgentQuestionRefNoAgent tests that a bare ordinal outside an
+// agent session is a usageError naming both explicit forms — never a guess.
+func TestResolveAgentQuestionRefNoAgent(t *testing.T) {
+	t.Setenv("ROCKET_SESSION_ID", "")
+	t.Setenv("TMUX", "")
+	_, err := resolveAgentQuestionRef("Q1", "")
+	if err == nil {
+		t.Fatal("want an error for Q1 with no agent to infer")
+	}
+	var usageErr *usageError
+	if !errors.As(err, &usageErr) {
+		t.Fatalf("error is %T (%v), want *usageError", err, err)
+	}
+	if !strings.Contains(err.Error(), "--agent") || !strings.Contains(err.Error(), "/Q1") {
+		t.Errorf("error %q should show both explicit forms", err)
 	}
 }
