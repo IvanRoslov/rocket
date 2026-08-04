@@ -27,14 +27,32 @@ func newStore(t *testing.T, repos ...store.Repo) *store.Store {
 	return st
 }
 
+// mirrorUnder builds a mirror the way newMirror does, but parks it inside
+// reposDir under the given id — where the daemon's own clones live, and so
+// where the sweep is allowed to touch it. The clone's origin is an absolute
+// path, so relocating the directory keeps it working.
+func mirrorUnder(t *testing.T, reposDir, id string) (string, store.Repo) {
+	t.Helper()
+	origin, repo := newMirror(t)
+	dst := filepath.Join(reposDir, id)
+	if err := os.Rename(repo.Path, dst); err != nil {
+		t.Fatalf("move mirror into repos dir: %v", err)
+	}
+	repo.Path, repo.ID = dst, id
+	return origin, repo
+}
+
 func TestSyncOnceSyncsEveryRepo(t *testing.T) {
-	originA, repoA := newMirror(t)
-	originB, repoB := newMirror(t)
-	repoA.ID, repoB.ID = "a", "b"
+	reposDir := t.TempDir()
+	originA, repoA := mirrorUnder(t, reposDir, "a")
+	originB, repoB := mirrorUnder(t, reposDir, "b")
 	commitToOrigin(t, originA, "a2\n", "second a")
 	commitToOrigin(t, originB, "b2\n", "second b")
 
-	s := NewSyncer(newStore(t, repoA, repoB), &config.Config{MirrorSyncInterval: time.Minute})
+	s := NewSyncer(newStore(t, repoA, repoB), &config.Config{
+		MirrorSyncInterval: time.Minute,
+		ReposDir:           reposDir,
+	})
 	s.SyncOnce(context.Background())
 
 	if got := readFile(t, filepath.Join(repoA.Path, "file.txt")); got != "a2\n" {
@@ -45,14 +63,50 @@ func TestSyncOnceSyncsEveryRepo(t *testing.T) {
 	}
 }
 
+// `rocket repo add <path>` registers a human's own working copy, and
+// docs/05-state.md promises rocket changes nothing inside it. Only the
+// daemon's own clones under ReposDir are mirrors this sweep may advance.
+func TestSyncOnceSkipsReposOutsideReposDir(t *testing.T) {
+	reposDir := t.TempDir()
+	originMirror, mirrorRepo := mirrorUnder(t, reposDir, "mirror")
+	// The second repo stays where newMirror put it: a checkout somewhere
+	// else on disk, exactly like one registered by `rocket repo add`.
+	originLocal, localRepo := newMirror(t)
+	localRepo.ID = "local"
+	commitToOrigin(t, originMirror, "m2\n", "second mirror")
+	commitToOrigin(t, originLocal, "l2\n", "second local")
+
+	localHead := headSHA(t, localRepo.Path)
+
+	s := NewSyncer(newStore(t, mirrorRepo, localRepo), &config.Config{
+		MirrorSyncInterval: time.Minute,
+		ReposDir:           reposDir,
+	})
+	s.SyncOnce(context.Background())
+
+	if got := readFile(t, filepath.Join(mirrorRepo.Path, "file.txt")); got != "m2\n" {
+		t.Errorf("mirror under ReposDir not synced: %q", got)
+	}
+	if got := headSHA(t, localRepo.Path); got != localHead {
+		t.Errorf("local checkout outside ReposDir was moved: HEAD %s -> %s", localHead, got)
+	}
+	if got := readFile(t, filepath.Join(localRepo.Path, "file.txt")); got != "v1\n" {
+		t.Errorf("local checkout outside ReposDir was modified: %q", got)
+	}
+}
+
 func TestSyncOnceContinuesAfterFailingRepo(t *testing.T) {
-	origin, repo := newMirror(t)
+	reposDir := t.TempDir()
+	origin, repo := mirrorUnder(t, reposDir, "healthy")
 	commitToOrigin(t, origin, "v2\n", "second")
 
 	// "aaa" sorts before the healthy repo's id, so ListRepos (ORDER BY id)
 	// hands the broken one to the pass first.
-	broken := store.Repo{ID: "aaa-broken", Path: filepath.Join(t.TempDir(), "gone"), DefaultBranch: "main"}
-	s := NewSyncer(newStore(t, broken, repo), &config.Config{MirrorSyncInterval: time.Minute})
+	broken := store.Repo{ID: "aaa-broken", Path: filepath.Join(reposDir, "gone"), DefaultBranch: "main"}
+	s := NewSyncer(newStore(t, broken, repo), &config.Config{
+		MirrorSyncInterval: time.Minute,
+		ReposDir:           reposDir,
+	})
 	s.SyncOnce(context.Background())
 
 	if got := readFile(t, filepath.Join(repo.Path, "file.txt")); got != "v2\n" {
@@ -61,10 +115,14 @@ func TestSyncOnceContinuesAfterFailingRepo(t *testing.T) {
 }
 
 func TestRunSyncsImmediatelyAndOnEveryTick(t *testing.T) {
-	origin, repo := newMirror(t)
+	reposDir := t.TempDir()
+	origin, repo := mirrorUnder(t, reposDir, "demo")
 	commitToOrigin(t, origin, "v2\n", "second")
 
-	s := NewSyncer(newStore(t, repo), &config.Config{MirrorSyncInterval: 50 * time.Millisecond})
+	s := NewSyncer(newStore(t, repo), &config.Config{
+		MirrorSyncInterval: 50 * time.Millisecond,
+		ReposDir:           reposDir,
+	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan struct{})
@@ -86,10 +144,14 @@ func TestRunSyncsImmediatelyAndOnEveryTick(t *testing.T) {
 }
 
 func TestRunDoesNothingWhenIntervalIsZero(t *testing.T) {
-	origin, repo := newMirror(t)
+	reposDir := t.TempDir()
+	origin, repo := mirrorUnder(t, reposDir, "demo")
 	commitToOrigin(t, origin, "v2\n", "second")
 
-	s := NewSyncer(newStore(t, repo), &config.Config{MirrorSyncInterval: 0})
+	s := NewSyncer(newStore(t, repo), &config.Config{
+		MirrorSyncInterval: 0,
+		ReposDir:           reposDir,
+	})
 
 	done := make(chan struct{})
 	go func() { s.Run(context.Background()); close(done) }()
