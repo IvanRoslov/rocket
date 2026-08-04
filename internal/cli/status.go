@@ -39,7 +39,7 @@ func newStatusCmd() *cobra.Command {
 			}
 
 			now := time.Now()
-			mirrors := mirrorFreshness(cmd.Context(), c, mirrorSyncInterval(cfg), now)
+			mirrors := mirrorFreshness(cmd.Context(), c, cfg, now)
 
 			// The mirror block is printed even with no live sessions: a
 			// stale mirror misleads whoever reads it regardless of whether

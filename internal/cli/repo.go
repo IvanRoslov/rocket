@@ -89,7 +89,7 @@ func newRepoLsCmd() *cobra.Command {
 			// (no network, no daemon round-trip) — see internal/cli/mirror.go.
 			now := time.Now()
 			repos := reposFromMaps(raw)
-			mirrors := checkMirrorsWithTimeout(cmd.Context(), repos, mirrorSyncInterval(cfg), now)
+			mirrors := checkMirrorsWithTimeout(cmd.Context(), mirrorsOnly(repos, cfg.ReposDir), mirrorSyncInterval(cfg), now)
 
 			if flags.JSON {
 				return printJSON(cmd, reposWithMirror(raw, mirrors))

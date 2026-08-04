@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/client"
@@ -89,20 +91,52 @@ func checkMirrors(ctx context.Context, repos []repoRow, staleAfter time.Duration
 }
 
 // mirrorFreshness fetches the repo registry and computes freshness for every
-// registered mirror — deliberately unfiltered by feature or project, since
+// registered mirror. It is deliberately unfiltered by feature or project —
 // the misreads this exists to prevent came from agents reading repos their
-// own feature did not own.
+// own feature did not own — but it is filtered to actual mirrors, see
+// mirrorsOnly.
 //
 // A failure to reach the registry is not fatal: it returns no rows and no
 // error, because a command must still print what it does know. Per-mirror
 // failures are carried in the rows themselves.
-func mirrorFreshness(ctx context.Context, c *client.Client, syncInterval time.Duration, now time.Time) []mirrorRow {
+func mirrorFreshness(ctx context.Context, c *client.Client, cfg *config.Config, now time.Time) []mirrorRow {
 	var repos []repoRow
 	if err := c.Get("/v1/repos", nil, &repos); err != nil {
 		slog.Debug("cli: cannot list repos for mirror freshness", "error", err)
 		return nil
 	}
-	return checkMirrorsWithTimeout(ctx, repos, syncInterval, now)
+	return checkMirrorsWithTimeout(ctx, mirrorsOnly(repos, cfg.ReposDir), mirrorSyncInterval(cfg), now)
+}
+
+// mirrorsOnly keeps the repos that are actually shared mirrors: the service
+// clones the daemon made under repos_dir.
+//
+// The registry holds two different kinds of thing. A clone under repos_dir
+// is a mirror the daemon owns and keeps fast-forwarded. But `rocket repo add
+// <path>` registers the user's own working copy, which rocket promises to
+// leave exactly as it is (docs/05-state.md) — and a working copy parked on a
+// feature branch is perfectly healthy. Reporting it as ПРОТУХЛО would be a
+// false alarm, and a warning nobody trusts is a warning nobody reads, which
+// would defeat the point of printing these lines at all.
+//
+// With no repos_dir configured there is nothing to tell the two apart, so
+// nothing is reported: saying nothing beats crying wolf over someone's own
+// checkout.
+func mirrorsOnly(repos []repoRow, reposDir string) []repoRow {
+	if reposDir == "" {
+		return nil
+	}
+	base := filepath.Clean(reposDir)
+
+	out := make([]repoRow, 0, len(repos))
+	for _, r := range repos {
+		rel, err := filepath.Rel(base, filepath.Clean(r.Path))
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // checkMirrorsWithTimeout runs checkMirrors under mirrorCheckTimeout.

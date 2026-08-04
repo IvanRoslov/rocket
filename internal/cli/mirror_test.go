@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -185,5 +186,51 @@ func TestMirrorStaleAfterFallback(t *testing.T) {
 	}
 	if got := mirrorStaleAfter(time.Hour); got != 2*time.Hour {
 		t.Errorf("mirrorStaleAfter(1h) = %s, want 2h", got)
+	}
+}
+
+// TestMirrorsOnly keeps the user's own checkouts out of the freshness
+// report. The repo registry holds two different things: service clones the
+// daemon made under repos_dir, which are shared mirrors, and working copies
+// the user registered with `rocket repo add <path>`, which rocket promises
+// to leave alone (docs/05-state.md). A user checkout parked on a feature
+// branch is perfectly healthy, and calling it ПРОТУХЛО would be a false
+// alarm — and a warning system that cries wolf is one nobody reads.
+func TestMirrorsOnly(t *testing.T) {
+	reposDir := t.TempDir()
+	repos := []repoRow{
+		{ID: "mirror-a", Path: filepath.Join(reposDir, "mirror-a")},
+		{ID: "user-checkout", Path: filepath.Join(t.TempDir(), "work", "app")},
+		{ID: "mirror-b", Path: filepath.Join(reposDir, "nested", "mirror-b")},
+		{ID: "lookalike", Path: reposDir + "-elsewhere/app"},
+		{ID: "escape", Path: filepath.Join(reposDir, "..", "outside")},
+	}
+
+	got := mirrorsOnly(repos, reposDir)
+
+	var ids []string
+	for _, r := range got {
+		ids = append(ids, r.ID)
+	}
+	want := []string{"mirror-a", "mirror-b"}
+	if len(ids) != len(want) {
+		t.Fatalf("mirrorsOnly() = %v, want %v", ids, want)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Errorf("mirrorsOnly() = %v, want %v", ids, want)
+			break
+		}
+	}
+}
+
+// TestMirrorsOnlyWithoutReposDir: with no repos_dir configured there is no
+// way to tell a mirror from a user checkout, so nothing is reported rather
+// than everything — a false ПРОТУХЛО on someone's own working copy is worse
+// than saying nothing.
+func TestMirrorsOnlyWithoutReposDir(t *testing.T) {
+	repos := []repoRow{{ID: "a", Path: "/anywhere/a"}}
+	if got := mirrorsOnly(repos, ""); len(got) != 0 {
+		t.Errorf("mirrorsOnly(_, \"\") = %v, want none", got)
 	}
 }
