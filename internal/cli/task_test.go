@@ -1426,3 +1426,63 @@ func TestTaskWritingCommandsRegisterFileFlag(t *testing.T) {
 		}
 	}
 }
+
+// TestTaskShowJSONCarriesEverythingTheCardShows pins that --json is not
+// poorer than the human card: whatever renderTaskCard draws (subtasks,
+// docs, journal, question threads) must have a home in the JSON shape.
+// Before this, --json short-circuited before fetching three of those four
+// and emitted the bare task row.
+//
+// The task's own fields must stay at the TOP level — web and mobile already
+// read id/title/subtasks from there, so --json may only gain keys.
+func TestTaskShowJSONCarriesEverythingTheCardShows(t *testing.T) {
+	v := taskShowJSON{
+		taskDetailRow: taskDetailRow{ID: 5, Title: "t", Subtasks: []taskRow{{ID: 6}}},
+		Docs:          []taskDocRow{{ID: 1, Kind: "spec"}},
+		Log:           []taskLogRow{{ID: 2, Kind: "decision"}},
+		Questions:     []questionRow{{ID: 3, Ordinal: 1}},
+	}
+
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	for _, key := range []string{"id", "title", "subtasks", "docs", "log", "questions"} {
+		if _, ok := got[key]; !ok {
+			t.Errorf("task show --json is missing key %q; got keys %v", key, keysOf(got))
+		}
+	}
+}
+
+// TestTaskShowJSONEmptyCollectionsAreArrays keeps the shape stable for
+// machine consumers: an empty journal is [], never null, so `jq '.log[]'`
+// works on a fresh task exactly as it does on a busy one.
+func TestTaskShowJSONEmptyCollectionsAreArrays(t *testing.T) {
+	raw, err := json.Marshal(taskShowJSON{
+		taskDetailRow: taskDetailRow{ID: 5},
+		Docs:          []taskDocRow{},
+		Log:           []taskLogRow{},
+		Questions:     []questionRow{},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"docs":[]`, `"log":[]`, `"questions":[]`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("json = %s, want it to contain %s", raw, want)
+		}
+	}
+}
+
+func keysOf(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}

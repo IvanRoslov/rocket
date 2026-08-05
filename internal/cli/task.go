@@ -372,6 +372,22 @@ func newTaskLsCmd() *cobra.Command {
 	return cmd
 }
 
+// taskShowJSON is what `rocket task show --json` emits: the task's own
+// fields inlined at the top level, plus the three collections the human
+// card also shows.
+//
+// Inlining rather than nesting under a "task" key is deliberate — web and
+// mobile already read id/title/subtasks from the top level, and --json may
+// only gain keys, never move them. Before this type existed --json returned
+// the bare task row and was strictly poorer than the text output it is
+// supposed to mirror.
+type taskShowJSON struct {
+	taskDetailRow
+	Docs      []taskDocRow  `json:"docs"`
+	Log       []taskLogRow  `json:"log"`
+	Questions []questionRow `json:"questions"`
+}
+
 func newTaskShowCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show <id>",
@@ -397,11 +413,9 @@ func newTaskShowCmd() *cobra.Command {
 				return err
 			}
 
-			if flags.JSON {
-				return printJSON(cmd, task)
-			}
-
-			// Fetch docs and log
+			// Docs, log and questions are fetched for --json too: the human
+			// card shows all three, so a --json that skipped them would be
+			// strictly less informative than the text output.
 			var docsResp struct {
 				Docs []taskDocRow `json:"docs"`
 			}
@@ -421,7 +435,30 @@ func newTaskShowCmd() *cobra.Command {
 				return err
 			}
 
-			renderTaskCard(task, docsResp.Docs, logResp.Log, questions, cmd.OutOrStdout(), time.Now())
+			// Machine consumers want an empty array, not a missing key or a
+			// null: `jq '.log[]'` must work on a fresh task too.
+			docs := docsResp.Docs
+			if docs == nil {
+				docs = []taskDocRow{}
+			}
+			logEntries := logResp.Log
+			if logEntries == nil {
+				logEntries = []taskLogRow{}
+			}
+			if questions == nil {
+				questions = []questionRow{}
+			}
+
+			if flags.JSON {
+				return printJSON(cmd, taskShowJSON{
+					taskDetailRow: task,
+					Docs:          docs,
+					Log:           logEntries,
+					Questions:     questions,
+				})
+			}
+
+			renderTaskCard(task, docs, logEntries, questions, cmd.OutOrStdout(), time.Now())
 			return nil
 		},
 	}
