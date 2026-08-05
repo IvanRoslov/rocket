@@ -22,8 +22,11 @@ type AgentQuestion struct {
 	// AddressedTo narrows who is expected to respond before the thread has any
 	// messages; see Question.AddressedTo.
 	AddressedTo []string
-	AskedAt     int64
-	ResolvedAt  int64 // 0 = not resolved
+	// Type and Options mirror Question.Type / Question.Options.
+	Type       string
+	Options    []string
+	AskedAt    int64
+	ResolvedAt int64 // 0 = not resolved
 }
 
 // AgentQuestionMessage is a single entry in a role question's thread: either a
@@ -42,7 +45,7 @@ type AgentQuestionMessage struct {
 // what makes a thread a role thread is a non-NULL role_id. The functions below
 // are a thin facade over that shared storage, kept so internal/api's role
 // handlers keep their existing shape.
-const agentQuestionColumns = `id, role_id, asked_by, body, context, status, resolution, addressed_to, asked_at, resolved_at`
+const agentQuestionColumns = `id, role_id, asked_by, body, context, status, resolution, addressed_to, type, options, asked_at, resolved_at`
 
 // toQuestion / toAgentQuestion convert between the facade's type and the
 // unified one, so the facade owns no SQL of its own where it can avoid it.
@@ -50,6 +53,7 @@ func (q AgentQuestion) toQuestion() Question {
 	return Question{
 		ID: q.ID, RoleID: q.RoleID, AskedBy: q.AskedBy, Body: q.Body, Context: q.Context,
 		Status: q.Status, Resolution: q.Resolution, AddressedTo: q.AddressedTo,
+		Type: q.Type, Options: q.Options,
 		AskedAt: q.AskedAt, ResolvedAt: q.ResolvedAt,
 	}
 }
@@ -138,7 +142,8 @@ func (s *Store) ResolveAgentQuestion(id int64, resolution string) error {
 // id and ErrQuestionOpen if the question is not resolved.
 func (s *Store) ReopenAgentQuestion(id int64) error {
 	res, err := s.db.Exec(
-		`UPDATE questions SET status = 'open', resolution = '', resolved_at = NULL
+		`UPDATE questions SET status = 'open', resolution = '', resolved_at = NULL,
+		        type = 'decision'
 		 WHERE id = ? AND status = 'resolved'`,
 		id,
 	)
@@ -209,11 +214,12 @@ func (s *Store) AgentQuestionOrdinal(q AgentQuestion) (int, error) {
 func scanAgentQuestion(row interface{ Scan(...any) error }) (AgentQuestion, error) {
 	var q AgentQuestion
 	var context, resolution, addressedTo sql.NullString
+	var qType, options sql.NullString
 	var resolvedAt sql.NullInt64
 
 	err := row.Scan(
 		&q.ID, &q.RoleID, &q.AskedBy, &q.Body, &context, &q.Status, &resolution,
-		&addressedTo, &q.AskedAt, &resolvedAt,
+		&addressedTo, &qType, &options, &q.AskedAt, &resolvedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AgentQuestion{}, ErrNotFound
@@ -225,6 +231,11 @@ func scanAgentQuestion(row interface{ Scan(...any) error }) (AgentQuestion, erro
 	q.Context = context.String
 	q.Resolution = resolution.String
 	q.AddressedTo = decodeAddressedTo(addressedTo.String)
+	q.Type = qType.String
+	if q.Type == "" {
+		q.Type = QuestionTypeDecision
+	}
+	q.Options = decodeOptions(options.String)
 	q.ResolvedAt = resolvedAt.Int64
 
 	return q, nil

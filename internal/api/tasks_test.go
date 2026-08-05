@@ -1814,10 +1814,13 @@ func TestListTasks_QuestionCounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddQuestion: %v", err)
 	}
-	// The turn follows the participant list, exactly as it does for the
-	// thread response — a thread nobody takes part in waits on nobody.
+	// The turn is the stored attention set, exactly as it is for the thread
+	// response — so the fixture seeds it the way the ask handler does.
 	if err := d.Store.AddParticipants(openID, "human", "orch-1"); err != nil {
 		t.Fatalf("AddParticipants: %v", err)
+	}
+	if err := d.Store.AttentionOnOpen(openID, "orch-1", nil, []string{"human", "orch-1"}); err != nil {
+		t.Fatalf("AttentionOnOpen: %v", err)
 	}
 	qid, err := d.Store.AddQuestion(store.Question{TaskID: taskID, AskedBy: "orch-1", Body: "done q"})
 	if err != nil {

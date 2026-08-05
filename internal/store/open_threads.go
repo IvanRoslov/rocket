@@ -14,6 +14,10 @@ type OpenThread struct {
 	Question     Question
 	LastMessage  *QuestionMessage
 	Participants []string
+	// Attention is the stored "whose turn" set (migration 0011). Since task
+	// #1023 it — not the last message's addressed_to — is what waiting_on and
+	// the awaiting-user badges are read from.
+	Attention []string
 }
 
 // ListOpenThreads returns every open thread bound to a task or a role,
@@ -84,8 +88,13 @@ func (s *Store) ListOpenThreads() ([]OpenThread, error) {
 	if err != nil {
 		return nil, err
 	}
+	attention, err := s.AttentionOfOpenThreads()
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
 		out[i].Participants = parts[out[i].Question.ID]
+		out[i].Attention = attention[out[i].Question.ID]
 	}
 	return out, nil
 }

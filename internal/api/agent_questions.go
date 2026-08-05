@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/IvanRoslov/rocket/internal/store"
 )
@@ -24,13 +25,37 @@ type agentQuestionResponse struct {
 	Resolution string `json:"resolution,omitempty"`
 	// Participants, WaitingOn and YourTurn mirror questionResponse; WhoseTurn
 	// keeps the role vocabulary (user|role) the clients already read.
-	Participants []string                  `json:"participants"`
-	WaitingOn    []string                  `json:"waiting_on"`
-	YourTurn     bool                      `json:"your_turn"`
-	WhoseTurn    string                    `json:"whose_turn,omitempty"` // user|role
-	AskedAt      int64                     `json:"asked_at"`
-	ResolvedAt   int64                     `json:"resolved_at,omitempty"`
-	Messages     []questionMessageResponse `json:"messages"`
+	Participants []string `json:"participants"`
+	// Attention is the stored "whose turn" set; WaitingOn is the same set
+	// under its original name (see questionResponse).
+	Attention  []string                  `json:"attention"`
+	WaitingOn  []string                  `json:"waiting_on"`
+	YourTurn   bool                      `json:"your_turn"`
+	WhoseTurn  string                    `json:"whose_turn,omitempty"` // user|role
+	Type       string                    `json:"type"`
+	Options    []string                  `json:"options,omitempty"`
+	LocalRef   string                    `json:"local_ref"`
+	AskedAt    int64                     `json:"asked_at"`
+	ResolvedAt int64                     `json:"resolved_at,omitempty"`
+	Messages   []questionMessageResponse `json:"messages"`
+}
+
+// dryRunAgentQuestionResponse mirrors dryRunQuestionResponse for role threads.
+type dryRunAgentQuestionResponse struct {
+	agentQuestionResponse
+	DryRun bool   `json:"dry_run"`
+	Echo   string `json:"echo"`
+}
+
+// writeDryRunAgentQuestion answers a dry run on a role thread: the thread as
+// it stands plus the target echo, with nothing written or delivered.
+func writeDryRunAgentQuestion(w http.ResponseWriter, d Deps, caller *store.Session, q store.AgentQuestion, echo string) {
+	resp, err := buildAgentQuestionResponse(d, caller, q)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, dryRunAgentQuestionResponse{agentQuestionResponse: resp, DryRun: true, Echo: echo})
 }
 
 // buildAgentQuestionResponse loads a role thread's messages, participants and
@@ -57,10 +82,10 @@ func buildAgentQuestionResponse(d Deps, caller *store.Session, q store.AgentQues
 		msgOut[i] = toQuestionMessageResponse(m)
 	}
 
-	waiting := waitingOn(store.Question{
-		ID: q.ID, RoleID: q.RoleID, AskedBy: q.AskedBy, Status: q.Status,
-		AddressedTo: q.AddressedTo,
-	}, msgs, participants)
+	attention, err := threadAttention(d, store.Question{ID: q.ID, Status: q.Status})
+	if err != nil {
+		return agentQuestionResponse{}, err
+	}
 
 	return agentQuestionResponse{
 		ID:           q.ID,
@@ -72,9 +97,13 @@ func buildAgentQuestionResponse(d Deps, caller *store.Session, q store.AgentQues
 		Status:       q.Status,
 		Resolution:   q.Resolution,
 		Participants: participants,
-		WaitingOn:    waiting,
-		YourTurn:     contains(waiting, callerParticipant(caller)),
-		WhoseTurn:    whoseTurnCompat(waiting, "role"),
+		Attention:    attention,
+		WaitingOn:    attention,
+		YourTurn:     contains(attention, callerParticipant(caller)),
+		WhoseTurn:    whoseTurnCompat(attention, "role"),
+		Type:         q.Type,
+		Options:      q.Options,
+		LocalRef:     threadLocalRef(threadSubject{RoleID: q.RoleID}, ordinal),
 		AskedAt:      q.AskedAt,
 		ResolvedAt:   q.ResolvedAt,
 		Messages:     msgOut,
@@ -182,6 +211,8 @@ type postAgentQuestionRequest struct {
 	Body    string   `json:"body"`
 	Context string   `json:"context"`
 	To      []string `json:"to"`
+	Type    string   `json:"type"`
+	Options []string `json:"options"`
 }
 
 // handlePostAgentQuestions serves POST /v1/agents/{id}/questions
@@ -219,13 +250,25 @@ func handlePostAgentQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
-	qid, err := d.Store.AddAgentQuestion(store.AgentQuestion{
+	threadType, ok := normalizeThreadType(w, req.Type)
+	if !ok {
+		return
+	}
+	newQ := store.AgentQuestion{
 		RoleID:      a.ID,
 		AskedBy:     callerAuthor(caller),
 		Body:        req.Body,
 		Context:     req.Context,
 		AddressedTo: req.To,
-	})
+		Type:        threadType,
+		Options:     req.Options,
+	}
+	if threadType == store.QuestionTypeFYI {
+		newQ.Status = "resolved"
+		newQ.Resolution = store.QuestionResolutionFYI
+		newQ.ResolvedAt = time.Now().Unix()
+	}
+	qid, err := d.Store.AddAgentQuestion(newQ)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -252,6 +295,12 @@ func handlePostAgentQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
+	if threadType != store.QuestionTypeFYI {
+		if err := d.Store.AttentionOnOpen(qid, author, req.To, participants); err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+	}
 	text := req.Body
 	if req.Context != "" {
 		text += "\n\n" + req.Context
@@ -269,8 +318,10 @@ func handlePostAgentQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 }
 
 type postAgentQuestionReplyRequest struct {
-	Body string   `json:"body"`
-	To   []string `json:"to"`
+	Body   string   `json:"body"`
+	To     []string `json:"to"`
+	Join   bool     `json:"join"`
+	DryRun bool     `json:"dry_run"`
 }
 
 // handlePostAgentQuestionReply serves POST /v1/agent-questions/{id}/reply
@@ -303,19 +354,10 @@ func handlePostAgentQuestionReply(w http.ResponseWriter, r *http.Request, d Deps
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	if !canPostToThread(d, caller, subj, participants) {
-		writeErr(w, http.StatusForbidden, "forbidden",
-			"only a participant of this thread may reply")
+	ordinal, err := d.Store.AgentQuestionOrdinal(q)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
-	}
-
-	reopen := false
-	if q.Status != "open" {
-		if caller == nil {
-			writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
-			return
-		}
-		reopen = true
 	}
 
 	var req postAgentQuestionReplyRequest
@@ -325,6 +367,27 @@ func handlePostAgentQuestionReply(w http.ResponseWriter, r *http.Request, d Deps
 	}
 	if req.Body == "" {
 		writeErr(w, http.StatusBadRequest, "empty_body", "body must not be empty")
+		return
+	}
+
+	participants, ok = enforceThreadGuard(w, d, caller, subj,
+		store.Question{ID: q.ID, RoleID: q.RoleID, Body: q.Body, Status: q.Status},
+		ordinal, "", participants, req.Join)
+	if !ok {
+		return
+	}
+
+	reopen := false
+	if q.Status != "open" {
+		if caller == nil && q.Type != store.QuestionTypeFYI {
+			writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
+			return
+		}
+		reopen = true
+	}
+
+	if req.DryRun {
+		writeDryRunAgentQuestion(w, d, caller, q, threadEcho(subj, ordinal, q.Body, ""))
 		return
 	}
 
@@ -362,13 +425,12 @@ func handlePostAgentQuestionReply(w http.ResponseWriter, r *http.Request, d Deps
 		})
 	}
 
-	ordinal, err := d.Store.AgentQuestionOrdinal(q)
+	recipients, err := d.Store.ListParticipants(id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	recipients, err := d.Store.ListParticipants(id)
-	if err != nil {
+	if err := d.Store.AttentionOnEntry(id, author, req.To, recipients); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
@@ -388,6 +450,9 @@ type postAgentQuestionAnswerRequest struct {
 	Body    string   `json:"body"`
 	Dismiss bool     `json:"dismiss"`
 	To      []string `json:"to"`
+	Choose  int      `json:"choose"`
+	Join    bool     `json:"join"`
+	DryRun  bool     `json:"dry_run"`
 }
 
 // handlePostAgentQuestionAnswer serves POST /v1/agent-questions/{id}/answer
@@ -423,6 +488,31 @@ func handlePostAgentQuestionAnswer(w http.ResponseWriter, r *http.Request, d Dep
 	var req postAgentQuestionAnswerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+	unified := store.Question{ID: q.ID, RoleID: q.RoleID, Body: q.Body, Status: q.Status, Options: q.Options}
+	req.Body, ok = chooseOptionBody(w, unified, req.Choose, req.Body)
+	if !ok {
+		return
+	}
+
+	subj := threadSubject{RoleID: q.RoleID, Counterpart: q.RoleID}
+	ordinal, err := d.Store.AgentQuestionOrdinal(q)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	participants, err := d.Store.ListParticipants(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	if _, ok := enforceThreadGuard(w, d, caller, subj, unified, ordinal, "", participants, req.Join); !ok {
+		return
+	}
+
+	if req.DryRun {
+		writeDryRunAgentQuestion(w, d, caller, q, threadEcho(subj, ordinal, q.Body, ""))
 		return
 	}
 
@@ -472,21 +562,20 @@ func handlePostAgentQuestionAnswer(w http.ResponseWriter, r *http.Request, d Dep
 			return
 		}
 
-		ordinal, err := d.Store.AgentQuestionOrdinal(q)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
-		}
 		recipients, err := d.Store.ListParticipants(id)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
-		subj := threadSubject{RoleID: q.RoleID, Counterpart: q.RoleID}
 		if err := participantFanOut(d, subj, ordinal, "answer", author, req.Body, recipients); err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
+	}
+
+	if err := d.Store.ClearAttention(id); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
 	}
 
 	d.Bus.Publish("agent.question_resolved", "", map[string]any{

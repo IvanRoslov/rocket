@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/IvanRoslov/rocket/internal/store"
 )
@@ -60,13 +61,29 @@ type questionResponse struct {
 	// subset expected to speak next; YourTurn says whether the caller is one
 	// of them. WhoseTurn is the pre-participant field the clients still read,
 	// derived from WaitingOn until subtask #736 retires it.
-	Participants []string                  `json:"participants"`
-	WaitingOn    []string                  `json:"waiting_on"`
-	YourTurn     bool                      `json:"your_turn"`
-	WhoseTurn    string                    `json:"whose_turn,omitempty"`
-	AskedAt      int64                     `json:"asked_at"`
-	ResolvedAt   int64                     `json:"resolved_at,omitempty"`
-	Messages     []questionMessageResponse `json:"messages"`
+	Participants []string `json:"participants"`
+	// Attention is the stored "whose turn" set (task #1023). WaitingOn is the
+	// same set under its original name, kept so existing clients keep working.
+	Attention []string `json:"attention"`
+	WaitingOn []string `json:"waiting_on"`
+	YourTurn  bool     `json:"your_turn"`
+	WhoseTurn string   `json:"whose_turn,omitempty"`
+	// Type is decision|fyi; Options are the answer choices a client renders as
+	// buttons; LocalRef is the one user-facing thread id, e.g. "1023/Q2".
+	Type       string                    `json:"type"`
+	Options    []string                  `json:"options,omitempty"`
+	LocalRef   string                    `json:"local_ref"`
+	AskedAt    int64                     `json:"asked_at"`
+	ResolvedAt int64                     `json:"resolved_at,omitempty"`
+	Messages   []questionMessageResponse `json:"messages"`
+}
+
+// dryRunQuestionResponse is what a dry-run write returns: the thread as it
+// stands, untouched, plus the echo of the target the write WOULD have gone to.
+type dryRunQuestionResponse struct {
+	questionResponse
+	DryRun bool   `json:"dry_run"`
+	Echo   string `json:"echo"`
 }
 
 // buildQuestionResponse loads a thread's messages, participants and ordinal
@@ -91,7 +108,10 @@ func buildQuestionResponse(d Deps, caller *store.Session, q store.Question) (que
 		msgOut[i] = toQuestionMessageResponse(m)
 	}
 
-	waiting := waitingOn(q, msgs, participants)
+	attention, err := threadAttention(d, q)
+	if err != nil {
+		return questionResponse{}, err
+	}
 	return questionResponse{
 		ID:           q.ID,
 		TaskID:       q.TaskID,
@@ -102,13 +122,46 @@ func buildQuestionResponse(d Deps, caller *store.Session, q store.Question) (que
 		Status:       q.Status,
 		Resolution:   q.Resolution,
 		Participants: participants,
-		WaitingOn:    waiting,
-		YourTurn:     contains(waiting, callerParticipant(caller)),
-		WhoseTurn:    whoseTurnCompat(waiting, "orchestrator"),
+		Attention:    attention,
+		WaitingOn:    attention,
+		YourTurn:     contains(attention, callerParticipant(caller)),
+		WhoseTurn:    whoseTurnCompat(attention, "orchestrator"),
+		Type:         q.Type,
+		Options:      q.Options,
+		LocalRef:     threadLocalRef(threadSubject{TaskID: q.TaskID}, ordinal),
 		AskedAt:      q.AskedAt,
 		ResolvedAt:   q.ResolvedAt,
 		Messages:     msgOut,
 	}, nil
+}
+
+// normalizeThreadType validates the requested thread type and defaults an
+// empty one to decision, so a client that predates task #1023 keeps opening
+// ordinary threads. An unknown type is rejected rather than silently coerced:
+// a typo must not turn a decision into a status note nobody answers.
+func normalizeThreadType(w http.ResponseWriter, t string) (string, bool) {
+	switch t {
+	case "":
+		return store.QuestionTypeDecision, true
+	case store.QuestionTypeDecision, store.QuestionTypeFYI:
+		return t, true
+	default:
+		writeErr(w, http.StatusBadRequest, "bad_request",
+			"type must be \"decision\" or \"fyi\"")
+		return "", false
+	}
+}
+
+// writeDryRunQuestion answers a dry run: the thread exactly as it stands, plus
+// the echo of the target the write would have gone to. Nothing is written and
+// nothing is delivered.
+func writeDryRunQuestion(w http.ResponseWriter, d Deps, caller *store.Session, q store.Question, echo string) {
+	resp, err := buildQuestionResponse(d, caller, q)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, dryRunQuestionResponse{questionResponse: resp, DryRun: true, Echo: echo})
 }
 
 // registerQuestionRoutes wires the /v1/questions routes onto mux. The
@@ -244,6 +297,9 @@ type postQuestionRequest struct {
 	// To narrows who is expected to respond. Its ids join the thread as
 	// participants and are stored as the message's addressed_to.
 	To []string `json:"to"`
+	// Type is decision (default) or fyi; Options are answer choices.
+	Type    string   `json:"type"`
+	Options []string `json:"options"`
 }
 
 // handlePostTaskQuestions serves POST /v1/tasks/{id}/questions
@@ -291,16 +347,30 @@ func handlePostTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 		writeErr(w, http.StatusBadRequest, "empty_body", "body must not be empty")
 		return
 	}
+	threadType, ok := normalizeThreadType(w, req.Type)
+	if !ok {
+		return
+	}
 
-	qid, err := d.Store.AddQuestion(store.Question{
+	// An fyi thread is a status note: it is born resolved, so it never waits
+	// on anybody and never lights a badge. A reply into it reopens it as an
+	// ordinary decision thread.
+	newQ := store.Question{
 		TaskID:  id,
 		AskedBy: callerAuthor(caller),
 		Body:    req.Body,
 		Context: req.Context,
-		// --to narrows the turn from the very first entry: with no messages
-		// yet, waitingOn reads the question's own addressees.
+		// --to seeds the attention set of the new thread.
 		AddressedTo: req.To,
-	})
+		Type:        threadType,
+		Options:     req.Options,
+	}
+	if threadType == store.QuestionTypeFYI {
+		newQ.Status = "resolved"
+		newQ.Resolution = store.QuestionResolutionFYI
+		newQ.ResolvedAt = time.Now().Unix()
+	}
+	qid, err := d.Store.AddQuestion(newQ)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -335,6 +405,12 @@ func handlePostTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
+	}
+	if threadType != store.QuestionTypeFYI {
+		if err := d.Store.AttentionOnOpen(qid, author, req.To, participants); err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
 	}
 	text := req.Body
 	if req.Context != "" {
@@ -409,6 +485,10 @@ type postQuestionReplyRequest struct {
 	Body string `json:"body"`
 	// To narrows who is expected to respond and joins its ids to the thread.
 	To []string `json:"to"`
+	// Join is the caller's explicit "yes, I know this is not my thread" for
+	// the non-participant guard; DryRun asks for the target echo and no write.
+	Join   bool `json:"join"`
+	DryRun bool `json:"dry_run"`
 }
 
 // handlePostQuestionReply serves POST /v1/questions/{id}/reply {body}. The
@@ -441,24 +521,10 @@ func handlePostQuestionReply(w http.ResponseWriter, r *http.Request, d Deps) {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	if !canPostToThread(d, caller, subj, participants) {
-		writeErr(w, http.StatusForbidden, "forbidden",
-			"only a participant of this thread may reply")
+	ordinal, err := d.Store.QuestionOrdinal(q)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
-	}
-
-	// A resolved question is final for the human (409), but the task's own
-	// orchestrator may dispute the final answer: its reply REOPENS the
-	// thread (status back to open, resolution cleared) so the disagreement
-	// continues in the same thread with full context, instead of a
-	// disconnected new question. See docs/12-tasks.md «Q&A».
-	reopen := false
-	if q.Status != "open" {
-		if caller == nil {
-			writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
-			return
-		}
-		reopen = true
 	}
 
 	var req postQuestionReplyRequest
@@ -468,6 +534,33 @@ func handlePostQuestionReply(w http.ResponseWriter, r *http.Request, d Deps) {
 	}
 	if req.Body == "" {
 		writeErr(w, http.StatusBadRequest, "empty_body", "body must not be empty")
+		return
+	}
+
+	participants, ok = enforceThreadGuard(w, d, caller, subj, q, ordinal, task.Title, participants, req.Join)
+	if !ok {
+		return
+	}
+
+	// A resolved question is final for the human (409), but the task's own
+	// orchestrator may dispute the final answer: its reply REOPENS the
+	// thread (status back to open, resolution cleared) so the disagreement
+	// continues in the same thread with full context, instead of a
+	// disconnected new question. See docs/12-tasks.md «Q&A».
+	//
+	// An fyi thread is the one resolved thread the human may reply into: the
+	// note turns out to matter, so it reopens as a decision thread.
+	reopen := false
+	if q.Status != "open" {
+		if caller == nil && q.Type != store.QuestionTypeFYI {
+			writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
+			return
+		}
+		reopen = true
+	}
+
+	if req.DryRun {
+		writeDryRunQuestion(w, d, caller, q, threadEcho(subj, ordinal, q.Body, task.Title))
 		return
 	}
 
@@ -504,14 +597,15 @@ func handlePostQuestionReply(w http.ResponseWriter, r *http.Request, d Deps) {
 		})
 	}
 
-	ordinal, err := d.Store.QuestionOrdinal(q)
+	// Re-read: req.To has just joined and must be notified too.
+	recipients, err := d.Store.ListParticipants(id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	// Re-read: req.To has just joined and must be notified too.
-	recipients, err := d.Store.ListParticipants(id)
-	if err != nil {
+	// Attention rule 2 (and 4 on a reopen): the author leaves, --to joins, an
+	// emptied set hands the turn to everyone else.
+	if err := d.Store.AttentionOnEntry(id, author, req.To, recipients); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
@@ -539,6 +633,11 @@ func handlePostQuestionReply(w http.ResponseWriter, r *http.Request, d Deps) {
 type postQuestionAnswerRequest struct {
 	Body    string `json:"body"`
 	Dismiss bool   `json:"dismiss"`
+	// Choose picks an answer by its 1-based position in the thread's options.
+	Choose int `json:"choose"`
+	// Join and DryRun mirror the reply endpoint.
+	Join   bool `json:"join"`
+	DryRun bool `json:"dry_run"`
 	// To narrows who is expected to respond and joins its ids to the thread.
 	// On an answer it only records intent: a resolved thread waits on nobody.
 	To []string `json:"to"`
@@ -582,6 +681,30 @@ func handlePostQuestionAnswer(w http.ResponseWriter, r *http.Request, d Deps) {
 	var req postQuestionAnswerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+	req.Body, ok = chooseOptionBody(w, q, req.Choose, req.Body)
+	if !ok {
+		return
+	}
+
+	subj := threadSubject{TaskID: task.ID, Counterpart: task.SessionID}
+	ordinal, err := d.Store.QuestionOrdinal(q)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	participants, err := d.Store.ListParticipants(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	if _, ok := enforceThreadGuard(w, d, caller, subj, q, ordinal, task.Title, participants, req.Join); !ok {
+		return
+	}
+
+	if req.DryRun {
+		writeDryRunQuestion(w, d, caller, q, threadEcho(subj, ordinal, q.Body, task.Title))
 		return
 	}
 
@@ -633,21 +756,21 @@ func handlePostQuestionAnswer(w http.ResponseWriter, r *http.Request, d Deps) {
 			return
 		}
 
-		ordinal, err := d.Store.QuestionOrdinal(q)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
-		}
 		recipients, err := d.Store.ListParticipants(id)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
-		subj := threadSubject{TaskID: task.ID, Counterpart: task.SessionID}
 		if err := participantFanOut(d, subj, ordinal, "answer", author, req.Body, recipients); err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
+	}
+
+	// Attention rule 3: a closed thread waits on nobody.
+	if err := d.Store.ClearAttention(id); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
 	}
 
 	d.Bus.Publish("task.question_resolved", "", map[string]any{

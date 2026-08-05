@@ -8,7 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
+	"net/http"
+	"strings"
 
 	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -52,57 +53,88 @@ func contains(ids []string, id string) bool {
 	return false
 }
 
-// lastAuthor returns the participant id that spoke last in a thread. With no
-// messages that is the question's own author, where an empty asked_by means
-// the human — asked_by is not a participant-id column, so it still carries the
-// legacy empty form (see T1, subtask #730).
-func lastAuthor(q store.Question, msgs []store.QuestionMessage) string {
-	author := q.AskedBy
-	if len(msgs) > 0 {
-		author = msgs[len(msgs)-1].Author
+// threadAttention returns the stored "whose turn" set of a thread — the
+// replacement for the old waitingOn() derivation. A resolved thread waits on
+// nobody regardless of what the table holds, so closing a thread can never
+// leave a stale badge behind even if a clear were ever missed.
+func threadAttention(d Deps, q store.Question) ([]string, error) {
+	if q.Status != "open" {
+		return nil, nil
 	}
-	if store.IsHuman(author) {
-		return store.ParticipantHuman
-	}
-	return author
+	return d.Store.ListAttention(q.ID)
 }
 
-// waitingOn derives who is expected to speak next, per spec v2 §2 of task
-// #722: a resolved thread waits on nobody; an explicitly addressed last entry
-// names its own addressees; otherwise everyone but whoever spoke last.
-//
-// The "last entry" is the last message, or the question itself when the thread
-// has none — and both carry addressed_to, so `ask --to cto` narrows the turn
-// to cto exactly the way `reply --to cto` does. Without the question's own
-// column (migration 0010) a thread addressed to cto would still list the human
-// in waiting_on and show them an "awaiting you" badge.
-//
-// The result is sorted so the API response and its tests are deterministic.
-func waitingOn(q store.Question, msgs []store.QuestionMessage, participants []string) []string {
-	if q.Status != "open" {
-		return nil
+// threadLocalRef renders the one user-facing thread id (spec v1 §«Тред и его
+// id»): "1023/Q2" for a task thread, "cto/Q2" for a role thread. The global
+// numeric id stays in the API but stops being what a human or an agent has to
+// type — mistyping it across tasks was the original misdelivery bug.
+func threadLocalRef(subj threadSubject, ordinal int) string {
+	if subj.RoleID != "" {
+		return fmt.Sprintf("%s/Q%d", subj.RoleID, ordinal)
 	}
+	return fmt.Sprintf("%d/Q%d", subj.TaskID, ordinal)
+}
 
-	addressed := q.AddressedTo
-	if len(msgs) > 0 {
-		addressed = msgs[len(msgs)-1].AddressedTo
+// threadSubjectLabel names what a thread hangs off, for echoes and guard
+// errors: `task #1023 "Ship it"` or `role cto`.
+func threadSubjectLabel(subj threadSubject, title string) string {
+	if subj.RoleID != "" {
+		return fmt.Sprintf("role %s", subj.RoleID)
 	}
-	if len(addressed) > 0 {
-		out := append([]string(nil), addressed...)
-		sort.Strings(out)
-		return out
-	}
+	return fmt.Sprintf("task #%d %q", subj.TaskID, title)
+}
 
-	author := lastAuthor(q, msgs)
-	var out []string
-	for _, p := range participants {
-		if sameParticipant(p, author) {
-			continue
-		}
-		out = append(out, p)
+// threadEchoLimit is how much of a question's body an echo quotes: enough to
+// recognise the thread, short enough to stay one line.
+const threadEchoLimit = 60
+
+// truncateForEcho shortens s to threadEchoLimit runes, appending an ellipsis
+// when it had to cut. It counts runes, not bytes, so a Cyrillic question is not
+// cut mid-character.
+func truncateForEcho(s string) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
+	r := []rune(s)
+	if len(r) <= threadEchoLimit {
+		return s
 	}
-	sort.Strings(out)
-	return out
+	return string(r[:threadEchoLimit]) + "…"
+}
+
+// threadEcho renders the target confirmation every write prints back, so a
+// misaddressed reply is visible immediately instead of hours later:
+//
+//	→ 1023/Q2 «Which approach?» (task #1023 "Ship it")
+func threadEcho(subj threadSubject, ordinal int, body, title string) string {
+	return fmt.Sprintf("→ %s «%s» (%s)",
+		threadLocalRef(subj, ordinal), truncateForEcho(body), threadSubjectLabel(subj, title))
+}
+
+// threadWriteAccess decides whether caller may write into a thread, and — when
+// it may not by default — whether an explicit join can let it through.
+//
+// Participants and the subject's own counterpart write as before. Everybody
+// else is refused, but the refusal has two flavours (spec v1 §«Подтверждение
+// цели»): the human and persistent agents are org-wide parties that legitimately
+// get pulled into other people's threads, so they may retry with join=true and
+// take responsibility for knowing where they are writing; an orchestrator or
+// worker of another task stays refused outright, as today.
+func threadWriteAccess(d Deps, caller *store.Session, subj threadSubject, participants []string) (allowed, joinable bool) {
+	if contains(participants, callerParticipant(caller)) || callerIsCounterpart(caller, subj) {
+		return true, true
+	}
+	if caller == nil || callerIsPersistentAgent(d, caller) {
+		return false, true
+	}
+	return false, false
+}
+
+// notAParticipantMessage is the guard error: it names the thread the caller was
+// about to write into, quotes it, lists who is in it, and says how to proceed on
+// purpose. Reading it is meant to be enough to notice "this is not my thread".
+func notAParticipantMessage(subj threadSubject, ordinal int, body, title string, participants []string) string {
+	return fmt.Sprintf(
+		"you are not a participant of %s: %s — participants: %s. If you really mean to write here, retry with join.",
+		threadLocalRef(subj, ordinal), threadEcho(subj, ordinal, body, title), strings.Join(participants, ", "))
 }
 
 // threadCounts aggregates the open threads of one subject kind into per-subject
@@ -118,13 +150,9 @@ func threadCounts[K comparable](threads []store.OpenThread, key func(store.OpenT
 		if !ok {
 			continue
 		}
-		var msgs []store.QuestionMessage
-		if th.LastMessage != nil {
-			msgs = []store.QuestionMessage{*th.LastMessage}
-		}
 		c := out[k]
 		c.Open++
-		if contains(waitingOn(th.Question, msgs, th.Participants), store.ParticipantHuman) {
+		if contains(th.Attention, store.ParticipantHuman) {
 			c.AwaitingUser++
 		}
 		out[k] = c
@@ -203,16 +231,59 @@ func canOpenThread(d Deps, caller *store.Session, subj threadSubject) bool {
 		callerIsCounterpart(caller, subj)
 }
 
-// canPostToThread reports whether caller may add a reply. Spec v1 §3: any
-// participant may post. The human is a participant of every thread by
-// construction, and the subject's counterpart is admitted even before it has
-// spoken, which preserves today's "the task's orchestrator may always reply"
-// behaviour on threads it has not yet touched.
-func canPostToThread(d Deps, caller *store.Session, subj threadSubject, participants []string) bool {
-	if caller == nil {
-		return true
+// enforceThreadGuard applies the non-participant guard to a write. It returns
+// the participant list the caller should carry on with — refreshed when an
+// explicit join just added the caller — and false when it has already written
+// the error response.
+//
+// The guard exists because answering used to check only WHO you are, never
+// WHICH thread you were writing into: a persistent agent could resolve any
+// thread in the system by id, and a mistyped id resolved somebody else's
+// question silently and successfully.
+func enforceThreadGuard(
+	w http.ResponseWriter, d Deps, caller *store.Session, subj threadSubject,
+	q store.Question, ordinal int, title string, participants []string, join bool,
+) ([]string, bool) {
+	allowed, joinable := threadWriteAccess(d, caller, subj, participants)
+	if allowed {
+		return participants, true
 	}
-	return contains(participants, caller.ID) || callerIsCounterpart(caller, subj)
+	if !joinable {
+		writeErr(w, http.StatusForbidden, "forbidden",
+			"only a participant of this thread may write into it")
+		return nil, false
+	}
+	if !join {
+		writeErr(w, http.StatusForbidden, "not_a_participant",
+			notAParticipantMessage(subj, ordinal, q.Body, title, participants))
+		return nil, false
+	}
+
+	if err := d.Store.AddParticipants(q.ID, callerParticipant(caller)); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return nil, false
+	}
+	joined, err := d.Store.ListParticipants(q.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return nil, false
+	}
+	return joined, true
+}
+
+// chooseOptionBody resolves a 1-based --choose index into the option's own
+// text, so a client never has to retype an answer the thread already offers.
+// choose == 0 means "no choice made" and leaves body as it is.
+func chooseOptionBody(w http.ResponseWriter, q store.Question, choose int, body string) (string, bool) {
+	if choose == 0 {
+		return body, true
+	}
+	if choose < 1 || choose > len(q.Options) {
+		writeErr(w, http.StatusBadRequest, "invalid_choice",
+			fmt.Sprintf("choose must be between 1 and %d for this thread", len(q.Options)))
+		return "", false
+	}
+	return q.Options[choose-1], true
 }
 
 // threadPrefix renders the frame every delivered thread entry carries, so a
