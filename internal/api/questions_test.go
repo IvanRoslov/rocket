@@ -603,6 +603,47 @@ func TestQuestionAnswer_Dismiss_NoDeliveryNoMessageRow(t *testing.T) {
 	}
 }
 
+// TestQuestionAnswer_DismissWithReasonIsRecordedAndDelivered: "close --dismiss
+// <почему>" (task #1023, spec v1 §«Глаголы») must not swallow the reason. A
+// bare dismiss stays silent as before; a dismiss WITH a reason records it in
+// the thread and tells the participants, since otherwise the orchestrator
+// waiting on that thread never learns why it died.
+func TestQuestionAnswer_DismissWithReasonIsRecordedAndDelivered(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	askResp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1", map[string]any{"body": "Q"})
+	q := decodeQuestion(t, askResp)
+	askResp.Body.Close()
+
+	resp := postJSON(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/answer",
+		map[string]any{"dismiss": true, "body": "уже решили в чате"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	got := decodeQuestion(t, resp)
+	if got.Status != "resolved" || got.Resolution != "dismissed" {
+		t.Fatalf("got status=%q resolution=%q, want resolved/dismissed", got.Status, got.Resolution)
+	}
+	if len(got.Messages) != 1 || got.Messages[0].Body != "уже решили в чате" {
+		t.Fatalf("Messages = %+v, want the reason recorded in the thread", got.Messages)
+	}
+	if got.Messages[0].Kind != "dismiss" {
+		t.Errorf("kind = %q, want dismiss — it is not an answer to the question",
+			got.Messages[0].Kind)
+	}
+
+	msgs, err := d.Store.ListMessages("orch-1", 10)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 1 || !strings.Contains(msgs[0].Body, "уже решили в чате") {
+		t.Errorf("delivered = %+v, want the reason delivered to the orchestrator", msgs)
+	}
+}
+
 func TestQuestionAnswer_AlreadyResolvedConflict(t *testing.T) {
 	d := questionsTestDeps(t)
 	srv := newTestServer(t, d)

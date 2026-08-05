@@ -709,41 +709,40 @@ func handlePostQuestionAnswer(w http.ResponseWriter, r *http.Request, d Deps) {
 	}
 
 	var resolution string
+	// A close has two independent halves: HOW the thread ends (answered or
+	// dismissed) and WHAT is said while ending it. An answer must say
+	// something; a dismissal may, and when it does the reason is recorded and
+	// delivered exactly like an answer — a participant that was waiting on the
+	// thread otherwise never learns why it died.
+	kind := "answer"
+	resolution = "answered"
 	if req.Dismiss {
+		kind = "dismiss"
 		resolution = "dismissed"
-		if err := d.Store.ResolveQuestion(id, resolution); err != nil {
-			if errors.Is(err, store.ErrQuestionResolved) {
-				writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
-				return
-			}
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
-		}
-	} else {
-		if req.Body == "" {
-			writeErr(w, http.StatusBadRequest, "empty_body", "body must not be empty")
-			return
-		}
-		resolution = "answered"
+	} else if req.Body == "" {
+		writeErr(w, http.StatusBadRequest, "empty_body", "body must not be empty")
+		return
+	}
 
-		// Resolve first — if it fails with already-resolved, return 409 immediately.
-		// Only after successful resolve do we add the message, deliver, and publish event.
-		if err := d.Store.ResolveQuestion(id, resolution); err != nil {
-			if errors.Is(err, store.ErrQuestionResolved) {
-				writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
-				return
-			}
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+	// Resolve first — if it fails with already-resolved, return 409 immediately.
+	// Only after successful resolve do we add the message, deliver, and publish event.
+	if err := d.Store.ResolveQuestion(id, resolution); err != nil {
+		if errors.Is(err, store.ErrQuestionResolved) {
+			writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
 			return
 		}
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
 
+	if req.Body != "" {
 		// The author used to be left empty, which was only correct while the
 		// human was the only party allowed to answer.
 		author := callerParticipant(caller)
 		if _, err := d.Store.AddQuestionMessage(store.QuestionMessage{
 			QuestionID:  id,
 			Author:      author,
-			Kind:        "answer",
+			Kind:        kind,
 			Body:        req.Body,
 			AddressedTo: req.To,
 		}); err != nil {
@@ -761,7 +760,7 @@ func handlePostQuestionAnswer(w http.ResponseWriter, r *http.Request, d Deps) {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
-		if err := participantFanOut(d, subj, ordinal, "answer", author, req.Body, recipients); err != nil {
+		if err := participantFanOut(d, subj, ordinal, kind, author, req.Body, recipients); err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
