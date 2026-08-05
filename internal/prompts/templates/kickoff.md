@@ -7,9 +7,8 @@ Feature request from the human (task #{{task_id}}):
 ---
 
 The task is in status "brainstorm": that is where it stays while you clarify,
-research and write the spec. The moment the human confirms the spec (gate 3),
-move it on yourself: `rocket task move {{task_id}} in_progress`. Only then
-spawn workers.
+research and write the spec. You end that phase yourself at gate 3 below, as
+soon as the human confirms the spec.
 
 Start now:
 
@@ -33,10 +32,10 @@ Start now:
    Do not spawn workers until that question is answered. ANY later edit to the
    spec — including rationale-only edits — reopens this gate: store the new
    version and ask again.
+   The moment the human answers "go", move the task on yourself:
+   `rocket task move {{task_id}} in_progress` — before spawning any worker.
 
-4. EXECUTE. Right after the confirmation lands, move the task out of
-   brainstorm: `rocket task move {{task_id}} in_progress`. Then create
-   subtasks, spawn workers, coordinate to merged PRs.
+4. EXECUTE. Create subtasks, spawn workers, coordinate to merged PRs.
    Gates: a worker's PR needs green CI before you consider its task done.
 
 5. DELIVER. Final report, task to review, tell the human.
