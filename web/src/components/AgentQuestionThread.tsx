@@ -46,6 +46,7 @@ export function AgentQuestionThread({ roleId, question }: AgentQuestionThreadPro
   return (
     <QuestionThreadView
       ordinal={question.ordinal}
+      localRef={question.local_ref}
       body={question.body}
       context={question.context}
       messages={question.messages}
@@ -55,11 +56,14 @@ export function AgentQuestionThread({ roleId, question }: AgentQuestionThreadPro
       participants={question.participants}
       agentName={roleId}
       agentInitial="A"
+      options={question.options}
+      stale={question.stale}
       placeholder={`Write a reply, ask ${roleId} to rephrase, or give your final answer…`}
       busy={reply.isPending || answer.isPending}
       onClarify={(body, to) => reply.mutate({ id: question.id, body, to, roleId })}
       onAnswer={(body, to) => answer.mutate({ id: question.id, body, to, roleId })}
       onDismiss={() => answer.mutate({ id: question.id, dismiss: true, roleId })}
+      onChoose={(choose) => answer.mutate({ id: question.id, choose, roleId })}
     />
   )
 }

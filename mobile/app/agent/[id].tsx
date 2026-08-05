@@ -49,6 +49,8 @@ import {
   participantInitial,
   participantLabel,
   toggleAddressee,
+  threadBadges,
+  threadRefLabel,
 } from '../../src/lib/threads'
 import { colors, mono, radius } from '../../src/theme'
 
@@ -105,16 +107,27 @@ function AgentQuestionCard({ q, agentId }: { q: AgentQuestion; agentId: string }
   return (
     <View style={styles.qCard}>
       <View style={styles.qHead}>
-        <Badge label={`Q${q.ordinal}`} fg={colors.amberDeep} bg={colors.amberBg} />
-        <Badge
-          label={
-            q.your_turn
-              ? 'awaiting you'
-              : `waiting for ${(q.waiting_on ?? []).map(participantLabel).join(', ') || agentId}`
-          }
-          fg={colors.amberDeep}
-          bg={colors.amberBg}
-        />
+        <Badge label={threadRefLabel(q)} fg={colors.amberDeep} bg={colors.amberBg} />
+        {threadBadges(q).map((b) => (
+          <Badge
+            key={b.label}
+            label={b.label}
+            fg={b.label === 'stale' ? colors.amberDeep : colors.textDim}
+            bg={b.label === 'stale' ? colors.amberBg : colors.cardAlt}
+          />
+        ))}
+        {/* An fyi note waits for nobody, so it never gets a turn chip. */}
+        {q.status === 'open' && q.type !== 'fyi' ? (
+          <Badge
+            label={
+              q.your_turn
+                ? 'awaiting you'
+                : `waiting for ${(q.waiting_on ?? []).map(participantLabel).join(', ') || agentId}`
+            }
+            fg={colors.amberDeep}
+            bg={colors.amberBg}
+          />
+        ) : null}
         <View style={{ flex: 1 }} />
         <MonoText style={{ fontSize: 11, color: '#a1621a' }}>{participantLabel(q.asked_by)} asked</MonoText>
       </View>
@@ -144,6 +157,28 @@ function AgentQuestionCard({ q, agentId }: { q: AgentQuestion; agentId: string }
               <Text style={{ fontSize: 12.5, color: colors.accent }}>＋ Show context</Text>
             </Pressable>
           )
+        ) : null}
+        {/* One tap closes the thread with that option — the cheapest answer
+            there is, and the reason threads stop piling up (spec v1
+            §«Варианты ответа»). `choose` is a 1-based index. */}
+        {q.status === 'open' && (q.options ?? []).length > 0 ? (
+          <View style={styles.optionRow}>
+            {(q.options ?? []).map((label, i) => (
+              <Pressable
+                key={label}
+                style={styles.optionBtn}
+                disabled={busy}
+                onPress={() =>
+                  answer.mutate(
+                    { id: q.id, choose: i + 1 },
+                    { onError: (e: unknown) => toast.show((e as Error).message) },
+                  )
+                }
+              >
+                <Text style={styles.optionText}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
         ) : null}
         <Text style={styles.discussLabel}>DISCUSSION · {q.messages.length} REPLIES</Text>
         {q.messages.map((m) => {
@@ -465,7 +500,12 @@ export default function AgentScreen() {
                 {resolved.length > 0 ? <Text style={styles.discussLabel}>RESOLVED</Text> : null}
                 {resolved.map((q) => (
                   <Card key={q.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 9, padding: 12 }}>
-                    <Badge label={`Q${q.ordinal}`} fg={colors.slateFg} bg={colors.slateBg} />
+                    <Badge label={threadRefLabel(q)} fg={colors.slateFg} bg={colors.slateBg} />
+                    {/* An fyi note is a status message, not an answered
+                        question — the history says which it was. */}
+                    {threadBadges(q).map((b) => (
+                      <Badge key={b.label} label={b.label} fg={colors.textDim} bg={colors.cardAlt} />
+                    ))}
                     <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, color: colors.textMid }}>
                       {q.body}
                     </Text>
@@ -566,6 +606,16 @@ const styles = StyleSheet.create({
     borderBottomColor: '#fde68a',
   },
   qText: { fontSize: 17, lineHeight: 24, fontWeight: '700', letterSpacing: -0.2, marginBottom: 14 },
+  optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
+  optionBtn: {
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.cardAlt,
+  },
+  optionText: { fontSize: 13, fontWeight: '600', color: colors.text },
   ctxBox: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, overflow: 'hidden', marginBottom: 18 },
   ctxHead: {
     flexDirection: 'row',

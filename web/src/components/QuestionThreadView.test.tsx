@@ -31,6 +31,52 @@ describe('QuestionThreadView', () => {
     expect(screen.getByText('ready')).toBeInTheDocument()
   })
 
+  // The local ref ("1023/Q2", "cto/Q1") is the one thread id a human sees —
+  // the bare ordinal only survives as the fallback for a pre-#1023 daemon.
+  it('shows the local ref in place of the bare ordinal', () => {
+    render(<QuestionThreadView {...base} localRef="1023/Q2" />)
+
+    expect(screen.getByText('1023/Q2')).toBeInTheDocument()
+    expect(screen.queryByText('Q2')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Reply to 1023/Q2')).toBeInTheDocument()
+  })
+
+  it('falls back to Q<ordinal> when the daemon sends no local ref', () => {
+    render(<QuestionThreadView {...base} />)
+
+    expect(screen.getByText('Q2')).toBeInTheDocument()
+  })
+
+  it('badges a stale thread', () => {
+    render(<QuestionThreadView {...base} stale />)
+
+    expect(screen.getByText('stale')).toBeInTheDocument()
+  })
+
+  it('leaves a moving thread unbadged', () => {
+    render(<QuestionThreadView {...base} />)
+
+    expect(screen.queryByText('stale')).not.toBeInTheDocument()
+  })
+
+  // Picking an option closes the thread with that answer; `choose` is 1-based
+  // (internal/api/threads.go chooseOptionBody), which is the whole point of
+  // this test — an off-by-one here answers the wrong option.
+  it('renders options as buttons that close the thread with a 1-based index', async () => {
+    const onChoose = vi.fn()
+    render(<QuestionThreadView {...base} options={['Ship it', 'Wait']} onChoose={onChoose} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Wait' }))
+
+    expect(onChoose).toHaveBeenCalledWith(2)
+  })
+
+  it('renders no option row when the thread has no options', () => {
+    render(<QuestionThreadView {...base} onChoose={vi.fn()} />)
+
+    expect(screen.queryByLabelText('Answer options')).not.toBeInTheDocument()
+  })
+
   it('labels human entries as "you"', () => {
     render(
       <QuestionThreadView

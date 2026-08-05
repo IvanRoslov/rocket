@@ -608,6 +608,75 @@ export const handlers = [
     })
   }),
 
+  // GET /v1/threads — internal/api/thread_inbox.go. The unified inbox of task
+  // AND role threads. Derived from the same state the per-subject endpoints
+  // serve, so a row and the thread it opens can never disagree.
+  http.get('/v1/threads', ({ request }) => {
+    const url = new URL(request.url)
+    const all = url.searchParams.get('all') === 'true'
+    const waitingOn = url.searchParams.get('waiting_on')
+
+    const taskThreads = questionsState.map((q) => {
+      const task = tasksState.find((t) => t.id === q.task_id)
+      const attention = q.status === 'open' ? (q.waiting_on ?? []) : []
+      return {
+        local_ref: q.local_ref ?? `${q.task_id}/Q${q.ordinal}`,
+        kind: 'task' as const,
+        task_id: q.task_id,
+        subject: `task #${q.task_id} "${task?.title ?? ''}"`,
+        id: q.id,
+        ordinal: q.ordinal,
+        asked_by: q.asked_by,
+        body: q.body,
+        status: q.status,
+        resolution: q.resolution,
+        type: q.type ?? ('decision' as const),
+        options: q.options,
+        participants: q.participants ?? [],
+        attention,
+        waiting_on: attention,
+        your_turn: attention.some((p) => isHuman(p)),
+        asked_at: q.asked_at,
+        updated_at: q.messages.at(-1)?.created_at ?? q.asked_at,
+        resolved_at: q.resolved_at,
+        stale: q.stale,
+        project_id: task?.project_id,
+        task_title: task?.title,
+      }
+    })
+
+    const roleThreads = agentQuestions.map((q) => {
+      const attention = q.status === 'open' ? (q.waiting_on ?? []) : []
+      return {
+        local_ref: q.local_ref ?? `${q.role_id}/Q${q.ordinal}`,
+        kind: 'role' as const,
+        role_id: q.role_id,
+        subject: `role ${q.role_id}`,
+        id: q.id,
+        ordinal: q.ordinal,
+        asked_by: q.asked_by,
+        body: q.body,
+        status: q.status,
+        resolution: q.resolution,
+        type: q.type ?? ('decision' as const),
+        options: q.options,
+        participants: q.participants ?? [],
+        attention,
+        waiting_on: attention,
+        your_turn: attention.some((p) => isHuman(p)),
+        asked_at: q.asked_at,
+        updated_at: q.messages.at(-1)?.created_at ?? q.asked_at,
+        resolved_at: q.resolved_at,
+        stale: q.stale,
+      }
+    })
+
+    let threads = [...taskThreads, ...roleThreads]
+    if (!all) threads = threads.filter((t) => t.status === 'open')
+    if (waitingOn) threads = threads.filter((t) => t.attention.some((p) => p === waitingOn))
+    return HttpResponse.json({ threads })
+  }),
+
   http.get('/v1/tasks/:id/questions', ({ params, request }) => {
     const id = Number(params.id)
     const url = new URL(request.url)
@@ -673,7 +742,26 @@ export const handlers = [
     if (question.status !== 'open') {
       return HttpResponse.json({ error: { code: 'question_resolved', message: 'question is already resolved' } }, { status: 409 })
     }
-    const body = (await request.json()) as { body?: string; dismiss?: boolean; to?: string[] }
+    const body = (await request.json()) as {
+      body?: string
+      dismiss?: boolean
+      to?: string[]
+      choose?: number
+    }
+    // `choose` is a 1-based index into `options`; the daemon substitutes the
+    // option's own text as the answer (internal/api/threads.go
+    // chooseOptionBody), so the mock does the same rather than echoing a body.
+    if (body.choose) {
+      const picked = (question.options ?? [])[body.choose - 1]
+      if (picked === undefined) {
+        return HttpResponse.json(
+          { error: { code: 'bad_request', message: `choose must be between 1 and ${(question.options ?? []).length}` } },
+          { status: 400 },
+        )
+      }
+      body.body = picked
+      delete body.to
+    }
     if (body.dismiss) {
       // Dismissing resolves the question without adding a thread message.
       question.status = 'resolved'

@@ -46,6 +46,19 @@ type threadInboxEntry struct {
 	// has this been hanging" is measured from.
 	UpdatedAt  int64 `json:"updated_at"`
 	ResolvedAt int64 `json:"resolved_at,omitempty"`
+	// Stale mirrors questionResponse.Stale: an open decision thread nobody has
+	// moved for longer than question_stale_after. The inbox is the one screen
+	// that shows every thread at once, so the badge has to be readable here
+	// rather than only after opening each thread — and the threshold is
+	// configurable, so a client cannot honestly recompute it.
+	Stale bool `json:"stale,omitempty"`
+	// ProjectID and TaskTitle give a task thread the context the per-task
+	// endpoints get for free from their URL: a dashboard row links to the task
+	// and labels itself with the title. Subject is a human-readable sentence
+	// and must not be parsed back apart for them. Both are empty on a role
+	// thread, which hangs off no project.
+	ProjectID string `json:"project_id,omitempty"`
+	TaskTitle string `json:"task_title,omitempty"`
 }
 
 func registerThreadInboxRoutes(mux *http.ServeMux, d Deps) {
@@ -93,6 +106,7 @@ func handleGetThreads(w http.ResponseWriter, r *http.Request, d Deps) {
 
 		subj := threadSubject{TaskID: q.TaskID, RoleID: q.RoleID}
 		title := ""
+		projectID := ""
 		if q.TaskID != 0 {
 			task, ok := tasks[q.TaskID]
 			if !ok {
@@ -110,6 +124,7 @@ func handleGetThreads(w http.ResponseWriter, r *http.Request, d Deps) {
 			}
 			subj.Counterpart = task.SessionID
 			title = task.Title
+			projectID = task.ProjectID
 		} else {
 			subj.Counterpart = q.RoleID
 		}
@@ -147,6 +162,9 @@ func handleGetThreads(w http.ResponseWriter, r *http.Request, d Deps) {
 			AskedAt:      q.AskedAt,
 			UpdatedAt:    updatedAt,
 			ResolvedAt:   q.ResolvedAt,
+			Stale:        threadStale(d, q, th.LastMessage, th.Attention),
+			ProjectID:    projectID,
+			TaskTitle:    title,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"threads": out})

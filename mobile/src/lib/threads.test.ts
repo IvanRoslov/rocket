@@ -7,6 +7,8 @@ import {
   participantInitial,
   participantLabel,
   toggleAddressee,
+  threadRefLabel,
+  threadBadges,
 } from './threads'
 
 describe('isHuman', () => {
@@ -101,5 +103,37 @@ describe('countYourTurn', () => {
 
   it('is 0 for no threads', () => {
     expect(countYourTurn([])).toBe(0)
+  })
+})
+
+describe('threadRefLabel', () => {
+  it('prefers the local ref — the one thread id a human sees', () => {
+    expect(threadRefLabel({ ordinal: 2, local_ref: '1023/Q2' })).toBe('1023/Q2')
+  })
+
+  it('falls back to Q<ordinal> on a daemon older than #1023', () => {
+    expect(threadRefLabel({ ordinal: 2 })).toBe('Q2')
+  })
+})
+
+describe('threadBadges', () => {
+  it('badges an open thread nobody has moved as stale', () => {
+    expect(threadBadges({ status: 'open', stale: true }).map((b) => b.label)).toEqual(['stale'])
+  })
+
+  // An fyi note is born closed and waits on nobody: it can neither go stale
+  // nor carry a turn, so it gets exactly one badge saying what it is.
+  it('badges an fyi thread as fyi and never as stale', () => {
+    expect(threadBadges({ status: 'resolved', type: 'fyi', stale: true }).map((b) => b.label)).toEqual([
+      'fyi',
+    ])
+  })
+
+  it('leaves a plain open thread unbadged', () => {
+    expect(threadBadges({ status: 'open' })).toEqual([])
+  })
+
+  it('never badges a closed decision thread as stale', () => {
+    expect(threadBadges({ status: 'resolved', stale: true })).toEqual([])
   })
 })
