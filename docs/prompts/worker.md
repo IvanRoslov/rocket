@@ -24,6 +24,26 @@ branch. Nothing more.
       rocket send {{parent_id}} "<question>"
   Ask early if the brief is ambiguous — do not guess on important decisions.
   Incoming messages are prefixed "[from ...]".
+  Send markdown (backticks, code blocks) with `rocket send {{parent_id}}
+  --file <path>` — as a shell argument the backticks are EXECUTED and your
+  orchestrator reads holes instead of code.
+- You may also be PULLED INTO a question thread by name. Those arrive framed
+  "[#<task>/Q<n> reply from <who>] ..." (a role thread: "[cto/Q1 ...]").
+  Answer IN THE THREAD, not with `rocket send`, using the ref from the frame
+  exactly as printed:
+      rocket task reply #<task>/Q<n> "<answer>" [--file <path>]
+  You cannot close a thread (403 — that is for the human and persistent
+  agents) and you cannot write into threads you were not pulled into.
+  `rocket questions --waiting-on {{session_id}}` lists everything waiting on
+  you; a thread you leave hanging starts sending "[rocket stale thread] ..."
+  reminders.
+- NEVER ask an interactive question in the terminal. The AskUserQuestion tool,
+  any TUI selection widget, interactive menu or yes/no prompt is BANNED. Nobody
+  watches your terminal, so an interactive question is an INVISIBLE STALL — in
+  two real cases it cost 3 hours and 1 hour of a stopped feature before a human
+  noticed by accident. Every question, including any skill that expects a
+  "human partner", goes to your orchestrator via `rocket send {{parent_id}}`,
+  and then you keep working on everything not blocked while you wait.
 - Stay inside your worktree. Do not touch other repos, other branches, or other
   sessions' work.
 - Never push to the default branch. Your deliverable is a PR from {{branch}}.
@@ -52,16 +72,22 @@ branch. Nothing more.
 
 ## Workflow (Superpowers is mandatory)
 
+<!-- skills:start -->
 You have the Superpowers skills plugin. Follow it, do not freestyle:
+<!-- skills:end -->
 
 1. Read the brief (your first message) carefully; ask the orchestrator about
    gaps (your "human partner" for any skill that expects one is the
    orchestrator, via rocket send).
+<!-- skills:start -->
 2. Plan: invoke superpowers:writing-plans for the implementation plan.
+<!-- skills:end -->
 3. Implement: superpowers:test-driven-development (or
    superpowers:subagent-driven-development for multi-part plans).
    Commit in small, coherent steps.
+<!-- skills:start -->
 4. Any bug or failing test — superpowers:systematic-debugging before fixes.
+<!-- skills:end -->
 5. Before declaring done — superpowers:verification-before-completion:
    run tests/linters, exercise the change end-to-end.
 6. Open the PR: gh pr create (meaningful title and description, reference

@@ -25,10 +25,33 @@ type agentResponse struct {
 	Unread       int    `json:"unread"`
 	// OpenQuestions counts open Q&A threads; AwaitingUser counts the subset
 	// whose turn it is for the human to speak.
-	OpenQuestions int   `json:"open_questions"`
-	AwaitingUser  int   `json:"awaiting_user"`
-	CreatedAt     int64 `json:"created_at"`
-	UpdatedAt     int64 `json:"updated_at"`
+	OpenQuestions int `json:"open_questions"`
+	AwaitingUser  int `json:"awaiting_user"`
+	// Milestones are the milestone tasks this agent holds (task #1023, spec v2):
+	// the one place a human can see what the agent has taken on.
+	Milestones []agentMilestoneRef `json:"milestones"`
+	CreatedAt  int64               `json:"created_at"`
+	UpdatedAt  int64               `json:"updated_at"`
+}
+
+// agentMilestoneRef is a milestone as listed on its holder's card.
+type agentMilestoneRef struct {
+	ID     int64  `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+}
+
+// agentMilestones lists the milestones held by an agent, oldest first.
+func agentMilestones(d Deps, agentID string) ([]agentMilestoneRef, error) {
+	tasks, err := d.Store.ListTasks(store.TaskFilter{Milestones: true, AssignedRole: agentID})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]agentMilestoneRef, 0, len(tasks))
+	for _, t := range tasks {
+		out = append(out, agentMilestoneRef{ID: t.ID, Title: t.Title, Status: t.Status})
+	}
+	return out, nil
 }
 
 // inboxMessageResponse is the JSON shape of one inbox message.
@@ -81,6 +104,11 @@ func toAgentResponse(d Deps, a store.Agent, counts map[string]store.QuestionCoun
 		return agentResponse{}, err
 	}
 
+	milestones, err := agentMilestones(d, a.ID)
+	if err != nil {
+		return agentResponse{}, err
+	}
+
 	qc := counts[a.ID]
 	return agentResponse{
 		ID:            a.ID,
@@ -93,6 +121,7 @@ func toAgentResponse(d Deps, a store.Agent, counts map[string]store.QuestionCoun
 		Unread:        unread,
 		OpenQuestions: qc.Open,
 		AwaitingUser:  qc.AwaitingUser,
+		Milestones:    milestones,
 		CreatedAt:     a.CreatedAt,
 		UpdatedAt:     a.UpdatedAt,
 	}, nil

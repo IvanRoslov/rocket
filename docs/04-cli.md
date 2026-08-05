@@ -12,14 +12,14 @@
 ## Для пользователя
 
 ```
-rocket task add "<title>" [--project <id>] [--desc <md>|--desc-file <f>]
-rocket task ls [--status <s>] [--project <id>]   # канбан в терминале
+rocket task add "<title>" [--project <id> | --milestone] [--parent <id>] [--desc <md>|--desc-file <f>]
+rocket task ls [--status <s>] [--project <id>] [--milestones]   # канбан в терминале
 rocket task show <id>       # карточка: подзадачи, доки, журнал, attach-команда
                             # --json отдаёт то же целиком: поля задачи + docs, log, questions
 rocket task start <id> [--agent <name>]          # назначить оркестратора
-rocket task move <id> <status>
-rocket task doc put <id> --kind spec|plan|report --title "..." --file <f.md>
-rocket task log <id> --kind decision|problem|note "<текст>" | --file <f>
+rocket task move <id> <status> [--force]         # --force: в review при живых воркерах/открытых подзадачах
+rocket task doc put <id> --kind spec|plan|report|doc --title "..." --file <f.md>
+rocket task log <id> --kind decision|problem|note|status "<текст>" | --file <f>
 rocket task ask-orch <id> "<вопрос>" | --file <f> [--context <md>] [--to a,b]
                        [--option "<текст>"]... [--fyi]
                                                  # открыть тред оркестратору
@@ -45,6 +45,18 @@ rocket task close <тред> --dismiss ["<почему>"]  # закрыть ка
 rocket task cancel <id>
     Подробности — 12-tasks.md.
 
+rocket task add "<title>" --milestone               # майлстон: задача вне проектов
+rocket task assign <id> <agent-id> | --none         # назначить/снять (только человек)
+rocket task ls --milestones                         # канбан майлстонов
+    Майлстон — единица работы постоянного агента: живёт выше проектов, берётся
+    агентом (`rocket task take`, см. «Для агента»), а не запускается как фича
+    (`task start` на майлстоне отвечает 403). Доки, журнал и треды — как у задачи.
+    В review майлстон не уходит, пока в нём нет ни дока, ни записи журнала от
+    агента (422): смотреть было бы нечего. `done`/`cancelled` ставит только
+    человек — это приёмка. Карточка майлстона показывает агента и команду
+    `rocket agent attach <agent>` (сессия у агента одна на все его майлстоны),
+    а `rocket agent show <agent>` — список его майлстонов.
+
 rocket questions [--waiting-on <id>] [--all] [--json]
     Единый инбокс: все открытые треды — и задач, и ролей — одним списком.
     На тред: локальная ссылка, к чему привязан, первая строка вопроса,
@@ -56,6 +68,7 @@ rocket questions [--waiting-on <id>] [--all] [--json]
     тем, из-за чего треды терялись.
 
 rocket up "<описание фичи>" [--project <id>] [--agent <name>]
+          [--desc <md>|--desc-file <f>]
     Шорткат: task add + task start. Проект по умолчанию — по cwd.
     Печатает task id, feature slug и session id.
 
@@ -192,16 +205,24 @@ rocket spawn --task <name> --repo <id> --prompt "<бриф>" [--agent <name>]
 rocket task ... (см. выше)
     Оркестратор ведёт доки/журнал своей задачи, воркер — своей подзадачи.
 
+rocket task take <id>
+    Только для постоянных агентов и только на майлстонах: агент берёт майлстон
+    из своей сессии. Занятый другим агентом — 409 с именем держателя, обычная
+    проектная задача — 403 (её запускает человек через task start). Писать в
+    майлстон (log/doc/move) могут человек и взявший его агент.
+
 rocket task ask <id> "<вопрос>" | --file <f> [--context <md>] [--to a,b]
                 [--option "<текст>"]... [--fyi]
     Открыть тред по задаче. Доступно человеку, постоянному агенту и
     оркестратору самой задачи. Вопрос — тред с участниками: записи приходят
-    как "[#N/QM reply from <кто>] ..." — этой же ссылкой и отвечают
-    (rocket task reply #N/QM ...); финальный ответ — "[#N/QM answer from
-    <кто>] ...". У тредов ролей префикс без решётки: "[sre/Q1 reply from ...]".
-    --to называет, от кого ждут ответа, и втягивает названных в тред;
-    уведомление о каждой записи всё равно получают все участники, кроме
-    её автора. Закрыть тред оркестратор не может — 403, только reply.
+    как "[#N/QM reply from <кто>] ...", закрытие — как "[#N/QM answer from
+    <кто>] ...". У тредов ролей ссылка без решётки: "[sre/Q1 reply from ...]".
+    Отвечают ссылкой прямо из рамки: rocket task reply #N/QM "..."
+    (решётка необязательна, N/QM работает так же; у тредов ролей её нет).
+    --to называет, от кого ждут ответа, втягивает названных в тред и
+    переводит на них ход; уведомление о каждой записи всё равно получают
+    все участники, кроме её автора. Закрыть тред оркестратор не может —
+    403, только reply.
 
 rocket send <session|role> "<текст>"
     То же, что у пользователя; from заполняется из ROCKET_SESSION_ID,
@@ -215,16 +236,15 @@ rocket ls / rocket status <slug>
 rocket kill <session>
     Оркестратор может убивать только своих воркеров.
 
-rocket agent state set <kind>:<ref> <state> [--note "..."] [--until 2026-08-15]
-                       [--task <id>] [--agent <role>]
-rocket agent state ls [--state deferred] [--agent <role>]
-    Досье роли (kind: issue|task|ping). Роль определяется по ROCKET_SESSION_ID
-    инстанса (<role>-run-<n>); вне инстанса нужен --agent.
+rocket agent ask <role> "<вопрос>" / rocket agent reply <тред> "<текст>"
+    Q&A-треды роли (см. «Постоянные агенты» выше). Изнутри сессии агента
+    ask эскалирует вопрос человеку, reply отвечает в тред, открытый
+    человеком; записи приходят как "[<role>/Q<n> question|reply|answer
+    from <кто>] ...".
 
-rocket agent ask <role> "<вопрос>" / rocket agent reply <qid> "<текст>"
-    Q&A-треды роли. Изнутри инстанса ask эскалирует вопрос человеку,
-    reply отвечает в тред, открытый человеком (сообщения приходят
-    как "[role <id> Q<n> question|reply|answer] ...").
+rocket questions [--waiting-on <id>] [--all]
+    Один список всех открытых тредов — задач и ролей. Оркестратору и
+    воркеру нужен именно он, а не обход задач циклом.
 ```
 
 ## Коды выхода

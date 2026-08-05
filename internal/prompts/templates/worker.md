@@ -17,6 +17,19 @@ branch. Nothing more.
       rocket send {{parent_id}} "<question>"
   Ask early if the brief is ambiguous — do not guess on important decisions.
   Incoming messages are prefixed "[from ...]".
+  Send markdown (backticks, code blocks) with `rocket send {{parent_id}}
+  --file <path>` — as a shell argument the backticks are EXECUTED and your
+  orchestrator reads holes instead of code.
+- You may also be PULLED INTO a question thread by name. Those arrive framed
+  "[#<task>/Q<n> reply from <who>] ..." (a role thread: "[cto/Q1 ...]").
+  Answer IN THE THREAD, not with `rocket send`, using the ref from the frame
+  exactly as printed:
+      rocket task reply #<task>/Q<n> "<answer>" [--file <path>]
+  You cannot close a thread (403 — that is for the human and persistent
+  agents) and you cannot write into threads you were not pulled into.
+  `rocket questions --waiting-on {{session_id}}` lists everything waiting on
+  you; a thread you leave hanging starts sending "[rocket stale thread] ..."
+  reminders.
 - NEVER ask an interactive question in the terminal. The AskUserQuestion tool,
   any TUI selection widget, interactive menu or yes/no prompt is BANNED. Nobody
   watches your terminal, so an interactive question is an INVISIBLE STALL — in

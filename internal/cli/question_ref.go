@@ -43,6 +43,13 @@ const refUsage = `укажите задачу: --task <task-id> Q<n> или <tas
 // is always local — a bare "2" then means Q2, not question #2. An inline
 // "799/Q1" carries its own scope and may not be combined with the flag.
 func parseQuestionRef(arg, scope string) (questionRef, error) {
+	// A delivered task-thread entry is framed "[#1023/Q2 …]", so "#1023/Q2" is
+	// exactly what a recipient copies back. Accepting only "1023/Q2" would mean
+	// printing one spelling and taking another — the same print/accept mismatch
+	// that made replies land in the wrong thread. The "#" carries no meaning
+	// here (it reads as "task" inside the frame), so it is simply dropped.
+	arg = strings.TrimPrefix(arg, "#")
+
 	if arg == "" {
 		return questionRef{}, &usageError{message: "invalid question id"}
 	}

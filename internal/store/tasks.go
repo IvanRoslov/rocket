@@ -32,6 +32,12 @@ type Task struct {
 	CreatedAt   int64
 	UpdatedAt   int64
 	CompletedAt int64 // 0 = not completed
+	// Milestone marks a root task that belongs to no project and is taken by a
+	// persistent agent instead of an orchestrator (task #1023, spec v2).
+	Milestone bool
+	// AssignedRole is the id of the persistent agent holding the milestone,
+	// empty when nobody has taken it. Only milestones ever carry it.
+	AssignedRole string
 }
 
 // TaskFilter narrows the results of ListTasks. Empty Project/Status mean "no
@@ -39,12 +45,21 @@ type Task struct {
 // false, no filter is applied on parent_id; when true and Parent == 0, only
 // root tasks (parent_id IS NULL) are returned; when true and Parent != 0,
 // only direct children of Parent are returned.
+// Milestones, when true, narrows the result to milestone tasks; AssignedRole,
+// when non-empty, to the milestones held by that agent.
 type TaskFilter struct {
-	Project   string
-	Status    string
-	Parent    int64
-	ParentSet bool
+	Project      string
+	Status       string
+	Parent       int64
+	ParentSet    bool
+	Milestones   bool
+	AssignedRole string
 }
+
+// taskColumns is the column list every task SELECT shares, in the order
+// scanTask reads them.
+const taskColumns = `id, parent_id, title, description, project_id, repo_id, status, feature_slug,
+	session_id, created_by, created_at, updated_at, completed_at, milestone, assigned_role`
 
 // AddTask inserts a new task. Status defaults to "backlog" and CreatedBy
 // defaults to "user" when empty. CreatedAt/UpdatedAt default to now. Returns
@@ -70,11 +85,12 @@ func (s *Store) AddTask(t Task) (int64, error) {
 	res, err := s.db.Exec(
 		`INSERT INTO tasks (
 			parent_id, title, description, project_id, repo_id, status, feature_slug,
-			session_id, created_by, created_at, updated_at, completed_at
-		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			session_id, created_by, created_at, updated_at, completed_at, milestone, assigned_role
+		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nullIfZero(t.ParentID), t.Title, t.Description, t.ProjectID, nullIfEmpty(t.RepoID),
 		t.Status, nullIfEmpty(t.FeatureSlug), nullIfEmpty(t.SessionID), t.CreatedBy,
-		t.CreatedAt, t.UpdatedAt, nullIfZero(t.CompletedAt),
+		t.CreatedAt, t.UpdatedAt, nullIfZero(t.CompletedAt), boolToInt(t.Milestone),
+		nullIfEmpty(t.AssignedRole),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert task: %w", err)
@@ -85,9 +101,7 @@ func (s *Store) AddTask(t Task) (int64, error) {
 // GetTask returns the task with the given id, or ErrNotFound.
 func (s *Store) GetTask(id int64) (Task, error) {
 	row := s.db.QueryRow(
-		`SELECT id, parent_id, title, description, project_id, repo_id, status, feature_slug,
-		        session_id, created_by, created_at, updated_at, completed_at
-		 FROM tasks WHERE id = ?`, id,
+		`SELECT `+taskColumns+` FROM tasks WHERE id = ?`, id,
 	)
 	return scanTask(row)
 }
@@ -97,18 +111,14 @@ func (s *Store) GetTask(id int64) (Task, error) {
 // subtask), or ErrNotFound if no task references it.
 func (s *Store) GetTaskBySessionID(sessionID string) (Task, error) {
 	row := s.db.QueryRow(
-		`SELECT id, parent_id, title, description, project_id, repo_id, status, feature_slug,
-		        session_id, created_by, created_at, updated_at, completed_at
-		 FROM tasks WHERE session_id = ?`, sessionID,
+		`SELECT `+taskColumns+` FROM tasks WHERE session_id = ?`, sessionID,
 	)
 	return scanTask(row)
 }
 
 // ListTasks returns tasks matching the filter, ordered by id.
 func (s *Store) ListTasks(f TaskFilter) ([]Task, error) {
-	query := `SELECT id, parent_id, title, description, project_id, repo_id, status, feature_slug,
-	                  session_id, created_by, created_at, updated_at, completed_at
-	          FROM tasks`
+	query := `SELECT ` + taskColumns + ` FROM tasks`
 
 	var conds []string
 	var args []any
@@ -120,6 +130,13 @@ func (s *Store) ListTasks(f TaskFilter) ([]Task, error) {
 	if f.Status != "" {
 		conds = append(conds, `status = ?`)
 		args = append(args, f.Status)
+	}
+	if f.Milestones {
+		conds = append(conds, `milestone = 1`)
+	}
+	if f.AssignedRole != "" {
+		conds = append(conds, `assigned_role = ?`)
+		args = append(args, f.AssignedRole)
 	}
 	if f.ParentSet {
 		if f.Parent == 0 {
@@ -194,14 +211,29 @@ func (s *Store) UpdateTask(t Task) error {
 	return checkRowsAffected(res)
 }
 
+// SetTaskAssignedRole sets (or, with an empty role, clears) the persistent
+// agent holding a milestone, refreshing updated_at. Returns ErrNotFound if the
+// task doesn't exist.
+func (s *Store) SetTaskAssignedRole(id int64, role string) error {
+	res, err := s.db.Exec(
+		`UPDATE tasks SET assigned_role = ?, updated_at = ? WHERE id = ?`,
+		nullIfEmpty(role), time.Now().Unix(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("update task assigned role: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
 func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	var t Task
 	var parentID, completedAt sql.NullInt64
-	var repoID, featureSlug, sessionID sql.NullString
+	var repoID, featureSlug, sessionID, assignedRole sql.NullString
+	var milestone int
 
 	err := row.Scan(
 		&t.ID, &parentID, &t.Title, &t.Description, &t.ProjectID, &repoID, &t.Status, &featureSlug,
-		&sessionID, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt, &completedAt,
+		&sessionID, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt, &completedAt, &milestone, &assignedRole,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Task{}, ErrNotFound
@@ -215,6 +247,8 @@ func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	t.FeatureSlug = featureSlug.String
 	t.SessionID = sessionID.String
 	t.CompletedAt = completedAt.Int64
+	t.Milestone = milestone != 0
+	t.AssignedRole = assignedRole.String
 
 	return t, nil
 }
