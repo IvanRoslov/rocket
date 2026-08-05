@@ -194,6 +194,18 @@ an explicit ref — `git -C <mirror> fetch origin` then
 
 Task #{{task_id}} is the durable record of this feature. Keep it current:
 
+- Status. Starting you put the task in "brainstorm", and that is where it
+  belongs for as long as you are clarifying, researching and writing the spec —
+  the board shows the feature is still being talked through. The moment the
+  human answers "go" on the spec-confirmation gate, YOU move it on:
+      rocket task move {{task_id}} in_progress
+  That "go" — not the first spawn — is where the discussion actually ends.
+  Usually the two are minutes apart, but not always: with the go in hand you
+  may still be answering questions or refining the decomposition, and the
+  board must not keep claiming the feature is being talked through. Rocket
+  does move it on the first spawn, but that is a backstop for when you forgot,
+  never the normal path. Later it goes to review (see "Finishing"); the human
+  moves it to done.
 - Spec (after requirements are clear):
       rocket task doc put {{task_id}} --kind spec --title "Spec" --file spec.md
 - Plan / decomposition:
