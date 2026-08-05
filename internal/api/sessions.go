@@ -271,6 +271,19 @@ func handlePostSession(w http.ResponseWriter, r *http.Request, d Deps) {
 		}
 	}
 
+	// The first worker spawned off a root task is what ends its brainstorming
+	// phase: up to here the orchestrator was only talking the task through,
+	// now somebody is writing code for it. The guard is the whole idempotence
+	// story — root was read from the store at the top of this handler, so a
+	// second spawn finds in_progress and changes nothing, and a task the human
+	// has moved elsewhere by hand is never dragged back.
+	if root.Status == "brainstorm" {
+		if err := applyTaskStatusChange(d, root, caller, "in_progress"); err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+	}
+
 	if _, err := d.Store.AddTaskLog(store.TaskLogEntry{
 		TaskID: root.ID,
 		Kind:   "status",
