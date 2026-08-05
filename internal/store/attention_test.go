@@ -78,3 +78,148 @@ func TestAgentQuestionTypeAndOptionsRoundTrip(t *testing.T) {
 		t.Errorf("Options = %#v, want [yes no]", got.Options)
 	}
 }
+
+// mustAttention reads a thread's attention set, failing the test on error.
+func mustAttention(t *testing.T, s *Store, qid int64) []string {
+	t.Helper()
+	got, err := s.ListAttention(qid)
+	if err != nil {
+		t.Fatalf("ListAttention: %v", err)
+	}
+	return got
+}
+
+func TestAttentionOnOpenAddressed(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+	qid := mustAddOpenQuestion(t, s, taskID, Question{AskedBy: "orch-1", Body: "?", AddressedTo: []string{"cto"}})
+
+	if err := s.AttentionOnOpen(qid, "orch-1", []string{"cto"}, []string{"cto", "human", "orch-1"}); err != nil {
+		t.Fatalf("AttentionOnOpen: %v", err)
+	}
+	if got := mustAttention(t, s, qid); !reflect.DeepEqual(got, []string{"cto"}) {
+		t.Errorf("attention = %#v, want [cto]", got)
+	}
+}
+
+func TestAttentionOnOpenWithoutAddressees(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+	qid := mustAddOpenQuestion(t, s, taskID, Question{AskedBy: "orch-1", Body: "?"})
+
+	if err := s.AttentionOnOpen(qid, "orch-1", nil, []string{"cto", "human", "orch-1"}); err != nil {
+		t.Fatalf("AttentionOnOpen: %v", err)
+	}
+	if got := mustAttention(t, s, qid); !reflect.DeepEqual(got, []string{"cto", "human"}) {
+		t.Errorf("attention = %#v, want [cto human]", got)
+	}
+}
+
+func TestAttentionOnEntryAuthorLeavesAndAddresseesJoin(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+	qid := mustAddOpenQuestion(t, s, taskID, Question{AskedBy: "orch-1", Body: "?"})
+
+	// Two people owe an answer; one of them replies and names the third.
+	if err := s.SetAttention(qid, []string{"cto", "human"}); err != nil {
+		t.Fatalf("SetAttention: %v", err)
+	}
+	if err := s.AttentionOnEntry(qid, "cto", []string{"orch-1"}, []string{"cto", "human", "orch-1"}); err != nil {
+		t.Fatalf("AttentionOnEntry: %v", err)
+	}
+	if got := mustAttention(t, s, qid); !reflect.DeepEqual(got, []string{"human", "orch-1"}) {
+		t.Errorf("attention = %#v, want [human orch-1]", got)
+	}
+}
+
+func TestAttentionOnEntryEmptiedPassesTurnToEveryoneElse(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+	qid := mustAddOpenQuestion(t, s, taskID, Question{AskedBy: "orch-1", Body: "?", AddressedTo: []string{"cto"}})
+
+	if err := s.SetAttention(qid, []string{"cto"}); err != nil {
+		t.Fatalf("SetAttention: %v", err)
+	}
+	// cto answers without naming anyone: the set empties, so the turn goes
+	// back to everyone but cto.
+	if err := s.AttentionOnEntry(qid, "cto", nil, []string{"cto", "human", "orch-1"}); err != nil {
+		t.Fatalf("AttentionOnEntry: %v", err)
+	}
+	if got := mustAttention(t, s, qid); !reflect.DeepEqual(got, []string{"human", "orch-1"}) {
+		t.Errorf("attention = %#v, want [human orch-1]", got)
+	}
+}
+
+func TestAttentionOnEntryKeepsOthersWaiting(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+	qid := mustAddOpenQuestion(t, s, taskID, Question{AskedBy: "human", Body: "?"})
+
+	if err := s.SetAttention(qid, []string{"cto", "orch-1"}); err != nil {
+		t.Fatalf("SetAttention: %v", err)
+	}
+	// Only cto has spoken: orch-1 still owes an answer, and the reply must
+	// NOT hand the turn back to the human the way the old last-entry rule did.
+	if err := s.AttentionOnEntry(qid, "cto", nil, []string{"cto", "human", "orch-1"}); err != nil {
+		t.Fatalf("AttentionOnEntry: %v", err)
+	}
+	if got := mustAttention(t, s, qid); !reflect.DeepEqual(got, []string{"orch-1"}) {
+		t.Errorf("attention = %#v, want [orch-1]", got)
+	}
+}
+
+func TestClearAttention(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+	qid := mustAddOpenQuestion(t, s, taskID, Question{AskedBy: "human", Body: "?"})
+
+	if err := s.SetAttention(qid, []string{"cto"}); err != nil {
+		t.Fatalf("SetAttention: %v", err)
+	}
+	if err := s.ClearAttention(qid); err != nil {
+		t.Fatalf("ClearAttention: %v", err)
+	}
+	if got := mustAttention(t, s, qid); got != nil {
+		t.Errorf("attention = %#v, want nil", got)
+	}
+}
+
+func TestAttentionCanonicalisesTheHuman(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+	qid := mustAddOpenQuestion(t, s, taskID, Question{AskedBy: "orch-1", Body: "?"})
+
+	// "" is the legacy spelling of the human and must never reach the table.
+	if err := s.SetAttention(qid, []string{"", "cto", "cto"}); err != nil {
+		t.Fatalf("SetAttention: %v", err)
+	}
+	if got := mustAttention(t, s, qid); !reflect.DeepEqual(got, []string{"cto", "human"}) {
+		t.Errorf("attention = %#v, want [cto human]", got)
+	}
+}
+
+func TestAttentionOfOpenThreads(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+	open := mustAddOpenQuestion(t, s, taskID, Question{AskedBy: "orch-1", Body: "open?"})
+	closed := mustAddOpenQuestion(t, s, taskID, Question{AskedBy: "orch-1", Body: "closed?"})
+
+	if err := s.SetAttention(open, []string{"human"}); err != nil {
+		t.Fatalf("SetAttention: %v", err)
+	}
+	if err := s.SetAttention(closed, []string{"human"}); err != nil {
+		t.Fatalf("SetAttention: %v", err)
+	}
+	if err := s.ResolveQuestion(closed, "answered"); err != nil {
+		t.Fatalf("ResolveQuestion: %v", err)
+	}
+
+	got, err := s.AttentionOfOpenThreads()
+	if err != nil {
+		t.Fatalf("AttentionOfOpenThreads: %v", err)
+	}
+	want := map[int64][]string{open: {"human"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("AttentionOfOpenThreads = %#v, want %#v", got, want)
+	}
+}
