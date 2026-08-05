@@ -69,10 +69,11 @@ export function FocusMode(props: FocusModeProps) {
         })}
         <div className="q__rail-foot">
           <button type="button" className="q__rail-link" onClick={props.onBrowse}>
-            {props.waitingOnAgents} threads waiting on agents →
+            {props.waitingOnAgents} {props.waitingOnAgents === 1 ? 'thread' : 'threads'} waiting on
+            agents →
           </button>
           <button type="button" className="q__rail-link q__rail-link--dim" onClick={props.onNotes}>
-            {props.notes} notes · nothing to answer →
+            {props.notes} {props.notes === 1 ? 'note' : 'notes'} · nothing to answer →
           </button>
         </div>
       </div>
