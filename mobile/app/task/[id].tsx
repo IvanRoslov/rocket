@@ -52,6 +52,7 @@ import { colors, mono, radius } from '../../src/theme'
 
 const STATUS_BADGE: Record<TaskStatus, { label: string; fg: string; bg: string }> = {
   backlog: { label: 'Backlog', fg: colors.slateFg, bg: colors.slateBg },
+  brainstorm: { label: 'Brainstorm', fg: colors.amberFg, bg: colors.amberBg },
   in_progress: { label: 'In Progress', fg: colors.indigoFg, bg: colors.indigoBg },
   review: { label: 'Review', fg: colors.purpleFg, bg: colors.purpleBg },
   done: { label: 'Done', fg: colors.greenFg, bg: colors.greenBg },
@@ -568,7 +569,7 @@ export default function TaskScreen() {
         title={`#${t.id} ${t.title}`}
         onClose={() => setTaskMenu(false)}
         actions={[
-          ...(['backlog', 'in_progress', 'review', 'done'] as const)
+          ...(['backlog', 'brainstorm', 'in_progress', 'review', 'done'] as const)
             .filter((s) => s !== t.status)
             .map((s) => ({
               label: `Move to ${STATUS_BADGE[s].label}`,

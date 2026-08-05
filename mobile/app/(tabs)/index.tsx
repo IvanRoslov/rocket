@@ -10,16 +10,18 @@ import { useServers } from '../../src/servers/ServerContext'
 import { colors, mono, radius } from '../../src/theme'
 
 function projectStats(tasks: Task[]) {
+  const brainstorm = tasks.filter((t) => t.status === 'brainstorm').length
   const inProgress = tasks.filter((t) => t.status === 'in_progress').length
   const review = tasks.filter((t) => t.status === 'review').length
   const updated = Math.max(0, ...tasks.map((t) => t.updated_at))
-  return { inProgress, review, updated }
+  return { brainstorm, inProgress, review, updated }
 }
 
 function ProjectCard({ project, tasks }: { project: Project; tasks: Task[] }) {
   const { setActiveProjectId } = useServers()
-  const { inProgress, review, updated } = projectStats(tasks)
-  const idle = inProgress + review + project.live_sessions === 0
+  const { brainstorm, inProgress, review, updated } = projectStats(tasks)
+  // A brainstormed task (#1077) is work in flight, so it keeps the project off "idle".
+  const idle = brainstorm + inProgress + review + project.live_sessions === 0
 
   return (
     <Pressable
@@ -50,6 +52,9 @@ function ProjectCard({ project, tasks }: { project: Project; tasks: Task[] }) {
           </MonoText>
         </View>
         <View style={styles.statsRow}>
+          {brainstorm > 0 ? (
+            <Badge label={`${brainstorm} brainstorm`} fg={colors.amberFg} bg={colors.amberBg} />
+          ) : null}
           {inProgress > 0 ? (
             <Badge label={`${inProgress} in progress`} fg={colors.indigoFg} bg={colors.indigoBg} />
           ) : null}

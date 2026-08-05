@@ -250,3 +250,27 @@ describe('task Q&A thread', () => {
     })
   })
 })
+
+/** Task #1077: the brainstorm status has to be nameable on the task screen. */
+describe('task status', () => {
+  afterEach(() => jest.restoreAllMocks())
+
+  it('badges a brainstormed task and offers moving out of it', async () => {
+    mockApi({ '/v1/tasks/12': { ...TASK, status: 'brainstorm' } })
+    renderWithProviders(<TaskScreen />)
+
+    await waitFor(() => expect(screen.getByText('Brainstorm')).toBeTruthy())
+    fireEvent.press(screen.getByText('⋯'))
+    expect(await screen.findByText('Move to In Progress')).toBeTruthy()
+    expect(screen.queryByText('Move to Brainstorm')).toBeNull()
+  })
+
+  it('offers moving an in-progress task back into brainstorm', async () => {
+    mockApi()
+    renderWithProviders(<TaskScreen />)
+
+    await waitFor(() => expect(screen.getByText('In Progress')).toBeTruthy())
+    fireEvent.press(screen.getByText('⋯'))
+    expect(await screen.findByText('Move to Brainstorm')).toBeTruthy()
+  })
+})
