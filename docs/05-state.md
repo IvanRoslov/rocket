@@ -61,6 +61,7 @@ attachments_dir: ~/.rocket/attachments  # куда сохранять вложе
 agent_notify_interval: 5m # не чаще этого агенту повторно сообщают о непрочитанных
 input_stall_threshold: 10m # сколько сессия может ждать интерактивного ввода до эскалации агенту cto
 question_stale_after: 24h # сколько открытый decision-тред может висеть без движения до напоминания участникам attention
+milestone_quiet_after: 24h # сколько взятый майлстон может не показывать следов работы агента до напоминания ему (и флага quiet)
 ```
 
 ## Схема SQLite
@@ -135,11 +136,17 @@ CREATE TABLE tasks (
   status       TEXT NOT NULL DEFAULT 'backlog', -- backlog|in_progress|review|done|cancelled
   feature_slug TEXT,
   session_id   TEXT REFERENCES sessions(id),   -- задача → оркестратор, подзадача → воркер
-  created_by   TEXT NOT NULL DEFAULT 'user',   -- user|orchestrator
+  milestone    INTEGER NOT NULL DEFAULT 0,     -- 1 = майлстон: корневая задача вне проектов (project_id = '')
+  assigned_role TEXT,                          -- id постоянного агента, взявшего майлстон; NULL/'' — не взят
+  created_by   TEXT NOT NULL DEFAULT 'user',   -- user|orchestrator|agent
   created_at   INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL,
   completed_at INTEGER
 );
+-- Майлстон (миграция 0012) представлен явной колонкой, а не выводится из «project_id
+-- пуст»: project_id объявлен NOT NULL ещё в 0001, у майлстона он '' (та же конвенция,
+-- что у agents.project_id), а '' от NULL здесь не отличить. Ровно одно из session_id
+-- (оркестратор фичи) и assigned_role (агент майлстона) может быть непустым.
 
 CREATE TABLE task_docs (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -241,6 +248,7 @@ CREATE TABLE events (
 );
 
 CREATE INDEX idx_tasks_status ON tasks(status, parent_id);
+CREATE INDEX idx_tasks_milestone ON tasks(milestone, assigned_role);
 CREATE INDEX idx_task_docs ON task_docs(task_id, kind);
 CREATE INDEX idx_task_log ON task_log(task_id, id);
 CREATE INDEX idx_questions_task ON questions(task_id, status);
