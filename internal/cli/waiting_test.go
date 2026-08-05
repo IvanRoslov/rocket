@@ -30,10 +30,13 @@ func TestRenderTaskBoardWaitingTerminal(t *testing.T) {
 			lines["moving"] = line
 		}
 	}
-	if !strings.Contains(lines["stalled"], waitingTerminalMark) {
-		t.Errorf("stalled task line = %q, want the %q marker", lines["stalled"], waitingTerminalMark)
+	// The exact wording depends on whether the task is a root task (see
+	// TestRenderTaskBoardOrchestratorWording); here only the presence of the
+	// marker is under test.
+	if !strings.Contains(lines["stalled"], waitingTerminalGlyph) {
+		t.Errorf("stalled task line = %q, want the %q marker", lines["stalled"], waitingTerminalGlyph)
 	}
-	if strings.Contains(lines["moving"], waitingTerminalMark) {
+	if strings.Contains(lines["moving"], waitingTerminalGlyph) {
 		t.Errorf("moving task line = %q, want no marker", lines["moving"])
 	}
 }
@@ -64,6 +67,59 @@ func TestRenderStatusWaitingTerminal(t *testing.T) {
 		case strings.HasPrefix(line, "wk-busy"):
 			if strings.Contains(line, waitingTerminalGlyph) {
 				t.Errorf("line %q, want no marker", line)
+			}
+		}
+	}
+}
+
+// TestRenderSessionsWaitingTerminal: `rocket ls` marks the ACTIVITY cell of a
+// session stalled on interactive input, the same way `rocket status` does.
+func TestRenderSessionsWaitingTerminal(t *testing.T) {
+	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	sessions := []sessionRow{
+		{ID: "orch-1", Kind: "orchestrator", State: "running", Activity: "waiting_input",
+			WaitingTerminal: true, CreatedAt: now.Add(-time.Hour).Unix()},
+		{ID: "wk-1", Kind: "worker", State: "running", Activity: "editing foo.go",
+			CreatedAt: now.Add(-time.Hour).Unix()},
+	}
+
+	var buf bytes.Buffer
+	renderSessions(sessions, &buf, now)
+	for _, line := range strings.Split(buf.String(), "\n") {
+		switch {
+		case strings.HasPrefix(line, "orch-1"):
+			if !strings.Contains(line, "waiting_input "+waitingTerminalGlyph) {
+				t.Errorf("line %q, want the activity cell tagged with %q", line, waitingTerminalGlyph)
+			}
+		case strings.HasPrefix(line, "wk-1"):
+			if strings.Contains(line, waitingTerminalGlyph) {
+				t.Errorf("line %q, want no marker", line)
+			}
+		}
+	}
+}
+
+// TestRenderTaskBoardOrchestratorWording: a root task (the one an orchestrator
+// runs) reads as "probably stuck"; a subtask keeps the neutral wording.
+func TestRenderTaskBoardOrchestratorWording(t *testing.T) {
+	board := map[string][]taskRow{
+		"in_progress": {
+			{ID: 1, Title: "Root", Status: "in_progress", SessionID: "orch-1", WaitingTerminal: true},
+			{ID: 2, Title: "Sub", Status: "in_progress", ParentID: 1, SessionID: "wk-1", WaitingTerminal: true},
+		},
+	}
+
+	var buf bytes.Buffer
+	renderTaskBoard(board, &buf, false)
+	for _, line := range strings.Split(buf.String(), "\n") {
+		switch {
+		case strings.HasPrefix(line, "#1 "):
+			if !strings.Contains(line, waitingTerminalOrch) {
+				t.Errorf("root task line = %q, want %q", line, waitingTerminalOrch)
+			}
+		case strings.HasPrefix(line, "#2 "):
+			if !strings.Contains(line, waitingTerminalMark) || strings.Contains(line, waitingTerminalOrch) {
+				t.Errorf("subtask line = %q, want the neutral %q", line, waitingTerminalMark)
 			}
 		}
 	}
