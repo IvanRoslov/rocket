@@ -88,7 +88,7 @@ func TestBuildSendBodyUsageViolations(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			body, err := buildSendBody(tc.args, tc.filePath)
+			body, err := buildSendBody(&cobra.Command{}, tc.args, tc.filePath)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil")
@@ -151,7 +151,7 @@ func TestBuildSendBodyContent(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			body, err := buildSendBody(tc.args, tc.filePath)
+			body, err := buildSendBody(&cobra.Command{}, tc.args, tc.filePath)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -306,4 +306,31 @@ func setPollIntervalForTest(t *testing.T, d time.Duration) func() {
 	old := pollInterval
 	pollInterval = d
 	return func() { pollInterval = old }
+}
+
+// TestBuildSendBodyFromStdin covers `rocket send <session> --file -`: the
+// body is piped in, so markdown reaches the recipient with its backticks
+// intact instead of being run by the shell.
+func TestBuildSendBodyFromStdin(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.SetIn(strings.NewReader("piped `body`"))
+
+	got, err := buildSendBody(cmd, []string{"session-id"}, stdinMarker)
+	if err != nil {
+		t.Fatalf("buildSendBody: %v", err)
+	}
+	if got != "piped `body`" {
+		t.Errorf("got %q, want %q", got, "piped `body`")
+	}
+}
+
+// TestBuildSendBodyEmptyStdin keeps the non-empty guarantee: an empty pipe
+// is a rejected body, not a silently-sent blank message.
+func TestBuildSendBodyEmptyStdin(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.SetIn(strings.NewReader(""))
+
+	if _, err := buildSendBody(cmd, []string{"session-id"}, stdinMarker); err == nil {
+		t.Fatal("expected an error for an empty piped body, got nil")
+	}
 }
