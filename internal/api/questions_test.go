@@ -223,7 +223,7 @@ func TestPostTaskQuestions_HumanOpensThreadToOrchestrator(t *testing.T) {
 		t.Errorf("Messages = %+v, want empty", q.Messages)
 	}
 
-	wantPrefix := "[task #" + itoa(taskID) + " Q1 question from human] What's the status?"
+	wantPrefix := "[#" + itoa(taskID) + "/Q1 question from human] What's the status?"
 	msgs, err := d.Store.ListMessages("orch-1", 10)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
@@ -247,7 +247,7 @@ func TestPostTaskQuestions_HumanOpensThreadWithContext(t *testing.T) {
 		t.Fatalf("status = %d, want 201", resp.StatusCode)
 	}
 
-	wantBody := "[task #" + itoa(taskID) + " Q1 question from human] What's the status?\n\nextra info"
+	wantBody := "[#" + itoa(taskID) + "/Q1 question from human] What's the status?\n\nextra info"
 	msgs, err := d.Store.ListMessages("orch-1", 10)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
@@ -442,7 +442,7 @@ func TestQuestionThread_FullLifecycle(t *testing.T) {
 		t.Fatalf("messages after user reply = %+v", afterUserReply.Messages)
 	}
 
-	wantUserReplyPrefix := "[task #" + itoa(taskID) + " Q1 reply from human] consider X"
+	wantUserReplyPrefix := "[#" + itoa(taskID) + "/Q1 reply from human] consider X"
 	msgs, err := d.Store.ListMessages("orch-1", 10)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
@@ -487,7 +487,7 @@ func TestQuestionThread_FullLifecycle(t *testing.T) {
 		t.Fatalf("after answer: WhoseTurn = %q, want empty (resolved)", afterAnswer.WhoseTurn)
 	}
 
-	wantAnswerPrefix := "[task #" + itoa(taskID) + " Q1 answer from human] final: use X"
+	wantAnswerPrefix := "[#" + itoa(taskID) + "/Q1 answer from human] final: use X"
 	msgsAfterAnswer, err := d.Store.ListMessages("orch-1", 10)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
@@ -1059,7 +1059,7 @@ func TestQuestionThread_OrchestratorAsksAgentAnswers(t *testing.T) {
 	if len(orchMsgs) == 0 {
 		t.Fatal("the orchestrator was not notified of cto's reply")
 	}
-	want := "[task #" + itoa(taskID) + " Q1 reply from cto] One question first."
+	want := "[#" + itoa(taskID) + "/Q1 reply from cto] One question first."
 	if last := orchMsgs[len(orchMsgs)-1].Body; last != want {
 		t.Errorf("orchestrator body = %q, want %q", last, want)
 	}

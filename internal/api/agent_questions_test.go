@@ -74,7 +74,7 @@ func TestPostAgentQuestion_FromHumanEnqueuesInboxEvent(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("inbox = %+v, want one message", msgs)
 	}
-	for _, want := range []string{"[role sre Q1 question from human]", "почему упал деплой?"} {
+	for _, want := range []string{"[sre/Q1 question from human]", "почему упал деплой?"} {
 		if !strings.Contains(msgs[0].Body, want) {
 			t.Errorf("body = %q, missing %q", msgs[0].Body, want)
 		}
@@ -238,7 +238,7 @@ func TestAgentQuestion_ReplyAnswerAndReopen(t *testing.T) {
 		t.Fatalf("after human reply: %+v", q)
 	}
 	sent, _ := d.Store.ListMessages("sre", 0)
-	if len(sent) != 2 || !strings.Contains(sent[1].Body, "[role sre Q1 reply from human]") {
+	if len(sent) != 2 || !strings.Contains(sent[1].Body, "[sre/Q1 reply from human]") {
 		t.Fatalf("a human reply must reach the live agent: %+v", sent)
 	}
 
@@ -377,8 +377,8 @@ func TestAgentQuestion_HumanEntriesReachTheLiveSession(t *testing.T) {
 	if len(sent) != 2 {
 		t.Fatalf("messages = %+v, want the question and the answer", sent)
 	}
-	if !strings.Contains(sent[0].Body, "[role sre Q1 question from human]") ||
-		!strings.Contains(sent[1].Body, "[role sre Q1 answer from human]") {
+	if !strings.Contains(sent[0].Body, "[sre/Q1 question from human]") ||
+		!strings.Contains(sent[1].Body, "[sre/Q1 answer from human]") {
 		t.Errorf("bodies = %q / %q", sent[0].Body, sent[1].Body)
 	}
 

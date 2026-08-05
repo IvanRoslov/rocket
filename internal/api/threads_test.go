@@ -107,13 +107,17 @@ func TestCanOpenThread(t *testing.T) {
 	}
 }
 
+// TestThreadPrefix: the frame a recipient sees carries the SAME local ref the
+// recipient has to type back (task #1023, spec v1 §«Тред и его id»). It used to
+// spell the thread one way ("task #722 Q3") and expect another ("722/Q3"), and
+// the gap is where replies went to the wrong thread.
 func TestThreadPrefix(t *testing.T) {
 	task := threadSubject{TaskID: 722, Counterpart: "orch-1"}
-	if got := threadPrefix(task, 3, "reply", "cto"); got != "[task #722 Q3 reply from cto]" {
+	if got := threadPrefix(task, 3, "reply", "cto"); got != "[#722/Q3 reply from cto]" {
 		t.Errorf("task prefix = %q", got)
 	}
 	role := threadSubject{RoleID: "cto", Counterpart: "cto"}
-	if got := threadPrefix(role, 2, "answer", "human"); got != "[role cto Q2 answer from human]" {
+	if got := threadPrefix(role, 2, "answer", "human"); got != "[cto/Q2 answer from human]" {
 		t.Errorf("role prefix = %q", got)
 	}
 }
@@ -143,7 +147,7 @@ func TestParticipantFanOut_SkipsAuthorAndHuman(t *testing.T) {
 	if len(orchMsgs) != 1 {
 		t.Fatalf("orch-1 got %d messages, want 1", len(orchMsgs))
 	}
-	if want := "[task #7 Q1 reply from cto] the body"; orchMsgs[0].Body != want {
+	if want := "[#7/Q1 reply from cto] the body"; orchMsgs[0].Body != want {
 		t.Errorf("orch-1 body = %q, want %q", orchMsgs[0].Body, want)
 	}
 
@@ -179,7 +183,7 @@ func TestParticipantFanOut_DeadAgentGetsInbox(t *testing.T) {
 	if len(inbox) != 1 {
 		t.Fatalf("cto inbox has %d messages, want 1", len(inbox))
 	}
-	if want := "[task #7 Q1 question from orch-1] wake up"; inbox[0].Body != want {
+	if want := "[#7/Q1 question from orch-1] wake up"; inbox[0].Body != want {
 		t.Errorf("inbox body = %q, want %q", inbox[0].Body, want)
 	}
 }
