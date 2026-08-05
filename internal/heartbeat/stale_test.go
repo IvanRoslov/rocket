@@ -199,10 +199,15 @@ func TestSweepStaleThreads_RemindsAttentionOnce(t *testing.T) {
 	if len(bodies) != 1 {
 		t.Fatalf("inbox = %q, want exactly one reminder", bodies)
 	}
-	for _, want := range []string{"Ship or hold?", "30h", "rocket task reply", "rocket task close", "rocket task answer"} {
+	for _, want := range []string{"Ship or hold?", "30h", "rocket task reply", "rocket task close"} {
 		if !strings.Contains(bodies[0], want) {
 			t.Errorf("reminder %q must contain %q", bodies[0], want)
 		}
+	}
+	// `answer` is close's hidden alias; naming both in one reminder only makes
+	// the recipient guess which verb is the real one.
+	if strings.Contains(bodies[0], "rocket task answer") {
+		t.Errorf("reminder %q must offer close only, not its answer alias", bodies[0])
 	}
 	ordinal := "1/Q1"
 	if !strings.Contains(bodies[0], "/Q1") {
