@@ -1,0 +1,78 @@
+/* Milestones page (task #1023, spec v2). The board itself reuses
+   kanban.css — only what a milestone card has and a task card doesn't lives
+   here: the holder row, the small action strip and the agent picker. */
+
+.milestones-screen__error {
+  margin: 0;
+  padding: 10px 20px;
+  background: var(--warn-bg);
+  color: var(--warn-text-2);
+  font: 500 12.5px var(--font-ui);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.milestone-card__holder {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 9px;
+}
+
+.milestone-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.milestone-card__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: 500 11.5px var(--font-ui);
+  white-space: nowrap;
+}
+
+.milestone-card__action:hover {
+  border-color: var(--border-hover);
+  color: var(--text);
+}
+
+.milestone-card__picker {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--divider);
+}
+
+.milestone-card__picker-option {
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: var(--radius-btn-sm);
+  background: transparent;
+  color: var(--text-2);
+  font: 500 12px var(--font-ui);
+}
+
+.milestone-card__picker-option:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.milestone-card__picker-option:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.milestone-card__picker-option--none {
+  color: var(--err-text, var(--text-3));
+}

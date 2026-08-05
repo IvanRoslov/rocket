@@ -42,6 +42,13 @@ test('шапка: лого и табы', () => {
   }
 })
 
+// Майлстоны живут вне проектов, поэтому их таб — глобальный, как Agents.
+test('таб Milestones ведёт на глобальную страницу майлстонов', () => {
+  renderShell('/milestones')
+  expect(tabHref('Milestones')).toBe('/milestones')
+  expect(screen.getByRole('link', { name: 'Milestones' })).toHaveAttribute('aria-current', 'page')
+})
+
 test('с главной страницы Kanban ведёт на запомненный проект, Agents — на глобальный список', async () => {
   window.localStorage.setItem(LAST_PROJECT_STORAGE_KEY, 'analytics')
   renderShell('/')
