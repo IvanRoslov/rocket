@@ -69,6 +69,25 @@ function SettingsIcon({ color }: { color: import("react-native").ColorValue }) {
   )
 }
 
+/** A milestone: a flag on a pole — work an agent plants its name on. */
+function MilestonesIcon({ color }: { color: import('react-native').ColorValue }) {
+  return (
+    <View style={{ width: 20, height: 20, flexDirection: 'row', gap: 2 }}>
+      <View style={{ width: 1.8, height: 18, borderRadius: 1, backgroundColor: color }} />
+      <View
+        style={{
+          width: 12,
+          height: 9,
+          marginTop: 1,
+          borderWidth: 1.7,
+          borderColor: color,
+          borderRadius: 2,
+        }}
+      />
+    </View>
+  )
+}
+
 /** An agent: a head over a body, echoing the agent cards' avatar. */
 function AgentsIcon({ color }: { color: import('react-native').ColorValue }) {
   return (
@@ -117,6 +136,10 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="kanban"
         options={{ title: 'Kanban', tabBarIcon: ({ color }) => <KanbanIcon color={color} /> }}
+      />
+      <Tabs.Screen
+        name="milestones"
+        options={{ title: 'Milestones', tabBarIcon: ({ color }) => <MilestonesIcon color={color} /> }}
       />
       <Tabs.Screen
         name="agents"

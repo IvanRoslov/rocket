@@ -474,6 +474,31 @@ export default function AgentScreen() {
               />
             </View>
 
+            {/* Milestones (task #1023, spec v2): what this agent has taken
+                on. They live outside every project and open as task cards. */}
+            <View style={{ marginTop: 16 }}>
+              <Text style={styles.milestonesTitle}>MILESTONES</Text>
+              {(a.milestones ?? []).length === 0 ? (
+                <Text style={styles.milestonesEmpty}>No milestones — nothing taken yet.</Text>
+              ) : (
+                <View style={{ gap: 8 }}>
+                  {(a.milestones ?? []).map((m) => (
+                    <Pressable
+                      key={m.id}
+                      style={styles.milestoneRow}
+                      onPress={() => router.navigate(`/task/${m.id}`)}
+                    >
+                      <MonoText style={{ fontSize: 11.5, color: colors.textFaint }}>#{m.id}</MonoText>
+                      <Text style={styles.milestoneTitle} numberOfLines={1}>
+                        {m.title}
+                      </Text>
+                      <Badge label={m.status.replace('_', ' ')} fg={colors.slateFg} bg={colors.slateBg} />
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </View>
+
             {awaiting.length > 0 && tab !== 'questions' ? (
               <Pressable style={styles.awaitBanner} onPress={() => setTab('questions')}>
                 <Badge label="? awaiting" fg={colors.amberDeep} bg={colors.amberBg} />
@@ -561,6 +586,26 @@ export default function AgentScreen() {
 }
 
 const styles = StyleSheet.create({
+  milestonesTitle: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    color: colors.textFaint,
+    marginBottom: 8,
+  },
+  milestonesEmpty: { fontSize: 12.5, color: colors.textFaint },
+  milestoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.card,
+  },
+  milestoneTitle: { flex: 1, fontSize: 13.5, fontWeight: '600', color: colors.text },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

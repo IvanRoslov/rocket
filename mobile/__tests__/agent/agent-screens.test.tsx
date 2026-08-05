@@ -189,6 +189,28 @@ describe('AgentsScreen', () => {
 describe('AgentScreen', () => {
   afterEach(() => jest.restoreAllMocks())
 
+  // The milestones an agent holds (task #1023, spec v2) — the one place a
+  // human sees what it has taken on.
+  it('lists the milestones the agent holds and opens one on tap', async () => {
+    mockApi({
+      '/v1/agents/sre': {
+        ...AGENT,
+        milestones: [{ id: 41, title: 'Own the incident review ritual', status: 'in_progress' }],
+      },
+    })
+    renderWithProviders(<AgentScreen />)
+
+    await waitFor(() => expect(screen.getByText('Own the incident review ritual')).toBeTruthy())
+    fireEvent.press(screen.getByText('Own the incident review ritual'))
+    expect(router.navigate).toHaveBeenCalledWith('/task/41')
+  })
+
+  it('says so when the agent holds no milestones', async () => {
+    mockApi()
+    renderWithProviders(<AgentScreen />)
+    await waitFor(() => expect(screen.getByText(/No milestones/)).toBeTruthy())
+  })
+
   it('opens on the questions tab and renders the thread', async () => {
     mockApi()
     renderWithProviders(<AgentScreen />)
