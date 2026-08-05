@@ -17,7 +17,9 @@ import (
 
 // taskRow represents a task as returned by the API for ls rendering.
 type taskRow struct {
-	ID          int64  `json:"id"`
+	ID int64 `json:"id"`
+	// ParentID is 0 for a root task — the one an orchestrator runs.
+	ParentID    int64  `json:"parent_id,omitempty"`
 	Title       string `json:"title"`
 	Status      string `json:"status"`
 	ProjectID   string `json:"project_id"`
@@ -34,12 +36,28 @@ type taskRow struct {
 }
 
 // waitingTerminalGlyph flags a task or session stalled waiting for a
-// keystroke; waitingTerminalMark is its spelled-out form, used where there is
-// room for one (the free-form task board line) rather than in a table cell.
+// keystroke; the two marks are its spelled-out forms, used where there is room
+// for one (the free-form task board line) rather than in a table cell.
+//
+// An orchestrator gets a blunter wording than a worker on purpose (task #1023
+// §«Input stall»): a worker may legitimately be answering a question, whereas
+// an orchestrator must never wait on a terminal prompt at all — for it the
+// state is a fault, not a mode.
 const (
 	waitingTerminalGlyph = "⏳"
 	waitingTerminalMark  = waitingTerminalGlyph + " ждёт ответа в терминале"
+	waitingTerminalOrch  = waitingTerminalGlyph + " ждёт ввода в терминале — вероятно, застрял"
 )
+
+// waitingMarkFor picks the wording for a task line: the root task of a feature
+// is the one an orchestrator runs, and only it gets the "probably stuck"
+// reading.
+func waitingMarkFor(t taskRow) string {
+	if t.ParentID == 0 {
+		return waitingTerminalOrch
+	}
+	return waitingTerminalMark
+}
 
 // taskDetailRow represents a full task detail as returned by GET /v1/tasks/{id}.
 type taskDetailRow struct {
@@ -1218,7 +1236,7 @@ func renderTaskBoard(board map[string][]taskRow, w io.Writer, statusFiltered boo
 				line += fmt.Sprintf(" [%s]", t.SessionID)
 			}
 			if t.WaitingTerminal {
-				line += " " + waitingTerminalMark
+				line += " " + waitingMarkFor(t)
 			}
 			fmt.Fprintf(w, "%s\n", line)
 		}

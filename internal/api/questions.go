@@ -70,9 +70,13 @@ type questionResponse struct {
 	WhoseTurn string   `json:"whose_turn,omitempty"`
 	// Type is decision|fyi; Options are the answer choices a client renders as
 	// buttons; LocalRef is the one user-facing thread id, e.g. "1023/Q2".
-	Type       string                    `json:"type"`
-	Options    []string                  `json:"options,omitempty"`
-	LocalRef   string                    `json:"local_ref"`
+	Type     string   `json:"type"`
+	Options  []string `json:"options,omitempty"`
+	LocalRef string   `json:"local_ref"`
+	// Stale flags an open decision thread nobody has moved for longer than
+	// question_stale_after (task #1023 §«Устаревание тредов»). Derived on
+	// every read, never stored; absent on healthy threads.
+	Stale      bool                      `json:"stale,omitempty"`
 	AskedAt    int64                     `json:"asked_at"`
 	ResolvedAt int64                     `json:"resolved_at,omitempty"`
 	Messages   []questionMessageResponse `json:"messages"`
@@ -132,6 +136,7 @@ func buildQuestionResponse(d Deps, caller *store.Session, q store.Question) (que
 		Type:         q.Type,
 		Options:      q.Options,
 		LocalRef:     threadLocalRef(threadSubject{TaskID: q.TaskID}, ordinal),
+		Stale:        threadStale(d, q, lastOf(msgs), attention),
 		AskedAt:      q.AskedAt,
 		ResolvedAt:   q.ResolvedAt,
 		Messages:     msgOut,

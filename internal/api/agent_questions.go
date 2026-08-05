@@ -28,13 +28,16 @@ type agentQuestionResponse struct {
 	Participants []string `json:"participants"`
 	// Attention is the stored "whose turn" set; WaitingOn is the same set
 	// under its original name (see questionResponse).
-	Attention  []string                  `json:"attention"`
-	WaitingOn  []string                  `json:"waiting_on"`
-	YourTurn   bool                      `json:"your_turn"`
-	WhoseTurn  string                    `json:"whose_turn,omitempty"` // user|role
-	Type       string                    `json:"type"`
-	Options    []string                  `json:"options,omitempty"`
-	LocalRef   string                    `json:"local_ref"`
+	Attention []string `json:"attention"`
+	WaitingOn []string `json:"waiting_on"`
+	YourTurn  bool     `json:"your_turn"`
+	WhoseTurn string   `json:"whose_turn,omitempty"` // user|role
+	Type      string   `json:"type"`
+	Options   []string `json:"options,omitempty"`
+	LocalRef  string   `json:"local_ref"`
+	// Stale mirrors questionResponse.Stale: an open decision thread nobody
+	// has moved for longer than question_stale_after.
+	Stale      bool                      `json:"stale,omitempty"`
 	AskedAt    int64                     `json:"asked_at"`
 	ResolvedAt int64                     `json:"resolved_at,omitempty"`
 	Messages   []questionMessageResponse `json:"messages"`
@@ -106,9 +109,13 @@ func buildAgentQuestionResponse(d Deps, caller *store.Session, q store.AgentQues
 		Type:         q.Type,
 		Options:      q.Options,
 		LocalRef:     threadLocalRef(threadSubject{RoleID: q.RoleID}, ordinal),
-		AskedAt:      q.AskedAt,
-		ResolvedAt:   q.ResolvedAt,
-		Messages:     msgOut,
+		Stale: threadStale(d, store.Question{
+			ID: q.ID, RoleID: q.RoleID, Status: q.Status,
+			Type: q.Type, AskedAt: q.AskedAt,
+		}, lastOf(msgs), attention),
+		AskedAt:    q.AskedAt,
+		ResolvedAt: q.ResolvedAt,
+		Messages:   msgOut,
 	}, nil
 }
 

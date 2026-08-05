@@ -5,8 +5,12 @@
 package api
 
 import (
+	"time"
+
 	"errors"
 	"fmt"
+	"github.com/IvanRoslov/rocket/internal/config"
+	"github.com/IvanRoslov/rocket/internal/heartbeat"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -401,4 +405,33 @@ func canReadThread(d Deps, caller *store.Session, subj threadSubject, participan
 		return true
 	}
 	return callerOwnsRootTask(d, caller, subj.TaskID)
+}
+
+// threadStale reports whether a thread has gone stale — open, of type
+// decision, waiting on somebody, and without movement for longer than
+// question_stale_after. The rule itself lives in internal/heartbeat (the
+// package that acts on it) and is read here so a client can badge a thread
+// without recomputing it; the heartbeat messages agents and sessions, but the
+// human is only ever badged, and this field is that badge.
+//
+// It is derived on every read, like waiting_terminal, and never stored.
+func threadStale(d Deps, q store.Question, lastMessage *store.QuestionMessage, attention []string) bool {
+	after := config.DefaultQuestionStaleAfter
+	if d.Cfg != nil && d.Cfg.QuestionStaleAfter > 0 {
+		after = d.Cfg.QuestionStaleAfter
+	}
+	_, stale := heartbeat.StaleThread(store.OpenThread{
+		Question:    q,
+		LastMessage: lastMessage,
+		Attention:   attention,
+	}, time.Now(), after)
+	return stale
+}
+
+// lastOf returns the last thread entry, or nil when nobody has replied yet.
+func lastOf(msgs []store.QuestionMessage) *store.QuestionMessage {
+	if len(msgs) == 0 {
+		return nil
+	}
+	return &msgs[len(msgs)-1]
 }
