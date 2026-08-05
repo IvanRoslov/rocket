@@ -132,7 +132,7 @@ export function TaskScreen() {
           </div>
 
           {bannerQuestion && (
-            <QuestionBanner question={bannerQuestion} onOpen={() => setTab('questions')} />
+            <QuestionBanner taskId={task.id} question={bannerQuestion} onOpen={() => setTab('questions')} />
           )}
 
           <div className="task-screen__tabs" role="tablist">

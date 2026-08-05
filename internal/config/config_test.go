@@ -67,6 +67,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.QuestionStaleAfter != DefaultQuestionStaleAfter {
 		t.Errorf("expected QuestionStaleAfter %v, got %v", DefaultQuestionStaleAfter, cfg.QuestionStaleAfter)
 	}
+	if cfg.MilestoneQuietAfter != DefaultMilestoneQuietAfter {
+		t.Errorf("expected MilestoneQuietAfter %v, got %v", DefaultMilestoneQuietAfter, cfg.MilestoneQuietAfter)
+	}
 }
 
 func TestLoadWithConfig(t *testing.T) {
@@ -88,6 +91,7 @@ github_api_base: https://ghe.example.com/api/v3
 merge_grace: 10m
 input_stall_threshold: 3m
 question_stale_after: 6h
+milestone_quiet_after: 12h
 `
 	configPath := filepath.Join(tempDir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
@@ -140,6 +144,9 @@ question_stale_after: 6h
 	}
 	if cfg.QuestionStaleAfter != 6*time.Hour {
 		t.Errorf("expected QuestionStaleAfter 6h, got %v", cfg.QuestionStaleAfter)
+	}
+	if cfg.MilestoneQuietAfter != 12*time.Hour {
+		t.Errorf("expected MilestoneQuietAfter 12h, got %v", cfg.MilestoneQuietAfter)
 	}
 }
 

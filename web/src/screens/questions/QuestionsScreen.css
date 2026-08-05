@@ -27,18 +27,101 @@
   color: var(--text-4);
 }
 
-.questions-screen__item {
+/* One inbox row: the collapsed header, the subject line under it, and the
+   full thread once expanded. */
+.questions-screen__row {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 11px 14px;
+  background: var(--surface);
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
 }
 
-.questions-screen__task {
+.questions-screen__row-main {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.questions-screen__ref {
+  font: 600 12px var(--font-mono);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.questions-screen__turn {
+  font: 600 11.5px var(--font-ui);
+  padding: 2px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  color: var(--text-3);
+  background: var(--surface-2);
+}
+.questions-screen__turn--warn {
+  color: var(--warn-text-2);
+  background: var(--warn-bg);
+}
+
+/* Outlined, so it warns about the thread without claiming a turn. */
+.questions-screen__stale {
+  font: 600 11.5px var(--font-ui);
+  padding: 1px 7px;
+  border-radius: 6px;
+  white-space: nowrap;
+  color: var(--warn-text);
+  background: var(--warn-bg-2);
+  border: 1px solid var(--warn-border);
+}
+
+/* A status note, not a question: neutral by design — it must never read as
+   something waiting for you. */
+.questions-screen__fyi {
+  font: 600 11.5px var(--font-ui);
+  padding: 2px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  color: var(--text-3);
+  background: var(--surface-2);
+}
+
+.questions-screen__body {
+  font: 500 13.5px/1.4 var(--font-ui);
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.questions-screen__age,
+.questions-screen__chevron {
+  font: 12px var(--font-ui);
+  color: var(--text-4);
+  white-space: nowrap;
+}
+
+.questions-screen__subject {
   font: 600 12.5px var(--font-ui);
   color: var(--text-3);
 }
-.questions-screen__task:hover {
+.questions-screen__subject a:hover {
   color: var(--text);
+}
+
+.questions-screen__detail-loading {
+  font: 13px var(--font-ui);
+  color: var(--text-4);
+  padding: 8px 0;
 }
 
 .questions-screen__head {

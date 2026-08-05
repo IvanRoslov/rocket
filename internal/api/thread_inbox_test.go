@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/IvanRoslov/rocket/internal/store"
 )
@@ -178,6 +179,49 @@ func TestGetThreads_WaitingOnFiltersByAttention(t *testing.T) {
 	both := getThreads(t, srv, "?all=true&waiting_on=human", "")
 	if want := []string{itoa(taskID) + "/Q1"}; !reflect.DeepEqual(refsOf(both), want) {
 		t.Fatalf("all+waiting_on refs = %v, want %v", refsOf(both), want)
+	}
+}
+
+// TestGetThreads_StaleFlag: the inbox is the one screen that shows every
+// thread at once, so "hanging for over a day" has to be readable there rather
+// than only after opening each thread. The threshold is configurable
+// (question_stale_after), so a client cannot recompute it — the daemon says it.
+func TestGetThreads_StaleFlag(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv, taskID := setupInbox(t, d)
+	seedAgedThread(t, d, taskID, 30*time.Hour)
+	seedAgedThread(t, d, taskID, time.Hour)
+
+	got := getThreads(t, srv, "", "")
+	byRef := map[string]threadInboxEntry{}
+	for _, e := range got {
+		byRef[e.LocalRef] = e
+	}
+	// setupInbox creates Q1 (open) and Q2 (fyi); the aged threads are Q3, Q4.
+	if !byRef[itoa(taskID)+"/Q3"].Stale {
+		t.Error("a thread idle for 30h with cto on the hook must be stale in the inbox")
+	}
+	if byRef[itoa(taskID)+"/Q4"].Stale {
+		t.Error("a thread that moved an hour ago must not be stale")
+	}
+}
+
+// TestGetThreads_TaskContext: the dashboard links an inbox row to the task
+// page (/p/<project>/tasks/<id>) and labels it with the task title. Subject is
+// a human-readable sentence, so those two travel as their own fields rather
+// than being parsed back out of it. A role thread hangs off no project and
+// carries neither.
+func TestGetThreads_TaskContext(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv, _ := setupInbox(t, d)
+
+	got := getThreads(t, srv, "", "")
+	task, role := got[0], got[1]
+	if task.ProjectID != "proj1" || task.TaskTitle != "Root" {
+		t.Errorf("task entry project/title = %q/%q, want proj1/Root", task.ProjectID, task.TaskTitle)
+	}
+	if role.ProjectID != "" || role.TaskTitle != "" {
+		t.Errorf("role entry project/title = %q/%q, want both empty", role.ProjectID, role.TaskTitle)
 	}
 }
 

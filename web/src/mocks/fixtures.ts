@@ -478,6 +478,8 @@ export const questions: Question[] = [
     body: 'Should the v2 flag default on for internal test accounts?',
     status: 'resolved',
     resolution: 'answered',
+    local_ref: '12/Q1',
+    type: 'decision',
     participants: ['human', 's-billing-v2-orch'],
     waiting_on: [],
     your_turn: false,
@@ -508,6 +510,8 @@ export const questions: Question[] = [
     body: 'Which currency rounding mode for invoice totals — half-up or banker’s?',
     status: 'resolved',
     resolution: 'answered',
+    local_ref: '12/Q2',
+    type: 'decision',
     participants: ['human', 's-billing-v2-orch'],
     waiting_on: [],
     your_turn: false,
@@ -540,6 +544,13 @@ export const questions: Question[] = [
       'Current plan only prorates upgrades. Downgrades take effect at the ' +
       'next billing cycle. Finance wants to know if v2 should change that.',
     status: 'open',
+    // The new-model showcase (task #1023): a local ref, answer options that
+    // close the thread in one click, and a thread that has gone stale.
+    local_ref: '12/Q3',
+    type: 'decision',
+    options: ['Yes, prorate downgrades', 'No, keep next-cycle'],
+    stale: true,
+    attention: ['human'],
     // The multi-participant showcase: the human, the orchestrator and the
     // "cto" persistent agent. The human speaks under BOTH wire spellings —
     // "" is what internal/api's wireAuthor() sends today and "human" is what
@@ -580,6 +591,28 @@ export const questions: Question[] = [
         created_at: NOW - 15 * MIN,
       },
     ],
+  },
+  // The fyi showcase (task #1023 spec v1 §«Тип треда»): a status note, born
+  // resolved, waiting on nobody. It belongs in the history and must never
+  // light a badge or land in an open count.
+  {
+    id: 6,
+    task_id: 12,
+    ordinal: 4,
+    local_ref: '12/Q4',
+    asked_by: 's-billing-v2-orch',
+    body: 'Deployed the refunds migration to staging.',
+    status: 'resolved',
+    resolution: 'fyi',
+    type: 'fyi',
+    participants: ['human', 's-billing-v2-orch'],
+    waiting_on: [],
+    attention: [],
+    your_turn: false,
+    whose_turn: '',
+    asked_at: NOW - 3 * HOUR,
+    resolved_at: NOW - 3 * HOUR,
+    messages: [],
   },
   // User-opened threads (asked_by "") on task #13, opposite direction from
   // Q1-Q3 above — the human asked the orchestrator, not the other way
@@ -918,6 +951,8 @@ export const agentQuestions: AgentQuestion[] = [
     id: 91,
     role_id: 'sre',
     ordinal: 1,
+    local_ref: 'sre/Q1',
+    type: 'decision',
     asked_by: 'sre',
     body: 'Should I close acme/platform#42 now?',
     context: 'The task is in review and the team has not confirmed yet.',
@@ -933,6 +968,8 @@ export const agentQuestions: AgentQuestion[] = [
     id: 90,
     role_id: 'sre',
     ordinal: 2,
+    local_ref: 'sre/Q2',
+    type: 'decision',
     asked_by: '',
     body: 'What is blocking acme/platform#43?',
     status: 'resolved',

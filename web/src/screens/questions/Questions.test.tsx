@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { setupServer } from 'msw/node'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -29,19 +29,26 @@ function renderQuestions() {
   )
 }
 
-// Fixture questions (web/src/mocks/fixtures.ts): Q3 (task #12, billing) and
-// Q5 (task #13, billing) are both open with your_turn true — they land under
-// "Awaiting you". Q4 (task #13) is open but waits on the orchestrator — it
-// lands under "Awaiting others".
+// The screen reads GET /v1/threads — the unified inbox — so it covers task
+// AND role threads. From the fixtures: task threads 12/Q3 (stale, your turn,
+// two options) and 13/Q2 (your turn) plus 13/Q1 (waiting on the orchestrator),
+// role thread sre/Q1 (your turn), and the resolved 12/Q4 fyi note.
 
-test('groups open questions and links each to its task', async () => {
+test('lists task and role threads in one list, each under its local ref', async () => {
+  renderQuestions()
+
+  expect(await screen.findByText('12/Q3')).toBeInTheDocument()
+  expect(screen.getByText('sre/Q1')).toBeInTheDocument()
+  expect(screen.getByText('13/Q1')).toBeInTheDocument()
+})
+
+test('groups by whose turn it is and links a task thread to its task', async () => {
   renderQuestions()
 
   expect(await screen.findByText('Awaiting you')).toBeInTheDocument()
   expect(screen.getByText('Awaiting others')).toBeInTheDocument()
 
-  // Fixture questions carry task_id -> the context row links to the task page.
-  const link = screen.getAllByRole('link', { name: /#\d+/ })[0]
+  const link = screen.getAllByRole('link')[0]
   expect(link).toHaveAttribute('href', expect.stringMatching(/\/p\/.+\/tasks\/\d+/))
 })
 
@@ -50,23 +57,21 @@ test('groups open questions and links each to its task', async () => {
 test('the "waiting on me" filter is off by default and hides nothing', async () => {
   renderQuestions()
 
-  expect(await screen.findByText('Awaiting you')).toBeInTheDocument()
+  await screen.findByText('Awaiting you')
   expect(screen.getByRole('checkbox', { name: /waiting on me/i })).not.toBeChecked()
   expect(screen.getByText('Awaiting others')).toBeInTheDocument()
 })
 
-test('checking it narrows the list to the threads that are your turn', async () => {
+test('checking it narrows the list to the threads waiting on you', async () => {
   renderQuestions()
   await screen.findByText('Awaiting you')
 
   await userEvent.click(screen.getByRole('checkbox', { name: /waiting on me/i }))
 
   expect(screen.queryByText('Awaiting others')).not.toBeInTheDocument()
-  expect(screen.getByText('Awaiting you')).toBeInTheDocument()
-  // Q4 (task #13) waits on the orchestrator, so its text is gone.
-  expect(
-    screen.queryByText('Should we backfill existing rows or only handle new ones going forward?'),
-  ).not.toBeInTheDocument()
+  // 13/Q1 waits on the orchestrator; sre/Q1 waits on you and stays.
+  expect(screen.queryByText('13/Q1')).not.toBeInTheDocument()
+  expect(screen.getByText('sre/Q1')).toBeInTheDocument()
 })
 
 test('unchecking it brings the hidden threads back', async () => {
@@ -78,4 +83,38 @@ test('unchecking it brings the hidden threads back', async () => {
   await userEvent.click(filter)
 
   expect(screen.getByText('Awaiting others')).toBeInTheDocument()
+})
+
+test('badges a stale thread', async () => {
+  renderQuestions()
+
+  const row = (await screen.findByText('12/Q3')).closest('.questions-screen__row') as HTMLElement
+  expect(within(row).getByText('stale')).toBeInTheDocument()
+})
+
+// An fyi thread is a status note: it is born resolved and waits on nobody, so
+// it belongs in the history and must never carry a turn badge or an open count
+// (spec v1 §«Тип треда»).
+test('keeps fyi threads out of the open list and badges them only as fyi', async () => {
+  renderQuestions()
+  await screen.findByText('12/Q3')
+
+  expect(screen.queryByText('12/Q4')).not.toBeInTheDocument()
+
+  await userEvent.click(screen.getByRole('checkbox', { name: /show resolved/i }))
+
+  const row = (await screen.findByText('12/Q4')).closest('.questions-screen__row') as HTMLElement
+  expect(within(row).getByText('fyi')).toBeInTheDocument()
+  expect(within(row).queryByText(/awaiting/i)).not.toBeInTheDocument()
+})
+
+// The inbox row carries the question only. Opening it fetches the real thread
+// — the conversation, the context and the reply box.
+test('expanding a row opens the full thread', async () => {
+  renderQuestions()
+
+  await userEvent.click(await screen.findByRole('button', { name: /12\/Q3/ }))
+
+  expect(await screen.findByLabelText('Discussion')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: /Answer & close/ })).toBeInTheDocument()
 })

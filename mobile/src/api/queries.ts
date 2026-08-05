@@ -319,8 +319,17 @@ export function useQuestionAnswer() {
   const baseUrl = useBaseUrl()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (p: { id: number; body: string; to?: string[] }) =>
-      api.post(baseUrl, `/v1/questions/${p.id}/answer`, { body: p.body, ...addresseePayload(p.to ?? []) }),
+    mutationFn: (p: { id: number; body?: string; to?: string[]; choose?: number }) =>
+      api.post(
+        baseUrl,
+        `/v1/questions/${p.id}/answer`,
+        // `choose` is a 1-based index into `options`; the daemon substitutes
+        // the option's own text as the resolution. Picking one closes the
+        // thread, so nobody is left to answer and `to` would be meaningless.
+        p.choose
+          ? { choose: p.choose }
+          : { body: p.body, ...addresseePayload(p.to ?? []) },
+      ),
     onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'task'] }),
   })
 }
@@ -573,8 +582,15 @@ export function useAgentQuestionAnswer() {
   const baseUrl = useBaseUrl()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (p: { id: number; body: string; to?: string[] }) =>
-      api.post(baseUrl, `/v1/agent-questions/${p.id}/answer`, { body: p.body, ...addresseePayload(p.to ?? []) }),
+    mutationFn: (p: { id: number; body?: string; to?: string[]; choose?: number }) =>
+      api.post(
+        baseUrl,
+        `/v1/agent-questions/${p.id}/answer`,
+        // See useQuestionAnswer: choose closes the thread with option #choose.
+        p.choose
+          ? { choose: p.choose }
+          : { body: p.body, ...addresseePayload(p.to ?? []) },
+      ),
     onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] }),
   })
 }

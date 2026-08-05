@@ -27,6 +27,12 @@ export interface ThreadEntry {
 
 export interface QuestionThreadViewProps {
   ordinal: number
+  /**
+   * The one thread id a human sees — "1023/Q2" for a task thread, "cto/Q1"
+   * for a role thread. Absent on a daemon older than task #1023, where the
+   * bare `Q<ordinal>` is all there is.
+   */
+  localRef?: string
   body: string
   context?: string
   messages: ThreadEntry[]
@@ -44,16 +50,31 @@ export interface QuestionThreadViewProps {
   agentName?: string
   /** Avatar letter for agent-authored entries: 'O' orchestrator, 'A' role. */
   agentInitial?: string
+  /**
+   * Answer choices. Each renders as a button that CLOSES the thread with that
+   * option as the resolution — the cheapest possible answer, which is what
+   * threads hang for want of (spec v1 §«Варианты ответа»).
+   */
+  options?: string[]
+  /**
+   * An open thread nobody has moved for longer than `question_stale_after`.
+   * The daemon decides this: the threshold is configurable, so the client
+   * cannot honestly derive it from `asked_at`.
+   */
+  stale?: boolean
   placeholder?: string
   busy?: boolean
   /** `to` is who must RESPOND next; empty means "everyone but you". */
   onClarify: (body: string, to: string[]) => void
   onAnswer: (body: string, to: string[]) => void
   onDismiss: () => void
+  /** Close the thread by picking option `choose` — a **1-based** index. */
+  onChoose?: (choose: number) => void
 }
 
 export function QuestionThreadView({
   ordinal,
+  localRef,
   body: question,
   context,
   messages,
@@ -63,16 +84,20 @@ export function QuestionThreadView({
   participants,
   agentName,
   agentInitial = 'O',
+  options,
+  stale,
   placeholder = 'Write a reply, ask for a rephrase, or give your final answer…',
   busy,
   onClarify,
   onAnswer,
   onDismiss,
+  onChoose,
 }: QuestionThreadViewProps) {
   const [ctxOpen, setCtxOpen] = useState(true)
   const [body, setBody] = useState('')
   const [to, setTo] = useState<string[]>([])
   const paste = usePasteImage(setBody)
+  const ref = localRef ?? `Q${ordinal}`
 
   // You are never your own addressee, so the human is not a candidate.
   const addressees = (participants ?? []).filter((p) => !isHuman(p))
@@ -91,7 +116,12 @@ export function QuestionThreadView({
   return (
     <div className="question-thread">
       <div className="question-thread__header">
-        <span className="question-thread__tag">Q{ordinal}</span>
+        <span className="question-thread__tag">{ref}</span>
+        {stale && (
+          <span className="question-thread__stale" title="Nobody has moved this thread in over a day">
+            stale
+          </span>
+        )}
         {turnLabel && (
           <span
             className={
@@ -180,9 +210,28 @@ export function QuestionThreadView({
           })}
         </div>
 
+        {options && options.length > 0 && onChoose && (
+          <div className="question-thread__options" aria-label="Answer options">
+            {options.map((label, i) => (
+              <button
+                key={label}
+                type="button"
+                className="question-thread__option"
+                onClick={() => onChoose(i + 1)}
+                disabled={busy}
+              >
+                {label}
+              </button>
+            ))}
+            <span className="question-thread__options-hint">
+              Picking an option closes the thread with that answer.
+            </span>
+          </div>
+        )}
+
         <div className="question-thread__form">
           <textarea
-            aria-label={`Reply to Q${ordinal}`}
+            aria-label={`Reply to ${ref}`}
             placeholder={placeholder}
             rows={4}
             value={body}

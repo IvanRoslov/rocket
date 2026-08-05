@@ -197,7 +197,7 @@ export interface Question {
   body: string
   context?: string
   status: QuestionStatus
-  resolution?: 'answered' | 'dismissed'
+  resolution?: 'answered' | 'dismissed' | 'fyi'
   /** Everyone taking part in the thread; ids are "human", an agent or a session. */
   participants: string[]
   /** The subset expected to speak next. */
@@ -206,6 +206,20 @@ export interface Question {
   your_turn: boolean
   /** Pre-participant compat field; retired by subtask #736. Do not read it. */
   whose_turn?: 'user' | 'orchestrator' | ''
+  /** The one thread id a human sees — "1023/Q2" / "cto/Q1". See threadRefLabel(). */
+  local_ref?: string
+  /** `decision` (the default) or `fyi` — a status note, born closed. */
+  type?: 'decision' | 'fyi'
+  /** Answer choices; `choose` is a **1-based** index into this array. */
+  options?: string[]
+  /**
+   * Open decision thread nobody has moved for longer than
+   * `question_stale_after`. Daemon-derived: the threshold is configurable, so
+   * never recompute it from `asked_at` here.
+   */
+  stale?: boolean
+  /** The stored "whose turn" set; `waiting_on` is the same thing, older name. */
+  attention?: string[]
   asked_at: number
   resolved_at?: number
   messages: QuestionMessage[]
@@ -257,7 +271,7 @@ export interface AgentQuestion {
   body: string
   context?: string
   status: QuestionStatus
-  resolution?: 'answered' | 'dismissed'
+  resolution?: 'answered' | 'dismissed' | 'fyi'
   /** Everyone taking part in the thread; ids are "human", an agent or a session. */
   participants: string[]
   /** The subset expected to speak next. */
@@ -266,6 +280,20 @@ export interface AgentQuestion {
   your_turn: boolean
   /** Pre-participant compat field; retired by subtask #736. Do not read it. */
   whose_turn?: 'user' | 'role' | ''
+  /** The one thread id a human sees — "1023/Q2" / "cto/Q1". See threadRefLabel(). */
+  local_ref?: string
+  /** `decision` (the default) or `fyi` — a status note, born closed. */
+  type?: 'decision' | 'fyi'
+  /** Answer choices; `choose` is a **1-based** index into this array. */
+  options?: string[]
+  /**
+   * Open decision thread nobody has moved for longer than
+   * `question_stale_after`. Daemon-derived: the threshold is configurable, so
+   * never recompute it from `asked_at` here.
+   */
+  stale?: boolean
+  /** The stored "whose turn" set; `waiting_on` is the same thing, older name. */
+  attention?: string[]
   asked_at: number
   resolved_at?: number
   messages: QuestionMessage[]

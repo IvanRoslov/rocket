@@ -13,6 +13,7 @@ import {
   useAgentInbox,
   useAgentQuestions,
   useAgents,
+  useAnswerAgentQuestion,
   useAnswerQuestion,
   useReplyAgentQuestion,
   useReplyQuestion,
@@ -212,6 +213,39 @@ describe('addressees on reply and answer', () => {
     result.current.mutate({ id: 3, dismiss: true, taskId: 12, to: ['cto'] })
     await waitFor(() => expect(bodies).toHaveLength(2))
     expect(bodies[1]).toEqual({ dismiss: true })
+  })
+
+  it('useAnswerQuestion closes a thread with a 1-based `choose` and nothing else', async () => {
+    const bodies: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/questions/:id/answer', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 3 })
+      }),
+    )
+    const { result } = renderHook(() => useAnswerQuestion(), { wrapper })
+
+    // Picking option #2 closes the thread; the daemon substitutes the option's
+    // own text (internal/api/threads.go chooseOptionBody), so no body travels,
+    // and nobody is left to respond, so no `to` either.
+    result.current.mutate({ id: 3, choose: 2, taskId: 12 })
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ choose: 2 })
+  })
+
+  it('useAnswerAgentQuestion closes a role thread with the same `choose`', async () => {
+    const bodies: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/agent-questions/:id/answer', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 90 })
+      }),
+    )
+    const { result } = renderHook(() => useAnswerAgentQuestion(), { wrapper })
+
+    result.current.mutate({ id: 90, choose: 1, roleId: 'sre' })
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ choose: 1 })
   })
 
   it('useReplyAgentQuestion carries the same optional `to`', async () => {

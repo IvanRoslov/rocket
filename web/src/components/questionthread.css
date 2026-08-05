@@ -38,6 +38,18 @@
   background: var(--surface-2);
 }
 
+/* A thread nobody has moved in over a day. Outlined rather than filled, so it
+   reads as a warning about the thread without competing with the turn chip
+   that says whose move it is. */
+.question-thread__stale {
+  font: 600 12px var(--font-ui);
+  padding: 2px 8px;
+  border-radius: 6px;
+  color: var(--warn-text);
+  background: var(--warn-bg-2);
+  border: 1px solid var(--warn-border);
+}
+
 .question-thread__spacer {
   flex: 1;
 }
@@ -183,6 +195,38 @@
   font: 14.5px/1.65 var(--font-ui);
   color: var(--text-2-alt);
   padding-left: 33px;
+}
+
+/* Answer options: one click closes the thread, so they sit above the composer
+   and are styled as the primary path — typing is the fallback, not the other
+   way round. */
+.question-thread__options {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+.question-thread__option {
+  height: 36px;
+  padding: 0 15px;
+  background: var(--accent-selected-bg);
+  border: 1px solid var(--accent-selected-border);
+  border-radius: 9px;
+  font: 600 13px var(--font-ui);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+.question-thread__option:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.question-thread__option:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.question-thread__options-hint {
+  font: 12px var(--font-ui);
+  color: var(--text-3);
 }
 
 .question-thread__form {

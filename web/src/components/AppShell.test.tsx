@@ -99,17 +99,22 @@ test('на главной ни Kanban, ни Agents не активны', () => {
   expect(screen.getByRole('link', { name: 'Agents' })).not.toHaveAttribute('aria-current')
 })
 
-// The nav counter is driven by `your_turn`, the caller-relative field, not by
-// the legacy two-party `whose_turn` string. They agree on the real API, so the
-// handler below deliberately makes them disagree to pin down which one wins.
+// The nav counter reads the unified inbox (GET /v1/threads), so a ROLE thread
+// waiting on the human counts too — it used to read GET /v1/questions, which
+// knows only task threads, and role threads never lit this badge.
+//
+// It is driven by `your_turn`, the caller-relative field, not by the legacy
+// two-party `whose_turn` string. They agree on the real API, so the handler
+// below deliberately makes them disagree to pin down which one wins.
 test('the Questions tab counts the threads whose turn is yours', async () => {
   server.use(
-    http.get('/v1/questions', () =>
+    http.get('/v1/threads', () =>
       HttpResponse.json({
-        questions: [
-          { id: 1, task_id: 12, ordinal: 1, your_turn: true, whose_turn: 'orchestrator', messages: [] },
-          { id: 2, task_id: 12, ordinal: 2, your_turn: true, whose_turn: '', messages: [] },
-          { id: 3, task_id: 12, ordinal: 3, your_turn: false, whose_turn: 'user', messages: [] },
+        threads: [
+          { id: 1, kind: 'task', task_id: 12, local_ref: '12/Q1', ordinal: 1, your_turn: true, whose_turn: 'orchestrator', attention: ['human'], messages: [] },
+          { id: 2, kind: 'task', task_id: 12, local_ref: '12/Q2', ordinal: 2, your_turn: true, whose_turn: '', attention: ['human'], messages: [] },
+          { id: 3, kind: 'task', task_id: 12, local_ref: '12/Q3', ordinal: 3, your_turn: false, whose_turn: 'user', attention: ['cto'], messages: [] },
+          { id: 4, kind: 'role', role_id: 'sre', local_ref: 'sre/Q1', ordinal: 1, your_turn: true, whose_turn: 'user', attention: ['human'], messages: [] },
         ],
       }),
     ),
@@ -117,5 +122,6 @@ test('the Questions tab counts the threads whose turn is yours', async () => {
   renderShell()
 
   const questions = await screen.findByRole('link', { name: /Questions/ })
-  await waitFor(() => expect(questions).toHaveTextContent('2'))
+  // Two task threads plus the role thread — three, not two.
+  await waitFor(() => expect(questions).toHaveTextContent('3'))
 })
