@@ -21,6 +21,9 @@ export interface QuestionsTabProps {
 }
 
 function resolutionLabel(question: Question): string {
+  // An fyi thread is born closed and nobody ever answered it — calling it
+  // "resolved" would claim somebody did (spec v1 §«Тип треда»).
+  if (question.type === 'fyi' || question.resolution === 'fyi') return 'fyi'
   if (question.resolution === 'dismissed') return 'dismissed'
   return 'resolved'
 }
@@ -125,7 +128,9 @@ function ResolvedThreadRow({ question, orchestratorName }: ResolvedThreadRowProp
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="questions-tab__resolved-tag">Q{question.ordinal}</span>
+        <span className="questions-tab__resolved-tag">
+          {question.local_ref ?? `Q${question.ordinal}`}
+        </span>
         <span className="questions-tab__resolved-badge">{resolutionLabel(question)}</span>
         <span className="questions-tab__resolved-text">{question.body}</span>
         <span className="questions-tab__resolved-when">

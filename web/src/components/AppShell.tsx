@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react'
 import { Link, NavLink, Outlet, useParams, useLocation } from 'react-router-dom'
 import { useLastProjectId } from '../lib/lastProject'
-import { useOpenQuestions } from '../lib/queries'
+import { useThreads } from '../lib/queries'
 import { ProjectSwitcher } from './ProjectSwitcher'
 
 const navLinkStyle = ({ isActive }: { isActive: boolean }): CSSProperties => ({
@@ -16,7 +16,7 @@ export function AppShell() {
   const { projectId } = useParams()
   const location = useLocation()
   const navProjectId = useLastProjectId(projectId)
-  const { data: questions } = useOpenQuestions()
+  const { data: threads } = useThreads()
   // Project-scoped tabs use plain <Link>: NavLink's own prefix matching would
   // light up Kanban on /p/:id/agents too, so we derive both the highlight and
   // aria-current from the pathname ourselves.
@@ -27,9 +27,11 @@ export function AppShell() {
   const agentsActive =
     location.pathname.startsWith('/agents') || (inProject && location.pathname.includes('/agents'))
   const kanbanActive = inProject && !location.pathname.includes('/agents')
-  // `your_turn` is caller-relative; `whose_turn` cannot distinguish "waiting
-  // on you" from "waiting on another participant".
-  const awaitingCount = (questions ?? []).filter((q) => q.your_turn).length
+  // Counted over the unified inbox, not GET /v1/questions: the latter knows
+  // only task threads, so a role thread waiting on the human never reached
+  // this badge. `your_turn` is the caller-relative field; `whose_turn` cannot
+  // distinguish "waiting on you" from "waiting on another participant".
+  const awaitingCount = (threads ?? []).filter((t) => t.your_turn).length
 
   return (
     <div style={{ minHeight: '100vh' }}>
