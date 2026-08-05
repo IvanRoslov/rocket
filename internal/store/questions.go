@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -37,9 +38,26 @@ type Question struct {
 	// mirrors QuestionMessage.AddressedTo, so the turn is derived the same
 	// way whether or not anyone has replied yet.
 	AddressedTo []string
-	AskedAt     int64
-	ResolvedAt  int64 // 0 = not resolved
+	// Type is QuestionTypeDecision (a thread that waits for a decision and
+	// lights badges) or QuestionTypeFYI (a status note: created already
+	// resolved, waiting on nobody). Empty on input means decision.
+	Type string
+	// Options are the answer choices a client may render as buttons. Stored
+	// as a JSON array of strings; nil means the thread has none.
+	Options    []string
+	AskedAt    int64
+	ResolvedAt int64 // 0 = not resolved
 }
+
+// Thread types. A decision thread waits for somebody's turn; an fyi thread is
+// a status note that is born resolved (resolution QuestionResolutionFYI) and
+// never lights a badge — a reply into it reopens it as a decision thread.
+const (
+	QuestionTypeDecision = "decision"
+	QuestionTypeFYI      = "fyi"
+
+	QuestionResolutionFYI = "fyi"
+)
 
 // QuestionMessage represents a single entry in a question's thread: either a
 // reply (thread stays open) or the resolving answer (thread becomes resolved).
@@ -57,7 +75,39 @@ type QuestionMessage struct {
 
 // questionColumns is the column list every Question scan relies on; it must
 // stay in sync with scanQuestion.
-const questionColumns = `id, task_id, role_id, asked_by, body, context, status, resolution, addressed_to, asked_at, resolved_at`
+const questionColumns = `id, task_id, role_id, asked_by, body, context, status, resolution, addressed_to, type, options, asked_at, resolved_at`
+
+// encodeOptions renders answer choices as the JSON stored in
+// questions.options. An empty list stores as "" rather than "[]", so a thread
+// without options is spelled one way only.
+func encodeOptions(opts []string) string {
+	if len(opts) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(opts)
+	if err != nil {
+		// []string always marshals; this cannot happen.
+		return ""
+	}
+	return string(b)
+}
+
+// decodeOptions parses questions.options back into a list. "" decodes to nil,
+// and so does anything unparseable: a corrupt value must not fail every read
+// of an otherwise healthy thread.
+func decodeOptions(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
 
 // encodeAddressedTo renders a recipient list as the CSV stored in
 // question_messages.addressed_to. An empty list stores as "".
@@ -92,12 +142,16 @@ func (s *Store) AddQuestion(q Question) (int64, error) {
 	if q.Status == "" {
 		q.Status = "open"
 	}
+	if q.Type == "" {
+		q.Type = QuestionTypeDecision
+	}
 
 	res, err := s.db.Exec(
-		`INSERT INTO questions (task_id, role_id, asked_by, body, context, status, resolution, addressed_to, asked_at, resolved_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO questions (task_id, role_id, asked_by, body, context, status, resolution, addressed_to, type, options, asked_at, resolved_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nullIfZero(q.TaskID), nullIfEmpty(q.RoleID), q.AskedBy, q.Body, nullIfEmpty(q.Context),
 		q.Status, nullIfEmpty(q.Resolution), encodeAddressedTo(q.AddressedTo),
+		q.Type, encodeOptions(q.Options),
 		q.AskedAt, nullIfZero(q.ResolvedAt),
 	)
 	if err != nil {
@@ -271,11 +325,12 @@ func (s *Store) ListAllOpenQuestions() ([]Question, error) {
 func scanQuestion(row interface{ Scan(...any) error }) (Question, error) {
 	var q Question
 	var roleID, context, resolution, addressedTo sql.NullString
+	var qType, options sql.NullString
 	var taskID, resolvedAt sql.NullInt64
 
 	err := row.Scan(
 		&q.ID, &taskID, &roleID, &q.AskedBy, &q.Body, &context, &q.Status, &resolution,
-		&addressedTo, &q.AskedAt, &resolvedAt,
+		&addressedTo, &qType, &options, &q.AskedAt, &resolvedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Question{}, ErrNotFound
@@ -289,6 +344,11 @@ func scanQuestion(row interface{ Scan(...any) error }) (Question, error) {
 	q.Context = context.String
 	q.Resolution = resolution.String
 	q.AddressedTo = decodeAddressedTo(addressedTo.String)
+	q.Type = qType.String
+	if q.Type == "" {
+		q.Type = QuestionTypeDecision
+	}
+	q.Options = decodeOptions(options.String)
 	q.ResolvedAt = resolvedAt.Int64
 
 	return q, nil
