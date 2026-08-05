@@ -56,6 +56,7 @@ export function QuestionThread({ taskId, question, orchestratorName }: QuestionT
   return (
     <QuestionThreadView
       ordinal={question.ordinal}
+      localRef={question.local_ref}
       body={question.body}
       context={question.context}
       messages={question.messages}
@@ -65,11 +66,14 @@ export function QuestionThread({ taskId, question, orchestratorName }: QuestionT
       participants={question.participants}
       agentName={orchestratorName}
       agentInitial="O"
+      options={question.options}
+      stale={question.stale}
       placeholder="Write a reply, ask the orchestrator to rephrase, or give your final answer…"
       busy={reply.isPending || answer.isPending}
       onClarify={(body, to) => reply.mutate({ id: question.id, body, to, taskId })}
       onAnswer={(body, to) => answer.mutate({ id: question.id, body, to, taskId })}
       onDismiss={() => answer.mutate({ id: question.id, dismiss: true, taskId })}
+      onChoose={(choose) => answer.mutate({ id: question.id, choose, taskId })}
     />
   )
 }
