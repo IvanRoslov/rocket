@@ -778,3 +778,89 @@ func TestTick_OrchestratorBlocked_Skipped(t *testing.T) {
 		t.Fatalf("expected no messages (orchestrator blocked), got %d", len(msgs))
 	}
 }
+
+// TestTick_OrchestratorPromptStall_NudgesAndLogsProblem: a prompt stall is
+// answerable by the orchestrator itself once it is told to stop asking through
+// the terminal — so it gets the nudge, and the task log gets the problem.
+func TestTick_OrchestratorPromptStall_NudgesAndLogsProblem(t *testing.T) {
+	st := openTestStore(t)
+	addCTOAgent(t, st)
+	taskID := seedOrchAndTask(t, st, "orch1", "in_progress")
+	setOrchInputState(t, st, "orch1", "waiting_input", time.Now().Add(-20*time.Minute).Unix(), "")
+
+	hb := New(st, bus.New(st), testConfig(), unknownActivity, func(string) {})
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	if !containsBody(queuedBodies(t, st, "orch1"), "interactive prompt nobody watches") {
+		t.Errorf("queued = %q, want a nudge", queuedBodies(t, st, "orch1"))
+	}
+	if !containsBody(queuedBodies(t, st, "orch1"), "rocket task ask") {
+		t.Errorf("the nudge must name the way out: rocket task ask")
+	}
+
+	entries, err := st.ListTaskLog(taskID, "problem")
+	if err != nil {
+		t.Fatalf("ListTaskLog: %v", err)
+	}
+	if len(entries) != 1 || !strings.Contains(entries[0].Body, "orch1") {
+		t.Fatalf("problem log = %+v, want exactly one entry naming orch1", entries)
+	}
+
+	// The same stall episode must not be re-logged on the next sweep.
+	hb.nowFunc = func() time.Time { return time.Now().Add(time.Hour) }
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("second Tick: %v", err)
+	}
+	entries, err = st.ListTaskLog(taskID, "problem")
+	if err != nil {
+		t.Fatalf("ListTaskLog: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("problem log = %d entries, want 1: one entry per stall episode", len(entries))
+	}
+}
+
+// TestTick_OrchestratorQuizStall_DoesNotNudge: a pending quiz pauses message
+// delivery, so a nudge would sit in the queue unread — the escalation to cto
+// is the only thing that can reach anybody.
+func TestTick_OrchestratorQuizStall_DoesNotNudge(t *testing.T) {
+	st := openTestStore(t)
+	addCTOAgent(t, st)
+	seedOrchAndTask(t, st, "orch1", "in_progress")
+	askedAt := time.Now().Add(-20 * time.Minute).Unix()
+	setOrchInputState(t, st, "orch1", "active", time.Now().Unix(),
+		`{"questions":[{"question":"Ship or hold?"}],"asked_at":`+strconv.FormatInt(askedAt, 10)+`}`)
+
+	hb := New(st, bus.New(st), testConfig(), unknownActivity, func(string) {})
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if containsBody(queuedBodies(t, st, "orch1"), "interactive prompt nobody watches") {
+		t.Error("a pending quiz pauses delivery: the nudge must not be queued")
+	}
+}
+
+// queuedBodies returns the bodies of messages addressed to sessionID.
+func queuedBodies(t *testing.T, st *store.Store, sessionID string) []string {
+	t.Helper()
+	msgs, err := st.ListMessages(sessionID, 0)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	var out []string
+	for _, m := range msgs {
+		out = append(out, m.Body)
+	}
+	return out
+}
+
+func containsBody(bodies []string, want string) bool {
+	for _, b := range bodies {
+		if strings.Contains(b, want) {
+			return true
+		}
+	}
+	return false
+}

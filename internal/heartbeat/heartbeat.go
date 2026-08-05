@@ -44,6 +44,12 @@ type Heartbeat struct {
 
 	mu       sync.Mutex
 	lastSent map[string]time.Time
+	// lastStallRef remembers, per orchestrator, the reference timestamp of the
+	// input stall already acted on. The nudge and the problem-log entry fire
+	// once per stall EPISODE (not once per interval like the cto escalation):
+	// while the same prompt is still open the reference does not move, and
+	// nothing is repeated.
+	lastStallRef map[string]int64
 }
 
 // New builds a Heartbeat. getActivity is typically Monitor.Activity; wake is
@@ -53,13 +59,14 @@ type Heartbeat struct {
 // package from the concrete *queue.Queue type.
 func New(st *store.Store, b *bus.Bus, cfg *config.Config, getActivity func(sessionID string) (activity.State, bool), wake func(to string)) *Heartbeat {
 	return &Heartbeat{
-		st:          st,
-		bus:         b,
-		cfg:         cfg,
-		getActivity: getActivity,
-		wake:        wake,
-		nowFunc:     time.Now,
-		lastSent:    make(map[string]time.Time),
+		st:           st,
+		bus:          b,
+		cfg:          cfg,
+		getActivity:  getActivity,
+		wake:         wake,
+		nowFunc:      time.Now,
+		lastSent:     make(map[string]time.Time),
+		lastStallRef: make(map[string]int64),
 	}
 }
 
@@ -207,26 +214,31 @@ func (h *Heartbeat) tickOne(orch store.Session) error {
 // reference point the session is reported as not stalled rather than stalled
 // since the epoch.
 func InputStalled(sess store.Session, now time.Time, threshold time.Duration) (since time.Duration, ok bool) {
-	var ref int64
-	switch {
-	case sess.PendingQuiz != "":
-		var quiz session.Quiz
-		if err := json.Unmarshal([]byte(sess.PendingQuiz), &quiz); err == nil && quiz.AskedAt > 0 {
-			ref = quiz.AskedAt
-		} else {
-			ref = sess.ActivityTS
-		}
-	case activity.State(sess.Activity) == activity.WaitingInput:
-		ref = sess.ActivityTS
-	default:
-		return 0, false
-	}
-
+	ref := inputStallRef(sess)
 	if ref <= 0 {
 		return 0, false
 	}
 	since = now.Sub(time.Unix(ref, 0))
 	return since, since > threshold
+}
+
+// inputStallRef returns the timestamp an input stall is measured from, or 0
+// when the session is not waiting on input at all. It doubles as the identity
+// of the stall episode: it stays put for as long as the same prompt or quiz is
+// open, and moves when a new one starts.
+func inputStallRef(sess store.Session) int64 {
+	switch {
+	case sess.PendingQuiz != "":
+		var quiz session.Quiz
+		if err := json.Unmarshal([]byte(sess.PendingQuiz), &quiz); err == nil && quiz.AskedAt > 0 {
+			return quiz.AskedAt
+		}
+		return sess.ActivityTS
+	case activity.State(sess.Activity) == activity.WaitingInput:
+		return sess.ActivityTS
+	default:
+		return 0
+	}
 }
 
 // escalateInputStall writes an escalation to the cto agent's inbox and
@@ -270,6 +282,8 @@ func (h *Heartbeat) escalateInputStall(orch store.Session, task store.Task) {
 	h.lastSent[escalationKeyPrefix+orch.ID] = now
 	h.mu.Unlock()
 
+	h.nudgeInputStall(orch, task, since, kind)
+
 	if h.bus != nil {
 		h.bus.Publish("orchestrator.input_stalled", orch.ID, map[string]any{
 			"task_id":       task.ID,
@@ -278,6 +292,74 @@ func (h *Heartbeat) escalateInputStall(orch store.Session, task store.Task) {
 			"kind":          kind,
 		})
 	}
+}
+
+// nudgeInputStall is the half of the response addressed to the stalled
+// orchestrator itself: a message telling it to stop asking through a terminal
+// nobody watches, plus a `problem` entry in its task log so the episode is
+// visible afterwards in `rocket task show`.
+//
+// Both fire once per stall episode (not once per heartbeat interval): the log
+// is a record of "this happened", and a fresh copy every five minutes would
+// bury the task's other entries.
+//
+// Nothing is sent while a quiz is pending. An open AskUserQuestion quiz pauses
+// delivery to the session entirely (docs/06-messaging.md), so a nudge would
+// only queue up behind the very thing it is meant to break — for that case the
+// escalation to cto above is the whole answer.
+func (h *Heartbeat) nudgeInputStall(orch store.Session, task store.Task, since time.Duration, kind string) {
+	if kind != "prompt" {
+		return
+	}
+
+	ref := inputStallRef(orch)
+	h.mu.Lock()
+	already := h.lastStallRef[orch.ID] == ref && ref != 0
+	if !already {
+		h.lastStallRef[orch.ID] = ref
+	}
+	h.mu.Unlock()
+	if already {
+		return
+	}
+
+	body := nudgeBody(task)
+	if id, err := h.st.AddMessage(store.Message{ToSession: orch.ID, Body: body}); err != nil {
+		slog.Warn("heartbeat: queue input-stall nudge", "orchestrator", orch.ID, "error", err)
+	} else {
+		if h.bus != nil {
+			h.bus.Publish("message.queued", orch.ID, map[string]any{"id": id, "from": "", "to": orch.ID})
+		}
+		if h.wake != nil {
+			h.wake(orch.ID)
+		}
+	}
+
+	if _, err := h.st.AddTaskLog(store.TaskLogEntry{
+		TaskID: task.ID,
+		Kind:   "problem",
+		Body: fmt.Sprintf(
+			"Оркестратор %s висит на интерактивном промпте %dm — ждёт нажатия клавиши, которого никто не видит. "+
+				"Ожидание в терминале невыразимо в системе: спрашивать надо тредом (rocket task ask), а не промптом.",
+			orch.ID, int(since.Minutes())),
+		Author: orch.ID,
+	}); err != nil {
+		slog.Warn("heartbeat: log input stall as a problem",
+			"orchestrator", orch.ID, "task", task.ID, "error", err)
+	}
+}
+
+// nudgeBody is the message injected into a prompt-stalled orchestrator. It
+// names the exact way out rather than describing the situation: the recipient
+// is an agent that will act on the first actionable line it reads.
+func nudgeBody(task store.Task) string {
+	return fmt.Sprintf(
+		"[rocket] You are stalled on an interactive prompt nobody watches. "+
+			"Never ask through the terminal — ask through the task instead: "+
+			"rocket task ask %d \"<question>\" (add --to <who> to name whose turn it is, "+
+			"--option \"A\" --option \"B\" to offer choices). "+
+			"Answer the prompt you are sitting on now, then re-ask that way.",
+		task.ID)
 }
 
 // escalationBody assembles the inbox message: what is stuck, for how long,
