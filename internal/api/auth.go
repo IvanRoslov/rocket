@@ -58,6 +58,12 @@ func canWriteTask(caller *store.Session, task store.Task, st *store.Store) bool 
 	if caller == nil {
 		return true
 	}
+	// A milestone is one agent's piece of work: only its holder writes to it.
+	// Any persistent agent may still TAKE an unassigned one — that path has its
+	// own check (handlePostTaskTake) and does not go through here.
+	if task.Milestone {
+		return caller.Kind == "agent" && caller.ID == task.AssignedRole
+	}
 	if caller.Kind == "agent" {
 		return true
 	}

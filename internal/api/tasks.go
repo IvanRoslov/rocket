@@ -46,6 +46,10 @@ type taskResponse struct {
 	CreatedAt   int64  `json:"created_at"`
 	UpdatedAt   int64  `json:"updated_at"`
 	CompletedAt int64  `json:"completed_at,omitempty"`
+	// Milestone marks a root task outside every project, taken by a persistent
+	// agent; AssignedRole names that agent (empty until somebody takes it).
+	Milestone    bool   `json:"milestone,omitempty"`
+	AssignedRole string `json:"assigned_role,omitempty"`
 	// Open-question annotations (docs/superpowers/specs/2026-07-21-questions-
 	// visibility-design.md §1): populated by list/board/detail handlers from
 	// one taskQuestionCounts(d) aggregate, not per-task queries.
@@ -61,19 +65,21 @@ type taskResponse struct {
 
 func toTaskResponse(t store.Task) taskResponse {
 	return taskResponse{
-		ID:          t.ID,
-		ParentID:    t.ParentID,
-		Title:       t.Title,
-		Description: t.Description,
-		ProjectID:   t.ProjectID,
-		RepoID:      t.RepoID,
-		Status:      t.Status,
-		FeatureSlug: t.FeatureSlug,
-		SessionID:   t.SessionID,
-		CreatedBy:   t.CreatedBy,
-		CreatedAt:   t.CreatedAt,
-		UpdatedAt:   t.UpdatedAt,
-		CompletedAt: t.CompletedAt,
+		ID:           t.ID,
+		ParentID:     t.ParentID,
+		Title:        t.Title,
+		Description:  t.Description,
+		ProjectID:    t.ProjectID,
+		RepoID:       t.RepoID,
+		Status:       t.Status,
+		FeatureSlug:  t.FeatureSlug,
+		SessionID:    t.SessionID,
+		CreatedBy:    t.CreatedBy,
+		CreatedAt:    t.CreatedAt,
+		UpdatedAt:    t.UpdatedAt,
+		CompletedAt:  t.CompletedAt,
+		Milestone:    t.Milestone,
+		AssignedRole: t.AssignedRole,
 	}
 }
 
@@ -185,6 +191,12 @@ func registerTaskRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("POST /v1/tasks/{id}/start", func(w http.ResponseWriter, r *http.Request) {
 		handlePostTaskStart(w, r, d)
 	})
+	mux.HandleFunc("POST /v1/tasks/{id}/take", func(w http.ResponseWriter, r *http.Request) {
+		handlePostTaskTake(w, r, d)
+	})
+	mux.HandleFunc("POST /v1/tasks/{id}/assign", func(w http.ResponseWriter, r *http.Request) {
+		handlePostTaskAssign(w, r, d)
+	})
 	mux.HandleFunc("GET /v1/tasks/{id}/docs", func(w http.ResponseWriter, r *http.Request) {
 		handleGetTaskDocs(w, r, d)
 	})
@@ -235,8 +247,9 @@ func handleListTasks(w http.ResponseWriter, r *http.Request, d Deps) {
 	q := r.URL.Query()
 
 	filter := store.TaskFilter{
-		Project: q.Get("project"),
-		Status:  q.Get("status"),
+		Project:    q.Get("project"),
+		Status:     q.Get("status"),
+		Milestones: q.Get("milestones") == "true",
 	}
 
 	switch p := q.Get("parent"); p {
@@ -292,6 +305,9 @@ type postTaskRequest struct {
 	Description string `json:"description"`
 	Project     string `json:"project"`
 	ParentID    int64  `json:"parent_id"`
+	// Milestone creates a milestone: a root task outside every project, taken
+	// by a persistent agent instead of started as a feature.
+	Milestone bool `json:"milestone"`
 }
 
 func handlePostTask(w http.ResponseWriter, r *http.Request, d Deps) {
@@ -304,6 +320,18 @@ func handlePostTask(w http.ResponseWriter, r *http.Request, d Deps) {
 	if req.Title == "" {
 		writeErr(w, http.StatusBadRequest, "empty_title", "title is required")
 		return
+	}
+
+	if req.Milestone {
+		if req.Project != "" {
+			writeErr(w, http.StatusBadRequest, "milestone_with_project",
+				"a milestone belongs to no project: --milestone and --project are mutually exclusive")
+			return
+		}
+		if req.ParentID != 0 {
+			writeErr(w, http.StatusBadRequest, "milestone_with_parent", "a milestone cannot be a subtask")
+			return
+		}
 	}
 
 	caller, err := callerSession(r, d.Store)
@@ -334,13 +362,15 @@ func handlePostTask(w http.ResponseWriter, r *http.Request, d Deps) {
 		}
 	}
 
-	if _, err := d.Store.GetProject(req.Project); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeErr(w, http.StatusBadRequest, "project_not_found", "project not found: "+req.Project)
+	if !req.Milestone {
+		if _, err := d.Store.GetProject(req.Project); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeErr(w, http.StatusBadRequest, "project_not_found", "project not found: "+req.Project)
+				return
+			}
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
-		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
 	}
 
 	createdBy := "user"
@@ -372,6 +402,7 @@ func handlePostTask(w http.ResponseWriter, r *http.Request, d Deps) {
 		Description: req.Description,
 		ProjectID:   req.Project,
 		CreatedBy:   createdBy,
+		Milestone:   req.Milestone,
 	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -609,6 +640,12 @@ func handlePatchTask(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
+	if task.Milestone && req.Status != nil {
+		if !milestoneStatusAllowed(w, d, task, caller, *req.Status) {
+			return
+		}
+	}
+
 	if req.Status != nil && *req.Status == "review" && task.ParentID == 0 {
 		force := false
 		if v := r.URL.Query().Get("force"); v != "" {
@@ -730,6 +767,10 @@ func handlePostTaskCancel(w http.ResponseWriter, r *http.Request, d Deps) {
 		writeErr(w, http.StatusForbidden, "forbidden", "caller may not cancel this task")
 		return
 	}
+	if task.Milestone && caller != nil {
+		writeErr(w, http.StatusForbidden, "human_only", "only the human may cancel a milestone")
+		return
+	}
 
 	killIDs := []int64{task.ID}
 	if task.ParentID == 0 {
@@ -826,6 +867,11 @@ func handlePostTaskStart(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
+	if task.Milestone {
+		writeErr(w, http.StatusForbidden, "milestone_not_startable",
+			"milestones are taken by persistent agents: rocket task take "+strconv.FormatInt(task.ID, 10))
+		return
+	}
 	if task.ParentID != 0 {
 		writeErr(w, http.StatusBadRequest, "not_root_task", "only root tasks can be started")
 		return
