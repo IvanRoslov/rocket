@@ -64,6 +64,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.InputStallThreshold != 10*time.Minute {
 		t.Errorf("expected InputStallThreshold 10m, got %v", cfg.InputStallThreshold)
 	}
+	if cfg.QuestionStaleAfter != DefaultQuestionStaleAfter {
+		t.Errorf("expected QuestionStaleAfter %v, got %v", DefaultQuestionStaleAfter, cfg.QuestionStaleAfter)
+	}
 }
 
 func TestLoadWithConfig(t *testing.T) {
@@ -84,6 +87,7 @@ queue_timeout: 1h
 github_api_base: https://ghe.example.com/api/v3
 merge_grace: 10m
 input_stall_threshold: 3m
+question_stale_after: 6h
 `
 	configPath := filepath.Join(tempDir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
@@ -133,6 +137,9 @@ input_stall_threshold: 3m
 	}
 	if cfg.InputStallThreshold != 3*time.Minute {
 		t.Errorf("expected InputStallThreshold 3m, got %v", cfg.InputStallThreshold)
+	}
+	if cfg.QuestionStaleAfter != 6*time.Hour {
+		t.Errorf("expected QuestionStaleAfter 6h, got %v", cfg.QuestionStaleAfter)
 	}
 }
 

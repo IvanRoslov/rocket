@@ -93,6 +93,7 @@ func renderSessions(sessions []sessionRow, w io.Writer, now time.Time) {
 		if activity == "" {
 			activity = "-"
 		}
+		activity = withWaitingGlyph(activity, s.WaitingTerminal)
 		pr := "-"
 		if s.PRNumber > 0 {
 			pr = fmt.Sprintf("#%d", s.PRNumber)

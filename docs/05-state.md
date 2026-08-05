@@ -60,6 +60,7 @@ mirror_sync_interval: 5m  # как часто демон синхронизир�
 attachments_dir: ~/.rocket/attachments  # куда сохранять вложения (POST /v1/attachments)
 agent_notify_interval: 5m # не чаще этого агенту повторно сообщают о непрочитанных
 input_stall_threshold: 10m # сколько сессия может ждать интерактивного ввода до эскалации агенту cto
+question_stale_after: 24h # сколько открытый decision-тред может висеть без движения до напоминания участникам attention
 ```
 
 ## Схема SQLite
