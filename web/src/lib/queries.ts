@@ -484,18 +484,22 @@ export function useAnswerQuestion(): UseMutationResult<
   Question,
   Error,
   { id: number; taskId: number; to?: string[] } & (
-    | { body: string; dismiss?: never }
-    | { dismiss: true; body?: never }
+    | { body: string; dismiss?: never; choose?: never }
+    | { dismiss: true; body?: never; choose?: never }
+    | { choose: number; body?: never; dismiss?: never }
   )
 > {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, body, dismiss, to }) =>
+    mutationFn: ({ id, body, dismiss, choose, to }) =>
       api.post<Question>(
         `/v1/questions/${id}/answer`,
-        // A dismiss resolves the thread outright, so nobody is left to
-        // respond and an addressee list would be meaningless.
-        dismiss ? { dismiss: true } : withTo({ body }, to),
+        // Both a dismiss and a picked option resolve the thread outright, so
+        // nobody is left to respond and an addressee list would be
+        // meaningless. `choose` is a 1-based index into `options`; the daemon
+        // substitutes the option's own text (chooseOptionBody in
+        // internal/api/threads.go), so no body travels with it.
+        dismiss ? { dismiss: true } : choose ? { choose } : withTo({ body }, to),
       ),
     onSuccess: (_data, { taskId }) => {
       queryClient.invalidateQueries({ queryKey: ['task', taskId, 'questions'] })
@@ -840,16 +844,19 @@ export function useAnswerAgentQuestion(): UseMutationResult<
   AgentQuestion,
   Error,
   { id: number; roleId: string; to?: string[] } & (
-    | { body: string; dismiss?: never }
-    | { dismiss: true; body?: never }
+    | { body: string; dismiss?: never; choose?: never }
+    | { dismiss: true; body?: never; choose?: never }
+    | { choose: number; body?: never; dismiss?: never }
   )
 > {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, body, dismiss, to }) =>
+    mutationFn: ({ id, body, dismiss, choose, to }) =>
       api.post<AgentQuestion>(
         `/v1/agent-questions/${id}/answer`,
-        dismiss ? { dismiss: true } : withTo({ body }, to),
+        // See useAnswerQuestion: dismiss and choose both close the thread, so
+        // neither carries addressees, and choose is a 1-based option index.
+        dismiss ? { dismiss: true } : choose ? { choose } : withTo({ body }, to),
       ),
     onSuccess: (_data, { roleId }) => {
       queryClient.invalidateQueries({ queryKey: ['agent', roleId, 'questions'] })
