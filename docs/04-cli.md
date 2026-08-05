@@ -2,6 +2,11 @@
 
 Один бинарник `rocket`. Все команды — клиенты API демона; при недоступном сокете демон автозапускается (кроме `daemon *`). Глобальные флаги: `--json` (машинный вывод), `--socket <path>`.
 
+Результат команды печатается в stdout (его можно пайпить в `grep`/`jq`), диагностика — в stderr.
+Везде, где команда принимает текст позиционным аргументом, есть и `--file <path>`
+(значение `-` — читать stdin): шелл иначе выполняет бэктики в markdown и раскрывает
+`$слова`. Указать оба источника сразу — ошибка использования (код 3).
+
 Внутри rocket-сессий выставлены env: `ROCKET_SESSION_ID`, `ROCKET_KIND`, `ROCKET_PARENT_ID`, `ROCKET_PROJECT_ID`, `ROCKET_REPO_ID`, `ROCKET_FEATURE`. CLI использует их для автоопределения вызывающего.
 
 ## Для пользователя
@@ -10,15 +15,16 @@
 rocket task add "<title>" [--project <id>] [--desc <md>|--desc-file <f>]
 rocket task ls [--status <s>] [--project <id>]   # канбан в терминале
 rocket task show <id>       # карточка: подзадачи, доки, журнал, attach-команда
+                            # --json отдаёт то же целиком: поля задачи + docs, log, questions
 rocket task start <id> [--agent <name>]          # назначить оркестратора
 rocket task move <id> <status>
 rocket task doc put <id> --kind spec|plan|report --title "..." --file <f.md>
-rocket task log <id> --kind decision|problem|note "<текст>"
-rocket task ask-orch <id> "<вопрос>" [--context <md>] [--to a,b]
+rocket task log <id> --kind decision|problem|note "<текст>" | --file <f>
+rocket task ask-orch <id> "<вопрос>" | --file <f> [--context <md>] [--to a,b]
                                                  # открыть тред оркестратору
 rocket task questions [<id>] [--open]            # вопросы, треды и участники
-rocket task reply <вопрос> "<уточнение>" [--to a,b]      # реплика, вопрос открыт
-rocket task answer <вопрос> "<ответ>" [--to a,b]         # финальный ответ, закрывает
+rocket task reply <вопрос> "<уточнение>" | --file <f> [--to a,b]   # реплика, вопрос открыт
+rocket task answer <вопрос> "<ответ>" | --file <f> [--to a,b]      # финальный ответ, закрывает
 rocket task answer <вопрос> --dismiss            # закрыть как неактуальный
     <вопрос> — это либо глобальный id (372, как раньше), либо локальный
     номер треда, который печатает `rocket task questions`: 799/Q1 или
@@ -70,7 +76,7 @@ rocket attach <session|task-id>
     трактуется как id задачи и резолвится в её сессию.
 
 rocket send <session> "<текст>" | --file <path>
-    Положить сообщение в очередь. Возвращается сразу; --wait — дождаться доставки.
+    Положить сообщение в очередь. `--file -` читает текст из stdin. Возвращается сразу; --wait — дождаться доставки.
 
 rocket kill <session> [--cleanup]
     Убить сессию. У оркестратора --cascade убивает и его воркеров.
@@ -119,13 +125,13 @@ rocket agent start <id>           # tmux-сессия <id>: cwd=dir, коман�
 rocket agent attach <id>          # подключиться к сессии агента
 rocket agent stop <id>            # убить сессию; регистрация остаётся
 
-rocket agent ask <id> "<вопрос>" [--context <md>] [--to a,b]
+rocket agent ask <id> "<вопрос>" | --file <f> [--context <md>] [--to a,b]
     Открыть тред-вопрос агенту. Изнутри сессии агента тот же вызов
     открывает тред человеку.
 rocket agent questions [<id>] [--open]
     Треды агента и их участники (без аргумента — агент текущей сессии).
-rocket agent reply <вопрос> "<текст>" [--to a,b]   # реплика; любой участник треда
-rocket agent answer <вопрос> "<ответ>" | --dismiss
+rocket agent reply <вопрос> "<текст>" | --file <f> [--to a,b]   # реплика; любой участник треда
+rocket agent answer <вопрос> "<ответ>" | --file <f> | --dismiss
     <вопрос> — глобальный id (372) либо локальный номер треда агента:
     sre/Q1, а изнутри сессии агента — просто Q1.
     Закрыть тред; человек и постоянный агент (оркестратору и воркеру — 403,
@@ -160,7 +166,7 @@ rocket spawn --task <name> --repo <id> --prompt "<бриф>" [--agent <name>]
 rocket task ... (см. выше)
     Оркестратор ведёт доки/журнал своей задачи, воркер — своей подзадачи.
 
-rocket task ask <id> "<вопрос>" [--context <md>] [--to a,b]
+rocket task ask <id> "<вопрос>" | --file <f> [--context <md>] [--to a,b]
     Открыть тред по задаче. Доступно человеку, постоянному агенту и
     оркестратору самой задачи. Вопрос — тред с участниками: записи приходят
     как "[task #N QM reply from <кто>] ..." (отвечать rocket task reply в тот

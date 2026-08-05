@@ -2,6 +2,9 @@ package cli
 
 import (
 	"errors"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -185,6 +188,60 @@ func TestAgentThreadCommandsHaveToFlag(t *testing.T) {
 	for name, cmd := range cmds {
 		if cmd.Flags().Lookup("to") == nil {
 			t.Errorf("agent %s: expected --to flag", name)
+		}
+	}
+}
+
+// TestAgentWritingCommandsFileFlag mirrors the task-side test: --file is an
+// alternative to the positional text on every role-thread writing command,
+// and supplying both (or neither) is a usage error, exit code 3.
+func TestAgentWritingCommandsFileFlag(t *testing.T) {
+	body := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(body, []byte("markdown `body`"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		new  func() *cobra.Command
+		args []string
+	}{
+		{"ask both", newAgentAskCmd, []string{"sre", "text", "--file", body}},
+		{"ask neither", newAgentAskCmd, []string{"sre"}},
+		{"reply both", newAgentReplyCmd, []string{"sre/Q1", "text", "--file", body}},
+		{"reply neither", newAgentReplyCmd, []string{"sre/Q1"}},
+		{"answer both", newAgentAnswerCmd, []string{"sre/Q1", "text", "--file", body}},
+		{"answer file plus dismiss", newAgentAnswerCmd, []string{"sre/Q1", "--dismiss", "--file", body}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := tc.new()
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs(tc.args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatal("expected a usage error, got nil")
+			}
+			if code := exitCode(err); code != 3 {
+				t.Fatalf("exitCode = %d, want 3 (err=%v)", code, err)
+			}
+		})
+	}
+}
+
+// TestAgentWritingCommandsRegisterFileFlag proves the flag exists on each.
+func TestAgentWritingCommandsRegisterFileFlag(t *testing.T) {
+	for name, newCmd := range map[string]func() *cobra.Command{
+		"ask":    newAgentAskCmd,
+		"reply":  newAgentReplyCmd,
+		"answer": newAgentAnswerCmd,
+	} {
+		if f := newCmd().Flags().Lookup("file"); f == nil {
+			t.Errorf("rocket agent %s: --file flag is not registered", name)
 		}
 	}
 }

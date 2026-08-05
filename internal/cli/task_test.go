@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1357,4 +1359,130 @@ func TestTaskThreadCommandsHaveToFlag(t *testing.T) {
 			t.Errorf("task %s: expected --to flag", name)
 		}
 	}
+}
+
+// TestTaskWritingCommandsFileFlag pins that every text-writing task command
+// accepts --file as an alternative to the positional text, and that
+// supplying both sources (or neither) is a usage error — exit code 3, not a
+// silent preference that could drop the user's markdown on a typo.
+//
+// Each case resolves its body before connect(), which is disabled under go
+// test, so only the usage-error paths run to completion here; the happy
+// path is covered at the textBody level in io_test.go.
+func TestTaskWritingCommandsFileFlag(t *testing.T) {
+	body := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(body, []byte("markdown `body`"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		new  func() *cobra.Command
+		args []string
+	}{
+		{"log both", newTaskLogCmd, []string{"1", "text", "--kind", "note", "--file", body}},
+		{"log neither", newTaskLogCmd, []string{"1", "--kind", "note"}},
+		{"ask both", newTaskAskCmd, []string{"1", "text", "--file", body}},
+		{"ask neither", newTaskAskCmd, []string{"1"}},
+		{"ask-orch both", newTaskAskOrchCmd, []string{"1", "text", "--file", body}},
+		{"ask-orch neither", newTaskAskOrchCmd, []string{"1"}},
+		{"reply both", newTaskReplyCmd, []string{"7", "text", "--file", body}},
+		{"reply neither", newTaskReplyCmd, []string{"7"}},
+		{"answer both", newTaskAnswerCmd, []string{"7", "text", "--file", body}},
+		{"answer file plus dismiss", newTaskAnswerCmd, []string{"7", "--dismiss", "--file", body}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := tc.new()
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs(tc.args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatal("expected a usage error, got nil")
+			}
+			if code := exitCode(err); code != 3 {
+				t.Fatalf("exitCode = %d, want 3 (err=%v)", code, err)
+			}
+		})
+	}
+}
+
+// TestTaskWritingCommandsRegisterFileFlag proves the flag exists on each of
+// them, independent of the daemon.
+func TestTaskWritingCommandsRegisterFileFlag(t *testing.T) {
+	for name, newCmd := range map[string]func() *cobra.Command{
+		"log":      newTaskLogCmd,
+		"ask":      newTaskAskCmd,
+		"ask-orch": newTaskAskOrchCmd,
+		"reply":    newTaskReplyCmd,
+		"answer":   newTaskAnswerCmd,
+	} {
+		if f := newCmd().Flags().Lookup("file"); f == nil {
+			t.Errorf("rocket task %s: --file flag is not registered", name)
+		}
+	}
+}
+
+// TestTaskShowJSONCarriesEverythingTheCardShows pins that --json is not
+// poorer than the human card: whatever renderTaskCard draws (subtasks,
+// docs, journal, question threads) must have a home in the JSON shape.
+// Before this, --json short-circuited before fetching three of those four
+// and emitted the bare task row.
+//
+// The task's own fields must stay at the TOP level — web and mobile already
+// read id/title/subtasks from there, so --json may only gain keys.
+func TestTaskShowJSONCarriesEverythingTheCardShows(t *testing.T) {
+	v := taskShowJSON{
+		taskDetailRow: taskDetailRow{ID: 5, Title: "t", Subtasks: []taskRow{{ID: 6}}},
+		Docs:          []taskDocRow{{ID: 1, Kind: "spec"}},
+		Log:           []taskLogRow{{ID: 2, Kind: "decision"}},
+		Questions:     []questionRow{{ID: 3, Ordinal: 1}},
+	}
+
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	for _, key := range []string{"id", "title", "subtasks", "docs", "log", "questions"} {
+		if _, ok := got[key]; !ok {
+			t.Errorf("task show --json is missing key %q; got keys %v", key, keysOf(got))
+		}
+	}
+}
+
+// TestTaskShowJSONEmptyCollectionsAreArrays keeps the shape stable for
+// machine consumers: an empty journal is [], never null, so `jq '.log[]'`
+// works on a fresh task exactly as it does on a busy one.
+func TestTaskShowJSONEmptyCollectionsAreArrays(t *testing.T) {
+	raw, err := json.Marshal(taskShowJSON{
+		taskDetailRow: taskDetailRow{ID: 5},
+		Docs:          []taskDocRow{},
+		Log:           []taskLogRow{},
+		Questions:     []questionRow{},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"docs":[]`, `"log":[]`, `"questions":[]`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("json = %s, want it to contain %s", raw, want)
+		}
+	}
+}
+
+func keysOf(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
