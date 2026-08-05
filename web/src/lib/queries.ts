@@ -33,6 +33,7 @@ import type {
   TaskDoc,
   TaskLogEntry,
   TaskStatus,
+  ThreadInboxEntry,
 } from './types'
 
 export interface SessionFilter {
@@ -223,6 +224,30 @@ export function useOpenQuestions(): UseQueryResult<GlobalQuestion[]> {
     queryFn: async () => {
       const res = await api.get<{ questions: GlobalQuestion[] }>('/v1/questions')
       return res.questions
+    },
+  })
+}
+
+/**
+ * `GET /v1/threads` (internal/api/thread_inbox.go): the unified inbox — every
+ * thread the caller may read, task and role alike, in one listing. This is the
+ * answer to "what is open and on whom", the question that previously required
+ * walking every task and every role (task #1023 spec v1 §«Единый инбокс»).
+ *
+ * A row carries the question only, never the conversation: expanding one
+ * fetches the real thread from its per-subject endpoint.
+ *
+ * `all` includes resolved threads — history, fyi notes included.
+ */
+export function useThreads(opts?: { all?: boolean }): UseQueryResult<ThreadInboxEntry[]> {
+  const all = opts?.all ?? false
+  return useQuery({
+    queryKey: ['threads', { all }],
+    queryFn: async () => {
+      const res = await api.get<{ threads: ThreadInboxEntry[] }>(
+        all ? '/v1/threads?all=true' : '/v1/threads',
+      )
+      return res.threads
     },
   })
 }
@@ -472,6 +497,7 @@ export function useReplyQuestion(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: ['task', taskId, 'questions'] })
       queryClient.invalidateQueries({ queryKey: ['task', taskId] })
       queryClient.invalidateQueries({ queryKey: ['questions'] })
+      queryClient.invalidateQueries({ queryKey: ['threads'] })
     },
   })
 }
@@ -505,6 +531,7 @@ export function useAnswerQuestion(): UseMutationResult<
       queryClient.invalidateQueries({ queryKey: ['task', taskId, 'questions'] })
       queryClient.invalidateQueries({ queryKey: ['task', taskId] })
       queryClient.invalidateQueries({ queryKey: ['questions'] })
+      queryClient.invalidateQueries({ queryKey: ['threads'] })
     },
   })
 }
@@ -817,6 +844,7 @@ export function useAskAgent(
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agent', roleId, 'questions'] })
       queryClient.invalidateQueries({ queryKey: ['agent', roleId] })
+      queryClient.invalidateQueries({ queryKey: ['threads'] })
     },
   })
 }
@@ -834,6 +862,7 @@ export function useReplyAgentQuestion(): UseMutationResult<
     onSuccess: (_data, { roleId }) => {
       queryClient.invalidateQueries({ queryKey: ['agent', roleId, 'questions'] })
       queryClient.invalidateQueries({ queryKey: ['agent', roleId] })
+      queryClient.invalidateQueries({ queryKey: ['threads'] })
     },
   })
 }
@@ -861,6 +890,7 @@ export function useAnswerAgentQuestion(): UseMutationResult<
     onSuccess: (_data, { roleId }) => {
       queryClient.invalidateQueries({ queryKey: ['agent', roleId, 'questions'] })
       queryClient.invalidateQueries({ queryKey: ['agent', roleId] })
+      queryClient.invalidateQueries({ queryKey: ['threads'] })
     },
   })
 }
@@ -892,6 +922,7 @@ export function wireInvalidation(queryClient: QueryClient) {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
       queryClient.invalidateQueries({ queryKey: ['task'] })
       queryClient.invalidateQueries({ queryKey: ['questions'] })
+      queryClient.invalidateQueries({ queryKey: ['threads'] })
     } else if (event.type === 'orchestrator.heartbeat_sent') {
       // High-frequency event; keep invalidation minimal — only the task
       // detail view (which shows session/heartbeat state) needs to refresh.
