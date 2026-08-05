@@ -673,7 +673,26 @@ export const handlers = [
     if (question.status !== 'open') {
       return HttpResponse.json({ error: { code: 'question_resolved', message: 'question is already resolved' } }, { status: 409 })
     }
-    const body = (await request.json()) as { body?: string; dismiss?: boolean; to?: string[] }
+    const body = (await request.json()) as {
+      body?: string
+      dismiss?: boolean
+      to?: string[]
+      choose?: number
+    }
+    // `choose` is a 1-based index into `options`; the daemon substitutes the
+    // option's own text as the answer (internal/api/threads.go
+    // chooseOptionBody), so the mock does the same rather than echoing a body.
+    if (body.choose) {
+      const picked = (question.options ?? [])[body.choose - 1]
+      if (picked === undefined) {
+        return HttpResponse.json(
+          { error: { code: 'bad_request', message: `choose must be between 1 and ${(question.options ?? []).length}` } },
+          { status: 400 },
+        )
+      }
+      body.body = picked
+      delete body.to
+    }
     if (body.dismiss) {
       // Dismissing resolves the question without adding a thread message.
       question.status = 'resolved'

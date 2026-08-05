@@ -47,7 +47,38 @@ describe('TaskScreen', () => {
     expect(await screen.findByText('Billing v2')).toBeInTheDocument()
 
     expect(screen.getByText('? awaiting you')).toBeInTheDocument()
-    expect(screen.getByText('Q3')).toBeInTheDocument()
+    // The local ref is the thread id a human sees — never the bare ordinal
+    // and never the global numeric id (task #1023 spec v1 §«Тред и его id»).
+    expect(screen.getAllByText('12/Q3').length).toBeGreaterThan(0)
+  })
+
+  // The banner is where a stale thread is cheapest to notice and cheapest to
+  // end: options close it in one click, and the stale badge says why it is
+  // still here.
+  it('badges a stale thread on the banner and offers a way to close it', async () => {
+    renderTask()
+    expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+
+    const banner = document.querySelector('.question-banner') as HTMLElement
+    expect(within(banner).getByText('stale')).toBeInTheDocument()
+    expect(within(banner).getByRole('button', { name: /Close with a resolution/ })).toBeInTheDocument()
+  })
+
+  it('closes the thread from the banner when an option is clicked', async () => {
+    renderTask()
+    expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+
+    const banner = document.querySelector('.question-banner') as HTMLElement
+    await userEvent.click(within(banner).getByRole('button', { name: 'No, keep next-cycle' }))
+
+    // The thread is resolved, so the banner — and the turn chip with it — goes.
+    await waitFor(() => expect(screen.queryByText('? awaiting you')).not.toBeInTheDocument())
+    // Option #2 was picked, so that option's own text — not the first one —
+    // is the answer the thread closed with.
+    await userEvent.click(screen.getByRole('tab', { name: /Questions/ }))
+    const row = await screen.findByText(/prorated refunds for mid-cycle downgrades/)
+    await userEvent.click(row)
+    expect(await screen.findByText('No, keep next-cycle')).toBeInTheDocument()
   })
 
   it('hides the awaiting-you banner when there is no open question awaiting the user', async () => {

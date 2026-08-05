@@ -1,12 +1,20 @@
 .question-banner {
+  border-radius: 12px;
+  padding: 13px 16px;
+  margin-bottom: 20px;
+}
+
+/* The clickable row: everything that used to be the banner itself, before
+   options and the close affordance made a nested button necessary. */
+.question-banner__main {
   width: 100%;
   text-align: left;
   display: flex;
   align-items: center;
   gap: 12px;
-  border-radius: 12px;
-  padding: 13px 16px;
-  margin-bottom: 20px;
+  background: none;
+  border: none;
+  padding: 0;
   cursor: pointer;
   font: inherit;
 }
@@ -76,4 +84,52 @@
 }
 .question-banner--neutral .question-banner__cta {
   color: var(--text-3);
+}
+
+/* An open thread nobody has moved in over a day. Outlined, not filled, so it
+   does not compete with the turn chip next to it. */
+.question-banner__stale {
+  font: 600 11.5px var(--font-ui);
+  padding: 3px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  color: var(--warn-text);
+  background: var(--warn-bg-2);
+  border: 1px solid var(--warn-border);
+}
+
+/* One click ends the thread — the cheapest answer there is. */
+.question-banner__options {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 11px;
+}
+.question-banner__option {
+  height: 32px;
+  padding: 0 13px;
+  background: var(--surface);
+  border: 1px solid var(--border-hover);
+  border-radius: 8px;
+  font: 600 12.5px var(--font-ui);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.question-banner__option:hover:not(:disabled) {
+  border-color: var(--text-3);
+}
+.question-banner__option:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.question-banner__close {
+  margin-top: 10px;
+  background: none;
+  border: none;
+  padding: 0;
+  font: 600 12.5px var(--font-ui);
+  color: var(--warn-text-2);
+  cursor: pointer;
 }
