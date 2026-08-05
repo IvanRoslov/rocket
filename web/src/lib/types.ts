@@ -275,7 +275,7 @@ export interface SystemCleanupResult {
 // (phase 3, merged). Verified against .superpowers/sdd/phase3-contract.md.
 // ---------------------------------------------------------------------------
 
-export type TaskStatus = 'backlog' | 'in_progress' | 'review' | 'done' | 'cancelled'
+export type TaskStatus = 'backlog' | 'brainstorm' | 'in_progress' | 'review' | 'done' | 'cancelled'
 
 export type TaskCreatedBy = 'user' | 'orchestrator' | 'agent'
 

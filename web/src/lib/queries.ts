@@ -111,6 +111,7 @@ export function useMessages(sessionId: string | undefined): UseQueryResult<Messa
 /** Task board grouped for the kanban screen: `GET /v1/tasks?board=true`. */
 export interface TaskBoard {
   backlog: Task[]
+  brainstorm: Task[]
   in_progress: Task[]
   review: Task[]
   done: Task[]

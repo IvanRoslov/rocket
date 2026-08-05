@@ -23,6 +23,7 @@ export interface OverviewTabProps {
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
   backlog: 'backlog',
+  brainstorm: 'brainstorm',
   in_progress: 'in progress',
   review: 'review',
   done: 'done',
@@ -31,6 +32,7 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 
 const STATUS_TONE: Record<TaskStatus, string> = {
   backlog: 'overview-tab__status--neutral',
+  brainstorm: 'overview-tab__status--review',
   in_progress: 'overview-tab__status--indigo',
   review: 'overview-tab__status--review',
   done: 'overview-tab__status--ok',

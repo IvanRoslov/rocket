@@ -28,6 +28,7 @@ type TabId = 'questions' | 'inbox'
 
 const MILESTONE_STATUS_LABEL: Record<TaskStatus, string> = {
   backlog: 'Backlog',
+  brainstorm: 'Brainstorm',
   in_progress: 'In Progress',
   review: 'Review',
   done: 'Done',
@@ -36,6 +37,7 @@ const MILESTONE_STATUS_LABEL: Record<TaskStatus, string> = {
 
 const MILESTONE_STATUS_TONE: Record<TaskStatus, BadgeTone> = {
   backlog: 'neutral',
+  brainstorm: 'review',
   in_progress: 'indigo',
   review: 'review',
   done: 'ok',

@@ -290,6 +290,20 @@ export const tasks: Task[] = [
     open_questions: 2,
     questions_awaiting_user: 1,
   },
+  {
+    // Brainstorm showcase (task-1077): the idea is being shaped, but nothing
+    // has been committed to the backlog yet — no session, no feature slug.
+    id: 17,
+    title: 'Metering rewrite',
+    description: 'Shape up per-seat vs per-event metering before committing to a plan.',
+    project_id: 'billing',
+    status: 'brainstorm',
+    created_by: 'user',
+    created_at: NOW - 5 * DAY,
+    updated_at: NOW - 1 * DAY,
+    open_questions: 0,
+    questions_awaiting_user: 0,
+  },
 ]
 
 /**

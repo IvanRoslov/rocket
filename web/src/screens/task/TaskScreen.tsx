@@ -23,6 +23,7 @@ type TabId = 'questions' | 'overview' | 'docs' | 'journal' | 'messages'
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
   backlog: 'Backlog',
+  brainstorm: 'Brainstorm',
   in_progress: 'In Progress',
   review: 'Review',
   done: 'Done',
@@ -31,6 +32,7 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 
 const STATUS_TONE: Record<TaskStatus, BadgeTone> = {
   backlog: 'neutral',
+  brainstorm: 'review',
   in_progress: 'indigo',
   review: 'review',
   done: 'ok',

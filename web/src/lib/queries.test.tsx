@@ -52,6 +52,7 @@ describe('useTasksBoard', () => {
     const board = result.current.data!
     // Board is root-only: subtasks #13/#14 are not included.
     expect(board.backlog.map((t) => t.id)).toEqual([10])
+    expect(board.brainstorm.map((t) => t.id)).toEqual([17])
     expect(board.in_progress.map((t) => t.id)).toEqual([12])
     expect(board.review.map((t) => t.id)).toEqual([11])
     expect(board.done.map((t) => t.id)).toEqual([9])
