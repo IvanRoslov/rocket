@@ -21,12 +21,15 @@ var pollInterval = 2 * time.Second
 // consistently. buildSendBody assumes it is called with a valid shape and
 // only reads the body from whichever source was given, then checks it is
 // non-empty.
-func buildSendBody(args []string, filePath string) (string, error) {
+//
+// The body is read through readTextInput, so --file also accepts "-",
+// meaning "read the body from stdin".
+func buildSendBody(cmd *cobra.Command, args []string, filePath string) (string, error) {
 	var body string
 	var err error
 
 	if filePath != "" {
-		body, err = readFile(filePath)
+		body, err = readTextInput(cmd, filePath)
 		if err != nil {
 			return "", err
 		}
@@ -39,15 +42,6 @@ func buildSendBody(args []string, filePath string) (string, error) {
 	}
 
 	return body, nil
-}
-
-// readFile reads the entire contents of a file.
-func readFile(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
 }
 
 func newSendCmd() *cobra.Command {
@@ -77,7 +71,7 @@ func newSendCmd() *cobra.Command {
 			sessionID := args[0]
 
 			// Build message body
-			body, err := buildSendBody(args, filePath)
+			body, err := buildSendBody(cmd, args, filePath)
 			if err != nil {
 				return fmt.Errorf("invalid message: %v", err)
 			}
@@ -141,7 +135,7 @@ func newSendCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&filePath, "file", "", "path to file containing message body")
+	cmd.Flags().StringVar(&filePath, "file", "", "файл с текстом сообщения ('-' — stdin)")
 	cmd.Flags().BoolVar(&wait, "wait", false, "poll until message is delivered or failed")
 
 	return cmd

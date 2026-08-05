@@ -372,6 +372,22 @@ func newTaskLsCmd() *cobra.Command {
 	return cmd
 }
 
+// taskShowJSON is what `rocket task show --json` emits: the task's own
+// fields inlined at the top level, plus the three collections the human
+// card also shows.
+//
+// Inlining rather than nesting under a "task" key is deliberate — web and
+// mobile already read id/title/subtasks from the top level, and --json may
+// only gain keys, never move them. Before this type existed --json returned
+// the bare task row and was strictly poorer than the text output it is
+// supposed to mirror.
+type taskShowJSON struct {
+	taskDetailRow
+	Docs      []taskDocRow  `json:"docs"`
+	Log       []taskLogRow  `json:"log"`
+	Questions []questionRow `json:"questions"`
+}
+
 func newTaskShowCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show <id>",
@@ -397,11 +413,9 @@ func newTaskShowCmd() *cobra.Command {
 				return err
 			}
 
-			if flags.JSON {
-				return printJSON(cmd, task)
-			}
-
-			// Fetch docs and log
+			// Docs, log and questions are fetched for --json too: the human
+			// card shows all three, so a --json that skipped them would be
+			// strictly less informative than the text output.
 			var docsResp struct {
 				Docs []taskDocRow `json:"docs"`
 			}
@@ -421,7 +435,30 @@ func newTaskShowCmd() *cobra.Command {
 				return err
 			}
 
-			renderTaskCard(task, docsResp.Docs, logResp.Log, questions, cmd.OutOrStdout(), time.Now())
+			// Machine consumers want an empty array, not a missing key or a
+			// null: `jq '.log[]'` must work on a fresh task too.
+			docs := docsResp.Docs
+			if docs == nil {
+				docs = []taskDocRow{}
+			}
+			logEntries := logResp.Log
+			if logEntries == nil {
+				logEntries = []taskLogRow{}
+			}
+			if questions == nil {
+				questions = []questionRow{}
+			}
+
+			if flags.JSON {
+				return printJSON(cmd, taskShowJSON{
+					taskDetailRow: task,
+					Docs:          docs,
+					Log:           logEntries,
+					Questions:     questions,
+				})
+			}
+
+			renderTaskCard(task, docs, logEntries, questions, cmd.OutOrStdout(), time.Now())
 			return nil
 		},
 	}
@@ -598,17 +635,20 @@ func newTaskDocPutCmd() *cobra.Command {
 
 func newTaskLogCmd() *cobra.Command {
 	var kind string
+	var file string
+
+	const usage = "usage: rocket task log <id> --kind <k> \"<text>\" | --file <path>"
 
 	cmd := &cobra.Command{
-		Use:   "log <id> <text>",
+		Use:   "log <id> [\"<text>\"]",
 		Short: "Добавить запись в журнал задачи",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) < 2 {
-				return &usageError{message: "usage: rocket task log <id> --kind <k> \"<text>\""}
+			if len(args) < 1 || len(args) > 2 {
+				return &usageError{message: usage}
 			}
 
 			if kind == "" {
-				return &usageError{message: "usage: rocket task log <id> --kind <k> \"<text>\""}
+				return &usageError{message: usage}
 			}
 
 			taskID, err := strconv.ParseInt(args[0], 10, 64)
@@ -616,7 +656,10 @@ func newTaskLogCmd() *cobra.Command {
 				return &usageError{message: "invalid task id"}
 			}
 
-			text := args[1]
+			text, err := textBody(cmd, argAt(args, 1), len(args) == 2, file, usage)
+			if err != nil {
+				return err
+			}
 
 			c, _, err := connect(true)
 			if err != nil {
@@ -642,6 +685,7 @@ func newTaskLogCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&kind, "kind", "", "тип записи (decision|problem|note|status)")
+	cmd.Flags().StringVar(&file, "file", "", "файл с текстом ('-' — stdin)")
 	return cmd
 }
 
@@ -652,16 +696,24 @@ func newTaskLogCmd() *cobra.Command {
 func newTaskAskCmd() *cobra.Command {
 	var context string
 	var to []string
+	var file string
+
+	const usage = "usage: rocket task ask <task-id> \"<вопрос>\" | --file <path> [--context <md>] [--to <id,...>]"
 
 	cmd := &cobra.Command{
-		Use:   "ask <task-id> \"<вопрос>\"",
+		Use:   "ask <task-id> [\"<вопрос>\"]",
 		Short: "Задать вопрос пользователю по задаче (от имени оркестратора этой задачи)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) != 2 {
-				return &usageError{message: "usage: rocket task ask <task-id> \"<вопрос>\" [--context <md>] [--to <id,...>]"}
+			if len(args) < 1 || len(args) > 2 {
+				return &usageError{message: usage}
 			}
 			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
 				return &usageError{message: "invalid task id"}
+			}
+
+			body, err := textBody(cmd, argAt(args, 1), len(args) == 2, file, usage)
+			if err != nil {
+				return err
 			}
 
 			if os.Getenv("ROCKET_SESSION_ID") == "" {
@@ -673,7 +725,7 @@ func newTaskAskCmd() *cobra.Command {
 				return err
 			}
 
-			reqBody := map[string]any{"body": args[1]}
+			reqBody := map[string]any{"body": body}
 			if context != "" {
 				reqBody["context"] = context
 			}
@@ -694,6 +746,7 @@ func newTaskAskCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&context, "context", "", "дополнительный контекст (MD)")
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
+	cmd.Flags().StringVar(&file, "file", "", "файл с вопросом ('-' — stdin)")
 	return cmd
 }
 
@@ -706,16 +759,24 @@ func newTaskAskCmd() *cobra.Command {
 func newTaskAskOrchCmd() *cobra.Command {
 	var context string
 	var to []string
+	var file string
+
+	const usage = "usage: rocket task ask-orch <task-id> \"<вопрос>\" | --file <path> [--context <md>] [--to <id,...>]"
 
 	cmd := &cobra.Command{
-		Use:   "ask-orch <task-id> \"<вопрос>\"",
+		Use:   "ask-orch <task-id> [\"<вопрос>\"]",
 		Short: "Задать вопрос оркестратору задачи (от пользователя)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) != 2 {
-				return &usageError{message: "usage: rocket task ask-orch <task-id> \"<вопрос>\" [--context <md>] [--to <id,...>]"}
+			if len(args) < 1 || len(args) > 2 {
+				return &usageError{message: usage}
 			}
 			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
 				return &usageError{message: "invalid task id"}
+			}
+
+			body, err := textBody(cmd, argAt(args, 1), len(args) == 2, file, usage)
+			if err != nil {
+				return err
 			}
 
 			c, _, err := connect(true)
@@ -723,7 +784,7 @@ func newTaskAskOrchCmd() *cobra.Command {
 				return err
 			}
 
-			reqBody := map[string]any{"body": args[1]}
+			reqBody := map[string]any{"body": body}
 			if context != "" {
 				reqBody["context"] = context
 			}
@@ -744,6 +805,7 @@ func newTaskAskOrchCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&context, "context", "", "дополнительный контекст (MD)")
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
+	cmd.Flags().StringVar(&file, "file", "", "файл с вопросом ('-' — stdin)")
 	return cmd
 }
 
@@ -846,13 +908,20 @@ func newTaskQuestionsCmd() *cobra.Command {
 func newTaskReplyCmd() *cobra.Command {
 	var to []string
 	var taskFlag int64
+	var file string
+
+	const usage = "usage: rocket task reply <question-id>|<task-id>/Q<n> \"<текст>\" | --file <path> [--task <task-id>] [--to <id,...>]"
 
 	cmd := &cobra.Command{
-		Use:   "reply <question-id>|<task-id>/Q<n> \"<текст>\"",
+		Use:   "reply <question-id>|<task-id>/Q<n> [\"<текст>\"]",
 		Short: "Ответить в тред вопроса",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) != 2 {
-				return &usageError{message: "usage: rocket task reply <question-id>|<task-id>/Q<n> \"<текст>\" [--task <task-id>] [--to <id,...>]"}
+			if len(args) < 1 || len(args) > 2 {
+				return &usageError{message: usage}
+			}
+			body, err := textBody(cmd, argAt(args, 1), len(args) == 2, file, usage)
+			if err != nil {
+				return err
 			}
 			id, err := resolveQuestionRef(args[0], taskFlag)
 			if err != nil {
@@ -864,7 +933,7 @@ func newTaskReplyCmd() *cobra.Command {
 				return err
 			}
 
-			reqBody := map[string]any{"body": args[1]}
+			reqBody := map[string]any{"body": body}
 			setTo(reqBody, parseTo(to))
 			path := apiPath("v1", "questions", id, "reply")
 			var resp questionRow
@@ -881,6 +950,7 @@ func newTaskReplyCmd() *cobra.Command {
 	}
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
 	cmd.Flags().Int64Var(&taskFlag, "task", 0, taskFlagUsage)
+	cmd.Flags().StringVar(&file, "file", "", "файл с текстом ('-' — stdin)")
 	return cmd
 }
 
@@ -888,19 +958,33 @@ func newTaskAnswerCmd() *cobra.Command {
 	var dismiss bool
 	var to []string
 	var taskFlag int64
+	var file string
+
+	const usageMsg = "usage: rocket task answer <question-id>|<task-id>/Q<n> \"<ответ>\" | --file <path> | --dismiss (exactly one)"
 
 	cmd := &cobra.Command{
 		Use:   "answer <question-id>|<task-id>/Q<n> [\"<ответ>\"]",
 		Short: "Ответить на вопрос или закрыть его без ответа",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			usage := &usageError{message: "usage: rocket task answer <question-id>|<task-id>/Q<n> \"<ответ>\" | --dismiss (exactly one)"}
+			usage := &usageError{message: usageMsg}
 			if len(args) < 1 || len(args) > 2 {
 				return usage
 			}
 
 			hasBody := len(args) == 2
-			if hasBody == dismiss {
+			// --dismiss closes the thread with no answer at all, so it
+			// excludes BOTH body sources, not just the positional one.
+			if dismiss && (hasBody || file != "") {
 				return usage
+			}
+
+			var body string
+			if !dismiss {
+				var err error
+				body, err = textBody(cmd, argAt(args, 1), hasBody, file, usageMsg)
+				if err != nil {
+					return err
+				}
 			}
 
 			id, err := resolveQuestionRef(args[0], taskFlag)
@@ -917,7 +1001,7 @@ func newTaskAnswerCmd() *cobra.Command {
 			if dismiss {
 				reqBody["dismiss"] = true
 			} else {
-				reqBody["body"] = args[1]
+				reqBody["body"] = body
 			}
 			setTo(reqBody, parseTo(to))
 
@@ -941,6 +1025,7 @@ func newTaskAnswerCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&dismiss, "dismiss", false, "закрыть вопрос без ответа")
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
 	cmd.Flags().Int64Var(&taskFlag, "task", 0, taskFlagUsage)
+	cmd.Flags().StringVar(&file, "file", "", "файл с ответом ('-' — stdin)")
 	return cmd
 }
 
