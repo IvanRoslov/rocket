@@ -85,3 +85,74 @@ func TestListOpenThreads(t *testing.T) {
 		t.Errorf("participants = %v, want [cto human]", second.Participants)
 	}
 }
+
+// TestListThreadsIncludesResolved: the unified inbox (rocket questions --all)
+// needs closed threads too, with their participants and their type/options —
+// none of which the open-only listing had to carry.
+func TestListThreadsIncludesResolved(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+
+	open, err := s.AddQuestion(Question{
+		TaskID: taskID, AskedBy: "orch-1", Body: "open one",
+		Options: []string{"A", "B"},
+	})
+	if err != nil {
+		t.Fatalf("AddQuestion open: %v", err)
+	}
+	if err := s.AddParticipants(open, "human", "orch-1"); err != nil {
+		t.Fatalf("AddParticipants open: %v", err)
+	}
+	if err := s.SetAttention(open, []string{"human"}); err != nil {
+		t.Fatalf("SetAttention open: %v", err)
+	}
+
+	closed, err := s.AddQuestion(Question{
+		TaskID: taskID, AskedBy: "orch-1", Body: "closed one", Type: QuestionTypeFYI,
+	})
+	if err != nil {
+		t.Fatalf("AddQuestion closed: %v", err)
+	}
+	if err := s.AddParticipants(closed, "human", "orch-1"); err != nil {
+		t.Fatalf("AddParticipants closed: %v", err)
+	}
+	if err := s.ResolveQuestion(closed, QuestionResolutionFYI); err != nil {
+		t.Fatalf("ResolveQuestion closed: %v", err)
+	}
+
+	openOnly, err := s.ListThreads(false)
+	if err != nil {
+		t.Fatalf("ListThreads(false): %v", err)
+	}
+	if len(openOnly) != 1 || openOnly[0].Question.ID != open {
+		t.Fatalf("ListThreads(false) = %+v, want only the open thread", openOnly)
+	}
+	if !reflect.DeepEqual(openOnly[0].Question.Options, []string{"A", "B"}) {
+		t.Errorf("options = %v, want [A B] — the inbox renders them", openOnly[0].Question.Options)
+	}
+	if !reflect.DeepEqual(openOnly[0].Attention, []string{"human"}) {
+		t.Errorf("attention = %v, want [human]", openOnly[0].Attention)
+	}
+
+	all, err := s.ListThreads(true)
+	if err != nil {
+		t.Fatalf("ListThreads(true): %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("ListThreads(true) = %+v, want both threads", all)
+	}
+	got := all[1]
+	if got.Question.ID != closed || got.Question.Status != "resolved" {
+		t.Fatalf("second thread = %+v, want the resolved one", got.Question)
+	}
+	if got.Question.Type != QuestionTypeFYI || got.Question.Resolution != QuestionResolutionFYI {
+		t.Errorf("type/resolution = %q/%q, want fyi/fyi",
+			got.Question.Type, got.Question.Resolution)
+	}
+	if !reflect.DeepEqual(got.Participants, []string{"human", "orch-1"}) {
+		t.Errorf("participants = %v, want [human orch-1] on a resolved thread", got.Participants)
+	}
+	if len(got.Attention) != 0 {
+		t.Errorf("attention = %v, want empty on a resolved thread", got.Attention)
+	}
+}
