@@ -33,6 +33,14 @@ func NewRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	// cobra's Print/Printf/Println write to OutOrStderr(), i.e. stderr
+	// unless an out writer is set. Every command in this package uses that
+	// family to print its RESULT, and a result on stderr cannot be piped
+	// into grep or jq. Setting the writer once on the root fixes all of
+	// them at once: subcommands inherit it through cobra's parent walk.
+	// Diagnostics keep using PrintErr*, which reads errWriter and is
+	// unaffected — they stay on stderr, which is where they belong.
+	root.SetOut(os.Stdout)
 	root.PersistentFlags().BoolVar(&flags.JSON, "json", false, "машинный вывод")
 	root.PersistentFlags().StringVar(&flags.Socket, "socket", "", "путь к сокету демона")
 	root.AddCommand(newDaemonCmd())

@@ -36,6 +36,10 @@ func TestLoadConfigAppliesSocketOverride(t *testing.T) {
 func TestLoadConfigNoOverrideWhenSocketFlagEmpty(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("ROCKET_HOME", home)
+	// loadConfig falls back to $ROCKET_SOCKET when --socket is empty, and
+	// that var is exported into every rocket agent session — so without
+	// clearing it this test fails whenever it is run from inside one.
+	t.Setenv("ROCKET_SOCKET", "")
 
 	prev := flags.Socket
 	t.Cleanup(func() { flags.Socket = prev })
