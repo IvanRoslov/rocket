@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -900,5 +902,113 @@ func TestPostSessionSpawnFailureLeavesExistingSubtask(t *testing.T) {
 	}
 	if sub.SessionID != "" {
 		t.Errorf("subtask SessionID should remain empty but got %q", sub.SessionID)
+	}
+}
+
+// --- root task: brainstorm → in_progress on first worker spawn ------------
+
+// spawnWorkerForRoot spawns one worker off the orchestrator holding rootID and
+// fails the test unless the spawn succeeded. Each call needs its own task name
+// so the worker sessions don't collide on id.
+func spawnWorkerForRoot(t *testing.T, srv *httptest.Server, orchID, taskName string) {
+	t.Helper()
+	resp := postJSONWithHeader(t, srv.URL+"/v1/sessions", orchID,
+		map[string]any{"repo": "proj1-repo", "task": taskName})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("spawn %q: status = %d, want 201 (%+v)", taskName, resp.StatusCode, decodeErr(t, resp))
+	}
+}
+
+// TestPostSessionFirstWorkerEndsBrainstorm: the first worker spawned off a task
+// still in brainstorm is what declares the discussion over and the work begun.
+func TestPostSessionFirstWorkerEndsBrainstorm(t *testing.T) {
+	d := sessionsTestDeps(t)
+	srv := newTestServer(t, d)
+	orchID, rootID := seedOrchestratorWithTask(t, d, "proj1", "myfeat")
+	if err := d.Store.UpdateTaskStatus(rootID, "brainstorm"); err != nil {
+		t.Fatalf("UpdateTaskStatus brainstorm: %v", err)
+	}
+
+	spawnWorkerForRoot(t, srv, orchID, "mytask")
+
+	root, err := d.Store.GetTask(rootID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if root.Status != "in_progress" {
+		t.Errorf("root Status = %q, want in_progress", root.Status)
+	}
+
+	logs, err := d.Store.ListTaskLog(rootID, "status")
+	if err != nil {
+		t.Fatalf("ListTaskLog: %v", err)
+	}
+	found := false
+	for _, e := range logs {
+		if strings.Contains(e.Body, "status: brainstorm → in_progress") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("root task log missing brainstorm → in_progress entry: %+v", logs)
+	}
+}
+
+// TestPostSessionSecondWorkerLeavesStatus: the transition is a one-way door.
+// The second worker finds the task already in_progress and must not log a
+// second, self-referential "in_progress → in_progress" line.
+func TestPostSessionSecondWorkerLeavesStatus(t *testing.T) {
+	d := sessionsTestDeps(t)
+	srv := newTestServer(t, d)
+	orchID, rootID := seedOrchestratorWithTask(t, d, "proj1", "myfeat")
+	if err := d.Store.UpdateTaskStatus(rootID, "brainstorm"); err != nil {
+		t.Fatalf("UpdateTaskStatus brainstorm: %v", err)
+	}
+
+	spawnWorkerForRoot(t, srv, orchID, "mytask")
+	spawnWorkerForRoot(t, srv, orchID, "othertask")
+
+	root, err := d.Store.GetTask(rootID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if root.Status != "in_progress" {
+		t.Errorf("root Status = %q, want in_progress", root.Status)
+	}
+
+	logs, err := d.Store.ListTaskLog(rootID, "status")
+	if err != nil {
+		t.Fatalf("ListTaskLog: %v", err)
+	}
+	n := 0
+	for _, e := range logs {
+		if strings.HasPrefix(e.Body, "status: ") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("status log entries = %d, want 1 (only the first spawn moves the task): %+v", n, logs)
+	}
+}
+
+// TestPostSessionSpawnKeepsManualStatus: a task the human has moved by hand is
+// never dragged back into in_progress by a spawn.
+func TestPostSessionSpawnKeepsManualStatus(t *testing.T) {
+	d := sessionsTestDeps(t)
+	srv := newTestServer(t, d)
+	orchID, rootID := seedOrchestratorWithTask(t, d, "proj1", "myfeat")
+	if err := d.Store.UpdateTaskStatus(rootID, "review"); err != nil {
+		t.Fatalf("UpdateTaskStatus review: %v", err)
+	}
+
+	spawnWorkerForRoot(t, srv, orchID, "mytask")
+
+	root, err := d.Store.GetTask(rootID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if root.Status != "review" {
+		t.Errorf("root Status = %q, want review (a human's move wins)", root.Status)
 	}
 }

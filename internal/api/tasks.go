@@ -137,6 +137,7 @@ type taskDetailResponse struct {
 // /v1/tasks?board=true: tasks bucketed by status.
 type taskBoard struct {
 	Backlog    []taskResponse `json:"backlog"`
+	Brainstorm []taskResponse `json:"brainstorm"`
 	InProgress []taskResponse `json:"in_progress"`
 	Review     []taskResponse `json:"review"`
 	Done       []taskResponse `json:"done"`
@@ -153,6 +154,7 @@ func annotateQuestionCounts(tr *taskResponse, counts map[int64]store.QuestionCou
 func toTaskBoard(tasks []store.Task, counts map[int64]store.QuestionCounts, waiting waitingTerminal, quiet quietMilestoneSet) taskBoard {
 	b := taskBoard{
 		Backlog:    []taskResponse{},
+		Brainstorm: []taskResponse{},
 		InProgress: []taskResponse{},
 		Review:     []taskResponse{},
 		Done:       []taskResponse{},
@@ -166,6 +168,8 @@ func toTaskBoard(tasks []store.Task, counts map[int64]store.QuestionCounts, wait
 		switch t.Status {
 		case "backlog":
 			b.Backlog = append(b.Backlog, tr)
+		case "brainstorm":
+			b.Brainstorm = append(b.Brainstorm, tr)
 		case "in_progress":
 			b.InProgress = append(b.InProgress, tr)
 		case "review":
@@ -857,10 +861,12 @@ type postTaskStartRequest struct {
 }
 
 // handlePostTaskStart spawns an orchestrator for a root, backlog task,
-// moving it to in_progress. Only the human user may start a task — agent
-// callers get 403. Root-ness, backlog status, and the absence of an
-// already-live orchestrator session on this task are all preconditions,
-// checked before spawning.
+// moving it to brainstorm — starting a task opens its discussion with the
+// orchestrator, and only the first worker spawned off it (see
+// handlePostSession) declares the work itself begun by moving it on to
+// in_progress. Only the human user may start a task — agent callers get 403.
+// Root-ness, backlog status, and the absence of an already-live orchestrator
+// session on this task are all preconditions, checked before spawning.
 func handlePostTaskStart(w http.ResponseWriter, r *http.Request, d Deps) {
 	id, ok := parseTaskID(w, r)
 	if !ok {
@@ -948,17 +954,17 @@ func handlePostTaskStart(w http.ResponseWriter, r *http.Request, d Deps) {
 	}
 
 	from := task.Status
-	if err := d.Store.UpdateTaskStatus(task.ID, "in_progress"); err != nil {
+	if err := d.Store.UpdateTaskStatus(task.ID, "brainstorm"); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 	d.Bus.Publish("task.status_changed", sess.ID, map[string]any{
-		"task_id": task.ID, "from": from, "to": "in_progress", "by": "system",
+		"task_id": task.ID, "from": from, "to": "brainstorm", "by": "system",
 	})
 	if _, err := d.Store.AddTaskLog(store.TaskLogEntry{
 		TaskID: task.ID,
 		Kind:   "status",
-		Body:   fmt.Sprintf("status: %s → in_progress (by system)", from),
+		Body:   fmt.Sprintf("status: %s → brainstorm (by system)", from),
 	}); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return

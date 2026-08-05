@@ -514,6 +514,47 @@ func TestListTasksBoardGrouping(t *testing.T) {
 	}
 }
 
+// TestListTasksBoardBrainstormGroup pins the brainstorm bucket: it is a key of
+// its own between backlog and in_progress, and — like every other bucket — an
+// empty array rather than null, so a client can render the column without a
+// nil check.
+func TestListTasksBoardBrainstormGroup(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+
+	id, err := d.Store.AddTask(store.Task{Title: "Talked through", ProjectID: "proj1"})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	resp := getJSON(t, srv.URL+"/v1/tasks?board=true")
+	board := decodeRepo(t, resp)["board"].(map[string]any)
+	resp.Body.Close()
+	empty, ok := board["brainstorm"].([]any)
+	if !ok {
+		t.Fatalf("board[brainstorm] = %#v, want an array", board["brainstorm"])
+	}
+	if len(empty) != 0 {
+		t.Errorf("len(brainstorm) = %d, want 0", len(empty))
+	}
+
+	if err := d.Store.UpdateTaskStatus(id, "brainstorm"); err != nil {
+		t.Fatalf("UpdateTaskStatus: %v", err)
+	}
+
+	resp2 := getJSON(t, srv.URL+"/v1/tasks?board=true")
+	defer resp2.Body.Close()
+	board2 := decodeRepo(t, resp2)["board"].(map[string]any)
+	brainstorm := board2["brainstorm"].([]any)
+	if len(brainstorm) != 1 {
+		t.Fatalf("len(brainstorm) = %d, want 1", len(brainstorm))
+	}
+	if len(board2["backlog"].([]any)) != 0 {
+		t.Errorf("task counted in backlog as well: %v", board2["backlog"])
+	}
+}
+
 // --- GET /v1/tasks/{id} -------------------------------------------------
 
 func TestGetTaskNotFound(t *testing.T) {
@@ -1565,14 +1606,60 @@ func TestPostTaskStartHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTask: %v", err)
 	}
-	if task.Status != "in_progress" {
-		t.Errorf("task status = %q, want in_progress", task.Status)
+	if task.Status != "brainstorm" {
+		t.Errorf("task status = %q, want brainstorm", task.Status)
 	}
 	if task.FeatureSlug != "add-login-page" {
 		t.Errorf("task feature_slug = %q, want add-login-page", task.FeatureSlug)
 	}
 	if task.SessionID != "add-login-page-orch" {
 		t.Errorf("task session_id = %q, want add-login-page-orch", task.SessionID)
+	}
+}
+
+// TestPostTaskStartAnnouncesBrainstorm pins the trace the transition leaves:
+// starting a task opens its brainstorming phase, so both the bus event and the
+// task log must say "brainstorm", not "in_progress" — the kanban and the human
+// reading the log learn about the phase from exactly these two.
+func TestPostTaskStartAnnouncesBrainstorm(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+
+	id, err := d.Store.AddTask(store.Task{Title: "Add login page", ProjectID: "proj1"})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	resp := postJSON(t, srv.URL+"/v1/tasks/"+itoa(id)+"/start", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+
+	events, err := d.Store.ListEventsTail(10, "")
+	if err != nil {
+		t.Fatalf("ListEventsTail: %v", err)
+	}
+	found := false
+	for _, e := range events {
+		if e.Type == "task.status_changed" && e.Data["to"] == "brainstorm" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected task.status_changed to=brainstorm, got %+v", events)
+	}
+
+	logs, err := d.Store.ListTaskLog(id, "status")
+	if err != nil {
+		t.Fatalf("ListTaskLog: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("len(logs) = %d, want 1", len(logs))
+	}
+	if logs[0].Body != "status: backlog → brainstorm (by system)" {
+		t.Errorf("log body = %q, want %q", logs[0].Body, "status: backlog → brainstorm (by system)")
 	}
 }
 

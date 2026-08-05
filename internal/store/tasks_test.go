@@ -491,3 +491,57 @@ func idsEqual(a, b []int64) bool {
 	}
 	return true
 }
+
+func TestAddTask_BrainstormIsValid(t *testing.T) {
+	s := openTestStore(t)
+
+	id, err := s.AddTask(Task{Title: "Discuss it", ProjectID: "billing", Status: "brainstorm"})
+	if err != nil {
+		t.Fatalf("AddTask brainstorm: %v", err)
+	}
+	got, err := s.GetTask(id)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got.Status != "brainstorm" {
+		t.Errorf("Status = %q, want brainstorm", got.Status)
+	}
+
+	if err := s.UpdateTaskStatus(id, "in_progress"); err != nil {
+		t.Fatalf("UpdateTaskStatus in_progress: %v", err)
+	}
+	if err := s.UpdateTaskStatus(id, "brainstorm"); err != nil {
+		t.Fatalf("UpdateTaskStatus brainstorm: %v", err)
+	}
+}
+
+func TestIsActiveTaskStatus(t *testing.T) {
+	active := map[string]bool{
+		"brainstorm":  true,
+		"in_progress": true,
+		"backlog":     false,
+		"review":      false,
+		"done":        false,
+		"cancelled":   false,
+	}
+	for status, want := range active {
+		if got := IsActiveTaskStatus(status); got != want {
+			t.Errorf("IsActiveTaskStatus(%q) = %v, want %v", status, got, want)
+		}
+	}
+
+	// ActiveTaskStatuses is the same set in canonical order, and every entry
+	// of it must be a status the store accepts.
+	want := []string{"brainstorm", "in_progress"}
+	if len(ActiveTaskStatuses) != len(want) {
+		t.Fatalf("ActiveTaskStatuses = %v, want %v", ActiveTaskStatuses, want)
+	}
+	for i, s := range ActiveTaskStatuses {
+		if s != want[i] {
+			t.Errorf("ActiveTaskStatuses[%d] = %q, want %q", i, s, want[i])
+		}
+		if !validTaskStatuses[s] {
+			t.Errorf("ActiveTaskStatuses[%d] = %q is not a valid task status", i, s)
+		}
+	}
+}

@@ -739,6 +739,9 @@ func TestRenderTaskBoardMultipleStatuses(t *testing.T) {
 		"backlog": []taskRow{
 			{ID: 1, Title: "Task 1", Status: "backlog"},
 		},
+		"brainstorm": []taskRow{
+			{ID: 6, Title: "Task 6", Status: "brainstorm"},
+		},
 		"in_progress": []taskRow{
 			{ID: 2, Title: "Task 2", Status: "in_progress"},
 		},
@@ -757,11 +760,18 @@ func TestRenderTaskBoardMultipleStatuses(t *testing.T) {
 	renderTaskBoard(board, w, false)
 
 	output := w.String()
-	headers := []string{"BACKLOG", "IN PROGRESS", "REVIEW", "DONE", "CANCELLED"}
+	headers := []string{"BACKLOG", "BRAINSTORM", "IN PROGRESS", "REVIEW", "DONE", "CANCELLED"}
+	last := -1
 	for _, h := range headers {
-		if !strings.Contains(output, h) {
+		i := strings.Index(output, h)
+		if i < 0 {
 			t.Errorf("expected %q header in output", h)
+			continue
 		}
+		if i < last {
+			t.Errorf("header %q is out of canonical board order", h)
+		}
+		last = i
 	}
 }
 

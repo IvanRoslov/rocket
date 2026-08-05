@@ -11,10 +11,30 @@ import (
 // validTaskStatuses is the set of allowed values for tasks.status.
 var validTaskStatuses = map[string]bool{
 	"backlog":     true,
+	"brainstorm":  true,
 	"in_progress": true,
 	"review":      true,
 	"done":        true,
 	"cancelled":   true,
+}
+
+// ActiveTaskStatuses are the statuses that mean the task is being worked on
+// right now, in canonical board order. A task in "brainstorm" is being talked
+// through with its orchestrator and one in "in_progress" has workers writing
+// code; both are live work, and everything that asks "is anybody on this?" —
+// the heartbeat, the quiet-milestone rule — must treat them alike. The
+// remaining statuses are either not started yet ("backlog") or the human's
+// move ("review", "done", "cancelled").
+var ActiveTaskStatuses = []string{"brainstorm", "in_progress"}
+
+// IsActiveTaskStatus reports whether status is one of ActiveTaskStatuses.
+func IsActiveTaskStatus(status string) bool {
+	for _, s := range ActiveTaskStatuses {
+		if s == status {
+			return true
+		}
+	}
+	return false
 }
 
 // Task represents a unit of work, optionally a subtask of another task.
