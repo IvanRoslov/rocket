@@ -292,6 +292,57 @@ export const tasks: Task[] = [
   },
 ]
 
+/**
+ * Milestones (task #1023, spec v2): root tasks outside every project, held by
+ * a persistent agent. Kept apart from `tasks` so a project board can never
+ * accidentally render one — the daemon separates them the same way.
+ */
+export const milestones: Task[] = [
+  {
+    id: 40,
+    title: 'Cut the on-call pager noise in half',
+    description: 'Audit alert rules, kill the ones nobody acts on.',
+    project_id: '',
+    status: 'backlog',
+    milestone: true,
+    created_by: 'user',
+    created_at: NOW - 6 * DAY,
+    updated_at: NOW - 6 * DAY,
+    open_questions: 0,
+    questions_awaiting_user: 0,
+  },
+  {
+    id: 41,
+    title: 'Own the incident review ritual',
+    description: 'Run reviews weekly, publish the write-ups.',
+    project_id: '',
+    status: 'in_progress',
+    milestone: true,
+    assigned_role: 'sre',
+    // Showcase for the quiet badge (subtask #1032): taken, but the agent has
+    // shown no work for longer than milestone_quiet_after.
+    quiet: true,
+    created_by: 'user',
+    created_at: NOW - 12 * DAY,
+    updated_at: NOW - 2 * DAY,
+    open_questions: 2,
+    questions_awaiting_user: 1,
+  },
+  {
+    id: 42,
+    title: 'Docs pass over every public README',
+    project_id: '',
+    status: 'review',
+    milestone: true,
+    assigned_role: 'librarian',
+    created_by: 'agent',
+    created_at: NOW - 20 * DAY,
+    updated_at: NOW - 5 * HOUR,
+    open_questions: 0,
+    questions_awaiting_user: 0,
+  },
+]
+
 export const subtasks: Task[] = [
   {
     id: 13,
