@@ -86,6 +86,56 @@ func TestListOpenThreads(t *testing.T) {
 	}
 }
 
+// TestThreadOrdinalsMatchPerQuestionOrdinal: the bulk ordinal pass must agree
+// with the single-thread ordinals local refs are built from today, including
+// across a resolved thread — otherwise the inbox would label a thread with a
+// ref that its own detail view disagrees with.
+func TestThreadOrdinalsMatchPerQuestionOrdinal(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+	seedAgentForQuestions(t, s, "cto")
+
+	var taskQs []int64
+	for i := 0; i < 3; i++ {
+		id, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch-1", Body: "q"})
+		if err != nil {
+			t.Fatalf("AddQuestion task %d: %v", i, err)
+		}
+		taskQs = append(taskQs, id)
+	}
+	if err := s.ResolveQuestion(taskQs[1], "answered"); err != nil {
+		t.Fatalf("ResolveQuestion: %v", err)
+	}
+	roleQ, err := s.AddQuestion(Question{RoleID: "cto", Body: "r"})
+	if err != nil {
+		t.Fatalf("AddQuestion role: %v", err)
+	}
+
+	got, err := s.ThreadOrdinals()
+	if err != nil {
+		t.Fatalf("ThreadOrdinals: %v", err)
+	}
+	for i, id := range taskQs {
+		q, err := s.GetQuestion(id)
+		if err != nil {
+			t.Fatalf("GetQuestion %d: %v", id, err)
+		}
+		want, err := s.QuestionOrdinal(q)
+		if err != nil {
+			t.Fatalf("QuestionOrdinal %d: %v", id, err)
+		}
+		if want != i+1 {
+			t.Fatalf("QuestionOrdinal %d = %d, want %d — test setup is wrong", id, want, i+1)
+		}
+		if got[id] != want {
+			t.Errorf("ThreadOrdinals[%d] = %d, want %d", id, got[id], want)
+		}
+	}
+	if got[roleQ] != 1 {
+		t.Errorf("ThreadOrdinals[role q] = %d, want 1 — role threads count separately", got[roleQ])
+	}
+}
+
 // TestListThreadsIncludesResolved: the unified inbox (rocket questions --all)
 // needs closed threads too, with their participants and their type/options —
 // none of which the open-only listing had to carry.

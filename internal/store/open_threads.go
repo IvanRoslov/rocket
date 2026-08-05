@@ -85,6 +85,46 @@ func (s *Store) ListThreads(includeResolved bool) ([]OpenThread, error) {
 	return out, nil
 }
 
+// ThreadOrdinals returns the per-subject 1-based ordinal of every thread,
+// keyed by question id — the number a local ref like "1023/Q2" or "cto/Q1" is
+// built from. It exists so a listing can label N threads without asking the
+// database N times: an ordinal is just the row's position among the threads of
+// its own subject, which one ordered pass computes for all of them at once.
+// Resolved threads count too, exactly as QuestionOrdinal counts them, so a
+// thread's ref never changes when a neighbour closes.
+func (s *Store) ThreadOrdinals() (map[int64]int, error) {
+	rows, err := s.db.Query(`
+		SELECT id, COALESCE(task_id, 0), COALESCE(role_id, '')
+		FROM questions
+		WHERE task_id IS NOT NULL OR role_id IS NOT NULL
+		ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("query thread ordinals: %w", err)
+	}
+	defer rows.Close()
+
+	type subject struct {
+		taskID int64
+		roleID string
+	}
+	seen := make(map[subject]int)
+	out := make(map[int64]int)
+	for rows.Next() {
+		var id, taskID int64
+		var roleID string
+		if err := rows.Scan(&id, &taskID, &roleID); err != nil {
+			return nil, fmt.Errorf("scan thread ordinal: %w", err)
+		}
+		subj := subject{taskID: taskID, roleID: roleID}
+		seen[subj]++
+		out[id] = seen[subj]
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // lastMessagesOfThreads returns the newest message of every thread matching
 // statusFilter, keyed by question id. Threads that nobody has spoken in yet are
 // simply absent from the map.
