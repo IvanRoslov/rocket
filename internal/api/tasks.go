@@ -61,6 +61,13 @@ type taskResponse struct {
 	// Derived on every read from the session's activity and the clock, never
 	// persisted, and omitted entirely when false.
 	WaitingTerminal bool `json:"waiting_terminal,omitempty"`
+	// Quiet reports that this milestone is in progress and has shown no trace
+	// of the agent holding it — no journal entry, no doc, no thread entry —
+	// for longer than milestone_quiet_after. It is the human's channel for the
+	// silence the heartbeat reminds the agent about (task #1023, spec v2):
+	// derived on every read by the same rule (heartbeat.QuietMilestone), never
+	// persisted, and omitted entirely when false.
+	Quiet bool `json:"quiet,omitempty"`
 }
 
 func toTaskResponse(t store.Task) taskResponse {
@@ -143,7 +150,7 @@ func annotateQuestionCounts(tr *taskResponse, counts map[int64]store.QuestionCou
 	tr.QuestionsAwaitingUser = c.AwaitingUser
 }
 
-func toTaskBoard(tasks []store.Task, counts map[int64]store.QuestionCounts, waiting waitingTerminal) taskBoard {
+func toTaskBoard(tasks []store.Task, counts map[int64]store.QuestionCounts, waiting waitingTerminal, quiet quietMilestoneSet) taskBoard {
 	b := taskBoard{
 		Backlog:    []taskResponse{},
 		InProgress: []taskResponse{},
@@ -155,6 +162,7 @@ func toTaskBoard(tasks []store.Task, counts map[int64]store.QuestionCounts, wait
 		tr := toTaskResponse(t)
 		annotateQuestionCounts(&tr, counts)
 		annotateWaitingTerminal(&tr, waiting)
+		annotateQuiet(&tr, quiet)
 		switch t.Status {
 		case "backlog":
 			b.Backlog = append(b.Backlog, tr)
@@ -286,8 +294,14 @@ func handleListTasks(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
+	quiet, err := quietMilestones(d)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
 	if q.Get("board") == "true" {
-		writeJSON(w, http.StatusOK, map[string]any{"board": toTaskBoard(tasks, counts, waiting)})
+		writeJSON(w, http.StatusOK, map[string]any{"board": toTaskBoard(tasks, counts, waiting, quiet)})
 		return
 	}
 
@@ -296,6 +310,7 @@ func handleListTasks(w http.ResponseWriter, r *http.Request, d Deps) {
 		out[i] = toTaskResponse(t)
 		annotateQuestionCounts(&out[i], counts)
 		annotateWaitingTerminal(&out[i], waiting)
+		annotateQuiet(&out[i], quiet)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": out})
 }
@@ -468,6 +483,11 @@ func handleGetTask(w http.ResponseWriter, r *http.Request, d Deps) {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
+	quiet, err := quietMilestones(d)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
 	for i := range subOut {
 		annotateWaitingTerminal(&subOut[i].taskResponse, waiting)
 	}
@@ -475,6 +495,7 @@ func handleGetTask(w http.ResponseWriter, r *http.Request, d Deps) {
 	tr := toTaskResponse(t)
 	annotateQuestionCounts(&tr, counts)
 	annotateWaitingTerminal(&tr, waiting)
+	annotateQuiet(&tr, quiet)
 
 	writeJSON(w, http.StatusOK, taskDetailResponse{
 		taskResponse: tr,
