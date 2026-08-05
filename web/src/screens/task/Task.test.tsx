@@ -629,6 +629,19 @@ describe('TaskScreen for a milestone', () => {
     }
   })
 
+  it('shows the agent rail — its session, not an orchestrator', async () => {
+    renderMilestone()
+    await waitFor(() => expect(screen.getByText('Own the incident review ritual')).toBeInTheDocument())
+
+    // The agent's tmux session is named after the agent, and one session
+    // serves all of its milestones (docs/10-agents.md).
+    expect(screen.getByText('Agent')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /term/ })).toHaveAttribute('href', '/term/sre')
+    expect(screen.getByRole('link', { name: /chat/ })).toHaveAttribute('href', '/chat/sre')
+    // A milestone has no orchestrator and no workers — no empty rail about them.
+    expect(screen.queryByText(/No workers yet/)).not.toBeInTheDocument()
+  })
+
   it('names the agent holding it', async () => {
     renderMilestone()
     await waitFor(() => expect(screen.getByText('Own the incident review ritual')).toBeInTheDocument())

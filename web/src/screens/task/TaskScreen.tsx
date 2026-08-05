@@ -15,6 +15,7 @@ import { MessagesTab } from './MessagesTab'
 import { OverviewTab } from './OverviewTab'
 import { QuestionBanner } from './QuestionBanner'
 import { QuestionsTab } from './QuestionsTab'
+import { AgentRail } from '../milestones/AgentRail'
 import { SessionRail } from './SessionRail'
 import './TaskScreen.css'
 
@@ -186,7 +187,11 @@ export function TaskScreen() {
         </div>
       </div>
 
-      <SessionRail orchestrator={orchestrator} workers={workers} />
+      {isMilestone ? (
+        <AgentRail agentId={task.assigned_role} />
+      ) : (
+        <SessionRail orchestrator={orchestrator} workers={workers} />
+      )}
     </div>
   )
 }
