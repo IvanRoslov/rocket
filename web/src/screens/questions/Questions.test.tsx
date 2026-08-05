@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { HttpResponse, http } from 'msw'
 import { setupServer } from 'msw/node'
@@ -17,13 +17,15 @@ afterEach(() => {
 })
 afterAll(() => server.close())
 
-function renderQuestions() {
+// The undo window is shortened rather than faked: vitest's fake timers
+// deadlock msw's request handling, so the screen takes the delay as a prop.
+function renderQuestions(undoMs = 5000) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/questions']}>
         <Routes>
-          <Route path="/questions" element={<QuestionsScreen />} />
+          <Route path="/questions" element={<QuestionsScreen undoMs={undoMs} />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -35,130 +37,225 @@ function renderQuestions() {
 // two options) and 13/Q2 (your turn) plus 13/Q1 (waiting on the orchestrator),
 // role thread sre/Q1 (your turn), and the resolved 12/Q4 fyi note.
 
-test('lists task and role threads in one list, each under its local ref', async () => {
-  renderQuestions()
+describe('Decide mode', () => {
+  test('opens on the queue of threads waiting on you, stale first', async () => {
+    renderQuestions()
 
-  expect(await screen.findByText('12/Q3')).toBeInTheDocument()
-  expect(screen.getByText('sre/Q1')).toBeInTheDocument()
-  expect(screen.getByText('13/Q1')).toBeInTheDocument()
+    // Wait for the inbox itself, not the static heading above it.
+    await screen.findByRole('heading', { level: 2 })
+    const rail = document.querySelector('.q__rail') as HTMLElement
+    const refs = within(rail)
+      .getAllByRole('button')
+      .map((b) => b.textContent ?? '')
+
+    // 12/Q3 is the stale one, so it leads however recently it moved.
+    expect(refs[0]).toContain('12/Q3')
+    expect(refs.join(' ')).toContain('sre/Q1')
+    // A thread waiting on the orchestrator is not on you and stays out.
+    expect(refs.join(' ')).not.toContain('13/Q1')
+  })
+
+  test('shows the leading thread as a card with its options as one-tap buttons', async () => {
+    renderQuestions()
+
+    expect(await screen.findByRole('heading', { level: 2 })).toHaveTextContent(
+      'Should we support prorated refunds for mid-cycle downgrades?',
+    )
+    expect(screen.getByRole('button', { name: /Yes, prorate downgrades/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /No, keep next-cycle/ })).toBeInTheDocument()
+    expect(screen.getByText('your turn')).toBeInTheDocument()
+  })
+
+  test('threads waiting on an agent stay out of the queue but are counted', async () => {
+    renderQuestions()
+
+    expect(await screen.findByText(/threads waiting on agents/)).toBeInTheDocument()
+  })
 })
 
-test('groups by whose turn it is and links a task thread to its task', async () => {
-  renderQuestions()
-
-  expect(await screen.findByText('Awaiting you')).toBeInTheDocument()
-  expect(screen.getByText('Awaiting others')).toBeInTheDocument()
-
-  const link = screen.getAllByRole('link')[0]
-  expect(link).toHaveAttribute('href', expect.stringMatching(/\/p\/.+\/tasks\/\d+/))
-})
-
-// The filter is an explicit product decision: OFF by default, so the human
-// always sees every thread until they narrow it themselves.
-test('the "waiting on me" filter is off by default and hides nothing', async () => {
-  renderQuestions()
-
-  await screen.findByText('Awaiting you')
-  expect(screen.getByRole('checkbox', { name: /waiting on me/i })).not.toBeChecked()
-  expect(screen.getByText('Awaiting others')).toBeInTheDocument()
-})
-
-test('checking it narrows the list to the threads waiting on you', async () => {
-  renderQuestions()
-  await screen.findByText('Awaiting you')
-
-  await userEvent.click(screen.getByRole('checkbox', { name: /waiting on me/i }))
-
-  expect(screen.queryByText('Awaiting others')).not.toBeInTheDocument()
-  // 13/Q1 waits on the orchestrator; sre/Q1 waits on you and stays.
-  expect(screen.queryByText('13/Q1')).not.toBeInTheDocument()
-  expect(screen.getByText('sre/Q1')).toBeInTheDocument()
-})
-
-test('unchecking it brings the hidden threads back', async () => {
-  renderQuestions()
-  await screen.findByText('Awaiting you')
-  const filter = screen.getByRole('checkbox', { name: /waiting on me/i })
-
-  await userEvent.click(filter)
-  await userEvent.click(filter)
-
-  expect(screen.getByText('Awaiting others')).toBeInTheDocument()
-})
-
-test('badges a stale thread', async () => {
-  renderQuestions()
-
-  const row = (await screen.findByText('12/Q3')).closest('.questions-screen__row') as HTMLElement
-  expect(within(row).getByText('stale')).toBeInTheDocument()
-})
-
-// An fyi thread is a status note: it is born resolved and waits on nobody, so
-// it belongs in the history and must never carry a turn badge or an open count
-// (spec v1 §«Тип треда»).
-test('keeps fyi threads out of the open list and badges them only as fyi', async () => {
-  renderQuestions()
-  await screen.findByText('12/Q3')
-
-  expect(screen.queryByText('12/Q4')).not.toBeInTheDocument()
-
-  await userEvent.click(screen.getByRole('checkbox', { name: /show resolved/i }))
-
-  const row = (await screen.findByText('12/Q4')).closest('.questions-screen__row') as HTMLElement
-  expect(within(row).getByText('fyi')).toBeInTheDocument()
-  expect(within(row).queryByText(/awaiting/i)).not.toBeInTheDocument()
-})
-
-// The inbox row carries the question only. Opening it fetches the real thread
-// — the conversation, the context and the reply box.
-test('expanding a row opens the full thread', async () => {
-  renderQuestions()
-
-  await userEvent.click(await screen.findByRole('button', { name: /12\/Q3/ }))
-
-  expect(await screen.findByLabelText('Discussion')).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: /Answer & close/ })).toBeInTheDocument()
-})
-
-// A server older than the emptyIfNil fix in internal/api/thread_inbox.go sends
-// `attention: null` for a thread whose attention set is empty — a nil Go slice.
-// That crashed the whole route with "Cannot read properties of null (reading
-// 'filter')". The server emits [] now; the screen must survive `null` anyway,
-// because a dashboard is served against whatever backend is deployed.
-test('renders a thread whose attention and participants arrive as null', async () => {
-  server.use(
-    http.get('/v1/threads', () =>
-      HttpResponse.json({
-        threads: [
-          {
-            local_ref: '1030/Q1',
-            kind: 'task',
-            task_id: 1030,
-            subject: 'task #1030 "Ship it"',
-            id: 9001,
-            ordinal: 1,
-            asked_by: 'orch-1',
-            body: 'нужен ли откат?',
-            status: 'open',
-            type: 'decision',
-            attention: null,
-            waiting_on: null,
-            participants: null,
-            your_turn: false,
-            asked_at: 1_700_000_000,
-            updated_at: 1_700_000_000,
-            project_id: 'rocket',
-            task_title: 'Ship it',
-          },
-        ],
+// The undo window is the whole reason answering is safe: the server has no
+// undo, so nothing may reach it until the window closes.
+describe('closing a thread', () => {
+  test('picking an option closes it after the undo window, with a 1-based choose', async () => {
+    const user = userEvent.setup()
+    const sent: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/questions/:id/answer', async ({ request }) => {
+        sent.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 3 })
       }),
-    ),
-  )
+    )
+    renderQuestions(60)
+    await screen.findByRole('button', { name: /No, keep next-cycle/ })
 
-  renderQuestions()
+    await user.click(screen.getByRole('button', { name: /No, keep next-cycle/ }))
 
-  const row = (await screen.findByText('1030/Q1')).closest('.questions-screen__row') as HTMLElement
-  expect(within(row).getByText('нужен ли откат?')).toBeInTheDocument()
-  // Nobody is in the attention set, so there is no turn badge to show.
-  expect(within(row).queryByText(/awaiting/i)).not.toBeInTheDocument()
+    expect(screen.getByText('12/Q3 closed · 2 No, keep next-cycle')).toBeInTheDocument()
+
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(sent[0]).toEqual({ choose: 2 })
+  })
+
+  test('Undo cancels the call outright', async () => {
+    const user = userEvent.setup()
+    const sent: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/questions/:id/answer', async ({ request }) => {
+        sent.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 3 })
+      }),
+    )
+    // A long window here: Undo must beat a timer that has not fired.
+    renderQuestions(10_000)
+    await screen.findByRole('button', { name: /Yes, prorate downgrades/ })
+
+    await user.click(screen.getByRole('button', { name: /Yes, prorate downgrades/ }))
+    await user.click(screen.getByRole('button', { name: /Undo/ }))
+
+    await new Promise((r) => setTimeout(r, 120))
+    expect(sent).toHaveLength(0)
+    // The thread is back, answerable again.
+    expect(screen.getByRole('button', { name: /Yes, prorate downgrades/ })).toBeInTheDocument()
+  })
+
+  test('"Answer & close" refuses to close on an empty draft', async () => {
+    const user = userEvent.setup()
+    renderQuestions()
+
+    await user.click(await screen.findByRole('button', { name: /Answer & close/ }))
+
+    expect(screen.getByText('Pick an option or write the resolution first')).toBeInTheDocument()
+  })
+})
+
+describe('keyboard', () => {
+  test('X dismisses the current thread and B toggles Browse', async () => {
+    const user = userEvent.setup()
+    renderQuestions()
+    await screen.findByRole('heading', { level: 2 })
+
+    await user.keyboard('x')
+    expect(screen.getByText('12/Q3 closed as not relevant')).toBeInTheDocument()
+
+    await user.keyboard('b')
+    expect(screen.getByPlaceholderText(/Filter by ref/)).toBeInTheDocument()
+  })
+
+  // Typing an answer that contains "s" or "x" must not fire the shortcuts.
+  test('shortcuts are inert while typing', async () => {
+    const user = userEvent.setup()
+    renderQuestions()
+    await screen.findByRole('heading', { level: 2 })
+
+    await user.click(screen.getByLabelText('Your answer'))
+    await user.keyboard('sx')
+
+    expect(screen.getByLabelText('Your answer')).toHaveValue('sx')
+    expect(screen.queryByText(/closed as not relevant/)).not.toBeInTheDocument()
+  })
+})
+
+describe('Browse mode', () => {
+  test('groups threads by whose turn it is', async () => {
+    const user = userEvent.setup()
+    renderQuestions()
+    await screen.findByRole('heading', { level: 2 })
+
+    await user.click(screen.getByRole('button', { name: /Browse/ }))
+
+    // "Your turn" is also a filter chip, so assert on the group headings.
+    const headings = Array.from(document.querySelectorAll('.q__group-label')).map(
+      (el) => el.textContent,
+    )
+    expect(headings).toEqual(['Your turn', 'Waiting on agents'])
+    expect(screen.getByText('13/Q1')).toBeInTheDocument()
+  })
+
+  test('the Closed filter reveals history, including the fyi note', async () => {
+    const user = userEvent.setup()
+    renderQuestions()
+    await screen.findByRole('heading', { level: 2 })
+
+    await user.click(screen.getByRole('button', { name: /Browse/ }))
+    await user.click(screen.getByRole('button', { name: /^Closed/ }))
+
+    expect(screen.getByText('Closed & notes')).toBeInTheDocument()
+    expect(screen.getByText('12/Q4')).toBeInTheDocument()
+  })
+
+  test('the search narrows the list and says so when nothing matches', async () => {
+    const user = userEvent.setup()
+    renderQuestions()
+    await screen.findByRole('heading', { level: 2 })
+
+    await user.click(screen.getByRole('button', { name: /Browse/ }))
+    await user.type(screen.getByLabelText('Filter threads'), 'refunds')
+    expect(screen.getByText('12/Q3')).toBeInTheDocument()
+    expect(screen.queryByText('13/Q1')).not.toBeInTheDocument()
+
+    await user.clear(screen.getByLabelText('Filter threads'))
+    await user.type(screen.getByLabelText('Filter threads'), 'zzzz')
+    expect(screen.getByText('Nothing matches')).toBeInTheDocument()
+  })
+
+  test('a row CTA drops you back into Decide on that thread', async () => {
+    const user = userEvent.setup()
+    renderQuestions()
+    await screen.findByRole('heading', { level: 2 })
+
+    await user.click(screen.getByRole('button', { name: /Browse/ }))
+    const row = screen.getByText('13/Q1').closest('.q__row') as HTMLElement
+    await user.click(within(row).getByRole('button', { name: 'Open' }))
+
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(
+      'Should we backfill existing rows',
+    )
+  })
+})
+
+describe('Ask an agent', () => {
+  test('opens a thread on a real orchestrator task', async () => {
+    const user = userEvent.setup()
+    const sent: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/tasks/:id/questions', async ({ request }) => {
+        sent.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 99 }, { status: 201 })
+      }),
+    )
+    renderQuestions()
+    await screen.findByRole('heading', { level: 2 })
+
+    await user.click(screen.getByRole('button', { name: 'Ask an agent' }))
+    await user.type(screen.getByLabelText('What to ask'), 'Which rounding mode?')
+    await user.click(screen.getByRole('button', { name: 'Open question' }))
+
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(sent[0]).toEqual({ body: 'Which rounding mode?' })
+  })
+
+  test('an FYI note posts as type=fyi', async () => {
+    const user = userEvent.setup()
+    const sent: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/tasks/:id/questions', async ({ request }) => {
+        sent.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 99 }, { status: 201 })
+      }),
+      http.post('/v1/agents/:id/questions', async ({ request }) => {
+        sent.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 99 }, { status: 201 })
+      }),
+    )
+    renderQuestions()
+    await screen.findByRole('heading', { level: 2 })
+
+    await user.click(screen.getByRole('button', { name: 'Ask an agent' }))
+    await user.click(screen.getByRole('button', { name: 'FYI note' }))
+    await user.type(screen.getByLabelText('What to ask'), 'Staging is back')
+    await user.click(screen.getByRole('button', { name: 'Post note' }))
+
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(sent[0]).toEqual({ body: 'Staging is back', type: 'fyi' })
+  })
 })

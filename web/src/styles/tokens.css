@@ -62,6 +62,21 @@
   --neutral-text: #52525b;
   --neutral-bg: #f1f5f9;
 
+  /* Quiet greys the Questions v3 design leans on: a muted label, a faint
+     meta value, a ghost hint and a hairline border, in that order of
+     fading. */
+  --q-mute: #8a8a86;
+  --q-faint: #b8b8b4;
+  --q-ghost: #c4c4c0;
+  --q-line: #e0e0dc;
+  /* Amber is the "on you" signal — filled, unlike the pale --warn-bg chip. */
+  --q-amber: #f59e0b;
+  /* A closed thread's green: quieter than --ok, which reads as "live". */
+  --closed-text: #16803c;
+  --closed-bg: #eaf4ea;
+  --closed-bg-2: #f7faf7;
+  --closed-border: #dcecdc;
+
   /* Dark surfaces (terminal / log only) */
   --dark-surface: #161618;
   --dark-header: #1f1f22;

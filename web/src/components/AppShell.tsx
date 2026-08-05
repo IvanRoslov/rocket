@@ -100,12 +100,15 @@ export function AppShell() {
             {awaitingCount > 0 && (
               <span
                 style={{
+                  // Filled amber, not the pale --warn-bg chip: this counter is
+                  // the one thing on the page that says work is blocked on the
+                  // human, and the v3 design gives it the loudest badge.
                   marginLeft: 6,
                   padding: '1px 7px',
                   borderRadius: 999,
-                  background: 'var(--warn-bg)',
-                  color: 'var(--warn-text-2)',
-                  font: '600 11px var(--font-ui)',
+                  background: 'var(--q-amber)',
+                  color: 'var(--surface)',
+                  font: '700 11px var(--font-mono)',
                 }}
               >
                 {awaitingCount}

@@ -34,6 +34,7 @@ import type {
   TaskLogEntry,
   TaskStatus,
   ThreadInboxEntry,
+  ThreadType,
 } from './types'
 
 export interface SessionFilter {
@@ -948,6 +949,110 @@ export function useAnswerAgentQuestion(): UseMutationResult<
     onSuccess: (_data, { roleId }) => {
       queryClient.invalidateQueries({ queryKey: ['agent', roleId, 'questions'] })
       queryClient.invalidateQueries({ queryKey: ['agent', roleId] })
+      queryClient.invalidateQueries({ queryKey: ['threads'] })
+    },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Unified thread actions (the Questions v3 screen)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which subject a thread hangs off. `GET /v1/threads` mixes task threads and
+ * role threads in one list, but the write endpoints stay separate
+ * (`/v1/questions/{id}/…` vs `/v1/agent-questions/{id}/…`), so anything that
+ * acts on an inbox row has to carry the kind with it.
+ */
+export type ThreadRef =
+  | { id: number; kind: 'task'; taskId: number }
+  | { id: number; kind: 'role'; roleId: string }
+
+/** Invalidates everything a write to `ref` can have changed. */
+function invalidateThread(queryClient: QueryClient, ref: ThreadRef): void {
+  if (ref.kind === 'task') {
+    queryClient.invalidateQueries({ queryKey: ['task', ref.taskId, 'questions'] })
+    queryClient.invalidateQueries({ queryKey: ['task', ref.taskId] })
+    queryClient.invalidateQueries({ queryKey: ['questions'] })
+  } else {
+    queryClient.invalidateQueries({ queryKey: ['agent', ref.roleId, 'questions'] })
+    queryClient.invalidateQueries({ queryKey: ['agent', ref.roleId] })
+  }
+  queryClient.invalidateQueries({ queryKey: ['threads'] })
+}
+
+/**
+ * Resolves a thread of either kind. Same three shapes as `useAnswerQuestion`:
+ * a written answer (which may carry addressees), a `dismiss`, or a 1-based
+ * `choose` into `options`.
+ */
+export function useAnswerThread(): UseMutationResult<
+  unknown,
+  Error,
+  { ref: ThreadRef; to?: string[] } & (
+    | { body: string; dismiss?: never; choose?: never }
+    | { dismiss: true; body?: never; choose?: never }
+    | { choose: number; body?: never; dismiss?: never }
+  )
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ ref, body, dismiss, choose, to }) => {
+      const path =
+        ref.kind === 'task' ? `/v1/questions/${ref.id}/answer` : `/v1/agent-questions/${ref.id}/answer`
+      // Dismiss and choose both close the thread outright, so neither carries
+      // addressees — see useAnswerQuestion for the whole story.
+      return api.post(path, dismiss ? { dismiss: true } : choose ? { choose } : withTo({ body }, to))
+    },
+    onSuccess: (_data, { ref }) => invalidateThread(queryClient, ref),
+  })
+}
+
+/** Replies into a thread of either kind, leaving it open. */
+export function useReplyThread(): UseMutationResult<
+  unknown,
+  Error,
+  { ref: ThreadRef; body: string; to?: string[] }
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ ref, body, to }) => {
+      const path =
+        ref.kind === 'task' ? `/v1/questions/${ref.id}/reply` : `/v1/agent-questions/${ref.id}/reply`
+      return api.post(path, withTo({ body }, to))
+    },
+    onSuccess: (_data, { ref }) => invalidateThread(queryClient, ref),
+  })
+}
+
+/** Who a new thread can be opened on: a task's orchestrator, or an agent. */
+export type AskTarget = { kind: 'task'; id: number } | { kind: 'role'; id: string }
+
+/**
+ * Opens a thread FROM the dashboard user. `type: 'fyi'` posts a note instead
+ * of a question: the daemon is born it resolved, so it waits on nobody and
+ * never enters the queue or the counters. An absent `type` means `decision`.
+ */
+export function useAskThread(): UseMutationResult<
+  unknown,
+  Error,
+  { target: AskTarget; body: string; type?: ThreadType }
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ target, body, type }) => {
+      const path =
+        target.kind === 'task' ? `/v1/tasks/${target.id}/questions` : `/v1/agents/${target.id}/questions`
+      return api.post(path, type ? { body, type } : { body })
+    },
+    onSuccess: (_data, { target }) => {
+      if (target.kind === 'task') {
+        queryClient.invalidateQueries({ queryKey: ['task', target.id, 'questions'] })
+        queryClient.invalidateQueries({ queryKey: ['task', target.id] })
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['agent', target.id, 'questions'] })
+        queryClient.invalidateQueries({ queryKey: ['agent', target.id] })
+      }
       queryClient.invalidateQueries({ queryKey: ['threads'] })
     },
   })
