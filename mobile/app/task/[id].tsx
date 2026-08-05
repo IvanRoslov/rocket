@@ -52,7 +52,7 @@ import { colors, mono, radius } from '../../src/theme'
 
 const STATUS_BADGE: Record<TaskStatus, { label: string; fg: string; bg: string }> = {
   backlog: { label: 'Backlog', fg: colors.slateFg, bg: colors.slateBg },
-  brainstorm: { label: 'Brainstorm', fg: colors.slateFg, bg: colors.slateBg },
+  brainstorm: { label: 'Brainstorm', fg: colors.amberFg, bg: colors.amberBg },
   in_progress: { label: 'In Progress', fg: colors.indigoFg, bg: colors.indigoBg },
   review: { label: 'Review', fg: colors.purpleFg, bg: colors.purpleBg },
   done: { label: 'Done', fg: colors.greenFg, bg: colors.greenBg },

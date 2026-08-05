@@ -20,7 +20,7 @@ const COLUMNS: { key: TaskStatus; title: string; dot: string }[] = [
   { key: 'backlog', title: 'Backlog', dot: colors.textFaint },
   // Task #1077: no automation puts a milestone here, but a human can, so the
   // column has to exist or such a milestone would be invisible on this board.
-  { key: 'brainstorm', title: 'Brainstorm', dot: colors.slate },
+  { key: 'brainstorm', title: 'Brainstorm', dot: colors.amber },
   { key: 'in_progress', title: 'In Progress', dot: colors.accent },
   { key: 'review', title: 'Review', dot: colors.purple },
   { key: 'done', title: 'Done', dot: colors.green },

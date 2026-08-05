@@ -53,7 +53,7 @@ function ProjectCard({ project, tasks }: { project: Project; tasks: Task[] }) {
         </View>
         <View style={styles.statsRow}>
           {brainstorm > 0 ? (
-            <Badge label={`${brainstorm} brainstorm`} fg={colors.slateFg} bg={colors.slateBg} />
+            <Badge label={`${brainstorm} brainstorm`} fg={colors.amberFg} bg={colors.amberBg} />
           ) : null}
           {inProgress > 0 ? (
             <Badge label={`${inProgress} in progress`} fg={colors.indigoFg} bg={colors.indigoBg} />
