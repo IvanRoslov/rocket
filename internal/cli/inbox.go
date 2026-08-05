@@ -193,9 +193,11 @@ func firstLine(body string) string {
 	if i := strings.IndexByte(line, '\n'); i >= 0 {
 		line = line[:i]
 	}
+	// Counted in runes, not bytes: a Cyrillic question cut at byte 72 lands
+	// mid-character and renders as garbage.
 	const max = 72
-	if len(line) > max {
-		line = line[:max] + "…"
+	if r := []rune(line); len(r) > max {
+		line = string(r[:max]) + "…"
 	}
 	return line
 }
