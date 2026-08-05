@@ -76,6 +76,9 @@ type questionResponse struct {
 	AskedAt    int64                     `json:"asked_at"`
 	ResolvedAt int64                     `json:"resolved_at,omitempty"`
 	Messages   []questionMessageResponse `json:"messages"`
+	// Echo confirms the target a WRITE landed in; reads leave it empty. It is
+	// what makes a misaddressed reply visible at once instead of hours later.
+	Echo string `json:"echo,omitempty"`
 }
 
 // dryRunQuestionResponse is what a dry-run write returns: the thread as it
@@ -627,6 +630,7 @@ func handlePostQuestionReply(w http.ResponseWriter, r *http.Request, d Deps) {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
+	resp.Echo = threadEcho(subj, ordinal, q.Body, task.Title)
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -785,5 +789,6 @@ func handlePostQuestionAnswer(w http.ResponseWriter, r *http.Request, d Deps) {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
+	resp.Echo = threadEcho(subj, ordinal, q.Body, task.Title)
 	writeJSON(w, http.StatusOK, resp)
 }
