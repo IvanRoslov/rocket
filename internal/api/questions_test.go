@@ -223,7 +223,7 @@ func TestPostTaskQuestions_HumanOpensThreadToOrchestrator(t *testing.T) {
 		t.Errorf("Messages = %+v, want empty", q.Messages)
 	}
 
-	wantPrefix := "[task #" + itoa(taskID) + " Q1 question from human] What's the status?"
+	wantPrefix := "[#" + itoa(taskID) + "/Q1 question from human] What's the status?"
 	msgs, err := d.Store.ListMessages("orch-1", 10)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
@@ -247,7 +247,7 @@ func TestPostTaskQuestions_HumanOpensThreadWithContext(t *testing.T) {
 		t.Fatalf("status = %d, want 201", resp.StatusCode)
 	}
 
-	wantBody := "[task #" + itoa(taskID) + " Q1 question from human] What's the status?\n\nextra info"
+	wantBody := "[#" + itoa(taskID) + "/Q1 question from human] What's the status?\n\nextra info"
 	msgs, err := d.Store.ListMessages("orch-1", 10)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
@@ -442,7 +442,7 @@ func TestQuestionThread_FullLifecycle(t *testing.T) {
 		t.Fatalf("messages after user reply = %+v", afterUserReply.Messages)
 	}
 
-	wantUserReplyPrefix := "[task #" + itoa(taskID) + " Q1 reply from human] consider X"
+	wantUserReplyPrefix := "[#" + itoa(taskID) + "/Q1 reply from human] consider X"
 	msgs, err := d.Store.ListMessages("orch-1", 10)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
@@ -487,7 +487,7 @@ func TestQuestionThread_FullLifecycle(t *testing.T) {
 		t.Fatalf("after answer: WhoseTurn = %q, want empty (resolved)", afterAnswer.WhoseTurn)
 	}
 
-	wantAnswerPrefix := "[task #" + itoa(taskID) + " Q1 answer from human] final: use X"
+	wantAnswerPrefix := "[#" + itoa(taskID) + "/Q1 answer from human] final: use X"
 	msgsAfterAnswer, err := d.Store.ListMessages("orch-1", 10)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
@@ -600,6 +600,76 @@ func TestQuestionAnswer_Dismiss_NoDeliveryNoMessageRow(t *testing.T) {
 	}
 	if len(msgs) != 0 {
 		t.Errorf("delivered messages = %+v, want none", msgs)
+	}
+}
+
+// TestQuestionWrite_EchoesTheTarget: a real write confirms where it landed,
+// not only a rehearsal. Echoing on dry-run alone would leave the write that
+// actually matters — the one that already happened — unconfirmed (task #1023,
+// spec v1 §«Подтверждение цели»).
+func TestQuestionWrite_EchoesTheTarget(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	askResp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
+		map[string]any{"body": "Какой подход?"})
+	q := decodeQuestion(t, askResp)
+	askResp.Body.Close()
+
+	wantEcho := "→ " + itoa(taskID) + "/Q1 «Какой подход?» (task #" + itoa(taskID) + " \"Root\")"
+
+	reply := postJSON(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/reply", map[string]any{"body": "уточняю"})
+	defer reply.Body.Close()
+	if got := decodeQuestion(t, reply); got.Echo != wantEcho {
+		t.Errorf("reply echo = %q, want %q", got.Echo, wantEcho)
+	}
+
+	answer := postJSON(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/answer", map[string]any{"body": "берём A"})
+	defer answer.Body.Close()
+	if got := decodeQuestion(t, answer); got.Echo != wantEcho {
+		t.Errorf("answer echo = %q, want %q", got.Echo, wantEcho)
+	}
+}
+
+// TestQuestionAnswer_DismissWithReasonIsRecordedAndDelivered: "close --dismiss
+// <почему>" (task #1023, spec v1 §«Глаголы») must not swallow the reason. A
+// bare dismiss stays silent as before; a dismiss WITH a reason records it in
+// the thread and tells the participants, since otherwise the orchestrator
+// waiting on that thread never learns why it died.
+func TestQuestionAnswer_DismissWithReasonIsRecordedAndDelivered(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	askResp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1", map[string]any{"body": "Q"})
+	q := decodeQuestion(t, askResp)
+	askResp.Body.Close()
+
+	resp := postJSON(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/answer",
+		map[string]any{"dismiss": true, "body": "уже решили в чате"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	got := decodeQuestion(t, resp)
+	if got.Status != "resolved" || got.Resolution != "dismissed" {
+		t.Fatalf("got status=%q resolution=%q, want resolved/dismissed", got.Status, got.Resolution)
+	}
+	if len(got.Messages) != 1 || got.Messages[0].Body != "уже решили в чате" {
+		t.Fatalf("Messages = %+v, want the reason recorded in the thread", got.Messages)
+	}
+	if got.Messages[0].Kind != "dismiss" {
+		t.Errorf("kind = %q, want dismiss — it is not an answer to the question",
+			got.Messages[0].Kind)
+	}
+
+	msgs, err := d.Store.ListMessages("orch-1", 10)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 1 || !strings.Contains(msgs[0].Body, "уже решили в чате") {
+		t.Errorf("delivered = %+v, want the reason delivered to the orchestrator", msgs)
 	}
 }
 
@@ -1059,7 +1129,7 @@ func TestQuestionThread_OrchestratorAsksAgentAnswers(t *testing.T) {
 	if len(orchMsgs) == 0 {
 		t.Fatal("the orchestrator was not notified of cto's reply")
 	}
-	want := "[task #" + itoa(taskID) + " Q1 reply from cto] One question first."
+	want := "[#" + itoa(taskID) + "/Q1 reply from cto] One question first."
 	if last := orchMsgs[len(orchMsgs)-1].Body; last != want {
 		t.Errorf("orchestrator body = %q, want %q", last, want)
 	}

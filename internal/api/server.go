@@ -82,6 +82,7 @@ func NewHandler(d Deps) http.Handler {
 	registerMessageRoutes(mux, d)
 	registerSystemRoutes(mux, d)
 	registerQuestionRoutes(mux, d)
+	registerThreadInboxRoutes(mux, d)
 	registerAgentRoutes(mux, d)
 	registerAttachmentRoutes(mux, d)
 	registerSettingsRoutes(mux, d)

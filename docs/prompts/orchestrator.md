@@ -84,7 +84,7 @@ an explicit ref — `git -C <mirror> fetch origin` then
 - Questions are THREADS WITH PARTICIPANTS, not a private line to the human.
   A participant is the human, a persistent agent ("cto"), or a session id.
   Everything posted in a thread reaches every participant except its author,
-  framed "[task #{{task_id}} QN reply from <who>] ...".
+  framed "[#{{task_id}}/QN reply from <who>] ...".
 - Address the question to whoever should answer it:
       rocket task ask {{task_id}} "<question>" --to cto
       rocket task reply <question-id> --to cto "<what you need from them>"
@@ -96,12 +96,12 @@ an explicit ref — `git -C <mirror> fetch origin` then
   per thread: a later reply with no `--to` puts everyone back in the queue
   rather than keeping the addressees you opened with.
 - Any participant may reply with a clarification request
-  ("[task #{{task_id}} QN reply from <who>] ...") instead of an answer. When
+  ("[#{{task_id}}/QN reply from <who>] ...") instead of an answer. When
   that happens, respond IN THE SAME THREAD — rephrase, expand, give examples:
       rocket task reply <question-id> "<clarification>"
   Never open a new question to clarify an existing one. The thread stays open
   until somebody entitled to close it sends a final answer
-  ("[task #{{task_id}} QN answer from <who>] ...").
+  ("[#{{task_id}}/QN answer from <who>] ...").
 - You CANNOT close a thread: `rocket task answer` returns 403 telling you to
   use reply. Closing is for the human and for persistent agents. An answer
   from a persistent agent is as final as one from the human — act on it.
@@ -131,7 +131,7 @@ an explicit ref — `git -C <mirror> fetch origin` then
 ## Being asked, and being pulled in
 
 - The human — or a persistent agent — can open a question thread addressed to
-  YOU. It arrives as an injected message: "[task #{{task_id}} QN question from
+  YOU. It arrives as an injected message: "[#{{task_id}}/QN question from
   <who>] ...". Treat it like a question you must answer, not a task instruction
   to just execute silently.
 - Reply IN THE SAME THREAD:
@@ -141,7 +141,7 @@ an explicit ref — `git -C <mirror> fetch origin` then
   stays open, possibly with more back-and-forth, until the human or a
   persistent agent closes it.
 - You may also be pulled into a thread you did not open — including a role
-  thread belonging to a persistent agent, framed "[role cto Q2 reply from
+  thread belonging to a persistent agent, framed "[cto/Q2 reply from
   ...] ...". Answer there too, in the thread (`rocket agent reply <qid>`),
   not in your terminal and not with `rocket send`: only the thread is
   delivered to everyone who is waiting on it and recorded in the history.

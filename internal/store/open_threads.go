@@ -20,62 +20,42 @@ type OpenThread struct {
 	Attention []string
 }
 
-// ListOpenThreads returns every open thread bound to a task or a role,
-// ascending by question id, in two queries regardless of how many threads
-// there are — the aggregate the board, task list and agent list all annotate
-// from.
+// ListOpenThreads returns every OPEN thread bound to a task or a role — the
+// aggregate the board, task list and agent list all annotate from.
 func (s *Store) ListOpenThreads() ([]OpenThread, error) {
+	return s.ListThreads(false)
+}
+
+// ListThreads returns every thread bound to a task or a role, ascending by
+// question id, in a fixed number of queries regardless of how many threads
+// there are. includeResolved widens the listing to closed threads, which the
+// unified inbox needs for "rocket questions --all"; a closed thread carries no
+// attention, so its set comes back empty either way.
+func (s *Store) ListThreads(includeResolved bool) ([]OpenThread, error) {
+	// One status predicate, spelled once and reused by every query below, so a
+	// widened listing can never disagree with its own participant rows.
+	statusFilter := "q.status = 'open'"
+	if includeResolved {
+		statusFilter = "1 = 1"
+	}
+
 	rows, err := s.db.Query(`
-		SELECT q.id, q.task_id, q.role_id, q.asked_by, q.body, q.context,
-		       q.status, q.resolution, q.type, q.asked_at, q.resolved_at,
-		       m.id, m.author, m.kind, m.body, m.addressed_to, m.created_at
+		SELECT ` + questionColumns + `
 		FROM questions q
-		LEFT JOIN question_messages m
-			ON m.question_id = q.id
-			AND m.id = (SELECT MAX(id) FROM question_messages WHERE question_id = q.id)
-		WHERE q.status = 'open' AND (q.task_id IS NOT NULL OR q.role_id IS NOT NULL)
+		WHERE ` + statusFilter + ` AND (q.task_id IS NOT NULL OR q.role_id IS NOT NULL)
 		ORDER BY q.id`)
 	if err != nil {
-		return nil, fmt.Errorf("query open threads: %w", err)
+		return nil, fmt.Errorf("query threads: %w", err)
 	}
 	defer rows.Close()
 
 	var out []OpenThread
 	for rows.Next() {
-		var (
-			q                         Question
-			roleID, context, resolutn sql.NullString
-			taskID, resolvedAt        sql.NullInt64
-			msgID, msgCreatedAt       sql.NullInt64
-			msgAuthor, msgKind        sql.NullString
-			msgBody, msgAddressedTo   sql.NullString
-		)
-		if err := rows.Scan(
-			&q.ID, &taskID, &roleID, &q.AskedBy, &q.Body, &context,
-			&q.Status, &resolutn, &q.Type, &q.AskedAt, &resolvedAt,
-			&msgID, &msgAuthor, &msgKind, &msgBody, &msgAddressedTo, &msgCreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan open thread: %w", err)
+		q, err := scanQuestion(rows)
+		if err != nil {
+			return nil, err
 		}
-		q.TaskID = taskID.Int64
-		q.RoleID = roleID.String
-		q.Context = context.String
-		q.Resolution = resolutn.String
-		q.ResolvedAt = resolvedAt.Int64
-
-		th := OpenThread{Question: q}
-		if msgID.Valid {
-			th.LastMessage = &QuestionMessage{
-				ID:          msgID.Int64,
-				QuestionID:  q.ID,
-				Author:      canonicalParticipant(msgAuthor.String),
-				Kind:        msgKind.String,
-				Body:        msgBody.String,
-				AddressedTo: decodeAddressedTo(msgAddressedTo.String),
-				CreatedAt:   msgCreatedAt.Int64,
-			}
-		}
-		out = append(out, th)
+		out = append(out, OpenThread{Question: q})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -84,7 +64,11 @@ func (s *Store) ListOpenThreads() ([]OpenThread, error) {
 		return nil, nil
 	}
 
-	parts, err := s.participantsOfOpenThreads()
+	last, err := s.lastMessagesOfThreads(statusFilter)
+	if err != nil {
+		return nil, err
+	}
+	parts, err := s.participantsOfThreads(statusFilter)
 	if err != nil {
 		return nil, err
 	}
@@ -93,23 +77,101 @@ func (s *Store) ListOpenThreads() ([]OpenThread, error) {
 		return nil, err
 	}
 	for i := range out {
-		out[i].Participants = parts[out[i].Question.ID]
-		out[i].Attention = attention[out[i].Question.ID]
+		id := out[i].Question.ID
+		out[i].LastMessage = last[id]
+		out[i].Participants = parts[id]
+		out[i].Attention = attention[id]
 	}
 	return out, nil
 }
 
-// participantsOfOpenThreads returns the participant ids of every open thread,
-// keyed by question id and sorted within each thread, matching ListParticipants.
-func (s *Store) participantsOfOpenThreads() (map[int64][]string, error) {
+// ThreadOrdinals returns the per-subject 1-based ordinal of every thread,
+// keyed by question id — the number a local ref like "1023/Q2" or "cto/Q1" is
+// built from. It exists so a listing can label N threads without asking the
+// database N times: an ordinal is just the row's position among the threads of
+// its own subject, which one ordered pass computes for all of them at once.
+// Resolved threads count too, exactly as QuestionOrdinal counts them, so a
+// thread's ref never changes when a neighbour closes.
+func (s *Store) ThreadOrdinals() (map[int64]int, error) {
+	rows, err := s.db.Query(`
+		SELECT id, COALESCE(task_id, 0), COALESCE(role_id, '')
+		FROM questions
+		WHERE task_id IS NOT NULL OR role_id IS NOT NULL
+		ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("query thread ordinals: %w", err)
+	}
+	defer rows.Close()
+
+	type subject struct {
+		taskID int64
+		roleID string
+	}
+	seen := make(map[subject]int)
+	out := make(map[int64]int)
+	for rows.Next() {
+		var id, taskID int64
+		var roleID string
+		if err := rows.Scan(&id, &taskID, &roleID); err != nil {
+			return nil, fmt.Errorf("scan thread ordinal: %w", err)
+		}
+		subj := subject{taskID: taskID, roleID: roleID}
+		seen[subj]++
+		out[id] = seen[subj]
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// lastMessagesOfThreads returns the newest message of every thread matching
+// statusFilter, keyed by question id. Threads that nobody has spoken in yet are
+// simply absent from the map.
+func (s *Store) lastMessagesOfThreads(statusFilter string) (map[int64]*QuestionMessage, error) {
+	rows, err := s.db.Query(`
+		SELECT m.id, m.question_id, m.author, m.kind, m.body, m.addressed_to, m.created_at
+		FROM question_messages m
+		JOIN questions q ON q.id = m.question_id
+		WHERE ` + statusFilter + `
+			AND m.id = (SELECT MAX(id) FROM question_messages WHERE question_id = q.id)`)
+	if err != nil {
+		return nil, fmt.Errorf("query thread last messages: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[int64]*QuestionMessage)
+	for rows.Next() {
+		var m QuestionMessage
+		var author, kind, body, addressedTo sql.NullString
+		if err := rows.Scan(&m.ID, &m.QuestionID, &author, &kind, &body,
+			&addressedTo, &m.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan thread last message: %w", err)
+		}
+		m.Author = canonicalParticipant(author.String)
+		m.Kind = kind.String
+		m.Body = body.String
+		m.AddressedTo = decodeAddressedTo(addressedTo.String)
+		out[m.QuestionID] = &m
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// participantsOfThreads returns the participant ids of every thread matching
+// statusFilter, keyed by question id and sorted within each thread, matching
+// ListParticipants.
+func (s *Store) participantsOfThreads(statusFilter string) (map[int64][]string, error) {
 	rows, err := s.db.Query(`
 		SELECT p.question_id, p.participant_id
 		FROM question_participants p
 		JOIN questions q ON q.id = p.question_id
-		WHERE q.status = 'open'
+		WHERE ` + statusFilter + `
 		ORDER BY p.question_id, p.participant_id`)
 	if err != nil {
-		return nil, fmt.Errorf("query open thread participants: %w", err)
+		return nil, fmt.Errorf("query thread participants: %w", err)
 	}
 	defer rows.Close()
 
@@ -118,7 +180,7 @@ func (s *Store) participantsOfOpenThreads() (map[int64][]string, error) {
 		var qid int64
 		var id string
 		if err := rows.Scan(&qid, &id); err != nil {
-			return nil, fmt.Errorf("scan open thread participant: %w", err)
+			return nil, fmt.Errorf("scan thread participant: %w", err)
 		}
 		out[qid] = append(out[qid], id)
 	}

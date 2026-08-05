@@ -26,7 +26,10 @@ func TestAgentQuestionCommandUsageErrors(t *testing.T) {
 		{"answer without args", ctor(newAgentAnswerCmd), []string{}},
 		{"answer with invalid id", ctor(newAgentAnswerCmd), []string{"nope", "text"}},
 		{"answer without body or dismiss", ctor(newAgentAnswerCmd), []string{"7"}},
-		{"answer with body and dismiss", ctor(newAgentAnswerCmd), []string{"7", "text", "--dismiss"}},
+		// --dismiss may carry a reason since task #1023; naming TWO resolutions
+		// at once is what stays ambiguous.
+		{"close with choose and body", ctor(newAgentCloseCmd0), []string{"7", "text", "--choose", "1"}},
+		{"close with choose and dismiss", ctor(newAgentCloseCmd0), []string{"7", "--dismiss", "--choose", "1"}},
 	}
 
 	for _, tc := range cases {
@@ -92,7 +95,7 @@ func TestRenderAgentQuestionsThread(t *testing.T) {
 	out := renderAgentQuestions("sre", qs)
 	for _, want := range []string{
 		"agent sre",
-		"Q1 (#7) [open] → ждут: human",
+		"sre/Q1 [open] → ждут: human",
 		"нужно решение",
 		"context: детали",
 		"  участники: human, sre",
@@ -210,8 +213,8 @@ func TestAgentWritingCommandsFileFlag(t *testing.T) {
 		{"ask neither", newAgentAskCmd, []string{"sre"}},
 		{"reply both", newAgentReplyCmd, []string{"sre/Q1", "text", "--file", body}},
 		{"reply neither", newAgentReplyCmd, []string{"sre/Q1"}},
-		{"answer both", newAgentAnswerCmd, []string{"sre/Q1", "text", "--file", body}},
-		{"answer file plus dismiss", newAgentAnswerCmd, []string{"sre/Q1", "--dismiss", "--file", body}},
+
+		{"close both", newAgentCloseCmd0, []string{"sre/Q1", "text", "--file", body}},
 	}
 
 	for _, tc := range cases {

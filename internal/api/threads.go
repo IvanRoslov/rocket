@@ -292,15 +292,23 @@ func chooseOptionBody(w http.ResponseWriter, q store.Question, choose int, body 
 
 // threadPrefix renders the frame every delivered thread entry carries, so a
 // recipient can tell a thread message from a plain one and see at a glance
-// which thread, which entry and which author it came from. Spec v1 §4 keeps
-// the pre-participant shapes and appends " from <id>" — uniformly, including
-// a human author: with several participants the frame is the only place the
-// author is named.
+// which thread, which entry and which author it came from. The author is named
+// uniformly, including a human one: with several participants the frame is the
+// only place it appears.
+//
+// The thread is named by its LOCAL ref — `[#1023/Q2 …]`, `[cto/Q1 …]` — which
+// is exactly the string the recipient types back into reply/close. The earlier
+// frame spelled the same thread differently from the id it accepted, and an
+// agent reconstructing "task #1023 Q2" as a global id replied into somebody
+// else's thread.
 func threadPrefix(subj threadSubject, ordinal int, kind, author string) string {
-	if subj.RoleID != "" {
-		return fmt.Sprintf("[role %s Q%d %s from %s]", subj.RoleID, ordinal, kind, author)
+	ref := threadLocalRef(subj, ordinal)
+	if subj.RoleID == "" {
+		// A task ref is spelled "#1023/Q2" here: the "#" reads as "task" and
+		// keeps a bare number from looking like part of the surrounding text.
+		ref = "#" + ref
 	}
-	return fmt.Sprintf("[task #%d Q%d %s from %s]", subj.TaskID, ordinal, kind, author)
+	return fmt.Sprintf("[%s %s from %s]", ref, kind, author)
 }
 
 // participantFanOut delivers one thread entry to every participant except its

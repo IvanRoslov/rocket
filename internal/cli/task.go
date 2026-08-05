@@ -135,13 +135,24 @@ type questionRow struct {
 	// subset expected to speak next; YourTurn says whether this CLI's caller
 	// is one of them. WhoseTurn is the pre-participant field the CLI no longer
 	// prints but keeps on the wire for web and mobile — subtask #736 retires it.
-	Participants []string             `json:"participants,omitempty"`
-	WaitingOn    []string             `json:"waiting_on,omitempty"`
-	YourTurn     bool                 `json:"your_turn,omitempty"`
-	WhoseTurn    string               `json:"whose_turn,omitempty"`
-	AskedAt      int64                `json:"asked_at"`
-	ResolvedAt   int64                `json:"resolved_at,omitempty"`
-	Messages     []questionMessageRow `json:"messages"`
+	Participants []string `json:"participants,omitempty"`
+	WaitingOn    []string `json:"waiting_on,omitempty"`
+	YourTurn     bool     `json:"your_turn,omitempty"`
+	WhoseTurn    string   `json:"whose_turn,omitempty"`
+	// Attention is WaitingOn under its stored name (task #1023); Type is
+	// decision|fyi; Options are the answer choices --choose picks from;
+	// LocalRef is the one id printed and typed back, e.g. "1023/Q2".
+	Attention  []string             `json:"attention,omitempty"`
+	Type       string               `json:"type,omitempty"`
+	Options    []string             `json:"options,omitempty"`
+	LocalRef   string               `json:"local_ref,omitempty"`
+	AskedAt    int64                `json:"asked_at"`
+	ResolvedAt int64                `json:"resolved_at,omitempty"`
+	Messages   []questionMessageRow `json:"messages"`
+	// Echo is the target confirmation a write returns; DryRun marks a write
+	// that was only rehearsed. Both are absent on a read.
+	Echo   string `json:"echo,omitempty"`
+	DryRun bool   `json:"dry_run,omitempty"`
 }
 
 // parseTo normalises --to values into participant ids. The flag is both
@@ -196,6 +207,7 @@ func newTaskCmd() *cobra.Command {
 	cmd.AddCommand(newTaskAskOrchCmd())
 	cmd.AddCommand(newTaskQuestionsCmd())
 	cmd.AddCommand(newTaskReplyCmd())
+	cmd.AddCommand(newTaskCloseCmd(false))
 	cmd.AddCommand(newTaskAnswerCmd())
 	return cmd
 }
@@ -715,8 +727,10 @@ func newTaskAskCmd() *cobra.Command {
 	var context string
 	var to []string
 	var file string
+	var options []string
+	var fyi bool
 
-	const usage = "usage: rocket task ask <task-id> \"<вопрос>\" | --file <path> [--context <md>] [--to <id,...>]"
+	const usage = "usage: rocket task ask <task-id> \"<вопрос>\" | --file <path> [--context <md>] [--to <id,...>] [--option <текст>]... [--fyi]"
 
 	cmd := &cobra.Command{
 		Use:   "ask <task-id> [\"<вопрос>\"]",
@@ -727,6 +741,9 @@ func newTaskAskCmd() *cobra.Command {
 			}
 			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
 				return &usageError{message: "invalid task id"}
+			}
+			if err := validateAskFlags(options, fyi, usage); err != nil {
+				return err
 			}
 
 			body, err := textBody(cmd, argAt(args, 1), len(args) == 2, file, usage)
@@ -743,11 +760,7 @@ func newTaskAskCmd() *cobra.Command {
 				return err
 			}
 
-			reqBody := map[string]any{"body": body}
-			if context != "" {
-				reqBody["context"] = context
-			}
-			setTo(reqBody, parseTo(to))
+			reqBody := askRequestBody(body, context, parseTo(to), options, fyi)
 
 			path := apiPath("v1", "tasks", args[0], "questions")
 			var resp questionRow
@@ -758,13 +771,15 @@ func newTaskAskCmd() *cobra.Command {
 			if flags.JSON {
 				return printJSON(cmd, resp)
 			}
-			cmd.Printf("question Q%d (#%d) opened\n", resp.Ordinal, resp.ID)
+			cmd.Printf("тред %s открыт\n", resp.ref())
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&context, "context", "", "дополнительный контекст (MD)")
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
 	cmd.Flags().StringVar(&file, "file", "", "файл с вопросом ('-' — stdin)")
+	cmd.Flags().StringArrayVar(&options, "option", nil, optionFlagUsage)
+	cmd.Flags().BoolVar(&fyi, "fyi", false, fyiFlagUsage)
 	return cmd
 }
 
@@ -778,8 +793,10 @@ func newTaskAskOrchCmd() *cobra.Command {
 	var context string
 	var to []string
 	var file string
+	var options []string
+	var fyi bool
 
-	const usage = "usage: rocket task ask-orch <task-id> \"<вопрос>\" | --file <path> [--context <md>] [--to <id,...>]"
+	const usage = "usage: rocket task ask-orch <task-id> \"<вопрос>\" | --file <path> [--context <md>] [--to <id,...>] [--option <текст>]... [--fyi]"
 
 	cmd := &cobra.Command{
 		Use:   "ask-orch <task-id> [\"<вопрос>\"]",
@@ -790,6 +807,9 @@ func newTaskAskOrchCmd() *cobra.Command {
 			}
 			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
 				return &usageError{message: "invalid task id"}
+			}
+			if err := validateAskFlags(options, fyi, usage); err != nil {
+				return err
 			}
 
 			body, err := textBody(cmd, argAt(args, 1), len(args) == 2, file, usage)
@@ -802,11 +822,7 @@ func newTaskAskOrchCmd() *cobra.Command {
 				return err
 			}
 
-			reqBody := map[string]any{"body": body}
-			if context != "" {
-				reqBody["context"] = context
-			}
-			setTo(reqBody, parseTo(to))
+			reqBody := askRequestBody(body, context, parseTo(to), options, fyi)
 
 			path := apiPath("v1", "tasks", args[0], "questions")
 			var resp questionRow
@@ -817,13 +833,15 @@ func newTaskAskOrchCmd() *cobra.Command {
 			if flags.JSON {
 				return printJSON(cmd, resp)
 			}
-			cmd.Printf("question Q%d (#%d) opened for the orchestrator\n", resp.Ordinal, resp.ID)
+			cmd.Printf("тред %s открыт для оркестратора\n", resp.ref())
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&context, "context", "", "дополнительный контекст (MD)")
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
 	cmd.Flags().StringVar(&file, "file", "", "файл с вопросом ('-' — stdin)")
+	cmd.Flags().StringArrayVar(&options, "option", nil, optionFlagUsage)
+	cmd.Flags().BoolVar(&fyi, "fyi", false, fyiFlagUsage)
 	return cmd
 }
 
@@ -924,14 +942,15 @@ func newTaskQuestionsCmd() *cobra.Command {
 }
 
 func newTaskReplyCmd() *cobra.Command {
-	var to []string
+	var opts threadReplyOptions
 	var taskFlag int64
 	var file string
 
-	const usage = "usage: rocket task reply <question-id>|<task-id>/Q<n> \"<текст>\" | --file <path> [--task <task-id>] [--to <id,...>]"
+	const usage = "usage: rocket task reply <task-id>/Q<n>|<question-id> \"<текст>\" | --file <path> " +
+		"[--task <task-id>] [--to <id,...>] [--dry-run] [--join]"
 
 	cmd := &cobra.Command{
-		Use:   "reply <question-id>|<task-id>/Q<n> [\"<текст>\"]",
+		Use:   "reply <task-id>/Q<n>|<question-id> [\"<текст>\"]",
 		Short: "Ответить в тред вопроса",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) < 1 || len(args) > 2 {
@@ -951,58 +970,67 @@ func newTaskReplyCmd() *cobra.Command {
 				return err
 			}
 
-			reqBody := map[string]any{"body": body}
-			setTo(reqBody, parseTo(to))
-			path := apiPath("v1", "questions", id, "reply")
+			opts.body = body
+			opts.to = parseTo(opts.to)
 			var resp questionRow
-			if err := c.Post(path, reqBody, &resp); err != nil {
+			if err := c.Post(apiPath("v1", "questions", id, "reply"), opts.requestBody(), &resp); err != nil {
 				return err
 			}
 
 			if flags.JSON {
 				return printJSON(cmd, resp)
 			}
-			cmd.Printf("reply added to Q%d (#%d)\n", resp.Ordinal, resp.ID)
+			cmd.Print(renderWriteResult("реплика добавлена в", resp))
 			return nil
 		},
 	}
-	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
+	cmd.Flags().StringSliceVar(&opts.to, "to", nil, toFlagUsage)
 	cmd.Flags().Int64Var(&taskFlag, "task", 0, taskFlagUsage)
 	cmd.Flags().StringVar(&file, "file", "", "файл с текстом ('-' — stdin)")
+	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", false, dryRunFlagUsage)
+	cmd.Flags().BoolVar(&opts.join, "join", false, joinFlagUsage)
 	return cmd
 }
 
-func newTaskAnswerCmd() *cobra.Command {
-	var dismiss bool
-	var to []string
+// newTaskCloseCmd builds "rocket task close": the one verb that ends a thread,
+// with an answer, with a choice among its options, or as no longer relevant.
+// It replaced "answer" plus its --dismiss flag, which spelled one act two ways.
+func newTaskCloseCmd(hidden bool) *cobra.Command {
+	var opts threadCloseOptions
 	var taskFlag int64
 	var file string
 
-	const usageMsg = "usage: rocket task answer <question-id>|<task-id>/Q<n> \"<ответ>\" | --file <path> | --dismiss (exactly one)"
+	name := "close"
+	if hidden {
+		// The pre-#1023 name, kept working for the scripts and prompts that
+		// still say it, but out of the help so only one verb is taught.
+		name = "answer"
+	}
+
+	usage := "usage: rocket task " + name + " <task-id>/Q<n>|<question-id> \"<резолюция>\" | --file <path> | " +
+		"--choose <n> | --dismiss [\"<почему>\"] (ровно одно) [--task <task-id>] [--to <id,...>] [--dry-run] [--join]"
 
 	cmd := &cobra.Command{
-		Use:   "answer <question-id>|<task-id>/Q<n> [\"<ответ>\"]",
-		Short: "Ответить на вопрос или закрыть его без ответа",
+		Use:    name + " <task-id>/Q<n>|<question-id> [\"<резолюция>\"]",
+		Short:  "Закрыть тред: ответом, выбором варианта или как неактуальный",
+		Hidden: hidden,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			usage := &usageError{message: usageMsg}
 			if len(args) < 1 || len(args) > 2 {
-				return usage
+				return &usageError{message: usage}
 			}
 
+			// The text is optional here — --choose and a bare --dismiss carry
+			// no body — so it is only read when one of its sources is present.
 			hasBody := len(args) == 2
-			// --dismiss closes the thread with no answer at all, so it
-			// excludes BOTH body sources, not just the positional one.
-			if dismiss && (hasBody || file != "") {
-				return usage
-			}
-
-			var body string
-			if !dismiss {
-				var err error
-				body, err = textBody(cmd, argAt(args, 1), hasBody, file, usageMsg)
+			if hasBody || file != "" {
+				body, err := textBody(cmd, argAt(args, 1), hasBody, file, usage)
 				if err != nil {
 					return err
 				}
+				opts.body = body
+			}
+			if err := opts.validate(usage); err != nil {
+				return err
 			}
 
 			id, err := resolveQuestionRef(args[0], taskFlag)
@@ -1015,36 +1043,40 @@ func newTaskAnswerCmd() *cobra.Command {
 				return err
 			}
 
-			reqBody := map[string]any{}
-			if dismiss {
-				reqBody["dismiss"] = true
-			} else {
-				reqBody["body"] = body
-			}
-			setTo(reqBody, parseTo(to))
-
-			path := apiPath("v1", "questions", id, "answer")
+			opts.to = parseTo(opts.to)
 			var resp questionRow
-			if err := c.Post(path, reqBody, &resp); err != nil {
+			if err := c.Post(apiPath("v1", "questions", id, "answer"), opts.requestBody(), &resp); err != nil {
 				return err
 			}
 
 			if flags.JSON {
 				return printJSON(cmd, resp)
 			}
-			if dismiss {
-				cmd.Printf("question Q%d (#%d) dismissed\n", resp.Ordinal, resp.ID)
-			} else {
-				cmd.Printf("question Q%d (#%d) answered\n", resp.Ordinal, resp.ID)
-			}
+			cmd.Print(renderWriteResult(closeAction(opts), resp))
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&dismiss, "dismiss", false, "закрыть вопрос без ответа")
-	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
+	cmd.Flags().BoolVar(&opts.dismiss, "dismiss", false, dismissFlagUsage)
+	cmd.Flags().IntVar(&opts.choose, "choose", 0, chooseFlagUsage)
+	cmd.Flags().StringSliceVar(&opts.to, "to", nil, toFlagUsage)
 	cmd.Flags().Int64Var(&taskFlag, "task", 0, taskFlagUsage)
-	cmd.Flags().StringVar(&file, "file", "", "файл с ответом ('-' — stdin)")
+	cmd.Flags().StringVar(&file, "file", "", "файл с резолюцией ('-' — stdin)")
+	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", false, dryRunFlagUsage)
+	cmd.Flags().BoolVar(&opts.join, "join", false, joinFlagUsage)
 	return cmd
+}
+
+// newTaskAnswerCmd is the pre-#1023 name of "task close", kept so the scripts
+// and prompts that still spell it keep working. Same command, hidden from help.
+func newTaskAnswerCmd() *cobra.Command { return newTaskCloseCmd(true) }
+
+// closeAction names what a close did, so the result line reads as the act the
+// user asked for rather than a generic "closed".
+func closeAction(opts threadCloseOptions) string {
+	if opts.dismiss {
+		return "тред закрыт как неактуальный:"
+	}
+	return "тред закрыт:"
 }
 
 // threadTurnArrow renders the header suffix naming who is expected to speak
@@ -1072,6 +1104,41 @@ func threadAuthorLabel(author string) string {
 		return "user"
 	}
 	return author
+}
+
+// threadRef renders the id a thread is printed and typed back under. The
+// server sends it as local_ref; a daemon that predates task #1023 sends none,
+// so it is rebuilt from the scope and the ordinal the CLI already has. Either
+// way the global id no longer appears in human output — a header carrying two
+// numbers at once is what got replies misdelivered.
+func threadRef(localRef, scope string, ordinal int) string {
+	if localRef != "" {
+		return localRef
+	}
+	return fmt.Sprintf("%s/Q%d", scope, ordinal)
+}
+
+// threadStatusLabel renders the bracketed state of a thread. An fyi thread is
+// born resolved, so spelling it "resolved" would hide the one thing that
+// matters about it: nobody has to act on it.
+func threadStatusLabel(status, threadType string) string {
+	if threadType == "fyi" {
+		return "fyi"
+	}
+	return status
+}
+
+// renderThreadOptions writes the answer choices, numbered exactly as
+// "close --choose <n>" indexes them.
+func renderThreadOptions(sb *strings.Builder, options []string) {
+	if len(options) == 0 {
+		return
+	}
+	parts := make([]string, len(options))
+	for i, o := range options {
+		parts[i] = fmt.Sprintf("%d) %s", i+1, o)
+	}
+	fmt.Fprintf(sb, "  варианты: %s\n", strings.Join(parts, "  "))
 }
 
 // renderParticipantsLine writes the thread's participant line, omitted when
@@ -1108,12 +1175,15 @@ func renderQuestions(taskID int64, qs []questionRow) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "task #%d\n", taskID)
 	for _, q := range qs {
-		fmt.Fprintf(&sb, "Q%d (#%d) [%s]%s\n", q.Ordinal, q.ID, q.Status,
+		fmt.Fprintf(&sb, "%s [%s]%s\n",
+			threadRef(q.LocalRef, strconv.FormatInt(taskID, 10), q.Ordinal),
+			threadStatusLabel(q.Status, q.Type),
 			threadTurnArrow(q.WaitingOn, q.YourTurn))
 		fmt.Fprintf(&sb, "  %s\n", q.Body)
 		if q.Context != "" {
 			fmt.Fprintf(&sb, "  context: %s\n", q.Context)
 		}
+		renderThreadOptions(&sb, q.Options)
 		renderParticipantsLine(&sb, q.Participants)
 		for _, m := range q.Messages {
 			renderThreadMessage(&sb, m)

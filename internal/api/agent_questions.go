@@ -41,6 +41,8 @@ type agentQuestionResponse struct {
 	AskedAt    int64                     `json:"asked_at"`
 	ResolvedAt int64                     `json:"resolved_at,omitempty"`
 	Messages   []questionMessageResponse `json:"messages"`
+	// Echo confirms the target a WRITE landed in; reads leave it empty.
+	Echo string `json:"echo,omitempty"`
 }
 
 // dryRunAgentQuestionResponse mirrors dryRunQuestionResponse for role threads.
@@ -162,7 +164,8 @@ func getAgentQuestionOr404(w http.ResponseWriter, d Deps, id int64) (store.Agent
 }
 
 // writeAgentQuestion re-reads the thread and writes it with the given status.
-func writeAgentQuestion(w http.ResponseWriter, d Deps, caller *store.Session, id int64, status int) {
+// echo names the target a write landed in; it is empty for a plain read.
+func writeAgentQuestion(w http.ResponseWriter, d Deps, caller *store.Session, id int64, status int, echo string) {
 	q, ok := getAgentQuestionOr404(w, d, id)
 	if !ok {
 		return
@@ -172,6 +175,7 @@ func writeAgentQuestion(w http.ResponseWriter, d Deps, caller *store.Session, id
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
+	resp.Echo = echo
 	writeJSON(w, status, resp)
 }
 
@@ -321,7 +325,7 @@ func handlePostAgentQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 		"role_id": a.ID, "question_id": qid,
 	})
 
-	writeAgentQuestion(w, d, caller, qid, http.StatusCreated)
+	writeAgentQuestion(w, d, caller, qid, http.StatusCreated, threadEcho(subj, ordinal, req.Body, ""))
 }
 
 type postAgentQuestionReplyRequest struct {
@@ -450,7 +454,7 @@ func handlePostAgentQuestionReply(w http.ResponseWriter, r *http.Request, d Deps
 		"role_id": q.RoleID, "question_id": id,
 	})
 
-	writeAgentQuestion(w, d, caller, id, http.StatusCreated)
+	writeAgentQuestion(w, d, caller, id, http.StatusCreated, threadEcho(subj, ordinal, q.Body, ""))
 }
 
 type postAgentQuestionAnswerRequest struct {
@@ -524,39 +528,36 @@ func handlePostAgentQuestionAnswer(w http.ResponseWriter, r *http.Request, d Dep
 	}
 
 	var resolution string
+	// Same split as the task-thread close: HOW the thread ends, and WHAT is
+	// said while ending it. A dismissal may carry a reason, and when it does it
+	// is recorded and delivered like an answer.
+	kind := "answer"
+	resolution = "answered"
 	if req.Dismiss {
+		kind = "dismiss"
 		resolution = "dismissed"
-		if err := d.Store.ResolveAgentQuestion(id, resolution); err != nil {
-			if errors.Is(err, store.ErrQuestionResolved) {
-				writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
-				return
-			}
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
-		}
-	} else {
-		if req.Body == "" {
-			writeErr(w, http.StatusBadRequest, "empty_body", "body must not be empty")
-			return
-		}
-		resolution = "answered"
+	} else if req.Body == "" {
+		writeErr(w, http.StatusBadRequest, "empty_body", "body must not be empty")
+		return
+	}
 
-		// Resolve first: an already-resolved thread must 409 before anything
-		// is written or delivered.
-		if err := d.Store.ResolveAgentQuestion(id, resolution); err != nil {
-			if errors.Is(err, store.ErrQuestionResolved) {
-				writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
-				return
-			}
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+	// Resolve first: an already-resolved thread must 409 before anything
+	// is written or delivered.
+	if err := d.Store.ResolveAgentQuestion(id, resolution); err != nil {
+		if errors.Is(err, store.ErrQuestionResolved) {
+			writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
 			return
 		}
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
 
+	if req.Body != "" {
 		author := callerParticipant(caller)
 		if _, err := d.Store.AddQuestionMessage(store.QuestionMessage{
 			QuestionID:  id,
 			Author:      author,
-			Kind:        "answer",
+			Kind:        kind,
 			Body:        req.Body,
 			AddressedTo: req.To,
 		}); err != nil {
@@ -574,7 +575,7 @@ func handlePostAgentQuestionAnswer(w http.ResponseWriter, r *http.Request, d Dep
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
-		if err := participantFanOut(d, subj, ordinal, "answer", author, req.Body, recipients); err != nil {
+		if err := participantFanOut(d, subj, ordinal, kind, author, req.Body, recipients); err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
@@ -589,5 +590,5 @@ func handlePostAgentQuestionAnswer(w http.ResponseWriter, r *http.Request, d Dep
 		"role_id": q.RoleID, "question_id": id, "resolution": resolution,
 	})
 
-	writeAgentQuestion(w, d, caller, id, http.StatusOK)
+	writeAgentQuestion(w, d, caller, id, http.StatusOK, threadEcho(subj, ordinal, q.Body, ""))
 }
