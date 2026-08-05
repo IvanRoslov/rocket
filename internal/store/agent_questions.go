@@ -142,7 +142,8 @@ func (s *Store) ResolveAgentQuestion(id int64, resolution string) error {
 // id and ErrQuestionOpen if the question is not resolved.
 func (s *Store) ReopenAgentQuestion(id int64) error {
 	res, err := s.db.Exec(
-		`UPDATE questions SET status = 'open', resolution = '', resolved_at = NULL
+		`UPDATE questions SET status = 'open', resolution = '', resolved_at = NULL,
+		        type = 'decision'
 		 WHERE id = ? AND status = 'resolved'`,
 		id,
 	)

@@ -282,6 +282,11 @@ func TestAgentQuestion_HumanReplyToResolvedIsConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddAgentQuestion: %v", err)
 	}
+	// Every thread the API opens has the human in it; seed that here too, or
+	// the non-participant guard answers before the resolved check does.
+	if err := d.Store.AddParticipants(qid, store.ParticipantHuman, "sre"); err != nil {
+		t.Fatalf("AddParticipants: %v", err)
+	}
 	if err := d.Store.ResolveAgentQuestion(qid, "answered"); err != nil {
 		t.Fatalf("ResolveAgentQuestion: %v", err)
 	}

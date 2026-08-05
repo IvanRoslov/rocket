@@ -1,7 +1,6 @@
 package api
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/IvanRoslov/rocket/internal/session"
@@ -23,78 +22,10 @@ func TestCallerParticipant_HumanIsCanonical(t *testing.T) {
 	}
 }
 
-func TestWaitingOn(t *testing.T) {
-	parts := []string{"cto", "human", "orch-1"}
-
-	tests := []struct {
-		name string
-		q    store.Question
-		msgs []store.QuestionMessage
-		want []string
-	}{
-		{
-			name: "resolved thread waits on nobody",
-			q:    store.Question{Status: "resolved", AskedBy: "orch-1"},
-			msgs: []store.QuestionMessage{{Author: "human"}},
-			want: nil,
-		},
-		{
-			name: "no messages, orchestrator asked: everyone but the asker",
-			q:    store.Question{Status: "open", AskedBy: "orch-1"},
-			want: []string{"cto", "human"},
-		},
-		{
-			name: "no messages, question addressed: exactly its addressees",
-			q: store.Question{
-				Status: "open", AskedBy: "orch-1", AddressedTo: []string{"cto"},
-			},
-			want: []string{"cto"},
-		},
-		{
-			name: "messages override the question's own addressees",
-			q: store.Question{
-				Status: "open", AskedBy: "orch-1", AddressedTo: []string{"cto"},
-			},
-			msgs: []store.QuestionMessage{{Author: "cto"}},
-			want: []string{"human", "orch-1"},
-		},
-		{
-			name: "no messages, human asked (asked_by is empty)",
-			q:    store.Question{Status: "open", AskedBy: ""},
-			want: []string{"cto", "orch-1"},
-		},
-		{
-			name: "last message unaddressed: everyone but its author",
-			q:    store.Question{Status: "open", AskedBy: "orch-1"},
-			msgs: []store.QuestionMessage{{Author: "cto"}},
-			want: []string{"human", "orch-1"},
-		},
-		{
-			name: "last message addressed: exactly its addressees",
-			q:    store.Question{Status: "open", AskedBy: "orch-1"},
-			msgs: []store.QuestionMessage{
-				{Author: "human"},
-				{Author: "cto", AddressedTo: []string{"orch-1"}},
-			},
-			want: []string{"orch-1"},
-		},
-		{
-			name: "human author stored as the legacy empty string",
-			q:    store.Question{Status: "open", AskedBy: "orch-1"},
-			msgs: []store.QuestionMessage{{Author: ""}},
-			want: []string{"cto", "orch-1"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := waitingOn(tt.q, tt.msgs, parts)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("waitingOn = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
+// The old TestWaitingOn covered the derived turn (last entry's addressed_to,
+// else everyone but its author). Task #1023 replaced that derivation with the
+// stored attention set, so those cases now live where the rules do:
+// internal/store/attention_test.go.
 
 func TestWhoseTurnCompat(t *testing.T) {
 	if got := whoseTurnCompat([]string{"cto", "human"}, "orchestrator"); got != "user" {
@@ -127,26 +58,31 @@ func TestCanAnswerThread(t *testing.T) {
 	}
 }
 
-func TestCanPostToThread(t *testing.T) {
+func TestThreadWriteAccess(t *testing.T) {
 	d := Deps{}
 	subj := threadSubject{TaskID: 7, Counterpart: "orch-1"}
 	parts := []string{"cto", "human", "orch-1"}
 
-	if !canPostToThread(d, nil, subj, parts) {
-		t.Error("the human must be able to post")
-	}
-	if !canPostToThread(d, agentCaller("cto"), subj, parts) {
-		t.Error("a participant agent must be able to post")
-	}
-	if !canPostToThread(d, &store.Session{ID: "orch-1", Kind: "orchestrator"}, subj, parts) {
-		t.Error("the task's own orchestrator must be able to post")
-	}
-	if canPostToThread(d, &store.Session{ID: "w-9", Kind: "worker"}, subj, parts) {
-		t.Error("a non-participant worker must not be able to post")
-	}
-	if !canPostToThread(d, &store.Session{ID: "w-9", Kind: "worker"},
-		subj, append(parts, "w-9")) {
-		t.Error("a worker that is a participant must be able to post")
+	for _, tt := range []struct {
+		name              string
+		caller            *store.Session
+		parts             []string
+		allowed, joinable bool
+	}{
+		{"the human is a participant of every thread", nil, parts, true, true},
+		{"a participant agent writes as before", agentCaller("cto"), parts, true, true},
+		{"the task's own orchestrator", &store.Session{ID: "orch-1", Kind: "orchestrator"}, parts, true, true},
+		{"a participant worker", &store.Session{ID: "w-9", Kind: "worker"}, append(append([]string(nil), parts...), "w-9"), true, true},
+		{"an outside agent may join on purpose", agentCaller("sre"), parts, false, true},
+		{"the human of a thread they are not in may join", nil, []string{"cto"}, false, true},
+		{"an outside worker stays refused", &store.Session{ID: "w-9", Kind: "worker"}, parts, false, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			allowed, joinable := threadWriteAccess(d, tt.caller, subj, tt.parts)
+			if allowed != tt.allowed || joinable != tt.joinable {
+				t.Errorf("threadWriteAccess = %v/%v, want %v/%v", allowed, joinable, tt.allowed, tt.joinable)
+			}
+		})
 	}
 }
 
