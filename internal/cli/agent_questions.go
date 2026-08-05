@@ -38,13 +38,21 @@ type agentQuestionRow struct {
 func newAgentAskCmd() *cobra.Command {
 	var context string
 	var to []string
+	var file string
+
+	const usage = "usage: rocket agent ask <role> \"<вопрос>\" | --file <path> [--context <md>] [--to <id,...>]"
 
 	cmd := &cobra.Command{
-		Use:   "ask <role> \"<вопрос>\"",
+		Use:   "ask <role> [\"<вопрос>\"]",
 		Short: "Открыть тред-вопрос с ролью (направление — по вызывающему)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) != 2 {
-				return &usageError{message: "usage: rocket agent ask <role> \"<вопрос>\" [--context <md>] [--to <id,...>]"}
+			if len(args) < 1 || len(args) > 2 {
+				return &usageError{message: usage}
+			}
+
+			body, err := textBody(cmd, argAt(args, 1), len(args) == 2, file, usage)
+			if err != nil {
+				return err
 			}
 
 			c, _, err := connect(true)
@@ -52,7 +60,7 @@ func newAgentAskCmd() *cobra.Command {
 				return err
 			}
 
-			reqBody := map[string]any{"body": args[1]}
+			reqBody := map[string]any{"body": body}
 			if context != "" {
 				reqBody["context"] = context
 			}
@@ -72,6 +80,7 @@ func newAgentAskCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&context, "context", "", "дополнительный контекст (MD)")
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
+	cmd.Flags().StringVar(&file, "file", "", "файл с вопросом ('-' — stdin)")
 	return cmd
 }
 
@@ -126,13 +135,20 @@ func newAgentQuestionsCmd() *cobra.Command {
 // side. A role instance's reply into a resolved thread reopens it.
 func newAgentReplyCmd() *cobra.Command {
 	var to []string
+	var file string
+
+	const usage = "usage: rocket agent reply <question-id>|<role>/Q<n> \"<текст>\" | --file <path> [--to <id,...>]"
 
 	cmd := &cobra.Command{
-		Use:   "reply <question-id>|<role>/Q<n> \"<текст>\"",
+		Use:   "reply <question-id>|<role>/Q<n> [\"<текст>\"]",
 		Short: "Ответить в тред роли",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) != 2 {
-				return &usageError{message: "usage: rocket agent reply <question-id>|<role>/Q<n> \"<текст>\" [--to <id,...>]"}
+			if len(args) < 1 || len(args) > 2 {
+				return &usageError{message: usage}
+			}
+			body, err := textBody(cmd, argAt(args, 1), len(args) == 2, file, usage)
+			if err != nil {
+				return err
 			}
 			id, err := resolveAgentQuestionRef(args[0])
 			if err != nil {
@@ -144,7 +160,7 @@ func newAgentReplyCmd() *cobra.Command {
 				return err
 			}
 
-			reqBody := map[string]any{"body": args[1]}
+			reqBody := map[string]any{"body": body}
 			setTo(reqBody, parseTo(to))
 
 			var resp agentQuestionRow
@@ -161,6 +177,7 @@ func newAgentReplyCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
+	cmd.Flags().StringVar(&file, "file", "", "файл с текстом ('-' — stdin)")
 	return cmd
 }
 
@@ -169,19 +186,33 @@ func newAgentReplyCmd() *cobra.Command {
 func newAgentAnswerCmd() *cobra.Command {
 	var dismiss bool
 	var to []string
+	var file string
+
+	const usageMsg = "usage: rocket agent answer <question-id>|<role>/Q<n> \"<ответ>\" | --file <path> | --dismiss (exactly one)"
 
 	cmd := &cobra.Command{
 		Use:   "answer <question-id>|<role>/Q<n> [\"<ответ>\"]",
 		Short: "Закрыть тред роли ответом или без ответа",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			usage := &usageError{message: "usage: rocket agent answer <question-id>|<role>/Q<n> \"<ответ>\" | --dismiss (exactly one)"}
+			usage := &usageError{message: usageMsg}
 			if len(args) < 1 || len(args) > 2 {
 				return usage
 			}
 
 			hasBody := len(args) == 2
-			if hasBody == dismiss {
+			// --dismiss closes the thread with no answer at all, so it
+			// excludes BOTH body sources, not just the positional one.
+			if dismiss && (hasBody || file != "") {
 				return usage
+			}
+
+			var body string
+			if !dismiss {
+				var err error
+				body, err = textBody(cmd, argAt(args, 1), hasBody, file, usageMsg)
+				if err != nil {
+					return err
+				}
 			}
 
 			id, err := resolveAgentQuestionRef(args[0])
@@ -198,7 +229,7 @@ func newAgentAnswerCmd() *cobra.Command {
 			if dismiss {
 				reqBody["dismiss"] = true
 			} else {
-				reqBody["body"] = args[1]
+				reqBody["body"] = body
 			}
 			setTo(reqBody, parseTo(to))
 
@@ -220,6 +251,7 @@ func newAgentAnswerCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&dismiss, "dismiss", false, "закрыть тред без ответа")
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
+	cmd.Flags().StringVar(&file, "file", "", "файл с ответом ('-' — stdin)")
 	return cmd
 }
 
