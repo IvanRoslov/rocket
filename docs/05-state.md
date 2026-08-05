@@ -133,7 +133,7 @@ CREATE TABLE tasks (
   description  TEXT NOT NULL DEFAULT '',
   project_id   TEXT NOT NULL,                  -- проект; у подзадачи дополнительно
   repo_id      TEXT,                            -- репо воркера (только подзадачи)
-  status       TEXT NOT NULL DEFAULT 'backlog', -- backlog|in_progress|review|done|cancelled
+  status       TEXT NOT NULL DEFAULT 'backlog', -- backlog|brainstorm|in_progress|review|done|cancelled
   feature_slug TEXT,
   session_id   TEXT REFERENCES sessions(id),   -- задача → оркестратор, подзадача → воркер
   milestone    INTEGER NOT NULL DEFAULT 0,     -- 1 = майлстон: корневая задача вне проектов (project_id = '')
