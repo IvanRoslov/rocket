@@ -138,10 +138,47 @@ test('dropping a backlog card into Brainstorm PATCHes status=brainstorm', async 
   fireEvent.dragOver(brainstormColumn, { dataTransfer })
   fireEvent.drop(brainstormColumn, { dataTransfer })
 
-  // Only the PATCH is asserted: the stub handler above doesn't mutate the
+  // Only the PATCH is asserted here: the stub handler above doesn't mutate the
   // mock task state, so the post-mutation refetch puts the card back in
-  // Backlog — the optimistic placement is transient here by construction.
+  // Backlog. The card actually landing in the column is covered by the next
+  // test, which lets the real (state-mutating) handler answer.
   await waitFor(() => expect(capturedStatus).toBe('brainstorm'))
+})
+
+test('a card dragged into Brainstorm stays there', async () => {
+  // No handler override: the default PATCH handler (mocks/handlers.ts) mutates
+  // tasksState, so the post-mutation refetch must agree with the optimistic move.
+  renderKanban()
+  await waitFor(() => expect(screen.getByText('Invoice PDF export')).toBeInTheDocument())
+
+  const card = screen.getByText('Invoice PDF export').closest('.kanban-card') as HTMLElement
+  const brainstormColumn = screen.getByText('Brainstorm').closest('.kanban-col') as HTMLElement
+
+  const dataTransfer = { setData: () => {}, getData: () => '' }
+  fireEvent.dragStart(card, { dataTransfer })
+  fireEvent.dragOver(brainstormColumn, { dataTransfer })
+  fireEvent.drop(brainstormColumn, { dataTransfer })
+
+  // Re-query the column each poll: re-renders replace its DOM node.
+  await waitFor(() => {
+    const column = screen.getByText('Brainstorm').closest('.kanban-col') as HTMLElement
+    expect(within(column).getByText('Invoice PDF export')).toBeInTheDocument()
+  })
+  const backlog = screen.getByText('Backlog').closest('.kanban-col') as HTMLElement
+  expect(within(backlog).queryByText('Invoice PDF export')).not.toBeInTheDocument()
+})
+
+test('Start ▸ is offered on backlog cards but not on brainstorm ones', async () => {
+  renderKanban()
+  await waitFor(() => expect(screen.getByText('Metering rewrite')).toBeInTheDocument())
+
+  // #10 sits in Backlog — the orchestrator has not been started yet.
+  const backlogCard = screen.getByText('Invoice PDF export').closest('.kanban-card') as HTMLElement
+  expect(within(backlogCard).getByRole('button', { name: 'Start ▸' })).toBeInTheDocument()
+
+  // #17 is in Brainstorm — its orchestrator already exists, nothing to start.
+  const brainstormCard = screen.getByText('Metering rewrite').closest('.kanban-card') as HTMLElement
+  expect(within(brainstormCard).queryByRole('button', { name: 'Start ▸' })).not.toBeInTheDocument()
 })
 
 test('cancelled column hidden by default, shown via checkbox', async () => {
