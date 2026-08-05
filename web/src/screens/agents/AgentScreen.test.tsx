@@ -179,3 +179,21 @@ describe('AgentScreen tabs', () => {
     ])
   })
 })
+
+// An agent's milestones (task #1023, spec v2): the one place a human sees
+// what the agent has taken on.
+describe('milestones on the agent card', () => {
+  it('lists the milestones the agent holds, with statuses and links', async () => {
+    renderScreen('sre')
+
+    // Fixture: #41 «Own the incident review ritual», in_progress, held by sre.
+    const link = await screen.findByRole('link', { name: /Own the incident review ritual/ })
+    expect(link).toHaveAttribute('href', '/milestones/41')
+    expect(screen.getByText('In Progress')).toBeInTheDocument()
+  })
+
+  it('says so when the agent holds none', async () => {
+    renderScreen('triage')
+    expect(await screen.findByText(/no milestones/i)).toBeInTheDocument()
+  })
+})

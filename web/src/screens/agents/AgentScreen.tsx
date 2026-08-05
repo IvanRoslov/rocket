@@ -4,7 +4,7 @@
 
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Badge } from '../../components/Badge'
+import { Badge, type BadgeTone } from '../../components/Badge'
 import { Button } from '../../components/Button'
 import { timeAgo } from '../../lib/format'
 import {
@@ -17,6 +17,7 @@ import {
   useStartAgent,
   useStopAgent,
 } from '../../lib/queries'
+import type { TaskStatus } from '../../lib/types'
 import { TermOverlay } from '../task/TermOverlay'
 import { AgentFormModal } from './AgentFormModal'
 import { AgentQuestionsTab } from './AgentQuestionsTab'
@@ -24,6 +25,22 @@ import { InboxTab } from './InboxTab'
 import './agents.css'
 
 type TabId = 'questions' | 'inbox'
+
+const MILESTONE_STATUS_LABEL: Record<TaskStatus, string> = {
+  backlog: 'Backlog',
+  in_progress: 'In Progress',
+  review: 'Review',
+  done: 'Done',
+  cancelled: 'Cancelled',
+}
+
+const MILESTONE_STATUS_TONE: Record<TaskStatus, BadgeTone> = {
+  backlog: 'neutral',
+  in_progress: 'indigo',
+  review: 'review',
+  done: 'ok',
+  cancelled: 'neutral',
+}
 
 export function AgentScreen() {
   // Reached from both routes: `/p/:projectId/agents/:roleId` (inside a
@@ -173,6 +190,27 @@ export function AgentScreen() {
       {start.isError && <p className="agent-screen__error">{start.error.message}</p>}
       {stop.isError && <p className="agent-screen__error">{stop.error.message}</p>}
       {remove.isError && <p className="agent-screen__error">{remove.error.message}</p>}
+
+      {/* What the agent has taken on (task #1023, spec v2): milestones are
+          root tasks outside every project, so they link to /milestones/:id. */}
+      <div className="agent-screen__milestones">
+        <h2 className="agent-screen__milestones-title">Milestones</h2>
+        {(agent.milestones ?? []).length === 0 ? (
+          <p className="agent-screen__milestones-empty">No milestones — nothing taken yet.</p>
+        ) : (
+          <ul className="agent-screen__milestones-list">
+            {(agent.milestones ?? []).map((m) => (
+              <li key={m.id} className="agent-screen__milestone">
+                <Link to={`/milestones/${m.id}`} className="agent-screen__milestone-link">
+                  <span className="agent-screen__milestone-id">#{m.id}</span>
+                  {m.title}
+                </Link>
+                <Badge tone={MILESTONE_STATUS_TONE[m.status]}>{MILESTONE_STATUS_LABEL[m.status]}</Badge>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       <div className="agent-screen__tabs" role="tablist">
         {tabs.map((t) => (

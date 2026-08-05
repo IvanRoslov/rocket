@@ -445,3 +445,48 @@
   letter-spacing: 0;
   color: var(--text-4);
 }
+
+/* ---------- Milestones on the agent card (task #1023, spec v2) ---------- */
+
+.agent-screen__milestones {
+  margin: 22px 0 4px;
+}
+.agent-screen__milestones-title {
+  margin: 0 0 10px;
+  font: 600 13px var(--font-ui);
+  color: var(--text-2);
+}
+.agent-screen__milestones-empty {
+  margin: 0;
+  font: 12.5px var(--font-ui);
+  color: var(--text-3);
+}
+.agent-screen__milestones-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.agent-screen__milestone {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn-sm);
+  background: var(--surface);
+}
+.agent-screen__milestone-link {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex: 1;
+  color: var(--text);
+  font: 500 13px var(--font-ui);
+}
+.agent-screen__milestone-id {
+  color: var(--text-4);
+  font: 600 11.5px var(--font-mono);
+}
