@@ -27,7 +27,7 @@ type OpenThread struct {
 func (s *Store) ListOpenThreads() ([]OpenThread, error) {
 	rows, err := s.db.Query(`
 		SELECT q.id, q.task_id, q.role_id, q.asked_by, q.body, q.context,
-		       q.status, q.resolution, q.asked_at, q.resolved_at,
+		       q.status, q.resolution, q.type, q.asked_at, q.resolved_at,
 		       m.id, m.author, m.kind, m.body, m.addressed_to, m.created_at
 		FROM questions q
 		LEFT JOIN question_messages m
@@ -52,7 +52,7 @@ func (s *Store) ListOpenThreads() ([]OpenThread, error) {
 		)
 		if err := rows.Scan(
 			&q.ID, &taskID, &roleID, &q.AskedBy, &q.Body, &context,
-			&q.Status, &resolutn, &q.AskedAt, &resolvedAt,
+			&q.Status, &resolutn, &q.Type, &q.AskedAt, &resolvedAt,
 			&msgID, &msgAuthor, &msgKind, &msgBody, &msgAddressedTo, &msgCreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan open thread: %w", err)

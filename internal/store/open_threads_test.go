@@ -85,3 +85,27 @@ func TestListOpenThreads(t *testing.T) {
 		t.Errorf("participants = %v, want [cto human]", second.Participants)
 	}
 }
+
+// TestListOpenThreadsCarriesType: the thread's type travels with it. The
+// heartbeat's staleness sweep must skip fyi notes, and it reads them from
+// this aggregate rather than re-querying every thread.
+func TestListOpenThreadsCarriesType(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+
+	q, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch-1", Body: "Q", Type: QuestionTypeDecision})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+
+	got, err := s.ListOpenThreads()
+	if err != nil {
+		t.Fatalf("ListOpenThreads: %v", err)
+	}
+	if len(got) != 1 || got[0].Question.ID != q {
+		t.Fatalf("threads = %+v, want the one open thread", got)
+	}
+	if got[0].Question.Type != QuestionTypeDecision {
+		t.Errorf("Question.Type = %q, want %q", got[0].Question.Type, QuestionTypeDecision)
+	}
+}
