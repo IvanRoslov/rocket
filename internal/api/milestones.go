@@ -39,9 +39,14 @@ func recordAssignment(d Deps, task store.Task, caller *store.Session, role, verb
 		"task_id": task.ID, "agent_id": role, "by": by, "verb": verb,
 	})
 
-	body := fmt.Sprintf("milestone assigned to %s (by %s)", role, by)
-	if role == "" {
+	var body string
+	switch {
+	case role == "":
 		body = fmt.Sprintf("milestone unassigned (by %s)", by)
+	case verb == "take":
+		body = fmt.Sprintf("milestone taken by %s", role)
+	default:
+		body = fmt.Sprintf("milestone assigned to %s (by %s)", role, by)
 	}
 	if _, err := d.Store.AddTaskLog(store.TaskLogEntry{
 		TaskID: task.ID,
