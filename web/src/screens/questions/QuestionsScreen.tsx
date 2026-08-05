@@ -49,7 +49,9 @@ function RoleThreadDetail({ roleId, questionId }: { roleId: string; questionId: 
 function turnLabel(entry: ThreadInboxEntry): string {
   if (entry.status !== 'open' || entry.type === 'fyi') return ''
   if (entry.your_turn) return 'awaiting you'
-  const others = entry.attention.filter((p) => !isHuman(p))
+  // `?? []` and not a bare `.filter`: an older server serialises an empty
+  // attention set as `null` (a nil Go slice), and that crashed the whole route.
+  const others = (entry.attention ?? []).filter((p) => !isHuman(p))
   if (others.length === 0) return ''
   return `awaiting ${others.map((id) => participantLabel(id)).join(', ')}`
 }
