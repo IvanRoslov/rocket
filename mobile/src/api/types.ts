@@ -104,7 +104,14 @@ export interface SystemCleanupResult {
   removed_worktrees: string[]
 }
 
-export type TaskStatus = 'backlog' | 'in_progress' | 'review' | 'done' | 'cancelled'
+/**
+ * `brainstorm` (task #1077, spec v1) sits between `backlog` and `in_progress`:
+ * the orchestrator is still brainstorming the task with the human and no
+ * worker has been spawned yet. The daemon sets it on `task start` and moves it
+ * to `in_progress` on the first spawn; a human can also move a task there by
+ * hand, like into any other status.
+ */
+export type TaskStatus = 'backlog' | 'brainstorm' | 'in_progress' | 'review' | 'done' | 'cancelled'
 
 export interface Task {
   id: number

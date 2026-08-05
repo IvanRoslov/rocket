@@ -32,6 +32,10 @@ import { colors, mono, radius } from '../../src/theme'
 
 const COLUMNS: { key: TaskStatus; title: string; dot: string }[] = [
   { key: 'backlog', title: 'Backlog', dot: colors.textFaint },
+  // Task #1077: the task is being brainstormed, no worker spawned yet. Slate
+  // rather than amber — amber is the app's alert colour (stale threads, the
+  // connection banner) and this column is not an alert.
+  { key: 'brainstorm', title: 'Brainstorm', dot: colors.slate },
   { key: 'in_progress', title: 'In Progress', dot: colors.accent },
   { key: 'review', title: 'Review', dot: colors.purple },
   { key: 'done', title: 'Done', dot: colors.green },
