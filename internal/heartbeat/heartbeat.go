@@ -27,6 +27,16 @@ import (
 // may well not be running, and an escalation must not be lost when it isn't.
 const escalationAgent = "cto"
 
+// taskLogAuthor is what the heartbeat signs its task_log entries with. Not
+// the stalled orchestrator's id — the entry is written BY the heartbeat ABOUT
+// the orchestrator, and attributing it to the orchestrator reads as a
+// confession it never made. Not the empty author either: `rocket task show`
+// renders that as "user" (see internal/cli/task.go), which would credit the
+// human. task_log.author is a free-text column with no foreign key, so a
+// named non-session author is both allowed and the only spelling that
+// displays honestly.
+const taskLogAuthor = "heartbeat"
+
 // escalationKeyPrefix namespaces input-stall entries in lastSent so an
 // ordinary heartbeat summary and an escalation never suppress each other.
 const escalationKeyPrefix = "input-stall:"
@@ -342,7 +352,7 @@ func (h *Heartbeat) nudgeInputStall(orch store.Session, task store.Task, since t
 			"Оркестратор %s висит на интерактивном промпте %dm — ждёт нажатия клавиши, которого никто не видит. "+
 				"Ожидание в терминале невыразимо в системе: спрашивать надо тредом (rocket task ask), а не промптом.",
 			orch.ID, int(since.Minutes())),
-		Author: orch.ID,
+		Author: taskLogAuthor,
 	}); err != nil {
 		slog.Warn("heartbeat: log input stall as a problem",
 			"orchestrator", orch.ID, "task", task.ID, "error", err)

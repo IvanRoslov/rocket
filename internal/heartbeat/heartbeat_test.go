@@ -807,6 +807,12 @@ func TestTick_OrchestratorPromptStall_NudgesAndLogsProblem(t *testing.T) {
 	if len(entries) != 1 || !strings.Contains(entries[0].Body, "orch1") {
 		t.Fatalf("problem log = %+v, want exactly one entry naming orch1", entries)
 	}
+	// The entry is written by the heartbeat about the orchestrator: signing it
+	// with orch1 would read as a confession, and an empty author renders as
+	// "user" — crediting the human for a machine's observation.
+	if entries[0].Author != taskLogAuthor {
+		t.Errorf("problem log author = %q, want %q", entries[0].Author, taskLogAuthor)
+	}
 
 	// The same stall episode must not be re-logged on the next sweep.
 	hb.nowFunc = func() time.Time { return time.Now().Add(time.Hour) }
