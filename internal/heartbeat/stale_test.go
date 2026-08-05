@@ -1,9 +1,11 @@
 package heartbeat
 
 import (
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -80,4 +82,80 @@ func TestStaleThread(t *testing.T) {
 			t.Fatal("the threshold is exclusive, like every other one in this package")
 		}
 	})
+}
+
+// sessionMessages returns the bodies queued to sessionID.
+func sessionMessages(t *testing.T, st *store.Store, sessionID string) []string {
+	t.Helper()
+	msgs, err := st.ListMessages(sessionID, 0)
+	if err != nil {
+		t.Fatalf("ListMessages(%s): %v", sessionID, err)
+	}
+	var out []string
+	for _, m := range msgs {
+		out = append(out, m.Body)
+	}
+	return out
+}
+
+// TestRemindParticipant_LiveSessionGetsQueuedMessage: an ephemeral session in
+// the attention set is reminded through the ordinary delivery queue.
+func TestRemindParticipant_LiveSessionGetsQueuedMessage(t *testing.T) {
+	st := openTestStore(t)
+	seedOrchAndTask(t, st, "orch1", "in_progress")
+
+	var woken []string
+	hb := New(st, bus.New(st), testConfig(), unknownActivity, func(to string) { woken = append(woken, to) })
+
+	if !hb.remindParticipant("orch1", "reminder body") {
+		t.Fatal("remindParticipant = false, want true for a live session")
+	}
+	bodies := sessionMessages(t, st, "orch1")
+	if len(bodies) != 1 || !strings.Contains(bodies[0], "reminder body") {
+		t.Fatalf("queued = %q, want one message carrying the body", bodies)
+	}
+	if len(woken) != 1 || woken[0] != "orch1" {
+		t.Errorf("woken = %v, want [orch1]", woken)
+	}
+}
+
+// TestRemindParticipant_SleepingAgentGetsInbox: a persistent agent that is not
+// running still gets the reminder — its inbox is exactly the channel for that.
+func TestRemindParticipant_SleepingAgentGetsInbox(t *testing.T) {
+	st := openTestStore(t)
+	addCTOAgent(t, st)
+
+	hb := New(st, bus.New(st), testConfig(), unknownActivity, func(string) {})
+	if !hb.remindParticipant(escalationAgent, "reminder body") {
+		t.Fatal("remindParticipant = false, want true for a registered agent")
+	}
+	bodies := inboxBodies(t, st)
+	if len(bodies) != 1 || !strings.Contains(bodies[0], "reminder body") {
+		t.Fatalf("inbox = %q, want one message carrying the body", bodies)
+	}
+}
+
+// TestRemindParticipant_HumanIsNotMessaged: the human has no inbox to deliver
+// to — the stale flag on the thread is their channel.
+func TestRemindParticipant_HumanIsNotMessaged(t *testing.T) {
+	st := openTestStore(t)
+	hb := New(st, bus.New(st), testConfig(), unknownActivity, func(string) {})
+
+	if hb.remindParticipant(store.ParticipantHuman, "reminder body") {
+		t.Error("remindParticipant(human) = true, want false: the human is badged, not messaged")
+	}
+	if bodies := sessionMessages(t, st, store.ParticipantHuman); len(bodies) != 0 {
+		t.Errorf("queued = %q, want nothing for the human", bodies)
+	}
+}
+
+// TestRemindParticipant_UnknownRecipientIsDropped: a dead worker is neither a
+// live session nor an agent with an inbox; there is nowhere to put it.
+func TestRemindParticipant_UnknownRecipientIsDropped(t *testing.T) {
+	st := openTestStore(t)
+	hb := New(st, bus.New(st), testConfig(), unknownActivity, func(string) {})
+
+	if hb.remindParticipant("gone-worker", "reminder body") {
+		t.Error("remindParticipant(unknown) = true, want false")
+	}
 }
