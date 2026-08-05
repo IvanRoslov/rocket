@@ -77,9 +77,17 @@ export function TaskScreen() {
   )
   const bannerQuestion = openQuestions[0]
 
-  if (!projectId || !taskId || !task) return null
+  if (!taskId || !task) return null
 
+  // A milestone (task #1023, spec v2) belongs to no project: it is reached at
+  // /milestones/:taskId, goes back to the milestones board, and shows the
+  // agent holding it where a project task shows its feature branch.
+  const isMilestone = task.milestone === true
   const project = projects?.find((p) => p.id === projectId)
+  if (!projectId && !isMilestone) return null
+  const backPath = isMilestone ? '/milestones' : `/p/${projectId}`
+  const backLabel = isMilestone ? 'Milestones' : `${project?.name ?? projectId} board`
+  const taskPath = (id: number) => (isMilestone ? `/milestones/${id}` : `/p/${projectId}/tasks/${id}`)
 
   const tabs: Array<{ id: TabId; label: string; count?: number; warn?: boolean }> = [
     { id: 'questions', label: 'Questions', count: openQuestions.length || undefined, warn: openQuestions.length > 0 },
@@ -94,11 +102,11 @@ export function TaskScreen() {
       <div className="task-screen__content">
         <div className="task-screen__inner">
           <div className="task-screen__crumbs">
-            <Link to={`/p/${projectId}`} className="task-screen__back">
-              ← {project?.name ?? projectId} board
+            <Link to={backPath} className="task-screen__back">
+              ← {backLabel}
             </Link>
             {task.parent_id !== undefined && (
-              <Link to={`/p/${projectId}/tasks/${task.parent_id}`} className="task-screen__back">
+              <Link to={taskPath(task.parent_id)} className="task-screen__back">
                 ← #{task.parent_id} {parentTask?.title ?? '…'}
               </Link>
             )}
@@ -111,6 +119,11 @@ export function TaskScreen() {
           </div>
 
           <div className="task-screen__meta">
+            {isMilestone && (
+              <span className="task-screen__meta-mono">
+                {task.assigned_role ? `◆ ${task.assigned_role}` : 'not taken'}
+              </span>
+            )}
             {task.feature_slug && <span className="task-screen__meta-mono">feature/{task.feature_slug}</span>}
             <span className="task-screen__meta-dot">·</span>
             <span>created by {CREATED_BY_LABEL[task.created_by] ?? task.created_by} · {timeAgo(task.created_at)}</span>
@@ -160,6 +173,7 @@ export function TaskScreen() {
           {tab === 'overview' && (
             <OverviewTab
               projectId={projectId}
+              taskPath={taskPath}
               task={task}
               subtasks={task.subtasks}
               sessions={allSessions}

@@ -11,7 +11,10 @@ import type { Session, Task, TaskDoc, TaskStatus } from '../../lib/types'
 import './OverviewTab.css'
 
 export interface OverviewTabProps {
-  projectId: string
+  /** Undefined for a milestone — it belongs to no project (task #1023, spec v2). */
+  projectId?: string
+  /** Where a subtask card links; the task screen knows which route family it is on. */
+  taskPath: (id: number) => string
   task: Task
   subtasks: Task[]
   sessions: Session[] | undefined
@@ -57,7 +60,7 @@ function prLabel(session: Session | undefined): { text: string; tone: string } {
   return { text: `PR #${session.pr_number}`, tone: 'overview-tab__pr--neutral' }
 }
 
-export function OverviewTab({ projectId, task, subtasks, sessions, docs }: OverviewTabProps) {
+export function OverviewTab({ task, subtasks, sessions, docs, taskPath }: OverviewTabProps) {
   const report = docs?.find((d) => d.kind === 'report')
 
   const [editing, setEditing] = useState(false)
@@ -150,7 +153,7 @@ export function OverviewTab({ projectId, task, subtasks, sessions, docs }: Overv
               const session = s.session_id ? sessions?.find((sess) => sess.id === s.session_id) : undefined
               const pr = prLabel(session)
               return (
-                <Link key={s.id} to={`/p/${projectId}/tasks/${s.id}`} className="overview-tab__subtask">
+                <Link key={s.id} to={taskPath(s.id)} className="overview-tab__subtask">
                   <span className={`overview-tab__dot ${subtaskDot(session)}`} />
                   <span className="overview-tab__subtask-id">#{s.id}</span>
                   <div className="overview-tab__subtask-main">
