@@ -92,6 +92,41 @@ export function useTasks(project?: string) {
   })
 }
 
+/**
+ * Milestones (task #1023, spec v2): `GET /v1/tasks?milestones=true`. They
+ * belong to no project, so this one is never scoped by the active project.
+ */
+export function useMilestones() {
+  const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(5000)
+  return useQuery({
+    queryKey: [baseUrl, 'tasks', 'milestones'],
+    queryFn: async () =>
+      (await api.get<{ tasks: Task[] }>(baseUrl, '/v1/tasks?milestones=true')).tasks ?? [],
+    refetchInterval,
+  })
+}
+
+/**
+ * `POST /v1/tasks/{id}/assign` — the human hands a milestone to an agent, or
+ * takes it back with `{none:true}`. An agent's own `take` is a CLI verb from
+ * inside its session and has no UI.
+ */
+export function useAssignMilestone() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { id: number; agentId: string | null }) =>
+      api.post(baseUrl, `/v1/tasks/${p.id}/assign`, p.agentId ? { agent_id: p.agentId } : { none: true }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'tasks'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'task'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'agents'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] })
+    },
+  })
+}
+
 export function useTaskDetail(id: number) {
   const baseUrl = useBaseUrl()
   const refetchInterval = usePoll(3000)
