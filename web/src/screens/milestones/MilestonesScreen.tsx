@@ -28,7 +28,7 @@ interface ColumnSpec {
 
 const COLUMNS: ColumnSpec[] = [
   { key: 'backlog', title: 'Backlog', dot: 'var(--text-4)' },
-  { key: 'brainstorm', title: 'Brainstorm', dot: 'var(--review)' },
+  { key: 'brainstorm', title: 'Brainstorm', dot: 'var(--warn)' },
   { key: 'in_progress', title: 'In Progress', dot: 'var(--accent)' },
   { key: 'review', title: 'Review', dot: 'var(--review)' },
   { key: 'done', title: 'Done', dot: 'var(--ok)' },

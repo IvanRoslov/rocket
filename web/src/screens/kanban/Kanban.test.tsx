@@ -107,6 +107,15 @@ test('Brainstorm column sits between Backlog and In Progress and holds brainstor
   // #17 "Metering rewrite" (fixtures.ts) is the brainstorm fixture.
   const column = screen.getByText('Brainstorm').closest('.kanban-col') as HTMLElement
   expect(within(column).getByText('Metering rewrite')).toBeInTheDocument()
+
+  // The dot must not collide with a neighbouring column's — Brainstorm first
+  // shipped on var(--review), rendering identically to Review on one board.
+  const dot = (title: string) =>
+    (screen.getByText(title).closest('.kanban-col') as HTMLElement).querySelector('.kanban-col__dot')!
+      .getAttribute('style')
+  expect(dot('Brainstorm')).toContain('var(--warn)')
+  expect(dot('Brainstorm')).not.toBe(dot('Review'))
+  expect(dot('Brainstorm')).not.toBe(dot('In Progress'))
 })
 
 test('dropping a backlog card into Brainstorm PATCHes status=brainstorm', async () => {

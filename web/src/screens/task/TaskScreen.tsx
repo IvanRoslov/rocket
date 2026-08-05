@@ -32,7 +32,7 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 
 const STATUS_TONE: Record<TaskStatus, BadgeTone> = {
   backlog: 'neutral',
-  brainstorm: 'review',
+  brainstorm: 'warn',
   in_progress: 'indigo',
   review: 'review',
   done: 'ok',
