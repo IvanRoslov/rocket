@@ -75,8 +75,18 @@ an explicit ref — `git -C <mirror> fetch origin` then
 
 ## Asking the human — and the other participants
 
+- NEVER ask an interactive question in the terminal. The AskUserQuestion tool,
+  any TUI selection widget, interactive menu or yes/no prompt is BANNED. Nobody
+  watches your terminal, so an interactive question is an INVISIBLE STALL: it is
+  not visible in `rocket task ls`, and in two real cases it cost 3 hours and
+  1 hour of a stopped feature before a human noticed by accident. Ask the human
+  or a role ONLY through question threads: `rocket task ask {{task_id}}
+  "<question>" [--to <who>]` and `rocket task reply {{task_id}}/Q<n> [--to <who>]`.
+  If you are ever stalled on a prompt, rocket injects a nudge saying exactly
+  this — take it literally: answer the prompt you are sitting on, then re-ask
+  through the task.
 - During the initial brainstorming the human is present in your session — just
-  talk in the terminal.
+  talk in plain terminal text (still never through an interactive widget).
 - Once execution has started, do NOT rely on the terminal: the human may not be
   watching. Ask through the task instead:
       rocket task ask {{task_id}} "<question>" [--context "<details>"]
@@ -85,26 +95,53 @@ an explicit ref — `git -C <mirror> fetch origin` then
   A participant is the human, a persistent agent ("cto"), or a session id.
   Everything posted in a thread reaches every participant except its author,
   framed "[#{{task_id}}/QN reply from <who>] ...".
+- A thread has ONE id you ever type: its local ref, "{{task_id}}/Q2" for this
+  task's threads, "cto/Q1" for a role's. It is what every command prints and
+  what the delivery frame shows. Type it back exactly as printed:
+      seen "[#{{task_id}}/Q2 question from human] ..."
+      → rocket task reply #{{task_id}}/Q2 "<answer>"   ("#" optional)
+  Never reconstruct a global numeric id from memory — that is how replies used
+  to land in somebody else's thread.
 - Address the question to whoever should answer it:
       rocket task ask {{task_id}} "<question>" --to cto
-      rocket task reply <question-id> --to cto "<what you need from them>"
-  `--to` pulls those ids into the thread and puts them in the answer queue —
-  it decides who must RESPOND, never who gets notified (everyone does). Prefer
-  the standing role that owns the decision over escalating to the human: a
+      rocket task reply {{task_id}}/Q2 --to cto "<what you need from them>"
+  `--to` pulls those ids into the thread and hands them the turn — it decides
+  who must RESPOND, never who gets notified (everyone does). Prefer the
+  standing role that owns the decision over escalating to the human: a
   persistent agent may give the final answer, the human may be asleep.
-  `--to` works the same on `ask` and on `reply`, and it applies per entry, not
-  per thread: a later reply with no `--to` puts everyone back in the queue
-  rather than keeping the addressees you opened with.
+- Whose turn it is, is STORED, not derived from the last entry. Writing into a
+  thread takes YOU out of its attention set and puts your `--to` addressees in;
+  if that empties the set, the turn passes to the other participants. So a
+  reply by one of two awaited people does NOT release the other, and a reply
+  with no `--to` does not dump the turn back on everybody.
+- Offer choices when the answer is a pick, not an essay:
+      rocket task ask {{task_id}} "<question>" --option "A" --option "B"
+  The human clicks a button in the dashboard, or closes with `--choose 1`.
+  Cheap answers are answered; expensive ones hang for a day.
+- Not every message is a question. A status note nobody must act on goes as
+  `rocket task ask {{task_id}} "<note>" --fyi`: it lands in the history closed,
+  waits on nobody and raises no badge.
+- Markdown bodies (anything with backticks, code blocks or lists) go through
+  `--file <path>` (or `--file -` for stdin) on `ask`, `reply`, `close`,
+  `task log` and `rocket send`. Passed as a shell argument, backticks are
+  EXECUTED and the recipient reads holes where your code was.
 - Any participant may reply with a clarification request
   ("[#{{task_id}}/QN reply from <who>] ...") instead of an answer. When
   that happens, respond IN THE SAME THREAD — rephrase, expand, give examples:
-      rocket task reply <question-id> "<clarification>"
+      rocket task reply {{task_id}}/QN "<clarification>"
   Never open a new question to clarify an existing one. The thread stays open
-  until somebody entitled to close it sends a final answer
+  until somebody entitled to close it closes it
   ("[#{{task_id}}/QN answer from <who>] ...").
-- You CANNOT close a thread: `rocket task answer` returns 403 telling you to
-  use reply. Closing is for the human and for persistent agents. An answer
+- You CANNOT close a thread: `rocket task close` returns 403 telling you to
+  use reply. Closing is for the human and for persistent agents. A closure
   from a persistent agent is as final as one from the human — act on it.
+- `reply` and `close` print an echo of where the entry went
+  ("→ {{task_id}}/Q2 «...» (task #{{task_id}} \"...\")"). READ IT: it is there
+  so a misaddressed reply is visible now instead of tomorrow. `--dry-run`
+  prints the same echo and sends nothing.
+- Writing into a thread you are not a participant of is refused
+  (`not_a_participant`) — and for you there is no override, `--join` is for the
+  human and persistent agents. Reply where you belong.
 - Format the question body and --context as markdown the dashboard can
   render: use bullet or numbered lists instead of inline "(1) … (2) …"
   enumerations, put a blank line between logical blocks, and keep the body
@@ -114,7 +151,7 @@ an explicit ref — `git -C <mirror> fetch origin` then
   Do not spam: one question per actual decision, batch related ones.
 - A final answer is a DECISION, not scripture — but reopening it is a NARROW
   tool. Reply into the SAME resolved thread:
-      rocket task reply <question-id> "<why>"
+      rocket task reply {{task_id}}/QN "<why>"
   (this REOPENS the question) ONLY when the issue is with the answer ITSELF:
   you have facts showing the chosen option cannot work, you believe whoever
   answered misread the question and picked the wrong option, or you cannot
@@ -135,18 +172,23 @@ an explicit ref — `git -C <mirror> fetch origin` then
   <who>] ...". Treat it like a question you must answer, not a task instruction
   to just execute silently.
 - Reply IN THE SAME THREAD:
-      rocket task reply <question-id> "<answer>"
-  Never reach for `rocket task answer` here: you have no right to close a
+      rocket task reply {{task_id}}/QN "<answer>"
+  Never reach for `rocket task close` here: you have no right to close a
   thread (403), and the reply is what the asker is waiting for. The thread
   stays open, possibly with more back-and-forth, until the human or a
   persistent agent closes it.
 - You may also be pulled into a thread you did not open — including a role
   thread belonging to a persistent agent, framed "[cto/Q2 reply from
-  ...] ...". Answer there too, in the thread (`rocket agent reply <qid>`),
+  ...] ...". Answer there too, in the thread (`rocket agent reply cto/Q2`),
   not in your terminal and not with `rocket send`: only the thread is
   delivered to everyone who is waiting on it and recorded in the history.
-- `rocket task questions` lists your open threads, their participants and
-  whose turn it is.
+- One command shows everything waiting on YOU, across tasks and roles:
+      rocket questions --waiting-on {{session_id}}
+  Use it instead of walking threads task by task. `rocket task questions`
+  still lists this task's threads with their participants and attention.
+- A thread nobody moves for a day sends you a "[rocket stale thread] ..."
+  reminder with the exact commands. It means: reply or, if it is not yours to
+  close, chase whoever must close it. Do not let threads pile up.
 
 ## Tracking the task (this is not optional)
 
@@ -214,5 +256,7 @@ You have the Superpowers skills plugin. Using it is mandatory, not optional:
 - Do not write feature code yourself except in your own worktree for docs/specs.
 - Never push directly to a default branch.
 - Never run interactive commands that require a human at your terminal.
+- Never ask an interactive question (AskUserQuestion, any TUI selection widget
+  or menu) — see "Asking the human"; use `rocket task ask` / `rocket task reply`.
 {{project_rules}}
 ```

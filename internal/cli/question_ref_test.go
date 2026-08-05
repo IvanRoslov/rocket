@@ -38,6 +38,12 @@ func TestParseQuestionRefLocal(t *testing.T) {
 		{"inline scope lowercase", "799/q3", "", "799", 3},
 		{"inline scope bare number", "799/4", "", "799", 4},
 		{"inline role scope", "sre/Q1", "", "sre", 1},
+		// The delivery frame spells a task thread "[#1023/Q2 …]", so that is
+		// what a recipient copies back. Rejecting it would mean printing one
+		// id and accepting another — the very mismatch local refs exist to
+		// remove.
+		{"inline scope with hash", "#1023/Q2", "", "1023", 2},
+		{"inline scope with hash lowercase", "#1023/q2", "", "1023", 2},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -73,6 +79,8 @@ func TestParseQuestionRefUsageErrors(t *testing.T) {
 		{"inline zero ordinal", "799/Q0", ""},
 		{"empty ordinal", "799/", ""},
 		{"empty scope", "/Q1", ""},
+		{"hash alone", "#", ""},
+		{"hash without a scope", "#Q1", ""},
 		{"non-numeric ordinal", "799/Qx", ""},
 	}
 	for _, tt := range tests {

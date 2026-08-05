@@ -29,7 +29,9 @@ Start now:
    (task doc put --kind spec / --kind plan). Store the spec in the task, then
    ask for confirmation THROUGH THE TASK:
    `rocket task ask {{task_id}} "Confirm spec v<N> (see task docs): ok to start
-   implementation?"`. A chat "yes" about the design is NOT spec confirmation.
+   implementation?" --option "go" --option "needs changes"` (the summary of what
+   they are confirming goes in `--context`, or `--file` if it is long markdown).
+   A chat "yes" about the design is NOT spec confirmation.
    Do not spawn workers until that question is answered. ANY later edit to the
    spec — including rationale-only edits — reopens this gate: store the new
    version and ask again.
