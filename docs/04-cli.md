@@ -12,8 +12,8 @@
 ## Для пользователя
 
 ```
-rocket task add "<title>" [--project <id>] [--parent <id>] [--desc <md>|--desc-file <f>]
-rocket task ls [--status <s>] [--project <id>]   # канбан в терминале
+rocket task add "<title>" [--project <id> | --milestone] [--parent <id>] [--desc <md>|--desc-file <f>]
+rocket task ls [--status <s>] [--project <id>] [--milestones]   # канбан в терминале
 rocket task show <id>       # карточка: подзадачи, доки, журнал, attach-команда
                             # --json отдаёт то же целиком: поля задачи + docs, log, questions
 rocket task start <id> [--agent <name>]          # назначить оркестратора
@@ -44,6 +44,18 @@ rocket task close <тред> --dismiss ["<почему>"]  # закрыть ка
     в help не показывается.
 rocket task cancel <id>
     Подробности — 12-tasks.md.
+
+rocket task add "<title>" --milestone               # майлстон: задача вне проектов
+rocket task assign <id> <agent-id> | --none         # назначить/снять (только человек)
+rocket task ls --milestones                         # канбан майлстонов
+    Майлстон — единица работы постоянного агента: живёт выше проектов, берётся
+    агентом (`rocket task take`, см. «Для агента»), а не запускается как фича
+    (`task start` на майлстоне отвечает 403). Доки, журнал и треды — как у задачи.
+    В review майлстон не уходит, пока в нём нет ни дока, ни записи журнала от
+    агента (422): смотреть было бы нечего. `done`/`cancelled` ставит только
+    человек — это приёмка. Карточка майлстона показывает агента и команду
+    `rocket agent attach <agent>` (сессия у агента одна на все его майлстоны),
+    а `rocket agent show <agent>` — список его майлстонов.
 
 rocket questions [--waiting-on <id>] [--all] [--json]
     Единый инбокс: все открытые треды — и задач, и ролей — одним списком.
@@ -192,6 +204,12 @@ rocket spawn --task <name> --repo <id> --prompt "<бриф>" [--agent <name>]
 
 rocket task ... (см. выше)
     Оркестратор ведёт доки/журнал своей задачи, воркер — своей подзадачи.
+
+rocket task take <id>
+    Только для постоянных агентов и только на майлстонах: агент берёт майлстон
+    из своей сессии. Занятый другим агентом — 409 с именем держателя, обычная
+    проектная задача — 403 (её запускает человек через task start). Писать в
+    майлстон (log/doc/move) могут человек и взявший его агент.
 
 rocket task ask <id> "<вопрос>" | --file <f> [--context <md>] [--to a,b]
                 [--option "<текст>"]... [--fyi]

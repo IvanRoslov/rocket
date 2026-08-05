@@ -26,9 +26,13 @@ type taskRow struct {
 	RepoID      string `json:"repo_id,omitempty"`
 	FeatureSlug string `json:"feature_slug,omitempty"`
 	SessionID   string `json:"session_id,omitempty"`
-	PRNumber    int    `json:"pr_number,omitempty"`
-	PRState     string `json:"pr_state,omitempty"`
-	CIState     string `json:"ci_state,omitempty"`
+	Milestone   bool   `json:"milestone,omitempty"`
+	// AssignedRole is the persistent agent holding a milestone, empty when
+	// nobody has taken it.
+	AssignedRole string `json:"assigned_role,omitempty"`
+	PRNumber     int    `json:"pr_number,omitempty"`
+	PRState      string `json:"pr_state,omitempty"`
+	CIState      string `json:"ci_state,omitempty"`
 	// WaitingTerminal is the API's derived flag: the task's session has been
 	// sitting on interactive input long enough that nothing moves until
 	// somebody types.
@@ -74,6 +78,8 @@ type taskDetailRow struct {
 	CreatedAt     int64              `json:"created_at"`
 	UpdatedAt     int64              `json:"updated_at"`
 	CompletedAt   int64              `json:"completed_at,omitempty"`
+	Milestone     bool               `json:"milestone,omitempty"`
+	AssignedRole  string             `json:"assigned_role,omitempty"`
 	Subtasks      []taskRow          `json:"subtasks"`
 	Session       *taskSessionDetail `json:"session,omitempty"`
 	OpenQuestions int                `json:"open_questions"`
@@ -201,6 +207,8 @@ func newTaskCmd() *cobra.Command {
 	cmd.AddCommand(newTaskMoveCmd())
 	cmd.AddCommand(newTaskCancelCmd())
 	cmd.AddCommand(newTaskStartCmd())
+	cmd.AddCommand(newTaskTakeCmd())
+	cmd.AddCommand(newTaskAssignCmd())
 	cmd.AddCommand(newTaskDocCmd())
 	cmd.AddCommand(newTaskLogCmd())
 	cmd.AddCommand(newTaskAskCmd())
@@ -270,8 +278,27 @@ func newTaskStartCmd() *cobra.Command {
 // parent, the API inherits the project from the parent task, so sending an
 // empty project is correct (and required, since --parent may target a task
 // in a project other than the CLI's guessed default).
-func needsProjectDefault(projectID string, parentID int64) bool {
-	return projectID == "" && parentID == 0
+// A milestone belongs to no project at all, so it never resolves one.
+func needsProjectDefault(projectID string, parentID int64, milestone bool) bool {
+	return projectID == "" && parentID == 0 && !milestone
+}
+
+// taskAddRequestBody builds the POST /v1/tasks body. A milestone carries no
+// project key at all: the server rejects the pair outright.
+func taskAddRequestBody(title, description, projectID string, parentID int64, milestone bool) map[string]any {
+	body := map[string]any{"title": title}
+	if milestone {
+		body["milestone"] = true
+	} else {
+		body["project"] = projectID
+	}
+	if description != "" {
+		body["description"] = description
+	}
+	if parentID != 0 {
+		body["parent_id"] = parentID
+	}
+	return body
 }
 
 func newTaskAddCmd() *cobra.Command {
@@ -279,18 +306,26 @@ func newTaskAddCmd() *cobra.Command {
 	var parentID int64
 	var description string
 	var descFile string
+	var milestone bool
 
 	cmd := &cobra.Command{
 		Use:   "add \"<title>\"",
 		Short: "Создать новую задачу",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return &usageError{message: "usage: rocket task add \"<title>\" [--project <id>] [--parent <id>] [--desc <md> | --desc-file <f>]"}
+				return &usageError{message: "usage: rocket task add \"<title>\" [--project <id> | --milestone] [--parent <id>] [--desc <md> | --desc-file <f>]"}
 			}
 
 			// Check that both --desc and --desc-file are not provided
 			if description != "" && descFile != "" {
 				return &usageError{message: "--desc and --desc-file are mutually exclusive"}
+			}
+			// A milestone stands above projects: it belongs to none.
+			if milestone && projectID != "" {
+				return &usageError{message: "--milestone and --project are mutually exclusive: a milestone belongs to no project"}
+			}
+			if milestone && parentID != 0 {
+				return &usageError{message: "--milestone and --parent are mutually exclusive: a milestone is not a subtask"}
 			}
 
 			c, _, err := connect(true)
@@ -301,7 +336,7 @@ func newTaskAddCmd() *cobra.Command {
 			// If project not specified and a parent task is given, leave it
 			// empty — the API inherits the project from the parent task.
 			// Otherwise, try to resolve a default project.
-			if needsProjectDefault(projectID, parentID) {
+			if needsProjectDefault(projectID, parentID, milestone) {
 				var projects []map[string]any
 				if err := c.Get("/v1/projects", nil, &projects); err != nil {
 					return err
@@ -324,16 +359,7 @@ func newTaskAddCmd() *cobra.Command {
 				description = string(data)
 			}
 
-			reqBody := map[string]any{
-				"title":   args[0],
-				"project": projectID,
-			}
-			if description != "" {
-				reqBody["description"] = description
-			}
-			if parentID != 0 {
-				reqBody["parent_id"] = parentID
-			}
+			reqBody := taskAddRequestBody(args[0], description, projectID, parentID, milestone)
 
 			var resp taskRow
 			if err := c.Post("/v1/tasks", reqBody, &resp); err != nil {
@@ -351,19 +377,39 @@ func newTaskAddCmd() *cobra.Command {
 	cmd.Flags().Int64Var(&parentID, "parent", 0, "id родительской задачи")
 	cmd.Flags().StringVar(&description, "desc", "", "описание задачи (MD)")
 	cmd.Flags().StringVar(&descFile, "desc-file", "", "файл с описанием задачи (MD)")
+	cmd.Flags().BoolVar(&milestone, "milestone", false,
+		"создать майлстон: задачу вне проектов, которую берёт постоянный агент")
 	return cmd
+}
+
+// taskLsQuery builds the GET /v1/tasks query for `task ls`. The board grouping
+// is always on: the human view is a kanban.
+func taskLsQuery(status, project string, milestones bool) string {
+	q := url.Values{}
+	q.Set("board", "true")
+	if status != "" {
+		q.Set("status", status)
+	}
+	if project != "" {
+		q.Set("project", project)
+	}
+	if milestones {
+		q.Set("milestones", "true")
+	}
+	return q.Encode()
 }
 
 func newTaskLsCmd() *cobra.Command {
 	var status string
 	var project string
+	var milestones bool
 
 	cmd := &cobra.Command{
 		Use:   "ls",
 		Short: "Список задач",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 0 {
-				return &usageError{message: "usage: rocket task ls [--status <s>] [--project <id>]"}
+				return &usageError{message: "usage: rocket task ls [--status <s>] [--project <id>] [--milestones]"}
 			}
 
 			c, _, err := connect(true)
@@ -371,15 +417,7 @@ func newTaskLsCmd() *cobra.Command {
 				return err
 			}
 
-			q := url.Values{}
-			q.Set("board", "true")
-			if status != "" {
-				q.Set("status", status)
-			}
-			if project != "" {
-				q.Set("project", project)
-			}
-			path := "/v1/tasks?" + q.Encode()
+			path := "/v1/tasks?" + taskLsQuery(status, project, milestones)
 
 			var resp struct {
 				Board map[string][]taskRow `json:"board"`
@@ -399,6 +437,7 @@ func newTaskLsCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&status, "status", "", "фильтр по статусу")
 	cmd.Flags().StringVar(&project, "project", "", "фильтр по id проекта")
+	cmd.Flags().BoolVar(&milestones, "milestones", false, "показать только майлстоны")
 	return cmd
 }
 
@@ -1260,7 +1299,11 @@ func renderTaskCard(task taskDetailRow, docs []taskDocRow, logs []taskLogRow, qu
 
 	// Basic info
 	fmt.Fprintf(w, "## Info\n")
-	fmt.Fprintf(w, "Project: %s\n", task.ProjectID)
+	if task.Milestone {
+		renderMilestoneInfo(w, task.AssignedRole)
+	} else {
+		fmt.Fprintf(w, "Project: %s\n", task.ProjectID)
+	}
 	if task.RepoID != "" {
 		fmt.Fprintf(w, "Repo: %s\n", task.RepoID)
 	}

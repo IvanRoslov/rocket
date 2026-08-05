@@ -202,6 +202,8 @@ func newAgentShowCmd() *cobra.Command {
 			cmd.Printf("dir:         %s\n", dashIfEmpty(toString(agent["dir"])))
 			cmd.Printf("command:     %s\n", dashIfEmpty(toString(agent["command"])))
 
+			renderAgentMilestones(cmd.OutOrStdout(), agent["milestones"])
+
 			cmd.Printf("unread: %d\n", len(inbox))
 			for _, m := range inbox {
 				cmd.Printf("  - #%s from %s: %s\n", toString(m["id"]),
