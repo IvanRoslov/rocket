@@ -28,6 +28,7 @@ func newAgentCmd() *cobra.Command {
 	cmd.AddCommand(newAgentAskCmd())
 	cmd.AddCommand(newAgentQuestionsCmd())
 	cmd.AddCommand(newAgentReplyCmd())
+	cmd.AddCommand(newAgentCloseCmd(false))
 	cmd.AddCommand(newAgentAnswerCmd())
 	return cmd
 }

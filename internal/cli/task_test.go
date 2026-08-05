@@ -505,12 +505,14 @@ func TestTaskAnswerUsage(t *testing.T) {
 		})
 	}
 
-	t.Run("both body and dismiss", func(t *testing.T) {
-		cmd := newTaskAnswerCmd()
-		cmd.SetArgs([]string{"1", "answer", "--dismiss"})
+	// Since task #1023 --dismiss may carry a reason, so body+dismiss is a
+	// legal close. Naming two different resolutions at once is what is not.
+	t.Run("both choose and dismiss", func(t *testing.T) {
+		cmd := newTaskCloseCmd0()
+		cmd.SetArgs([]string{"1", "--dismiss", "--choose", "2"})
 		err := cmd.Execute()
 		if err == nil {
-			t.Errorf("expected error when both body and --dismiss given")
+			t.Fatalf("expected error when both --choose and --dismiss given")
 		}
 		var usageErr *usageError
 		if !errors.As(err, &usageErr) {
@@ -1430,8 +1432,8 @@ func TestTaskWritingCommandsFileFlag(t *testing.T) {
 		{"ask-orch neither", newTaskAskOrchCmd, []string{"1"}},
 		{"reply both", newTaskReplyCmd, []string{"7", "text", "--file", body}},
 		{"reply neither", newTaskReplyCmd, []string{"7"}},
-		{"answer both", newTaskAnswerCmd, []string{"7", "text", "--file", body}},
-		{"answer file plus dismiss", newTaskAnswerCmd, []string{"7", "--dismiss", "--file", body}},
+
+		{"close both", newTaskCloseCmd0, []string{"7", "text", "--file", body}},
 	}
 
 	for _, tc := range cases {

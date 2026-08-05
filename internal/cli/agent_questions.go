@@ -46,8 +46,10 @@ func newAgentAskCmd() *cobra.Command {
 	var context string
 	var to []string
 	var file string
+	var options []string
+	var fyi bool
 
-	const usage = "usage: rocket agent ask <role> \"<вопрос>\" | --file <path> [--context <md>] [--to <id,...>]"
+	const usage = "usage: rocket agent ask <role> \"<вопрос>\" | --file <path> [--context <md>] [--to <id,...>] [--option <текст>]... [--fyi]"
 
 	cmd := &cobra.Command{
 		Use:   "ask <role> [\"<вопрос>\"]",
@@ -55,6 +57,10 @@ func newAgentAskCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) < 1 || len(args) > 2 {
 				return &usageError{message: usage}
+			}
+
+			if err := validateAskFlags(options, fyi, usage); err != nil {
+				return err
 			}
 
 			body, err := textBody(cmd, argAt(args, 1), len(args) == 2, file, usage)
@@ -67,11 +73,7 @@ func newAgentAskCmd() *cobra.Command {
 				return err
 			}
 
-			reqBody := map[string]any{"body": body}
-			if context != "" {
-				reqBody["context"] = context
-			}
-			setTo(reqBody, parseTo(to))
+			reqBody := askRequestBody(body, context, parseTo(to), options, fyi)
 
 			var resp agentQuestionRow
 			if err := c.Post(apiPath("v1", "agents", args[0], "questions"), reqBody, &resp); err != nil {
@@ -81,13 +83,15 @@ func newAgentAskCmd() *cobra.Command {
 			if flags.JSON {
 				return printJSON(cmd, resp)
 			}
-			cmd.Printf("question Q%d (#%d) opened for %s\n", resp.Ordinal, resp.ID, args[0])
+			cmd.Printf("тред %s открыт\n", resp.ref())
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&context, "context", "", "дополнительный контекст (MD)")
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
 	cmd.Flags().StringVar(&file, "file", "", "файл с вопросом ('-' — stdin)")
+	cmd.Flags().StringArrayVar(&options, "option", nil, optionFlagUsage)
+	cmd.Flags().BoolVar(&fyi, "fyi", false, fyiFlagUsage)
 	return cmd
 }
 
@@ -141,13 +145,14 @@ func newAgentQuestionsCmd() *cobra.Command {
 // newAgentReplyCmd builds "rocket agent reply": a thread entry from either
 // side. A role instance's reply into a resolved thread reopens it.
 func newAgentReplyCmd() *cobra.Command {
-	var to []string
+	var opts threadReplyOptions
 	var file string
 
-	const usage = "usage: rocket agent reply <question-id>|<role>/Q<n> \"<текст>\" | --file <path> [--to <id,...>]"
+	const usage = "usage: rocket agent reply <role>/Q<n>|<question-id> \"<текст>\" | --file <path> " +
+		"[--to <id,...>] [--dry-run] [--join]"
 
 	cmd := &cobra.Command{
-		Use:   "reply <question-id>|<role>/Q<n> [\"<текст>\"]",
+		Use:   "reply <role>/Q<n>|<question-id> [\"<текст>\"]",
 		Short: "Ответить в тред роли",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) < 1 || len(args) > 2 {
@@ -167,59 +172,63 @@ func newAgentReplyCmd() *cobra.Command {
 				return err
 			}
 
-			reqBody := map[string]any{"body": body}
-			setTo(reqBody, parseTo(to))
-
+			opts.body = body
+			opts.to = parseTo(opts.to)
 			var resp agentQuestionRow
 			if err := c.Post(apiPath("v1", "agent-questions", id, "reply"),
-				reqBody, &resp); err != nil {
+				opts.requestBody(), &resp); err != nil {
 				return err
 			}
 
 			if flags.JSON {
 				return printJSON(cmd, resp)
 			}
-			cmd.Printf("reply added to Q%d (#%d)\n", resp.Ordinal, resp.ID)
+			cmd.Print(renderWriteResult("реплика добавлена в", resp))
 			return nil
 		},
 	}
-	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
+	cmd.Flags().StringSliceVar(&opts.to, "to", nil, toFlagUsage)
 	cmd.Flags().StringVar(&file, "file", "", "файл с текстом ('-' — stdin)")
+	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", false, dryRunFlagUsage)
+	cmd.Flags().BoolVar(&opts.join, "join", false, joinFlagUsage)
 	return cmd
 }
 
-// newAgentAnswerCmd builds "rocket agent answer": only the human closes a
-// role thread, with an answer or by dismissing it.
-func newAgentAnswerCmd() *cobra.Command {
-	var dismiss bool
-	var to []string
+// newAgentCloseCmd builds "rocket agent close": the role-thread twin of
+// "rocket task close" — one verb ending a thread with an answer, a choice
+// among its options, or as no longer relevant. hidden builds it under its
+// pre-#1023 name "answer", kept working but out of the help.
+func newAgentCloseCmd(hidden bool) *cobra.Command {
+	var opts threadCloseOptions
 	var file string
 
-	const usageMsg = "usage: rocket agent answer <question-id>|<role>/Q<n> \"<ответ>\" | --file <path> | --dismiss (exactly one)"
+	name := "close"
+	if hidden {
+		name = "answer"
+	}
+
+	usage := "usage: rocket agent " + name + " <role>/Q<n>|<question-id> \"<резолюция>\" | --file <path> | " +
+		"--choose <n> | --dismiss [\"<почему>\"] (ровно одно) [--to <id,...>] [--dry-run] [--join]"
 
 	cmd := &cobra.Command{
-		Use:   "answer <question-id>|<role>/Q<n> [\"<ответ>\"]",
-		Short: "Закрыть тред роли ответом или без ответа",
+		Use:    name + " <role>/Q<n>|<question-id> [\"<резолюция>\"]",
+		Short:  "Закрыть тред роли: ответом, выбором варианта или как неактуальный",
+		Hidden: hidden,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			usage := &usageError{message: usageMsg}
 			if len(args) < 1 || len(args) > 2 {
-				return usage
+				return &usageError{message: usage}
 			}
 
 			hasBody := len(args) == 2
-			// --dismiss closes the thread with no answer at all, so it
-			// excludes BOTH body sources, not just the positional one.
-			if dismiss && (hasBody || file != "") {
-				return usage
-			}
-
-			var body string
-			if !dismiss {
-				var err error
-				body, err = textBody(cmd, argAt(args, 1), hasBody, file, usageMsg)
+			if hasBody || file != "" {
+				body, err := textBody(cmd, argAt(args, 1), hasBody, file, usage)
 				if err != nil {
 					return err
 				}
+				opts.body = body
+			}
+			if err := opts.validate(usage); err != nil {
+				return err
 			}
 
 			id, err := resolveAgentQuestionRef(args[0])
@@ -232,35 +241,32 @@ func newAgentAnswerCmd() *cobra.Command {
 				return err
 			}
 
-			reqBody := map[string]any{}
-			if dismiss {
-				reqBody["dismiss"] = true
-			} else {
-				reqBody["body"] = body
-			}
-			setTo(reqBody, parseTo(to))
-
+			opts.to = parseTo(opts.to)
 			var resp agentQuestionRow
-			if err := c.Post(apiPath("v1", "agent-questions", id, "answer"), reqBody, &resp); err != nil {
+			if err := c.Post(apiPath("v1", "agent-questions", id, "answer"),
+				opts.requestBody(), &resp); err != nil {
 				return err
 			}
 
 			if flags.JSON {
 				return printJSON(cmd, resp)
 			}
-			if dismiss {
-				cmd.Printf("question Q%d (#%d) dismissed\n", resp.Ordinal, resp.ID)
-			} else {
-				cmd.Printf("question Q%d (#%d) answered\n", resp.Ordinal, resp.ID)
-			}
+			cmd.Print(renderWriteResult(closeAction(opts), resp))
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&dismiss, "dismiss", false, "закрыть тред без ответа")
-	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
-	cmd.Flags().StringVar(&file, "file", "", "файл с ответом ('-' — stdin)")
+	cmd.Flags().BoolVar(&opts.dismiss, "dismiss", false, dismissFlagUsage)
+	cmd.Flags().IntVar(&opts.choose, "choose", 0, chooseFlagUsage)
+	cmd.Flags().StringSliceVar(&opts.to, "to", nil, toFlagUsage)
+	cmd.Flags().StringVar(&file, "file", "", "файл с резолюцией ('-' — stdin)")
+	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", false, dryRunFlagUsage)
+	cmd.Flags().BoolVar(&opts.join, "join", false, joinFlagUsage)
 	return cmd
 }
+
+// newAgentAnswerCmd is the pre-#1023 name of "agent close", kept working and
+// hidden from help.
+func newAgentAnswerCmd() *cobra.Command { return newAgentCloseCmd(true) }
 
 // renderAgentQuestions renders a role's threads: an "agent <role>" header
 // followed by, per thread, a header line "Q<ordinal> (#<id>) [status] <arrow>"

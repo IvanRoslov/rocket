@@ -28,7 +28,7 @@ func inboxSample() []threadRow {
 		{
 			LocalRef: "cto/Q1", Kind: "role", RoleID: "cto",
 			Subject: "role cto", Body: "нужен доступ к проду",
-			Status:  "open", Type: "decision",
+			Status: "open", Type: "decision",
 			Participants: []string{"cto", "human"},
 			Attention:    []string{"cto"},
 			UpdatedAt:    inboxNow().Add(-30 * time.Minute).Unix(),
