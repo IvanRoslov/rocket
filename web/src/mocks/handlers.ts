@@ -37,6 +37,7 @@ import {
   subtasks,
   systemInfo,
   taskDocs,
+  milestones,
   taskLog,
   tasks,
 } from './fixtures'
@@ -121,11 +122,11 @@ export function appendChatEntry(sessionId: string, entry: ChatEntry): void {
 
 // Mutable copy of tasks + subtasks, written by task create/status/cancel
 // mutations. `nextTaskId` seeds past the highest fixture id.
-let tasksState: Task[] = [...tasks, ...subtasks].map((t) => ({ ...t }))
+let tasksState: Task[] = [...tasks, ...subtasks, ...milestones].map((t) => ({ ...t }))
 let nextTaskId = Math.max(...tasksState.map((t) => t.id)) + 1
 
 export function resetTasks(): void {
-  tasksState = [...tasks, ...subtasks].map((t) => ({ ...t }))
+  tasksState = [...tasks, ...subtasks, ...milestones].map((t) => ({ ...t }))
   nextTaskId = Math.max(...tasksState.map((t) => t.id)) + 1
 }
 
@@ -165,6 +166,20 @@ function maskToken(token: string): string {
   if (token === '') return ''
   if (token.length > 8) return `${token.slice(0, 4)}…${token.slice(-4)}`
   return 'set'
+}
+
+/**
+ * Mirrors agentMilestones() in internal/api/milestones.go: an agent card
+ * carries the milestones it holds, derived from the tasks — so an assign
+ * made through the API shows up on the agent immediately.
+ */
+function withMilestones(agent: Agent): Agent {
+  return {
+    ...agent,
+    milestones: tasksState
+      .filter((t) => t.milestone && t.assigned_role === agent.id)
+      .map((t) => ({ id: t.id, title: t.title, status: t.status })),
+  }
 }
 
 function openQuestionsFor(taskId: number): number {
@@ -390,8 +405,12 @@ export const handlers = [
     const status = url.searchParams.get('status')
     const parent = url.searchParams.get('parent')
     const board = url.searchParams.get('board') === 'true'
+    // `milestones=true` narrows to milestones; without it the daemon applies
+    // no milestone condition at all (internal/store/tasks.go ListTasks).
+    const milestonesOnly = url.searchParams.get('milestones') === 'true'
 
     let result = project ? tasksState.filter((t) => t.project_id === project) : tasksState
+    if (milestonesOnly) result = result.filter((t) => t.milestone === true)
     if (status) result = result.filter((t) => t.status === status)
 
     if (board) {
@@ -428,6 +447,7 @@ export const handlers = [
       description?: string
       project?: string
       parent_id?: number
+      milestone?: boolean
     }
     if (!body.title) {
       return HttpResponse.json({ error: { code: 'empty_title', message: 'title must not be empty' } }, { status: 400 })
@@ -458,6 +478,7 @@ export const handlers = [
       description: body.description,
       project_id: body.project ?? '',
       status: 'backlog',
+      ...(body.milestone ? { milestone: true } : {}),
       created_by: 'user',
       created_at: now,
       updated_at: now,
@@ -540,6 +561,43 @@ export const handlers = [
       return HttpResponse.json({ error: { code: 'not_found', message: `task ${id} not found` } }, { status: 404 })
     }
     task.status = 'cancelled'
+    task.updated_at = nowSeconds()
+    return HttpResponse.json(task)
+  }),
+
+  // internal/api/milestones.go: the human's half of milestone ownership.
+  // `{none:true}` releases it, `{agent_id}` hands it to a registered agent.
+  http.post('/v1/tasks/:id/assign', async ({ params, request }) => {
+    const id = Number(params.id)
+    const task = tasksState.find((t) => t.id === id)
+    if (!task) {
+      return HttpResponse.json({ error: { code: 'not_found', message: `task ${id} not found` } }, { status: 404 })
+    }
+    if (!task.milestone) {
+      return HttpResponse.json(
+        {
+          error: {
+            code: 'not_a_milestone',
+            message: 'only milestones are taken by agents: use rocket task start for a project task',
+          },
+        },
+        { status: 403 },
+      )
+    }
+    const body = (await request.json()) as { agent_id?: string; none?: boolean }
+    if (!!body.none === !!body.agent_id) {
+      return HttpResponse.json(
+        { error: { code: 'bad_request', message: 'pass exactly one of agent_id or none' } },
+        { status: 400 },
+      )
+    }
+    if (body.agent_id && !agentsState.some((a) => a.id === body.agent_id)) {
+      return HttpResponse.json(
+        { error: { code: 'agent_not_found', message: `agent not found: ${body.agent_id}` } },
+        { status: 400 },
+      )
+    }
+    task.assigned_role = body.none ? undefined : body.agent_id
     task.updated_at = nowSeconds()
     return HttpResponse.json(task)
   }),
@@ -1004,7 +1062,8 @@ export const handlers = [
 
   http.get('/v1/agents', ({ request }) => {
     const project = new URL(request.url).searchParams.get('project')
-    return HttpResponse.json(project ? agentsState.filter((a) => a.project === project) : agentsState)
+    const list = project ? agentsState.filter((a) => a.project === project) : agentsState
+    return HttpResponse.json(list.map(withMilestones))
   }),
 
   http.post('/v1/agents', async ({ request }) => {
@@ -1047,7 +1106,7 @@ export const handlers = [
         { status: 404 },
       )
     }
-    return HttpResponse.json(found)
+    return HttpResponse.json(withMilestones(found))
   }),
 
   http.patch('/v1/agents/:id', async ({ params, request }) => {

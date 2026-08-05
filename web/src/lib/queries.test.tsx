@@ -20,6 +20,9 @@ import {
   useSendAgentMessage,
   useStartAgent,
   useStopAgent,
+  useAssignMilestone,
+  useCreateMilestone,
+  useMilestonesBoard,
   useTask,
   useTasksBoard,
 } from './queries'
@@ -50,6 +53,52 @@ describe('useTasksBoard', () => {
     expect(board.review.map((t) => t.id)).toEqual([11])
     expect(board.done.map((t) => t.id)).toEqual([9])
     expect(board.cancelled).toEqual([])
+  })
+})
+
+// Milestones (task #1023, spec v2): root tasks outside every project, held by
+// a persistent agent. They must never leak into a project board, and the
+// project boards must never leak into theirs.
+describe('milestone queries', () => {
+  it('useMilestonesBoard returns only milestones, grouped by status', async () => {
+    const { result } = renderHook(() => useMilestonesBoard(), { wrapper })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    const board = result.current.data!
+    const every = Object.values(board).flat()
+    expect(every.length).toBeGreaterThan(0)
+    expect(every.every((t) => t.milestone === true)).toBe(true)
+    expect(every.every((t) => t.project_id === '')).toBe(true)
+    expect(board.in_progress.map((t) => t.assigned_role)).toContain('sre')
+  })
+
+  it('the project board carries no milestones', async () => {
+    const { result } = renderHook(() => useTasksBoard('billing'), { wrapper })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    const every = Object.values(result.current.data!).flat()
+    expect(every.some((t) => t.milestone)).toBe(false)
+  })
+
+  it('useAssignMilestone hands a milestone over and takes it back', async () => {
+    const { result } = renderHook(() => useAssignMilestone(), { wrapper })
+
+    result.current.mutate({ id: 40, agentId: 'librarian' })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data!.assigned_role).toBe('librarian')
+
+    result.current.mutate({ id: 40, agentId: null })
+    await waitFor(() => expect(result.current.data!.assigned_role).toBeUndefined())
+  })
+
+  it('useCreateMilestone creates a task with no project', async () => {
+    const { result } = renderHook(() => useCreateMilestone(), { wrapper })
+
+    result.current.mutate({ title: 'Kill the flaky suite' })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data!.milestone).toBe(true)
+    expect(result.current.data!.project_id).toBe('')
   })
 })
 

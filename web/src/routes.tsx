@@ -5,6 +5,7 @@ import { GlobalAgentsScreen } from './screens/agents/GlobalAgentsScreen'
 import { AppShell } from './components/AppShell'
 import { ChatScreen } from './screens/chat/ChatScreen'
 import { KanbanScreen } from './screens/kanban/KanbanScreen'
+import { MilestonesScreen } from './screens/milestones/MilestonesScreen'
 import { ProjectsScreen } from './screens/projects/ProjectsScreen'
 import { QuestionsScreen } from './screens/questions/QuestionsScreen'
 import { SettingsScreen } from './screens/settings/SettingsScreen'
@@ -34,6 +35,10 @@ export const router = createBrowserRouter([
       { path: '/agents/:roleId', element: <AgentScreen /> },
       { path: '/p/:projectId/agents', element: <AgentsScreen /> },
       { path: '/p/:projectId/agents/:roleId', element: <AgentScreen /> },
+      // Milestones (task #1023, spec v2): outside every project, so the
+      // routes carry no projectId — the detail view is the task screen.
+      { path: '/milestones', element: <MilestonesScreen /> },
+      { path: '/milestones/:taskId', element: <TaskScreen /> },
       { path: '/questions', element: <QuestionsScreen /> },
       { path: '/system', element: <SystemScreen /> },
       { path: '/settings', element: <SettingsScreen /> },

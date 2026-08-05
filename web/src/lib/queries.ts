@@ -133,6 +133,21 @@ export function useTasksBoard(projectId: string | undefined): UseQueryResult<Tas
   })
 }
 
+/**
+ * Milestones board: `GET /v1/tasks?milestones=true&board=true` (task #1023,
+ * spec v2). Milestones live outside every project, so unlike `useTasksBoard`
+ * this one takes no project and is never scoped by the project switcher.
+ */
+export function useMilestonesBoard(): UseQueryResult<TaskBoard> {
+  return useQuery({
+    queryKey: ['tasks', 'milestones', 'board'],
+    queryFn: async () => {
+      const res = await api.get<TaskBoardResponse>('/v1/tasks?milestones=true&board=true')
+      return res.board
+    },
+  })
+}
+
 export interface TaskFilter {
   project?: string
   status?: TaskStatus
@@ -391,6 +406,49 @@ export function useCreateTask(): UseMutationResult<
     mutationFn: (payload) => api.post<Task>('/v1/tasks', payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    },
+  })
+}
+
+/**
+ * `POST /v1/tasks` with `milestone: true` -> a root task outside every
+ * project. `--milestone` and a project are mutually exclusive, so this hook
+ * deliberately has no project parameter.
+ */
+export function useCreateMilestone(): UseMutationResult<
+  Task,
+  Error,
+  { title: string; description?: string }
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (payload) => api.post<Task>('/v1/tasks', { ...payload, milestone: true }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    },
+  })
+}
+
+/**
+ * `POST /v1/tasks/{id}/assign` — the human's half of milestone ownership:
+ * `{agent_id}` hands it over, `{none: true}` takes it back. The agent's own
+ * half (`take`) is a CLI verb from inside its session and has no UI.
+ */
+export function useAssignMilestone(): UseMutationResult<
+  Task,
+  Error,
+  { id: number; agentId: string | null }
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, agentId }) =>
+      api.post<Task>(`/v1/tasks/${id}/assign`, agentId ? { agent_id: agentId } : { none: true }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task'] })
+      // The agent card lists its milestones — it moved too.
+      queryClient.invalidateQueries({ queryKey: ['agents'] })
+      queryClient.invalidateQueries({ queryKey: ['agent'] })
     },
   })
 }
@@ -923,6 +981,12 @@ export function wireInvalidation(queryClient: QueryClient) {
       queryClient.invalidateQueries({ queryKey: ['task'] })
       queryClient.invalidateQueries({ queryKey: ['questions'] })
       queryClient.invalidateQueries({ queryKey: ['threads'] })
+    } else if (event.type.startsWith('milestone.')) {
+      // `milestone.quiet` (subtask #1032) flips the quiet flag the milestone
+      // cards render, on both the board and the holder's agent card.
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['agents'] })
+      queryClient.invalidateQueries({ queryKey: ['agent'] })
     } else if (event.type === 'orchestrator.heartbeat_sent') {
       // High-frequency event; keep invalidation minimal — only the task
       // detail view (which shows session/heartbeat state) needs to refresh.

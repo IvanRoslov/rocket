@@ -598,3 +598,53 @@ describe('TaskScreen', () => {
     })
   })
 })
+
+// A milestone (task #1023, spec v2) is a task outside every project, so the
+// same screen serves it at /milestones/:taskId — with no project to go back
+// to and no project-scoped session rail.
+describe('TaskScreen for a milestone', () => {
+  function renderMilestone(taskId = 41) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[`/milestones/${taskId}`]}>
+          <Routes>
+            <Route path="/milestones/:taskId" element={<TaskScreen />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+  }
+
+  it('renders the milestone and links back to the milestones board', async () => {
+    renderMilestone()
+
+    await waitFor(() =>
+      expect(screen.getByText('Own the incident review ritual')).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('link', { name: /milestones/i })).toHaveAttribute('href', '/milestones')
+    // Никаких /p/undefined/... — у майлстона нет проекта.
+    for (const link of screen.getAllByRole('link')) {
+      expect(link.getAttribute('href')).not.toContain('undefined')
+    }
+  })
+
+  it('shows the agent rail — its session, not an orchestrator', async () => {
+    renderMilestone()
+    await waitFor(() => expect(screen.getByText('Own the incident review ritual')).toBeInTheDocument())
+
+    // The agent's tmux session is named after the agent, and one session
+    // serves all of its milestones (docs/10-agents.md).
+    expect(screen.getByText('Agent')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /term/ })).toHaveAttribute('href', '/term/sre')
+    expect(screen.getByRole('link', { name: /chat/ })).toHaveAttribute('href', '/chat/sre')
+    // A milestone has no orchestrator and no workers — no empty rail about them.
+    expect(screen.queryByText(/No workers yet/)).not.toBeInTheDocument()
+  })
+
+  it('names the agent holding it', async () => {
+    renderMilestone()
+    await waitFor(() => expect(screen.getByText('Own the incident review ritual')).toBeInTheDocument())
+    expect(screen.getByText('◆ sre')).toBeInTheDocument()
+  })
+})

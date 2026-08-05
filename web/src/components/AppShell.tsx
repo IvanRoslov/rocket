@@ -90,6 +90,11 @@ export function AppShell() {
           >
             Agents
           </Link>
+          {/* Milestones are the persistent agents' work and belong to no
+              project (task #1023, spec v2) — a global tab, like Agents. */}
+          <NavLink to="/milestones" style={navLinkStyle}>
+            Milestones
+          </NavLink>
           <NavLink to="/questions" style={navLinkStyle}>
             Questions
             {awaitingCount > 0 && (

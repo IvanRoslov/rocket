@@ -303,6 +303,20 @@ export interface Task {
    * than the daemon's threshold — nothing moves until somebody types.
    */
   waiting_terminal?: boolean
+  /**
+   * Milestone (task #1023, spec v2): a root task outside every project
+   * (`project_id` is empty), taken by a persistent agent instead of started
+   * as a feature. `assigned_role` is that agent's id, absent until somebody
+   * takes it.
+   */
+  milestone?: boolean
+  assigned_role?: string
+  /**
+   * The holding agent has shown no work — no journal entry, doc or thread
+   * message — for longer than the daemon's `milestone_quiet_after`. Written
+   * by the daemon (subtask #1032); treat its absence as "not quiet".
+   */
+  quiet?: boolean
 }
 
 /**
@@ -538,8 +552,17 @@ export interface Agent {
   unread: number
   open_questions: number
   awaiting_user: number
+  /** The milestones this agent holds — the one place a human sees what it took on. */
+  milestones?: AgentMilestoneRef[]
   created_at: number
   updated_at: number
+}
+
+/** A milestone as listed on its holder's agent card (`GET /v1/agents/{id}`). */
+export interface AgentMilestoneRef {
+  id: number
+  title: string
+  status: TaskStatus
 }
 
 /** One inbox message. The inbox is what an agent gets when its session is

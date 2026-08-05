@@ -120,6 +120,24 @@ export interface Task {
   created_at: number
   updated_at: number
   completed_at?: number
+  /**
+   * Milestone (task #1023, spec v2): a root task outside every project
+   * (`project_id` empty), held by a persistent agent. `assigned_role` names
+   * that agent; `quiet` says the daemon has not seen it show work for longer
+   * than `milestone_quiet_after` (absent = not quiet).
+   */
+  milestone?: boolean
+  assigned_role?: string
+  quiet?: boolean
+  open_questions?: number
+  questions_awaiting_user?: number
+}
+
+/** A milestone as listed on its holder's agent card. */
+export interface AgentMilestoneRef {
+  id: number
+  title: string
+  status: TaskStatus
 }
 
 export interface TaskDetail extends Task {
@@ -225,6 +243,8 @@ export interface Agent {
   unread: number
   open_questions: number
   awaiting_user: number
+  /** The milestones this agent holds (task #1023, spec v2). */
+  milestones?: AgentMilestoneRef[]
   created_at: number
   updated_at: number
 }
