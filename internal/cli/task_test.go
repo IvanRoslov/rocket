@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1355,6 +1357,72 @@ func TestTaskThreadCommandsHaveToFlag(t *testing.T) {
 	for name, cmd := range cmds {
 		if cmd.Flags().Lookup("to") == nil {
 			t.Errorf("task %s: expected --to flag", name)
+		}
+	}
+}
+
+// TestTaskWritingCommandsFileFlag pins that every text-writing task command
+// accepts --file as an alternative to the positional text, and that
+// supplying both sources (or neither) is a usage error — exit code 3, not a
+// silent preference that could drop the user's markdown on a typo.
+//
+// Each case resolves its body before connect(), which is disabled under go
+// test, so only the usage-error paths run to completion here; the happy
+// path is covered at the textBody level in io_test.go.
+func TestTaskWritingCommandsFileFlag(t *testing.T) {
+	body := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(body, []byte("markdown `body`"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		new  func() *cobra.Command
+		args []string
+	}{
+		{"log both", newTaskLogCmd, []string{"1", "text", "--kind", "note", "--file", body}},
+		{"log neither", newTaskLogCmd, []string{"1", "--kind", "note"}},
+		{"ask both", newTaskAskCmd, []string{"1", "text", "--file", body}},
+		{"ask neither", newTaskAskCmd, []string{"1"}},
+		{"ask-orch both", newTaskAskOrchCmd, []string{"1", "text", "--file", body}},
+		{"ask-orch neither", newTaskAskOrchCmd, []string{"1"}},
+		{"reply both", newTaskReplyCmd, []string{"7", "text", "--file", body}},
+		{"reply neither", newTaskReplyCmd, []string{"7"}},
+		{"answer both", newTaskAnswerCmd, []string{"7", "text", "--file", body}},
+		{"answer file plus dismiss", newTaskAnswerCmd, []string{"7", "--dismiss", "--file", body}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := tc.new()
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs(tc.args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatal("expected a usage error, got nil")
+			}
+			if code := exitCode(err); code != 3 {
+				t.Fatalf("exitCode = %d, want 3 (err=%v)", code, err)
+			}
+		})
+	}
+}
+
+// TestTaskWritingCommandsRegisterFileFlag proves the flag exists on each of
+// them, independent of the daemon.
+func TestTaskWritingCommandsRegisterFileFlag(t *testing.T) {
+	for name, newCmd := range map[string]func() *cobra.Command{
+		"log":      newTaskLogCmd,
+		"ask":      newTaskAskCmd,
+		"ask-orch": newTaskAskOrchCmd,
+		"reply":    newTaskReplyCmd,
+		"answer":   newTaskAnswerCmd,
+	} {
+		if f := newCmd().Flags().Lookup("file"); f == nil {
+			t.Errorf("rocket task %s: --file flag is not registered", name)
 		}
 	}
 }
