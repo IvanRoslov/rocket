@@ -15,6 +15,9 @@ import {
   useAgents,
   useAnswerAgentQuestion,
   useAnswerQuestion,
+  useAnswerThread,
+  useAskThread,
+  useReplyThread,
   useReplyAgentQuestion,
   useReplyQuestion,
   useSendAgentMessage,
@@ -265,5 +268,89 @@ describe('addressees on reply and answer', () => {
     result.current.mutate({ id: 90, body: 'ping', roleId: 'sre' })
     await waitFor(() => expect(bodies).toHaveLength(2))
     expect(bodies[1]).toEqual({ body: 'ping' })
+  })
+})
+
+// The v3 Questions screen drives task threads and role threads through one
+// pair of controls, so the dispatch by `kind` — which URL a click reaches —
+// is the thing worth pinning down.
+describe('unified thread actions', () => {
+  it('useAnswerThread reaches the task endpoint for a task thread', async () => {
+    const seen: { url: string; body: Record<string, unknown> }[] = []
+    server.use(
+      http.post('/v1/questions/:id/answer', async ({ request }) => {
+        seen.push({ url: '/v1/questions/answer', body: (await request.json()) as never })
+        return HttpResponse.json({ id: 3 })
+      }),
+    )
+    const { result } = renderHook(() => useAnswerThread(), { wrapper })
+
+    result.current.mutate({ ref: { id: 3, kind: 'task', taskId: 12 }, choose: 2 })
+    await waitFor(() => expect(seen).toHaveLength(1))
+    expect(seen[0]).toEqual({ url: '/v1/questions/answer', body: { choose: 2 } })
+  })
+
+  it('useAnswerThread reaches the agent endpoint for a role thread', async () => {
+    const seen: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/agent-questions/:id/answer', async ({ request }) => {
+        seen.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 90 })
+      }),
+    )
+    const { result } = renderHook(() => useAnswerThread(), { wrapper })
+
+    result.current.mutate({ ref: { id: 90, kind: 'role', roleId: 'sre' }, dismiss: true })
+    await waitFor(() => expect(seen).toHaveLength(1))
+    expect(seen[0]).toEqual({ dismiss: true })
+  })
+
+  it('useReplyThread keeps `to` optional on both kinds', async () => {
+    const task: Record<string, unknown>[] = []
+    const role: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/questions/:id/reply', async ({ request }) => {
+        task.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 3 }, { status: 201 })
+      }),
+      http.post('/v1/agent-questions/:id/reply', async ({ request }) => {
+        role.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 90 }, { status: 201 })
+      }),
+    )
+    const { result } = renderHook(() => useReplyThread(), { wrapper })
+
+    result.current.mutate({ ref: { id: 3, kind: 'task', taskId: 12 }, body: 'more?', to: ['cto'] })
+    await waitFor(() => expect(task).toHaveLength(1))
+    expect(task[0]).toEqual({ body: 'more?', to: ['cto'] })
+
+    result.current.mutate({ ref: { id: 90, kind: 'role', roleId: 'sre' }, body: 'more?', to: [] })
+    await waitFor(() => expect(role).toHaveLength(1))
+    expect(role[0]).toEqual({ body: 'more?' })
+  })
+
+  it('useAskThread opens a task thread on an orchestrator and a role thread on an agent', async () => {
+    const task: Record<string, unknown>[] = []
+    const role: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/tasks/:id/questions', async ({ request }) => {
+        task.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 7 }, { status: 201 })
+      }),
+      http.post('/v1/agents/:id/questions', async ({ request }) => {
+        role.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 8 }, { status: 201 })
+      }),
+    )
+    const { result } = renderHook(() => useAskThread(), { wrapper })
+
+    result.current.mutate({ target: { kind: 'task', id: 12 }, body: 'decide this' })
+    await waitFor(() => expect(task).toHaveLength(1))
+    // A plain question carries no `type`: the daemon defaults to `decision`.
+    expect(task[0]).toEqual({ body: 'decide this' })
+
+    result.current.mutate({ target: { kind: 'role', id: 'sre' }, body: 'heads up', type: 'fyi' })
+    await waitFor(() => expect(role).toHaveLength(1))
+    expect(role[0]).toEqual({ body: 'heads up', type: 'fyi' })
   })
 })

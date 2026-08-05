@@ -83,13 +83,16 @@ describe('statusChip', () => {
     expect(chip).toEqual({ label: 'waiting on nobody', tone: 'waiting' })
   })
 
-  test('a resolved decision shows its resolution, truncated', () => {
+  // The inbox knows only HOW a thread ended, never the words it ended with.
+  test('a resolved decision falls back to the resolution enum', () => {
+    const chip = statusChip(thread({ id: 1, status: 'resolved', resolution: 'dismissed' }))
+    expect(chip).toEqual({ label: 'closed: dismissed', tone: 'closed' })
+  })
+
+  test('a caller holding the full thread shows the real resolution, truncated', () => {
     const chip = statusChip(
-      thread({
-        id: 1,
-        status: 'resolved',
-        resolution: 'B — carry the delta into the next invoice, matching v1.',
-      }),
+      thread({ id: 1, status: 'resolved', resolution: 'answered' }),
+      'B — carry the delta into the next invoice, matching v1.',
     )
     expect(chip.tone).toBe('closed')
     expect(chip.label).toBe('closed: B — carry the delta into the n…')
@@ -122,7 +125,7 @@ describe('browseGroups', () => {
   const all = [
     thread({ id: 1 }),
     thread({ id: 2, your_turn: false, attention: ['orch'] }),
-    thread({ id: 3, status: 'resolved', resolution: 'done' }),
+    thread({ id: 3, status: 'resolved', resolution: 'answered' }),
   ]
 
   test('"All open" shows both open groups and no history', () => {

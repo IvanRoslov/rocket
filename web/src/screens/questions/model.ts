@@ -41,11 +41,21 @@ export interface StatusChip {
   tone: ChipTone
 }
 
-/** The one-line status of a thread: whose turn it is, or how it ended. */
-export function statusChip(entry: ThreadInboxEntry): StatusChip {
+/**
+ * The one-line status of a thread: whose turn it is, or how it ended.
+ *
+ * The design shows the resolution TEXT in the closed chip, but the inbox
+ * carries only `resolution`, an enum (`answered` | `dismissed` | `fyi`) — the
+ * text a thread was closed with lives in its last `answer` message, which only
+ * the per-subject endpoint returns. So a caller that has fetched the full
+ * thread (the focus card) passes `resolutionText` and gets the design's chip;
+ * a caller that has not (a browse row) falls back to the enum rather than
+ * inventing a resolution it cannot know.
+ */
+export function statusChip(entry: ThreadInboxEntry, resolutionText?: string): StatusChip {
   if (entry.status !== 'open') {
     if (entry.type === 'fyi') return { label: 'note', tone: 'note' }
-    const resolution = entry.resolution ?? ''
+    const resolution = resolutionText?.trim() || entry.resolution || 'answered'
     const short =
       resolution.length > CHIP_RESOLUTION_MAX
         ? `${resolution.slice(0, CHIP_RESOLUTION_MAX)}…`
