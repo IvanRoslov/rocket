@@ -450,3 +450,30 @@ func TestMilestoneWritesRestrictedToHolder(t *testing.T) {
 	}
 	resp.Body.Close()
 }
+
+func TestAgentResponseListsMilestones(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	registerTestAgent(t, d, "cto")
+	id := addMilestone(t, d, "Agents UX")
+	if err := d.Store.SetTaskAssignedRole(id, "cto"); err != nil {
+		t.Fatalf("SetTaskAssignedRole: %v", err)
+	}
+	addMilestone(t, d, "not taken")
+
+	resp := getJSON(t, srv.URL+"/v1/agents/cto")
+	defer resp.Body.Close()
+	var body struct {
+		Milestones []struct {
+			ID     int64  `json:"id"`
+			Title  string `json:"title"`
+			Status string `json:"status"`
+		} `json:"milestones"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Milestones) != 1 || body.Milestones[0].ID != id || body.Milestones[0].Title != "Agents UX" {
+		t.Fatalf("milestones = %+v, want only #%d", body.Milestones, id)
+	}
+}
