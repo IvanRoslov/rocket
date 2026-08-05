@@ -179,6 +179,10 @@
   color: var(--accent-text);
   background: var(--accent-selected-bg);
 }
+.overview-tab__status--warn {
+  color: var(--warn-text);
+  background: var(--warn-bg);
+}
 .overview-tab__status--review {
   color: var(--review-text);
   background: var(--review-bg);

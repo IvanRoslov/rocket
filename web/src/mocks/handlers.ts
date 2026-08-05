@@ -154,7 +154,7 @@ export function resetLog(): void {
   nextLogId = Math.max(...logState.map((l) => l.id)) + 1
 }
 
-const TASK_STATUSES: TaskStatus[] = ['backlog', 'in_progress', 'review', 'done', 'cancelled']
+const TASK_STATUSES: TaskStatus[] = ['backlog', 'brainstorm', 'in_progress', 'review', 'done', 'cancelled']
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000)
@@ -418,6 +418,7 @@ export const handlers = [
       const rootOnly = result.filter((t) => t.parent_id === undefined)
       const b: Record<TaskStatus, Task[]> = {
         backlog: [],
+        brainstorm: [],
         in_progress: [],
         review: [],
         done: [],

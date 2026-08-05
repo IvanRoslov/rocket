@@ -28,6 +28,7 @@ interface ColumnSpec {
 
 const COLUMNS: ColumnSpec[] = [
   { key: 'backlog', title: 'Backlog', dot: 'var(--text-4)' },
+  { key: 'brainstorm', title: 'Brainstorm', dot: 'var(--warn)' },
   { key: 'in_progress', title: 'In Progress', dot: 'var(--accent)' },
   { key: 'review', title: 'Review', dot: 'var(--review)' },
   { key: 'done', title: 'Done', dot: 'var(--ok)' },
@@ -46,7 +47,7 @@ function matchesSearch(task: Task, query: string): boolean {
 /** Moves `taskId` into `status` within a board snapshot, for optimistic drag-drop updates. */
 function moveTaskInBoard(board: TaskBoard, taskId: number, status: TaskStatus): TaskBoard {
   let moved: Task | undefined
-  const next: TaskBoard = { backlog: [], in_progress: [], review: [], done: [], cancelled: [] }
+  const next: TaskBoard = { backlog: [], brainstorm: [], in_progress: [], review: [], done: [], cancelled: [] }
   for (const key of Object.keys(board) as TaskStatus[]) {
     for (const task of board[key]) {
       if (task.id === taskId) {
