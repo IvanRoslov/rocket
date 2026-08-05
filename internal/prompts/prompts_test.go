@@ -296,6 +296,29 @@ func TestRenderOrchestratorFieldFixes(t *testing.T) {
 	}
 }
 
+// The task status "brainstorm" is the phase both prompts run in before the
+// spec is confirmed; the orchestrator is the one that ends it. If the prompts
+// do not say so, the orchestrator leaves the board lying about the feature.
+func TestPromptsTeachBrainstormStatus(t *testing.T) {
+	vars := completeVars()
+
+	for _, name := range []string{"kickoff", "orchestrator"} {
+		t.Run(name, func(t *testing.T) {
+			result, err := Render("", name, vars)
+			if err != nil {
+				t.Fatalf("Render %s failed: %v", name, err)
+			}
+
+			if !strings.Contains(result, "brainstorm") {
+				t.Errorf("%s template never names the brainstorm status", name)
+			}
+			if !strings.Contains(result, "rocket task move 123 in_progress") {
+				t.Errorf("%s template missing the move-to-in_progress command", name)
+			}
+		})
+	}
+}
+
 func TestRenderInvalidTemplate(t *testing.T) {
 	vars := completeVars()
 

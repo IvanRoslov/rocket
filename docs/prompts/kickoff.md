@@ -13,6 +13,11 @@ Feature request from the human (task #{{task_id}}):
 {{task_description}}
 ---
 
+The task is in status "brainstorm": that is where it stays while you clarify,
+research and write the spec. The moment the human confirms the spec (gate 3),
+move it on yourself: `rocket task move {{task_id}} in_progress`. Only then
+spawn workers.
+
 Start now:
 
 1. CLARIFY FIRST. Invoke superpowers:brainstorming and drive it with the human
@@ -36,7 +41,9 @@ Start now:
    spec — including rationale-only edits — reopens this gate: store the new
    version and ask again.
 
-4. EXECUTE. Create subtasks, spawn workers, coordinate to merged PRs.
+4. EXECUTE. Right after the confirmation lands, move the task out of
+   brainstorm: `rocket task move {{task_id}} in_progress`. Then create
+   subtasks, spawn workers, coordinate to merged PRs.
    Gates: a worker's PR needs green CI before you consider its task done.
 
 5. DELIVER. Final report, task to review, tell the human.
