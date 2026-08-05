@@ -348,7 +348,14 @@ export interface TaskLogEntry {
 }
 
 export type QuestionStatus = 'open' | 'resolved'
-export type QuestionResolution = 'answered' | 'dismissed'
+/**
+ * `fyi` is not a way a thread was answered but the kind of thread it always
+ * was: a status note, created resolved, waiting on nobody (task #1023 spec v1
+ * §«Тип треда»).
+ */
+export type QuestionResolution = 'answered' | 'dismissed' | 'fyi'
+/** `questions.type` — internal/api/threads.go `normalizeThreadType`. */
+export type ThreadType = 'decision' | 'fyi'
 export type QuestionWhoseTurn = 'user' | 'orchestrator' | ''
 
 /** `questionResponse` — internal/api/questions.go. */
@@ -371,6 +378,27 @@ export interface Question {
   your_turn?: boolean
   /** Legacy two-party turn field, derived from `waiting_on` by the API. */
   whose_turn?: QuestionWhoseTurn
+  /**
+   * The one thread id a human sees: "1023/Q2" for a task thread, "cto/Q1" for
+   * a role thread. Absent on a daemon older than task #1023 — fall back to
+   * `Q${ordinal}`, never to the global numeric id.
+   */
+  local_ref?: string
+  /** `decision` (the default) or `fyi`; absent on a pre-#1023 daemon. */
+  type?: ThreadType
+  /**
+   * Answer choices. Picking one closes the thread with that text — the API
+   * takes `choose` as a **1-based** index into this array.
+   */
+  options?: string[]
+  /**
+   * An open decision thread nobody has moved for longer than
+   * `question_stale_after`. Derived by the daemon because the threshold is
+   * configurable — never recompute it from `asked_at` on the client.
+   */
+  stale?: boolean
+  /** The stored "whose turn" set; `waiting_on` is the same thing, older name. */
+  attention?: string[]
   asked_at: number
   resolved_at?: number
   messages: QuestionMessage[]
@@ -385,6 +413,50 @@ export interface GlobalQuestion extends Question {
   project_id: string
   project_name: string
   orchestrator_name?: string
+}
+
+/**
+ * One row of `GET /v1/threads` — `threadInboxEntry` in
+ * internal/api/thread_inbox.go. The unified inbox of task AND role threads:
+ * what is open and on whom, in one listing, without walking every task.
+ *
+ * It deliberately carries the question body only, never the conversation: a
+ * row that is expanded fetches the full thread from its per-subject endpoint.
+ */
+export interface ThreadInboxEntry {
+  /** "1023/Q2" or "cto/Q1" — the id a human types back. */
+  local_ref: string
+  kind: 'task' | 'role'
+  /** Set for `kind: 'task'`. */
+  task_id?: number
+  /** Set for `kind: 'role'`. */
+  role_id?: string
+  /** Human-readable subject: `task #1023 "Ship it"` or `role cto`. Never parsed. */
+  subject: string
+  /** The global numeric id — what the per-thread write endpoints address. */
+  id: number
+  ordinal: number
+  asked_by: string
+  body: string
+  status: QuestionStatus
+  resolution?: QuestionResolution
+  type: ThreadType
+  options?: string[]
+  participants: string[]
+  /** The stored "whose turn" set; `waiting_on` is the same array, older name. */
+  attention: string[]
+  waiting_on: string[]
+  /** Caller-relative: true when the dashboard user is in `attention`. */
+  your_turn: boolean
+  asked_at: number
+  /** Last movement — the last entry, or the question itself when nobody replied. */
+  updated_at: number
+  resolved_at?: number
+  /** Open decision thread idle longer than `question_stale_after` — daemon-derived. */
+  stale?: boolean
+  /** Task threads only: the context a dashboard row needs to link and label itself. */
+  project_id?: string
+  task_title?: string
 }
 
 export type QuestionMessageKind = 'reply' | 'answer'
@@ -510,6 +582,16 @@ export interface AgentQuestion {
   your_turn?: boolean
   /** Legacy two-party turn field, derived from `waiting_on` by the API. */
   whose_turn?: 'user' | 'role'
+  /** The one thread id a human sees — "cto/Q1" for a role thread. See `Question.local_ref`. */
+  local_ref?: string
+  /** `decision` (the default) or `fyi`; absent on a pre-#1023 daemon. */
+  type?: ThreadType
+  /** Answer choices; `choose` is a **1-based** index into this array. */
+  options?: string[]
+  /** Open decision thread idle longer than `question_stale_after` — daemon-derived. */
+  stale?: boolean
+  /** The stored "whose turn" set; `waiting_on` is the same thing, older name. */
+  attention?: string[]
   asked_at: number
   resolved_at?: number
   messages: QuestionMessage[]
