@@ -19,6 +19,11 @@ const DefaultInputStallThreshold = 10 * time.Minute
 // movement before it counts as stale.
 const DefaultQuestionStaleAfter = 24 * time.Hour
 
+// DefaultMilestoneQuietAfter is the built-in value of
+// Config.MilestoneQuietAfter — how long a milestone in progress may show no
+// trace of the agent holding it before it counts as quiet.
+const DefaultMilestoneQuietAfter = 24 * time.Hour
+
 // Config represents the rocket daemon configuration.
 type Config struct {
 	Port int    `yaml:"port"`
@@ -67,9 +72,18 @@ type Config struct {
 	// that one is fixed at heartbeat.staleReminderInterval, so shortening
 	// this threshold makes threads go stale sooner, not remind more often.
 	QuestionStaleAfter time.Duration `yaml:"question_stale_after"`
-	GithubAPIBase      string        `yaml:"github_api_base"`
-	GithubCloneBase    string        `yaml:"github_clone_base"`
-	MergeGrace         time.Duration `yaml:"merge_grace"`
+	// MilestoneQuietAfter is how long a milestone in progress may show no
+	// visible trace of the agent holding it — no journal entry, no doc, no
+	// thread entry of its own — before the heartbeat reminds that agent (and
+	// readers flag the milestone as quiet). A zero value means "unset":
+	// consumers outside a loaded config fall back to
+	// DefaultMilestoneQuietAfter. Like QuestionStaleAfter it is not the
+	// reminder's anti-spam window: that one is fixed at
+	// heartbeat.quietReminderInterval.
+	MilestoneQuietAfter time.Duration `yaml:"milestone_quiet_after"`
+	GithubAPIBase       string        `yaml:"github_api_base"`
+	GithubCloneBase     string        `yaml:"github_clone_base"`
+	MergeGrace          time.Duration `yaml:"merge_grace"`
 	// AgentNotifyInterval is the anti-spam floor between two "N unread"
 	// notifications injected into the same live agent session. A fresh
 	// notification is only due at all once new unread messages have arrived
@@ -135,6 +149,7 @@ func Load(home string) (*Config, error) {
 		QuestionReminderThreshold: 30 * time.Minute,
 		InputStallThreshold:       DefaultInputStallThreshold,
 		QuestionStaleAfter:        DefaultQuestionStaleAfter,
+		MilestoneQuietAfter:       DefaultMilestoneQuietAfter,
 		GithubAPIBase:             "https://api.github.com",
 		GithubCloneBase:           "",
 		MergeGrace:                5 * time.Minute,

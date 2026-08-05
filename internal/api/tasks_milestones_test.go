@@ -3,8 +3,10 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/IvanRoslov/rocket/internal/store"
 )
@@ -475,5 +477,78 @@ func TestAgentResponseListsMilestones(t *testing.T) {
 	}
 	if len(body.Milestones) != 1 || body.Milestones[0].ID != id || body.Milestones[0].Title != "Agents UX" {
 		t.Fatalf("milestones = %+v, want only #%d", body.Milestones, id)
+	}
+}
+
+// --- quiet flag -------------------------------------------------------
+
+// addQuietMilestone inserts a milestone taken by agentID whose last movement
+// is age hours ago, with no trace of the agent since.
+func addQuietMilestone(t *testing.T, d Deps, title, agentID string, ageHours int64) int64 {
+	t.Helper()
+	ts := time.Now().Add(-time.Duration(ageHours) * time.Hour).Unix()
+	id, err := d.Store.AddTask(store.Task{
+		Title: title, Status: "in_progress", Milestone: true, CreatedBy: "user",
+		AssignedRole: agentID, CreatedAt: ts, UpdatedAt: ts,
+	})
+	if err != nil {
+		t.Fatalf("AddTask milestone: %v", err)
+	}
+	return id
+}
+
+// TestMilestoneQuietFlag: criterion 5 — the human's channel for a silent
+// milestone is the derived `quiet` flag, present on both the detail and the
+// list response and absent from everything that isn't silent.
+func TestMilestoneQuietFlag(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	registerTestAgent(t, d, "cto")
+
+	quiet := addQuietMilestone(t, d, "silent", "cto", 30)
+	fresh := addQuietMilestone(t, d, "busy", "cto", 30)
+	if _, err := d.Store.AddTaskLog(store.TaskLogEntry{
+		TaskID: fresh, Kind: "decision", Body: "chose A", Author: "cto",
+		CreatedAt: time.Now().Add(-time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("AddTaskLog: %v", err)
+	}
+	addTestProject(t, d, "billing")
+	plain, err := d.Store.AddTask(store.Task{
+		Title: "regular", ProjectID: "billing", Status: "in_progress",
+		CreatedAt: 1000, UpdatedAt: 1000,
+	})
+	if err != nil {
+		t.Fatalf("AddTask regular: %v", err)
+	}
+
+	detail := decodeMap(t, getJSON(t, srv.URL+"/v1/tasks/"+strconv.FormatInt(quiet, 10)))
+	if detail["quiet"] != true {
+		t.Errorf("detail quiet = %v, want true", detail["quiet"])
+	}
+
+	resp := getJSON(t, srv.URL+"/v1/tasks?parent=all")
+	defer resp.Body.Close()
+	var listed struct {
+		Tasks []struct {
+			ID    int64 `json:"id"`
+			Quiet bool  `json:"quiet"`
+		} `json:"tasks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	got := map[int64]bool{}
+	for _, tk := range listed.Tasks {
+		got[tk.ID] = tk.Quiet
+	}
+	if !got[quiet] {
+		t.Errorf("list: milestone #%d must be quiet", quiet)
+	}
+	if got[fresh] {
+		t.Errorf("list: milestone #%d had activity an hour ago, must not be quiet", fresh)
+	}
+	if got[plain] {
+		t.Errorf("list: regular task #%d must never be quiet", plain)
 	}
 }

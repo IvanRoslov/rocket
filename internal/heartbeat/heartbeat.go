@@ -112,6 +112,13 @@ func (h *Heartbeat) Tick(ctx context.Context) error {
 		slog.Error("heartbeat: sweep stale threads", "error", err)
 	}
 
+	// A milestone belongs to no project and to no orchestrator either: like
+	// thread staleness, its silence is swept once per tick and its failure
+	// must not cost the orchestrator sweep below.
+	if err := h.sweepQuietMilestones(); err != nil {
+		slog.Error("heartbeat: sweep quiet milestones", "error", err)
+	}
+
 	orchestrators, err := h.st.ListSessions(store.SessionFilter{Kind: "orchestrator"})
 	if err != nil {
 		return fmt.Errorf("list orchestrators: %w", err)
