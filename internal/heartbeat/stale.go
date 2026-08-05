@@ -207,9 +207,9 @@ func (h *Heartbeat) threadRef(q store.Question) (string, error) {
 }
 
 // staleBody assembles the reminder: which thread, how long it has been
-// waiting, and the two commands that end the wait. Both the target `close`
-// (task T3) and today's `answer` are named, so the hint works whichever of the
-// two lands first.
+// waiting, and the two commands that end the wait. It names `close` only —
+// `answer` still works as its hidden alias, but a reminder that offers two
+// spellings of the same verb invites the recipient to wonder which is meant.
 func staleBody(q store.Question, ref string, since time.Duration) string {
 	verb := "task"
 	if q.RoleID != "" {
@@ -217,9 +217,8 @@ func staleBody(q store.Question, ref string, since time.Duration) string {
 	}
 	return fmt.Sprintf(
 		"[rocket stale thread] %s «%s» ждёт вашего хода %s.\n"+
-			"Ответьте: rocket %s reply %s \"<текст>\" — или закройте: rocket %s close %s \"<резолюция>\" "+
-			"(пока close не смержен — rocket %s answer %s \"<резолюция>\").",
-		ref, truncateForReminder(q.Body), humanSince(since), verb, ref, verb, ref, verb, ref)
+			"Ответьте: rocket %s reply %s \"<текст>\" — или закройте: rocket %s close %s \"<резолюция>\".",
+		ref, truncateForReminder(q.Body), humanSince(since), verb, ref, verb, ref)
 }
 
 // truncateForReminder shortens a question body to one readable line, counting
