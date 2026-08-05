@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { HttpResponse, http } from 'msw'
 import { setupServer } from 'msw/node'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { handlers, resetQuestions, resetTasks } from '../../mocks/handlers'
@@ -117,4 +118,47 @@ test('expanding a row opens the full thread', async () => {
 
   expect(await screen.findByLabelText('Discussion')).toBeInTheDocument()
   expect(screen.getByRole('button', { name: /Answer & close/ })).toBeInTheDocument()
+})
+
+// A server older than the emptyIfNil fix in internal/api/thread_inbox.go sends
+// `attention: null` for a thread whose attention set is empty — a nil Go slice.
+// That crashed the whole route with "Cannot read properties of null (reading
+// 'filter')". The server emits [] now; the screen must survive `null` anyway,
+// because a dashboard is served against whatever backend is deployed.
+test('renders a thread whose attention and participants arrive as null', async () => {
+  server.use(
+    http.get('/v1/threads', () =>
+      HttpResponse.json({
+        threads: [
+          {
+            local_ref: '1030/Q1',
+            kind: 'task',
+            task_id: 1030,
+            subject: 'task #1030 "Ship it"',
+            id: 9001,
+            ordinal: 1,
+            asked_by: 'orch-1',
+            body: 'нужен ли откат?',
+            status: 'open',
+            type: 'decision',
+            attention: null,
+            waiting_on: null,
+            participants: null,
+            your_turn: false,
+            asked_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            project_id: 'rocket',
+            task_title: 'Ship it',
+          },
+        ],
+      }),
+    ),
+  )
+
+  renderQuestions()
+
+  const row = (await screen.findByText('1030/Q1')).closest('.questions-screen__row') as HTMLElement
+  expect(within(row).getByText('нужен ли откат?')).toBeInTheDocument()
+  // Nobody is in the attention set, so there is no turn badge to show.
+  expect(within(row).queryByText(/awaiting/i)).not.toBeInTheDocument()
 })

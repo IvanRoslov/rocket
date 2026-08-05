@@ -142,22 +142,28 @@ func handleGetThreads(w http.ResponseWriter, r *http.Request, d Deps) {
 			updatedAt = th.LastMessage.CreatedAt
 		}
 		out = append(out, threadInboxEntry{
-			LocalRef:     threadLocalRef(subj, ordinals[q.ID]),
-			Kind:         kind,
-			TaskID:       q.TaskID,
-			RoleID:       q.RoleID,
-			Subject:      threadSubjectLabel(subj, title),
-			ID:           q.ID,
-			Ordinal:      ordinals[q.ID],
-			AskedBy:      wireParticipant(q.AskedBy),
-			Body:         q.Body,
-			Status:       q.Status,
-			Resolution:   q.Resolution,
-			Type:         q.Type,
-			Options:      q.Options,
-			Participants: th.Participants,
-			Attention:    th.Attention,
-			WaitingOn:    th.Attention,
+			LocalRef:   threadLocalRef(subj, ordinals[q.ID]),
+			Kind:       kind,
+			TaskID:     q.TaskID,
+			RoleID:     q.RoleID,
+			Subject:    threadSubjectLabel(subj, title),
+			ID:         q.ID,
+			Ordinal:    ordinals[q.ID],
+			AskedBy:    wireParticipant(q.AskedBy),
+			Body:       q.Body,
+			Status:     q.Status,
+			Resolution: q.Resolution,
+			Type:       q.Type,
+			Options:    q.Options,
+			// emptyIfNil on every list field without omitempty: a nil Go slice
+			// marshals to `null`, and these are documented as "always present,
+			// possibly empty" — the dashboard calls .filter() on `attention`
+			// straight off the wire. An empty attention set is not an edge
+			// case, every resolved thread has one. `options` is omitempty, so
+			// nil and empty alike drop out and the client reads it as optional.
+			Participants: emptyIfNil(th.Participants),
+			Attention:    emptyIfNil(th.Attention),
+			WaitingOn:    emptyIfNil(th.Attention),
 			YourTurn:     contains(th.Attention, callerParticipant(caller)),
 			AskedAt:      q.AskedAt,
 			UpdatedAt:    updatedAt,

@@ -240,3 +240,52 @@ func TestGetThreads_HidesThreadsTheCallerMayNotRead(t *testing.T) {
 		t.Fatalf("threads = %v, want its own task's thread for orch-1", refsOf(got))
 	}
 }
+
+// TestGetThreads_EmptySlicesMarshalAsArrays: a nil Go slice marshals to JSON
+// `null`, and the dashboard crashed on exactly that — /questions did
+// `entry.attention.filter(...)` on a thread whose attention set is empty
+// (a resolved thread, or an open one nobody is waiting on). The wire contract
+// is "always an array, possibly empty", so this asserts on the RAW JSON:
+// decoding into []string would turn `null` back into an empty slice and hide
+// the bug the way the typed helper above does.
+func TestGetThreads_EmptySlicesMarshalAsArrays(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv, taskID := setupInbox(t, d)
+
+	// A thread with nobody in it: no participants, no attention. Nothing else
+	// in the fixtures exercises the empty participants list.
+	bare, err := d.Store.AddQuestion(store.Question{TaskID: taskID, AskedBy: "orch-1", Body: "без участников"})
+	if err != nil {
+		t.Fatalf("AddQuestion bare: %v", err)
+	}
+	if err := d.Store.SetAttention(bare, nil); err != nil {
+		t.Fatalf("SetAttention bare: %v", err)
+	}
+
+	resp, err := http.Get(srv.URL + "/v1/threads?all=true")
+	if err != nil {
+		t.Fatalf("GET threads: %v", err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Threads []map[string]json.RawMessage `json:"threads"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode threads: %v", err)
+	}
+	if len(body.Threads) == 0 {
+		t.Fatalf("no threads returned")
+	}
+	for i, entry := range body.Threads {
+		for _, field := range []string{"attention", "waiting_on", "participants"} {
+			raw, ok := entry[field]
+			if !ok {
+				t.Errorf("thread[%d]: field %q missing; it has no omitempty and must always be present", i, field)
+				continue
+			}
+			if string(raw) == "null" {
+				t.Errorf("thread[%d].%s = null, want [] — a client does .filter() on it", i, field)
+			}
+		}
+	}
+}
