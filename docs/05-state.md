@@ -161,27 +161,48 @@ CREATE TABLE task_log (
   created_at INTEGER NOT NULL
 );
 
-CREATE TABLE task_questions (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  task_id     INTEGER NOT NULL REFERENCES tasks(id),
-  asked_by    TEXT NOT NULL,                 -- session id оркестратора
-  body        TEXT NOT NULL,                 -- исходный вопрос
-  context     TEXT,                          -- опциональный markdown-контекст
-  status      TEXT NOT NULL DEFAULT 'open',  -- open|resolved
-  resolution  TEXT,                          -- answered|dismissed (когда resolved)
-  asked_at    INTEGER NOT NULL,
-  resolved_at INTEGER
+CREATE TABLE questions (                     -- тред задачи ИЛИ роли (миграции 0009-0011)
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id      INTEGER REFERENCES tasks(id),  -- NULL — тред не привязан к задаче
+  role_id      TEXT REFERENCES agents(id),    -- NULL — тред не привязан к роли
+  asked_by     TEXT NOT NULL DEFAULT '',      -- session id автора; '' = человек
+  body         TEXT NOT NULL,                 -- исходный вопрос
+  context      TEXT,                          -- опциональный markdown-контекст
+  status       TEXT NOT NULL DEFAULT 'open',  -- open|resolved
+  resolution   TEXT,                          -- answered|dismissed|fyi (когда resolved)
+  addressed_to TEXT NOT NULL DEFAULT '',      -- CSV адресатов самого вопроса
+  type         TEXT NOT NULL DEFAULT 'decision', -- decision|fyi
+  options      TEXT NOT NULL DEFAULT '',      -- JSON-массив вариантов ответа; '' — вариантов нет
+  asked_at     INTEGER NOT NULL,
+  resolved_at  INTEGER
 );
 
-CREATE TABLE question_messages (             -- тред вопроса
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  question_id INTEGER NOT NULL REFERENCES task_questions(id),
-  author      TEXT,                          -- session id оркестратора; NULL = пользователь
-  kind        TEXT NOT NULL DEFAULT 'reply', -- reply|answer
-  body        TEXT NOT NULL,
-  created_at  INTEGER NOT NULL
+CREATE TABLE question_messages (             -- записи треда
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  question_id  INTEGER NOT NULL REFERENCES questions(id),
+  author       TEXT NOT NULL DEFAULT 'human', -- id участника; 'human' = человек
+  kind         TEXT NOT NULL DEFAULT 'reply', -- reply|answer
+  body         TEXT NOT NULL,
+  addressed_to TEXT NOT NULL DEFAULT '',      -- CSV участников; '' = всем, кроме автора
+  created_at   INTEGER NOT NULL
 );
--- чья очередь отвечать — производное от автора последней записи треда
+
+CREATE TABLE question_participants (         -- кто в треде
+  question_id    INTEGER NOT NULL REFERENCES questions(id),
+  participant_id TEXT NOT NULL,              -- 'human' | id агента | session id
+  added_at       INTEGER NOT NULL,
+  UNIQUE (question_id, participant_id)
+);
+
+CREATE TABLE question_attention (            -- чей ход: ХРАНИМОЕ множество, не производное
+  question_id    INTEGER NOT NULL REFERENCES questions(id),
+  participant_id TEXT NOT NULL,
+  added_at       INTEGER NOT NULL,
+  UNIQUE (question_id, participant_id)
+);
+-- Правила ведения attention (открытие/запись/закрытие) — internal/store/attention.go
+-- и docs/12-tasks.md. Флаг «тред завис» (stale) в базе не хранится: он считается
+-- на каждом чтении из времени последней записи и question_stale_after.
 
 CREATE TABLE attachments (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -222,7 +243,11 @@ CREATE TABLE events (
 CREATE INDEX idx_tasks_status ON tasks(status, parent_id);
 CREATE INDEX idx_task_docs ON task_docs(task_id, kind);
 CREATE INDEX idx_task_log ON task_log(task_id, id);
-CREATE INDEX idx_task_questions ON task_questions(task_id, status);
+CREATE INDEX idx_questions_task ON questions(task_id, status);
+CREATE INDEX idx_questions_role ON questions(role_id, status);
+CREATE INDEX idx_question_messages ON question_messages(question_id, id);
+CREATE INDEX idx_question_participants_participant ON question_participants(participant_id, question_id);
+CREATE INDEX idx_question_attention_participant ON question_attention(participant_id, question_id);
 CREATE INDEX idx_sessions_state ON sessions(state);
 CREATE INDEX idx_sessions_feature ON sessions(feature_slug);
 CREATE INDEX idx_messages_to ON messages(to_session, status);
