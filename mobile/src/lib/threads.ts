@@ -57,3 +57,28 @@ export function addresseePayload(sel: string[]): { to?: string[] } {
 export function countYourTurn(threads: { status: string; your_turn?: boolean }[]): number {
   return threads.filter((t) => t.status === 'open' && t.your_turn === true).length
 }
+
+/**
+ * The one thread id a human sees — "1023/Q2" for a task thread, "cto/Q1" for
+ * a role thread (task #1023 spec v1 §«Тред и его id»). `Q<ordinal>` is the
+ * fallback for a daemon that predates it; the global numeric id is never
+ * shown, because typing it across tasks is what misdelivered answers.
+ */
+export function threadRefLabel(t: { ordinal: number; local_ref?: string }): string {
+  return t.local_ref ?? `Q${t.ordinal}`
+}
+
+/**
+ * State badges of a thread. An fyi note is born closed and waits on nobody,
+ * so it can neither go stale nor hold a turn — it carries exactly one badge
+ * saying what it is, and never anything that reads as "needs you".
+ */
+export function threadBadges(t: {
+  status: string
+  type?: string
+  stale?: boolean
+}): { label: string }[] {
+  if (t.type === 'fyi') return [{ label: 'fyi' }]
+  if (t.status === 'open' && t.stale) return [{ label: 'stale' }]
+  return []
+}

@@ -188,4 +188,65 @@ describe('task Q&A thread', () => {
     await openQuestions()
     expect(screen.getByText('Answer & close')).toBeTruthy()
   })
+
+  // The local ref is the one thread id a human sees; the global numeric id
+  // never appears, because typing it across tasks is what misdelivered
+  // answers in the first place (task #1023 spec v1 §«Тред и его id»).
+  it('labels the thread with its local ref', async () => {
+    mockApi({ '/v1/tasks/12/questions': { questions: [{ ...THREAD, local_ref: '12/Q1' }] } })
+    renderWithProviders(<TaskScreen />)
+    await openQuestions()
+    expect(screen.getByText('12/Q1')).toBeTruthy()
+  })
+
+  it('falls back to Q<ordinal> when the daemon sends no local ref', async () => {
+    mockApi()
+    renderWithProviders(<TaskScreen />)
+    await openQuestions()
+    expect(screen.getByText('Q1')).toBeTruthy()
+  })
+
+  it('badges a stale thread', async () => {
+    mockApi({ '/v1/tasks/12/questions': { questions: [{ ...THREAD, stale: true }] } })
+    renderWithProviders(<TaskScreen />)
+    await openQuestions()
+    expect(screen.getByText('stale')).toBeTruthy()
+  })
+
+  // An fyi note is a status message: born closed, waiting on nobody. It shows
+  // in the history under its own badge and never as something needing us.
+  it('badges an fyi thread as fyi and gives it no turn chip', async () => {
+    mockApi({
+      '/v1/tasks/12/questions': {
+        questions: [
+          { ...THREAD, status: 'resolved', resolution: 'fyi', type: 'fyi', your_turn: false, waiting_on: [] },
+        ],
+      },
+    })
+    renderWithProviders(<TaskScreen />)
+    await openQuestions()
+    expect(screen.getByText('fyi')).toBeTruthy()
+    expect(screen.queryByText('awaiting you')).toBeNull()
+  })
+
+  it('closes the thread with a 1-based choose when an option is tapped', async () => {
+    mockApi({
+      '/v1/tasks/12/questions': {
+        questions: [{ ...THREAD, options: ['the monorepo', 'a new repo'] }],
+      },
+    })
+    renderWithProviders(<TaskScreen />)
+    await openQuestions()
+
+    fireEvent.press(screen.getByText('a new repo'))
+
+    await waitFor(() => {
+      const call = (fetch as jest.Mock).mock.calls.find(([u]: [string]) =>
+        String(u).includes('/v1/questions/1/answer'),
+      )
+      expect(call).toBeTruthy()
+      // Option #2, and nothing else: the daemon fills in the text itself.
+      expect(JSON.parse(call[1].body)).toEqual({ choose: 2 })
+    })
+  })
 })
