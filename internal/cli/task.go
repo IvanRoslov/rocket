@@ -1233,7 +1233,8 @@ func renderQuestions(taskID int64, qs []questionRow) string {
 }
 
 // renderTaskBoard writes a kanban board view to w, grouping tasks by status.
-// Renders statuses in order: backlog, in_progress, review, done, cancelled.
+// Renders statuses in order: backlog, brainstorm, in_progress, review, done,
+// cancelled.
 // Skips empty groups; shows done/cancelled only if they have tasks.
 // When statusFiltered is false, trims done/cancelled to last 5 tasks (highest ids).
 func renderTaskBoard(board map[string][]taskRow, w io.Writer, statusFiltered bool) {
@@ -1243,6 +1244,7 @@ func renderTaskBoard(board map[string][]taskRow, w io.Writer, statusFiltered boo
 		label string
 	}{
 		{"backlog", "BACKLOG"},
+		{"brainstorm", "BRAINSTORM"},
 		{"in_progress", "IN PROGRESS"},
 		{"review", "REVIEW"},
 		{"done", "DONE"},

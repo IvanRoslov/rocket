@@ -137,6 +137,7 @@ type taskDetailResponse struct {
 // /v1/tasks?board=true: tasks bucketed by status.
 type taskBoard struct {
 	Backlog    []taskResponse `json:"backlog"`
+	Brainstorm []taskResponse `json:"brainstorm"`
 	InProgress []taskResponse `json:"in_progress"`
 	Review     []taskResponse `json:"review"`
 	Done       []taskResponse `json:"done"`
@@ -153,6 +154,7 @@ func annotateQuestionCounts(tr *taskResponse, counts map[int64]store.QuestionCou
 func toTaskBoard(tasks []store.Task, counts map[int64]store.QuestionCounts, waiting waitingTerminal, quiet quietMilestoneSet) taskBoard {
 	b := taskBoard{
 		Backlog:    []taskResponse{},
+		Brainstorm: []taskResponse{},
 		InProgress: []taskResponse{},
 		Review:     []taskResponse{},
 		Done:       []taskResponse{},
@@ -166,6 +168,8 @@ func toTaskBoard(tasks []store.Task, counts map[int64]store.QuestionCounts, wait
 		switch t.Status {
 		case "backlog":
 			b.Backlog = append(b.Backlog, tr)
+		case "brainstorm":
+			b.Brainstorm = append(b.Brainstorm, tr)
 		case "in_progress":
 			b.InProgress = append(b.InProgress, tr)
 		case "review":

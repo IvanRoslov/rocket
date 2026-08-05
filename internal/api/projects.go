@@ -13,6 +13,7 @@ import (
 // the JSON shape is fixed here so clients don't need to change later.
 type taskCounters struct {
 	Backlog    int `json:"backlog"`
+	Brainstorm int `json:"brainstorm"`
 	InProgress int `json:"in_progress"`
 	Review     int `json:"review"`
 	Done       int `json:"done"`

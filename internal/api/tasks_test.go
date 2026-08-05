@@ -514,6 +514,47 @@ func TestListTasksBoardGrouping(t *testing.T) {
 	}
 }
 
+// TestListTasksBoardBrainstormGroup pins the brainstorm bucket: it is a key of
+// its own between backlog and in_progress, and — like every other bucket — an
+// empty array rather than null, so a client can render the column without a
+// nil check.
+func TestListTasksBoardBrainstormGroup(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+
+	id, err := d.Store.AddTask(store.Task{Title: "Talked through", ProjectID: "proj1"})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	resp := getJSON(t, srv.URL+"/v1/tasks?board=true")
+	board := decodeRepo(t, resp)["board"].(map[string]any)
+	resp.Body.Close()
+	empty, ok := board["brainstorm"].([]any)
+	if !ok {
+		t.Fatalf("board[brainstorm] = %#v, want an array", board["brainstorm"])
+	}
+	if len(empty) != 0 {
+		t.Errorf("len(brainstorm) = %d, want 0", len(empty))
+	}
+
+	if err := d.Store.UpdateTaskStatus(id, "brainstorm"); err != nil {
+		t.Fatalf("UpdateTaskStatus: %v", err)
+	}
+
+	resp2 := getJSON(t, srv.URL+"/v1/tasks?board=true")
+	defer resp2.Body.Close()
+	board2 := decodeRepo(t, resp2)["board"].(map[string]any)
+	brainstorm := board2["brainstorm"].([]any)
+	if len(brainstorm) != 1 {
+		t.Fatalf("len(brainstorm) = %d, want 1", len(brainstorm))
+	}
+	if len(board2["backlog"].([]any)) != 0 {
+		t.Errorf("task counted in backlog as well: %v", board2["backlog"])
+	}
+}
+
 // --- GET /v1/tasks/{id} -------------------------------------------------
 
 func TestGetTaskNotFound(t *testing.T) {

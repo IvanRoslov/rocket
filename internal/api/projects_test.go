@@ -76,7 +76,7 @@ func TestPostProjectHappyPath(t *testing.T) {
 	if !ok {
 		t.Fatalf("tasks not a map: %v", body["tasks"])
 	}
-	for _, k := range []string{"backlog", "in_progress", "review", "done"} {
+	for _, k := range []string{"backlog", "brainstorm", "in_progress", "review", "done"} {
 		if tasks[k] != float64(0) {
 			t.Errorf("tasks[%s] = %v, want 0", k, tasks[k])
 		}
