@@ -1565,14 +1565,60 @@ func TestPostTaskStartHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTask: %v", err)
 	}
-	if task.Status != "in_progress" {
-		t.Errorf("task status = %q, want in_progress", task.Status)
+	if task.Status != "brainstorm" {
+		t.Errorf("task status = %q, want brainstorm", task.Status)
 	}
 	if task.FeatureSlug != "add-login-page" {
 		t.Errorf("task feature_slug = %q, want add-login-page", task.FeatureSlug)
 	}
 	if task.SessionID != "add-login-page-orch" {
 		t.Errorf("task session_id = %q, want add-login-page-orch", task.SessionID)
+	}
+}
+
+// TestPostTaskStartAnnouncesBrainstorm pins the trace the transition leaves:
+// starting a task opens its brainstorming phase, so both the bus event and the
+// task log must say "brainstorm", not "in_progress" — the kanban and the human
+// reading the log learn about the phase from exactly these two.
+func TestPostTaskStartAnnouncesBrainstorm(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "proj1")
+
+	id, err := d.Store.AddTask(store.Task{Title: "Add login page", ProjectID: "proj1"})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	resp := postJSON(t, srv.URL+"/v1/tasks/"+itoa(id)+"/start", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+
+	events, err := d.Store.ListEventsTail(10, "")
+	if err != nil {
+		t.Fatalf("ListEventsTail: %v", err)
+	}
+	found := false
+	for _, e := range events {
+		if e.Type == "task.status_changed" && e.Data["to"] == "brainstorm" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected task.status_changed to=brainstorm, got %+v", events)
+	}
+
+	logs, err := d.Store.ListTaskLog(id, "status")
+	if err != nil {
+		t.Fatalf("ListTaskLog: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("len(logs) = %d, want 1", len(logs))
+	}
+	if logs[0].Body != "status: backlog → brainstorm (by system)" {
+		t.Errorf("log body = %q, want %q", logs[0].Body, "status: backlog → brainstorm (by system)")
 	}
 }
 
