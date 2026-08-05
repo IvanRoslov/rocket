@@ -870,3 +870,51 @@ func containsBody(bodies []string, want string) bool {
 	}
 	return false
 }
+
+// TestTick_BrainstormingOrchestrator_StillEscalates: the brainstorming phase
+// is where an orchestrator stalls on a prompt most often, so it is exactly
+// the phase where the escalation must still reach the human. A task in
+// brainstorm is live work, not a task nobody has started.
+func TestTick_BrainstormingOrchestrator_StillEscalates(t *testing.T) {
+	st := openTestStore(t)
+	b := bus.New(st)
+	cfg := testConfig()
+	addCTOAgent(t, st)
+
+	seedOrchAndTask(t, st, "orch1", "brainstorm")
+	setOrchInputState(t, st, "orch1", "waiting_input", time.Now().Add(-20*time.Minute).Unix(), "")
+
+	hb := New(st, b, cfg, unknownActivity, func(string) {})
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	if bodies := inboxBodies(t, st); len(bodies) != 1 {
+		t.Fatalf("expected 1 escalation for a brainstorming orchestrator, got %d: %v",
+			len(bodies), bodies)
+	}
+}
+
+// TestTick_NotStartedOrCloneOrchestrator_NoEscalation is the other half of the
+// same rule: statuses that are not active work stay silent.
+func TestTick_NotStartedOrClosedOrchestrator_NoEscalation(t *testing.T) {
+	for _, status := range []string{"backlog", "review", "done", "cancelled"} {
+		t.Run(status, func(t *testing.T) {
+			st := openTestStore(t)
+			b := bus.New(st)
+			cfg := testConfig()
+			addCTOAgent(t, st)
+
+			seedOrchAndTask(t, st, "orch1", status)
+			setOrchInputState(t, st, "orch1", "waiting_input", time.Now().Add(-20*time.Minute).Unix(), "")
+
+			hb := New(st, b, cfg, unknownActivity, func(string) {})
+			if err := hb.Tick(context.Background()); err != nil {
+				t.Fatalf("Tick: %v", err)
+			}
+			if bodies := inboxBodies(t, st); len(bodies) != 0 {
+				t.Fatalf("status %q: expected no escalation, got %v", status, bodies)
+			}
+		})
+	}
+}

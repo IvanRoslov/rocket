@@ -5,7 +5,6 @@ import (
 
 	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/heartbeat"
-	"github.com/IvanRoslov/rocket/internal/store"
 )
 
 // quietMilestoneSet is the set of milestone ids currently showing no trace of
@@ -23,12 +22,12 @@ func milestoneQuietAfter(cfg *config.Config) time.Duration {
 	return config.DefaultMilestoneQuietAfter
 }
 
-// quietMilestones computes the quiet set over every milestone in progress, in
-// two queries — the same rule the heartbeat reminds by (heartbeat.QuietMilestone),
+// quietMilestones computes the quiet set over every milestone being worked on,
+// in a query per active status plus one — the same rule the heartbeat reminds by (heartbeat.QuietMilestone),
 // so a badge and a reminder can never disagree. An installation with no
 // milestone in progress costs one query and stops there.
 func quietMilestones(d Deps) (quietMilestoneSet, error) {
-	tasks, err := d.Store.ListTasks(store.TaskFilter{Milestones: true, Status: "in_progress"})
+	tasks, err := heartbeat.ActiveMilestones(d.Store)
 	if err != nil {
 		return nil, err
 	}

@@ -139,7 +139,7 @@ func (h *Heartbeat) tickOne(orch store.Session) error {
 	if err != nil {
 		return fmt.Errorf("find root task: %w", err)
 	}
-	if !ok || task.Status != "in_progress" {
+	if !ok || !store.IsActiveTaskStatus(task.Status) {
 		return nil
 	}
 

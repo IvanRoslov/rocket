@@ -20,8 +20,11 @@ import (
 //
 // Three kinds of task are never quiet: a regular project task (the milestone
 // convention doesn't apply to it), an untaken milestone (nobody is silent when
-// nobody holds it), and one that isn't in progress — backlog work hasn't
-// started, and review/done/cancelled is the human's move, not the agent's.
+// nobody holds it), and one whose status isn't active work (store.
+// IsActiveTaskStatus) — backlog work hasn't started, and review/done/cancelled
+// is the human's move, not the agent's. Brainstorming counts as work: an agent
+// that goes silent while still thinking a milestone through is the very case
+// the reminder exists for.
 // Neither is a milestone without a usable timestamp: as in StaleThread, a
 // missing reference point means "not quiet", never "quiet since the epoch".
 //
@@ -29,7 +32,7 @@ import (
 // that sends the reminders, and by the API, which derives the milestone's
 // `quiet` flag from it on every read.
 func QuietMilestone(task store.Task, lastActivity int64, now time.Time, after time.Duration) (since time.Duration, ok bool) {
-	if !task.Milestone || task.AssignedRole == "" || task.Status != "in_progress" {
+	if !task.Milestone || task.AssignedRole == "" || !store.IsActiveTaskStatus(task.Status) {
 		return 0, false
 	}
 
@@ -43,6 +46,29 @@ func QuietMilestone(task store.Task, lastActivity int64, now time.Time, after ti
 
 	since = now.Sub(time.Unix(ref, 0))
 	return since, since > after
+}
+
+// milestoneLister is the slice of the store both callers of ActiveMilestones
+// depend on: the heartbeat's own store handle and the API's Deps.Store.
+type milestoneLister interface {
+	ListTasks(store.TaskFilter) ([]store.Task, error)
+}
+
+// ActiveMilestones lists every milestone in a status that counts as active
+// work. store.TaskFilter takes one status at a time and widening it would
+// serve nothing but this call, so the sweep is one query per active status,
+// concatenated. Like QuietMilestone it is exported because the same set is
+// read twice: by the heartbeat sweep and by the API deriving the `quiet` flag.
+func ActiveMilestones(st milestoneLister) ([]store.Task, error) {
+	var out []store.Task
+	for _, status := range store.ActiveTaskStatuses {
+		tasks, err := st.ListTasks(store.TaskFilter{Milestones: true, Status: status})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, tasks...)
+	}
+	return out, nil
 }
 
 // quietReminderInterval is the anti-spam floor between two reminders about the
@@ -67,7 +93,7 @@ const quietKeyPrefix = "quiet-milestone:"
 // inbox when it is not. The human is not messaged — the milestone.quiet event
 // and the derived `quiet` flag are their channel.
 func (h *Heartbeat) sweepQuietMilestones() error {
-	tasks, err := h.st.ListTasks(store.TaskFilter{Milestones: true, Status: "in_progress"})
+	tasks, err := ActiveMilestones(h.st)
 	if err != nil {
 		return fmt.Errorf("list milestones: %w", err)
 	}

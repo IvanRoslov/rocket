@@ -54,7 +54,16 @@ func TestQuietMilestone(t *testing.T) {
 		}
 	})
 
-	t.Run("only in_progress can be quiet", func(t *testing.T) {
+	t.Run("a milestone still being brainstormed can be quiet", func(t *testing.T) {
+		task := base()
+		task.Status = "brainstorm"
+		since, ok := QuietMilestone(task, 0, now, after)
+		if !ok || since != 30*time.Hour {
+			t.Fatalf("QuietMilestone = (%s, %v), want (30h, true): brainstorming is work too", since, ok)
+		}
+	})
+
+	t.Run("only active statuses can be quiet", func(t *testing.T) {
 		for _, status := range []string{"backlog", "review", "done", "cancelled"} {
 			task := base()
 			task.Status = status
@@ -182,5 +191,36 @@ func TestSweepQuietMilestones_UntakenAndRegularAreLeftAlone(t *testing.T) {
 	}
 	if hasEvent(eventTypes(t, st), "milestone.quiet") {
 		t.Error("no held milestone: milestone.quiet must not be published")
+	}
+}
+
+// TestSweepQuietMilestones_CoversBrainstorm: the sweep must look at every
+// active status, not just in_progress — a milestone whose agent went silent
+// while still brainstorming is exactly the case the reminder exists for.
+func TestSweepQuietMilestones_CoversBrainstorm(t *testing.T) {
+	st := openTestStore(t)
+	addCTOAgent(t, st)
+	// The status goes in at insert time for the same reason AssignedRole does
+	// in seedQuietMilestone: every status-changing store call stamps
+	// updated_at with "now", and this fixture is a milestone silent for 30h.
+	ts := time.Now().Add(-30 * time.Hour).Unix()
+	if _, err := st.AddTask(store.Task{
+		Title: "Improve external agents", Status: "brainstorm", Milestone: true,
+		AssignedRole: escalationAgent, CreatedAt: ts, UpdatedAt: ts,
+	}); err != nil {
+		t.Fatalf("AddTask milestone: %v", err)
+	}
+
+	hb := New(st, bus.New(st), testConfig(), unknownActivity, func(string) {})
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	bodies := inboxBodies(t, st)
+	if len(bodies) != 1 {
+		t.Fatalf("inbox = %q, want exactly one reminder for the brainstorming milestone", bodies)
+	}
+	if !strings.Contains(bodies[0], "Improve external agents") {
+		t.Errorf("reminder %q must name the milestone", bodies[0])
 	}
 }
