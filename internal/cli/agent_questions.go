@@ -22,13 +22,20 @@ type agentQuestionRow struct {
 	// Participants, WaitingOn and YourTurn mirror questionRow; WhoseTurn is
 	// the pre-participant field the CLI no longer prints but keeps on the wire
 	// for web and mobile — subtask #736 retires it.
-	Participants []string             `json:"participants,omitempty"`
-	WaitingOn    []string             `json:"waiting_on,omitempty"`
-	YourTurn     bool                 `json:"your_turn,omitempty"`
-	WhoseTurn    string               `json:"whose_turn,omitempty"`
-	AskedAt      int64                `json:"asked_at"`
-	ResolvedAt   int64                `json:"resolved_at,omitempty"`
-	Messages     []questionMessageRow `json:"messages"`
+	Participants []string `json:"participants,omitempty"`
+	WaitingOn    []string `json:"waiting_on,omitempty"`
+	YourTurn     bool     `json:"your_turn,omitempty"`
+	WhoseTurn    string   `json:"whose_turn,omitempty"`
+	// Attention, Type, Options, LocalRef, Echo and DryRun mirror questionRow.
+	Attention  []string             `json:"attention,omitempty"`
+	Type       string               `json:"type,omitempty"`
+	Options    []string             `json:"options,omitempty"`
+	LocalRef   string               `json:"local_ref,omitempty"`
+	AskedAt    int64                `json:"asked_at"`
+	ResolvedAt int64                `json:"resolved_at,omitempty"`
+	Messages   []questionMessageRow `json:"messages"`
+	Echo       string               `json:"echo,omitempty"`
+	DryRun     bool                 `json:"dry_run,omitempty"`
 }
 
 // newAgentAskCmd builds "rocket agent ask": open a Q&A thread with a role.
@@ -269,12 +276,15 @@ func renderAgentQuestions(role string, qs []agentQuestionRow) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "agent %s\n", role)
 	for _, q := range qs {
-		fmt.Fprintf(&sb, "Q%d (#%d) [%s]%s\n", q.Ordinal, q.ID, q.Status,
+		fmt.Fprintf(&sb, "%s [%s]%s\n",
+			threadRef(q.LocalRef, role, q.Ordinal),
+			threadStatusLabel(q.Status, q.Type),
 			threadTurnArrow(q.WaitingOn, q.YourTurn))
 		fmt.Fprintf(&sb, "  %s\n", q.Body)
 		if q.Context != "" {
 			fmt.Fprintf(&sb, "  context: %s\n", q.Context)
 		}
+		renderThreadOptions(&sb, q.Options)
 		renderParticipantsLine(&sb, q.Participants)
 		for _, m := range q.Messages {
 			renderThreadMessage(&sb, m)

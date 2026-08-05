@@ -92,7 +92,7 @@ func TestRenderAgentQuestionsThread(t *testing.T) {
 	out := renderAgentQuestions("sre", qs)
 	for _, want := range []string{
 		"agent sre",
-		"Q1 (#7) [open] → ждут: human",
+		"sre/Q1 [open] → ждут: human",
 		"нужно решение",
 		"context: детали",
 		"  участники: human, sre",

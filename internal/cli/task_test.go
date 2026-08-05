@@ -527,6 +527,48 @@ func TestRenderQuestionsEmpty(t *testing.T) {
 	}
 }
 
+// TestRenderQuestionsPrintsLocalRef: a thread header names the thread by the
+// one id a user types back — the local ref — and no longer by the global id
+// that sat next to it. Two numbers side by side is what sent replies into the
+// wrong thread (task #1023, spec v1 §«Тред и его id»).
+func TestRenderQuestionsPrintsLocalRef(t *testing.T) {
+	qs := []questionRow{{
+		ID: 372, Ordinal: 2, LocalRef: "799/Q2", Status: "open", Body: "Which approach?",
+		Options: []string{"откатить", "чинить вперёд"},
+	}}
+	out := renderQuestions(799, qs)
+	if !strings.Contains(out, "799/Q2 [open]") {
+		t.Errorf("expected the local ref in the header, got: %q", out)
+	}
+	if strings.Contains(out, "#372") {
+		t.Errorf("expected the global id to be gone from human output, got: %q", out)
+	}
+	if !strings.Contains(out, "  варианты: 1) откатить  2) чинить вперёд") {
+		t.Errorf("expected the answer options, got: %q", out)
+	}
+}
+
+// TestRenderQuestionsLocalRefFallback: a daemon that predates local_ref sends
+// none, and the CLI must still print a usable ref rather than a bare "Q2".
+func TestRenderQuestionsLocalRefFallback(t *testing.T) {
+	out := renderQuestions(799, []questionRow{{ID: 372, Ordinal: 2, Status: "open", Body: "b"}})
+	if !strings.Contains(out, "799/Q2 [open]") {
+		t.Errorf("expected a ref built from task and ordinal, got: %q", out)
+	}
+}
+
+// TestRenderQuestionsFyiMarked: an fyi thread is a status note nobody has to
+// answer, and it says so instead of looking like a resolved decision.
+func TestRenderQuestionsFyiMarked(t *testing.T) {
+	out := renderQuestions(799, []questionRow{{
+		ID: 1, Ordinal: 1, LocalRef: "799/Q1", Status: "resolved",
+		Type: "fyi", Body: "выкатили",
+	}})
+	if !strings.Contains(out, "799/Q1 [fyi]") {
+		t.Errorf("expected the fyi marker instead of the status, got: %q", out)
+	}
+}
+
 // TestRenderQuestionsWaitingArrow tests that the header arrow names who is
 // awaited, replacing the pre-participant whose_turn arrow.
 func TestRenderQuestionsWaitingArrow(t *testing.T) {
@@ -539,7 +581,7 @@ func TestRenderQuestionsWaitingArrow(t *testing.T) {
 	if !strings.Contains(out, "task #42") {
 		t.Errorf("expected task header, got: %q", out)
 	}
-	if !strings.Contains(out, "Q1 (#5) [open] → ждут: cto, human") {
+	if !strings.Contains(out, "42/Q1 [open] → ждут: cto, human") {
 		t.Errorf("expected waiting-on arrow, got: %q", out)
 	}
 	if strings.Contains(out, "ждёт ответа") || strings.Contains(out, "ждёт оркестратора") {
@@ -561,7 +603,7 @@ func TestRenderQuestionsNoWaitingNoArrow(t *testing.T) {
 		{ID: 7, Ordinal: 3, Status: "resolved", WhoseTurn: "", Body: "Done question"},
 	}
 	out := renderQuestions(42, qs)
-	if !strings.Contains(out, "Q3 (#7) [resolved]") {
+	if !strings.Contains(out, "42/Q3 [resolved]") {
 		t.Errorf("expected resolved header, got: %q", out)
 	}
 	if strings.Contains(out, "ждут") || strings.Contains(out, "участники") {
@@ -1003,7 +1045,7 @@ func TestRenderTaskCardWithQuestionsThread(t *testing.T) {
 	if !strings.Contains(output, "## Questions") {
 		t.Errorf("expected ## Questions section in output, got:\n%s", output)
 	}
-	if !strings.Contains(output, "Q1 (#42) [open]") {
+	if !strings.Contains(output, "1/Q1 [open]") {
 		t.Errorf("expected inlined question header in output, got:\n%s", output)
 	}
 	if !strings.Contains(output, "Which approach should I take?") {

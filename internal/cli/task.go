@@ -117,13 +117,24 @@ type questionRow struct {
 	// subset expected to speak next; YourTurn says whether this CLI's caller
 	// is one of them. WhoseTurn is the pre-participant field the CLI no longer
 	// prints but keeps on the wire for web and mobile — subtask #736 retires it.
-	Participants []string             `json:"participants,omitempty"`
-	WaitingOn    []string             `json:"waiting_on,omitempty"`
-	YourTurn     bool                 `json:"your_turn,omitempty"`
-	WhoseTurn    string               `json:"whose_turn,omitempty"`
-	AskedAt      int64                `json:"asked_at"`
-	ResolvedAt   int64                `json:"resolved_at,omitempty"`
-	Messages     []questionMessageRow `json:"messages"`
+	Participants []string `json:"participants,omitempty"`
+	WaitingOn    []string `json:"waiting_on,omitempty"`
+	YourTurn     bool     `json:"your_turn,omitempty"`
+	WhoseTurn    string   `json:"whose_turn,omitempty"`
+	// Attention is WaitingOn under its stored name (task #1023); Type is
+	// decision|fyi; Options are the answer choices --choose picks from;
+	// LocalRef is the one id printed and typed back, e.g. "1023/Q2".
+	Attention  []string             `json:"attention,omitempty"`
+	Type       string               `json:"type,omitempty"`
+	Options    []string             `json:"options,omitempty"`
+	LocalRef   string               `json:"local_ref,omitempty"`
+	AskedAt    int64                `json:"asked_at"`
+	ResolvedAt int64                `json:"resolved_at,omitempty"`
+	Messages   []questionMessageRow `json:"messages"`
+	// Echo is the target confirmation a write returns; DryRun marks a write
+	// that was only rehearsed. Both are absent on a read.
+	Echo   string `json:"echo,omitempty"`
+	DryRun bool   `json:"dry_run,omitempty"`
 }
 
 // parseTo normalises --to values into participant ids. The flag is both
@@ -1056,6 +1067,41 @@ func threadAuthorLabel(author string) string {
 	return author
 }
 
+// threadRef renders the id a thread is printed and typed back under. The
+// server sends it as local_ref; a daemon that predates task #1023 sends none,
+// so it is rebuilt from the scope and the ordinal the CLI already has. Either
+// way the global id no longer appears in human output — a header carrying two
+// numbers at once is what got replies misdelivered.
+func threadRef(localRef, scope string, ordinal int) string {
+	if localRef != "" {
+		return localRef
+	}
+	return fmt.Sprintf("%s/Q%d", scope, ordinal)
+}
+
+// threadStatusLabel renders the bracketed state of a thread. An fyi thread is
+// born resolved, so spelling it "resolved" would hide the one thing that
+// matters about it: nobody has to act on it.
+func threadStatusLabel(status, threadType string) string {
+	if threadType == "fyi" {
+		return "fyi"
+	}
+	return status
+}
+
+// renderThreadOptions writes the answer choices, numbered exactly as
+// "close --choose <n>" indexes them.
+func renderThreadOptions(sb *strings.Builder, options []string) {
+	if len(options) == 0 {
+		return
+	}
+	parts := make([]string, len(options))
+	for i, o := range options {
+		parts[i] = fmt.Sprintf("%d) %s", i+1, o)
+	}
+	fmt.Fprintf(sb, "  варианты: %s\n", strings.Join(parts, "  "))
+}
+
 // renderParticipantsLine writes the thread's participant line, omitted when
 // the server sent none.
 func renderParticipantsLine(sb *strings.Builder, participants []string) {
@@ -1090,12 +1136,15 @@ func renderQuestions(taskID int64, qs []questionRow) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "task #%d\n", taskID)
 	for _, q := range qs {
-		fmt.Fprintf(&sb, "Q%d (#%d) [%s]%s\n", q.Ordinal, q.ID, q.Status,
+		fmt.Fprintf(&sb, "%s [%s]%s\n",
+			threadRef(q.LocalRef, strconv.FormatInt(taskID, 10), q.Ordinal),
+			threadStatusLabel(q.Status, q.Type),
 			threadTurnArrow(q.WaitingOn, q.YourTurn))
 		fmt.Fprintf(&sb, "  %s\n", q.Body)
 		if q.Context != "" {
 			fmt.Fprintf(&sb, "  context: %s\n", q.Context)
 		}
+		renderThreadOptions(&sb, q.Options)
 		renderParticipantsLine(&sb, q.Participants)
 		for _, m := range q.Messages {
 			renderThreadMessage(&sb, m)
