@@ -1,6 +1,7 @@
 package heartbeat
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -157,5 +158,127 @@ func TestRemindParticipant_UnknownRecipientIsDropped(t *testing.T) {
 
 	if hb.remindParticipant("gone-worker", "reminder body") {
 		t.Error("remindParticipant(unknown) = true, want false")
+	}
+}
+
+// seedStaleThread opens a decision thread on taskID whose last movement is
+// age ago, waiting on attention.
+func seedStaleThread(t *testing.T, st *store.Store, taskID int64, body string, age time.Duration, attention ...string) int64 {
+	t.Helper()
+	qid, err := st.AddQuestion(store.Question{
+		TaskID: taskID, AskedBy: "orch1", Body: body,
+		Type: store.QuestionTypeDecision, AskedAt: time.Now().Add(-age).Unix(),
+	})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+	if err := st.AddParticipants(qid, append([]string{"orch1"}, attention...)...); err != nil {
+		t.Fatalf("AddParticipants: %v", err)
+	}
+	if err := st.SetAttention(qid, attention); err != nil {
+		t.Fatalf("SetAttention: %v", err)
+	}
+	return qid
+}
+
+// TestSweepStaleThreads_RemindsAttentionOnce: criterion 8 — a thread idle
+// longer than the threshold reminds exactly the members of its attention set,
+// exactly once inside the anti-spam window.
+func TestSweepStaleThreads_RemindsAttentionOnce(t *testing.T) {
+	st := openTestStore(t)
+	addCTOAgent(t, st)
+	taskID := seedOrchAndTask(t, st, "orch1", "in_progress")
+	seedStaleThread(t, st, taskID, "Ship or hold?", 30*time.Hour, escalationAgent)
+
+	hb := New(st, bus.New(st), testConfig(), unknownActivity, func(string) {})
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	bodies := inboxBodies(t, st)
+	if len(bodies) != 1 {
+		t.Fatalf("inbox = %q, want exactly one reminder", bodies)
+	}
+	for _, want := range []string{"Ship or hold?", "30h", "rocket task reply", "rocket task close", "rocket task answer"} {
+		if !strings.Contains(bodies[0], want) {
+			t.Errorf("reminder %q must contain %q", bodies[0], want)
+		}
+	}
+	ordinal := "1/Q1"
+	if !strings.Contains(bodies[0], "/Q1") {
+		t.Errorf("reminder %q must carry a local thread ref like %q", bodies[0], ordinal)
+	}
+	if !hasEvent(eventTypes(t, st), "question.stale") {
+		t.Errorf("expected a question.stale event, got %v", eventTypes(t, st))
+	}
+
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("second Tick: %v", err)
+	}
+	if bodies := inboxBodies(t, st); len(bodies) != 1 {
+		t.Errorf("inbox = %q after the second tick, want still one (anti-spam)", bodies)
+	}
+}
+
+// TestSweepStaleThreads_FreshThreadIsQuiet: a thread that moved recently is
+// nobody's problem yet.
+func TestSweepStaleThreads_FreshThreadIsQuiet(t *testing.T) {
+	st := openTestStore(t)
+	addCTOAgent(t, st)
+	taskID := seedOrchAndTask(t, st, "orch1", "in_progress")
+	seedStaleThread(t, st, taskID, "Fresh?", time.Hour, escalationAgent)
+
+	hb := New(st, bus.New(st), testConfig(), unknownActivity, func(string) {})
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if bodies := inboxBodies(t, st); len(bodies) != 0 {
+		t.Errorf("inbox = %q, want nothing for a fresh thread", bodies)
+	}
+	if hasEvent(eventTypes(t, st), "question.stale") {
+		t.Error("a fresh thread must not publish question.stale")
+	}
+}
+
+// TestSweepStaleThreads_HumanTurnIsBadgedNotMessaged: the human's turn still
+// publishes the event (the dashboard badges from it) but queues nothing.
+func TestSweepStaleThreads_HumanTurnIsBadgedNotMessaged(t *testing.T) {
+	st := openTestStore(t)
+	addCTOAgent(t, st)
+	taskID := seedOrchAndTask(t, st, "orch1", "in_progress")
+	seedStaleThread(t, st, taskID, "Your call?", 30*time.Hour, store.ParticipantHuman)
+
+	hb := New(st, bus.New(st), testConfig(), unknownActivity, func(string) {})
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if bodies := inboxBodies(t, st); len(bodies) != 0 {
+		t.Errorf("inbox = %q, want nothing: the human is badged, not messaged", bodies)
+	}
+	if !hasEvent(eventTypes(t, st), "question.stale") {
+		t.Errorf("expected a question.stale event, got %v", eventTypes(t, st))
+	}
+}
+
+// TestSweepStaleThreads_AnswerReplyResetsTheClock: movement is the thread's
+// last entry, so a reply an hour ago keeps a day-old question quiet.
+func TestSweepStaleThreads_AnswerReplyResetsTheClock(t *testing.T) {
+	st := openTestStore(t)
+	addCTOAgent(t, st)
+	taskID := seedOrchAndTask(t, st, "orch1", "in_progress")
+	qid := seedStaleThread(t, st, taskID, "Old question", 30*time.Hour, escalationAgent)
+	if _, err := st.AddQuestionMessage(store.QuestionMessage{
+		QuestionID: qid, Author: "orch1", Kind: "reply", Body: "still here",
+		CreatedAt: time.Now().Add(-time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("AddQuestionMessage: %v", err)
+	}
+
+	hb := New(st, bus.New(st), testConfig(), unknownActivity, func(string) {})
+	if err := hb.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if bodies := inboxBodies(t, st); len(bodies) != 0 {
+		t.Errorf("inbox = %q, want nothing: the thread moved an hour ago", bodies)
 	}
 }

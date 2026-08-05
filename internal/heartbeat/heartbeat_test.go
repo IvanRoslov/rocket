@@ -32,6 +32,7 @@ func testConfig() *config.Config {
 		WorkerStallThreshold:      15 * time.Minute,
 		QuestionReminderThreshold: 30 * time.Minute,
 		InputStallThreshold:       10 * time.Minute,
+		QuestionStaleAfter:        24 * time.Hour,
 	}
 }
 

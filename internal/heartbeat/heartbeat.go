@@ -88,6 +88,13 @@ func (h *Heartbeat) Run(ctx context.Context) {
 // Tick runs a single pass of the heartbeat sweep over every live
 // (spawning|running) orchestrator session.
 func (h *Heartbeat) Tick(ctx context.Context) error {
+	// Thread staleness is a property of the thread, not of any orchestrator:
+	// it is swept once per tick, and its failure must not cost the
+	// orchestrator sweep below.
+	if err := h.sweepStaleThreads(); err != nil {
+		slog.Error("heartbeat: sweep stale threads", "error", err)
+	}
+
 	orchestrators, err := h.st.ListSessions(store.SessionFilter{Kind: "orchestrator"})
 	if err != nil {
 		return fmt.Errorf("list orchestrators: %w", err)
@@ -159,7 +166,7 @@ func (h *Heartbeat) tickOne(orch store.Session) error {
 		return nil
 	}
 
-	if !h.antiSpamOK(orch.ID, now) {
+	if !h.antiSpamOK(orch.ID, now, h.cfg.HeartbeatInterval) {
 		return nil
 	}
 
@@ -233,7 +240,7 @@ func (h *Heartbeat) escalateInputStall(orch store.Session, task store.Task) {
 	if !stalled {
 		return
 	}
-	if !h.antiSpamOK(escalationKeyPrefix+orch.ID, now) {
+	if !h.antiSpamOK(escalationKeyPrefix+orch.ID, now, h.cfg.HeartbeatInterval) {
 		return
 	}
 
@@ -399,16 +406,18 @@ func (h *Heartbeat) reminderLine(q store.Question, now time.Time) (string, bool,
 	return fmt.Sprintf("- Q%d %q waiting for your reply %dm", ordinal, snippet, mins), true, nil
 }
 
-// antiSpamOK reports whether enough time has passed since the last
-// heartbeat sent to orchID (or none has ever been sent).
-func (h *Heartbeat) antiSpamOK(orchID string, now time.Time) bool {
+// antiSpamOK reports whether more than window has passed since the last
+// message sent under key (or none has ever been sent). key is an orchestrator
+// id for the ordinary summary, and a prefixed compound for the other senders
+// (see escalationKeyPrefix, staleKeyPrefix) so they never suppress each other.
+func (h *Heartbeat) antiSpamOK(key string, now time.Time, window time.Duration) bool {
 	h.mu.Lock()
-	last, ok := h.lastSent[orchID]
+	last, ok := h.lastSent[key]
 	h.mu.Unlock()
 	if !ok {
 		return true
 	}
-	return now.Sub(last) > h.cfg.HeartbeatInterval
+	return now.Sub(last) > window
 }
 
 // buildSummary assembles the heartbeat message body.

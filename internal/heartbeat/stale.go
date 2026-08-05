@@ -2,9 +2,12 @@ package heartbeat
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
+	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -102,4 +105,146 @@ func (h *Heartbeat) remindParticipant(participant, body string) bool {
 		return false
 	}
 	return true
+}
+
+// staleReminderInterval is the anti-spam floor between two reminders about the
+// same thread to the same recipient. It is deliberately a constant and not
+// cfg.QuestionStaleAfter: shortening the staleness threshold should make
+// threads go stale sooner, not make the reminder repeat every few hours.
+const staleReminderInterval = 24 * time.Hour
+
+// staleKeyPrefix namespaces per-(thread, recipient) reminder entries in
+// lastSent, so a thread reminder and an orchestrator summary never suppress
+// each other (same trick as escalationKeyPrefix).
+const staleKeyPrefix = "stale-thread:"
+
+// staleQuoteLimit is how much of a question's body a reminder quotes: enough
+// to recognise the thread, short enough to stay on one line. Mirrors
+// threadEchoLimit in internal/api/threads.go.
+const staleQuoteLimit = 60
+
+// sweepStaleThreads reminds every participant an open decision thread is
+// waiting on, once the thread has gone longer than cfg.QuestionStaleAfter
+// without movement. It runs once per tick over every open thread of every
+// task and role — staleness is a property of the thread, not of any one
+// orchestrator, so it deliberately sits outside the per-orchestrator sweep.
+//
+// The human is never messaged (see remindParticipant); the question.stale
+// event and the thread's `stale` flag are what reaches them.
+func (h *Heartbeat) sweepStaleThreads() error {
+	threads, err := h.st.ListOpenThreads()
+	if err != nil {
+		return fmt.Errorf("list open threads: %w", err)
+	}
+
+	now := h.nowFunc()
+	after := h.cfg.QuestionStaleAfter
+	if after <= 0 {
+		after = config.DefaultQuestionStaleAfter
+	}
+
+	for _, th := range threads {
+		since, stale := StaleThread(th, now, after)
+		if !stale {
+			continue
+		}
+
+		ref, err := h.threadRef(th.Question)
+		if err != nil {
+			slog.Warn("heartbeat: local ref of stale thread",
+				"question", th.Question.ID, "error", err)
+			continue
+		}
+
+		body := staleBody(th.Question, ref, since)
+		var reminded []string
+		for _, participant := range th.Attention {
+			key := staleKeyPrefix + ref + ":" + participant
+			if !h.antiSpamOK(key, now, staleReminderInterval) {
+				continue
+			}
+			if !h.remindParticipant(participant, body) {
+				continue
+			}
+			h.mu.Lock()
+			h.lastSent[key] = now
+			h.mu.Unlock()
+			reminded = append(reminded, participant)
+		}
+
+		if h.bus != nil {
+			h.bus.Publish("question.stale", "", map[string]any{
+				"question_id":   th.Question.ID,
+				"task_id":       th.Question.TaskID,
+				"role_id":       th.Question.RoleID,
+				"local_ref":     ref,
+				"since_seconds": int64(since.Seconds()),
+				"attention":     th.Attention,
+				"reminded":      reminded,
+			})
+		}
+	}
+	return nil
+}
+
+// threadRef renders the thread's one user-facing id — "1023/Q2" for a task
+// thread, "cto/Q2" for a role thread. It restates the format of
+// internal/api's threadLocalRef rather than importing it: heartbeat depends on
+// the store only, and internal/api is being rewritten in parallel (task T3).
+func (h *Heartbeat) threadRef(q store.Question) (string, error) {
+	if q.RoleID != "" {
+		ordinal, err := h.st.AgentQuestionOrdinal(store.AgentQuestion{ID: q.ID, RoleID: q.RoleID})
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s/Q%d", q.RoleID, ordinal), nil
+	}
+	ordinal, err := h.st.QuestionOrdinal(q)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d/Q%d", q.TaskID, ordinal), nil
+}
+
+// staleBody assembles the reminder: which thread, how long it has been
+// waiting, and the two commands that end the wait. Both the target `close`
+// (task T3) and today's `answer` are named, so the hint works whichever of the
+// two lands first.
+func staleBody(q store.Question, ref string, since time.Duration) string {
+	verb := "task"
+	if q.RoleID != "" {
+		verb = "agent"
+	}
+	return fmt.Sprintf(
+		"[rocket stale thread] %s «%s» ждёт вашего хода %s.\n"+
+			"Ответьте: rocket %s reply %s \"<текст>\" — или закройте: rocket %s close %s \"<резолюция>\" "+
+			"(пока close не смержен — rocket %s answer %s \"<резолюция>\").",
+		ref, truncateForReminder(q.Body), humanSince(since), verb, ref, verb, ref, verb, ref)
+}
+
+// truncateForReminder shortens a question body to one readable line, counting
+// runes so a Cyrillic question is not cut mid-character.
+func truncateForReminder(s string) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
+	r := []rune(s)
+	if len(r) <= staleQuoteLimit {
+		return s
+	}
+	return string(r[:staleQuoteLimit]) + "…"
+}
+
+// humanSince renders a waiting time: minutes below an hour, hours below two
+// days, days above. The threshold for switching to days is 48h rather than
+// 24h on purpose — "1d" reads as "since yesterday" and would hide the
+// difference between a thread 25h idle and one idle 47h, which is exactly the
+// range this reminder fires in.
+func humanSince(d time.Duration) string {
+	switch {
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
 }
