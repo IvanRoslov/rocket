@@ -327,3 +327,77 @@ func TestDryRunReplyWritesNothing(t *testing.T) {
 		t.Errorf("stored messages = %d, want 0", len(msgs))
 	}
 }
+
+// TestRoleThreadAttentionLifecycle: role threads run the same rules as task
+// threads — they share the storage, so they must share the turn model too.
+func TestRoleThreadAttentionLifecycle(t *testing.T) {
+	d := agentQuestionsTestDeps(t)
+	srv := setupRoleForQuestions(t, d)
+	addLiveAgentSession(t, d, "sre")
+
+	resp := postJSON(t, srv.URL+"/v1/agents/sre/questions", map[string]any{"body": "why did the deploy fail?"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("ask = %d, want 201", resp.StatusCode)
+	}
+	q := decodeAgentQuestion(t, resp)
+	if !reflect.DeepEqual(q.Attention, []string{"sre"}) {
+		t.Errorf("attention = %#v, want [sre]", q.Attention)
+	}
+	if q.LocalRef != "sre/Q1" {
+		t.Errorf("local_ref = %q, want sre/Q1", q.LocalRef)
+	}
+
+	replied := postJSONWithHeader(t, srv.URL+"/v1/agent-questions/"+itoa(q.ID)+"/reply", "sre",
+		map[string]any{"body": "out of disk"})
+	defer replied.Body.Close()
+	if replied.StatusCode != http.StatusCreated {
+		t.Fatalf("reply = %d, want 201", replied.StatusCode)
+	}
+	got := decodeAgentQuestion(t, replied)
+	if !reflect.DeepEqual(got.Attention, []string{"human"}) {
+		t.Errorf("attention after reply = %#v, want [human]", got.Attention)
+	}
+
+	answered := postJSON(t, srv.URL+"/v1/agent-questions/"+itoa(q.ID)+"/answer", map[string]any{"body": "thanks"})
+	defer answered.Body.Close()
+	if answered.StatusCode != http.StatusOK {
+		t.Fatalf("answer = %d, want 200", answered.StatusCode)
+	}
+	if final := decodeAgentQuestion(t, answered); final.Attention != nil {
+		t.Errorf("attention after answer = %#v, want empty", final.Attention)
+	}
+}
+
+// TestRoleThreadDryRunAndGuard covers the two write-safety features on the role
+// path: an outsider needs join, and a dry run writes nothing.
+func TestRoleThreadDryRunAndGuard(t *testing.T) {
+	d := agentQuestionsTestDeps(t)
+	srv := setupRoleForQuestions(t, d)
+	addTestSession(t, d, "cto", session.AgentSessionKind, "platform")
+
+	resp := postJSON(t, srv.URL+"/v1/agents/sre/questions", map[string]any{"body": "why did the deploy fail?"})
+	defer resp.Body.Close()
+	q := decodeAgentQuestion(t, resp)
+
+	guarded := postJSONWithHeader(t, srv.URL+"/v1/agent-questions/"+itoa(q.ID)+"/reply", "cto",
+		map[string]any{"body": "not my thread"})
+	defer guarded.Body.Close()
+	if guarded.StatusCode != http.StatusForbidden {
+		t.Fatalf("outsider reply = %d, want 403", guarded.StatusCode)
+	}
+
+	dry := postJSON(t, srv.URL+"/v1/agent-questions/"+itoa(q.ID)+"/reply",
+		map[string]any{"body": "any news?", "dry_run": true})
+	defer dry.Body.Close()
+	if dry.StatusCode != http.StatusOK {
+		t.Fatalf("dry-run reply = %d, want 200", dry.StatusCode)
+	}
+	msgs, err := d.Store.ListQuestionMessages(q.ID)
+	if err != nil {
+		t.Fatalf("ListQuestionMessages: %v", err)
+	}
+	if len(msgs) != 0 {
+		t.Errorf("stored messages = %d, want 0", len(msgs))
+	}
+}

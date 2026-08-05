@@ -101,6 +101,7 @@ func (s *Store) AttentionOfOpenThreads() (map[int64][]string, error)
 
 **Files:** Modify `internal/api/threads.go`, `internal/api/questions.go`, `internal/api/agent_questions.go`
 - [ ] Step 1: тесты: постоянный агент-не-участник reply → 403 `not_a_participant` с телом треда в message; тот же запрос с `join:true` → 201 и он в participants; тот же guard на answer; `dry_run:true` → 200, ничего не записано, есть `echo`.
+- Права воркеров НЕ расширяем (решение оркестратора): join доступен человеку и постоянным агентам, воркер-не-участник остаётся с 403 как раньше.
 - [ ] Step 2..5: FAIL → реализация → PASS → коммит.
 
 ### Task 8: верификация и PR
