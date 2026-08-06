@@ -132,6 +132,8 @@ func New(st *store.Store, b *bus.Bus, rt runtime.Runtime, cfg *config.Config, re
 		cache:        make(map[string]activity.State),
 		chat:         make(map[string]chatStat),
 		quizMiss:     make(map[string]int),
+
+		inputWaitMiss: make(map[string]int),
 	}
 }
 
