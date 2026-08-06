@@ -421,6 +421,15 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 		case err == nil:
 			q.deliverSuccess(msg)
 			return
+		case errors.Is(err, runtime.ErrNotDelivered):
+			// Inject positively established that nothing was submitted and
+			// cleared the composer, so there is no duplicate-message risk
+			// and no draft left to look for: retry, and on exhaustion fail
+			// so the sender is told. Deliberately NOT folded into the
+			// ErrSubmitUnconfirmed branch below — its tail probe would see
+			// the marker gone (Inject erased it) and record a known
+			// non-delivery as "delivered", silently dropping the message.
+			retryEligible = true
 		case errors.Is(err, runtime.ErrSubmitUnconfirmed):
 			// Mirror Inject's own confirmWindow: a narrow tail of the
 			// pane's bottom rows (input line + footer chrome). Chat-style

@@ -15,22 +15,42 @@ import (
 )
 
 // ErrSubmitUnconfirmed is returned by Inject when the text was pasted and
-// Enter was sent the configured number of times, but submission could not
-// be confirmed via the poll predicate before attempts were exhausted. This
-// does NOT necessarily mean delivery failed — the text may well have been
-// submitted; it means Inject could not verify it. Callers MUST NOT
-// blindly re-inject on this error, since the original text may already
-// have reached the target program: re-injecting risks sending a duplicate
-// message. Callers should typically surface this to the operator or fall
-// back to an out-of-band check (e.g. Capture) before deciding whether to
-// retry.
+// Enter was sent the configured number of times, submission could not be
+// confirmed via the poll predicate before attempts were exhausted, AND the
+// final whole-pane check could not settle the question either (the capture
+// itself failed). This is the genuinely unknown outcome: the text may well
+// have been submitted, and it may still be sitting in the composer.
+// Callers MUST NOT blindly re-inject on this error, since the original
+// text may already have reached the target program: re-injecting risks
+// sending a duplicate message. Callers should typically surface this to
+// the operator or fall back to an out-of-band check (e.g. Capture) before
+// deciding whether to retry.
+//
+// For the case where Inject positively established that nothing was
+// submitted, see ErrNotDelivered.
 var ErrSubmitUnconfirmed = errors.New("inject: submission unconfirmed after exhausting attempts")
+
+// ErrNotDelivered is returned by Inject when the attempts were exhausted
+// and the final whole-pane check found no trace of the text in the pane's
+// history: nothing was submitted. Inject has cleared the composer and
+// dropped the paste buffer, so no orphaned draft is left behind and the
+// text is definitively gone. Unlike ErrSubmitUnconfirmed, this carries no
+// duplicate-message risk: callers may re-inject freely, and MUST NOT
+// record the message as delivered.
+var ErrNotDelivered = errors.New("inject: text was not delivered; composer cleared")
 
 // nameRE is the set of characters permitted in a session name. It is
 // deliberately restrictive: session names are interpolated into tmux
 // targets as "=name", and tmux target syntax treats many characters
 // (":", ".", "%", etc.) specially.
 var nameRE = regexp.MustCompile(`^[a-z0-9-]+$`)
+
+// defaultPollInterval and defaultPollTimeout are Inject's production
+// confirmation-polling timings (see tmuxRuntime.pollInterval).
+const (
+	defaultPollInterval = 300 * time.Millisecond
+	defaultPollTimeout  = 1500 * time.Millisecond
+)
 
 // tmuxRuntime is the tmux-backed implementation of Runtime.
 type tmuxRuntime struct {
@@ -39,6 +59,28 @@ type tmuxRuntime struct {
 	// Defaults to time.Sleep; overridable by tests to observe the call
 	// without actually waiting.
 	settleFn func(time.Duration)
+
+	// runFn runs one tmux command. Defaults (when nil) to the real
+	// runTmux; tests substitute a fake to drive Inject's confirmation
+	// logic deterministically and to assert on the exact command
+	// sequence.
+	runFn func(ctx context.Context, args ...string) (stdout, stderr string, err error)
+
+	// pollInterval and pollTimeout bound Inject's confirmation polling.
+	// Zero means "use the defaults" (defaultPollInterval /
+	// defaultPollTimeout); tests shrink them to keep an
+	// exhausted-attempts run fast.
+	pollInterval time.Duration
+	pollTimeout  time.Duration
+}
+
+// run dispatches a tmux command through runFn, falling back to the real
+// tmux binary when no override is installed.
+func (t *tmuxRuntime) run(ctx context.Context, args ...string) (string, string, error) {
+	if t.runFn != nil {
+		return t.runFn(ctx, args...)
+	}
+	return runTmux(ctx, args...)
 }
 
 // NewTmux returns a Runtime that manages sessions via the tmux binary.
@@ -177,7 +219,7 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 	// paste-buffer address a pane, not a session, so they need the
 	// colon-suffixed pane target even though has-session/kill-session
 	// accept the bare session target.
-	if _, _, err := runTmux(ctx, "send-keys", "-t", paneTarget(h.Name), "C-u"); err != nil {
+	if _, _, err := t.run(ctx, "send-keys", "-t", paneTarget(h.Name), "C-u"); err != nil {
 		return fmt.Errorf("clear draft: %w", err)
 	}
 
@@ -202,10 +244,10 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 	}
 
 	bufName := "rocket-" + h.Name
-	if _, _, err := runTmux(ctx, "load-buffer", "-b", bufName, tmpPath); err != nil {
+	if _, _, err := t.run(ctx, "load-buffer", "-b", bufName, tmpPath); err != nil {
 		return fmt.Errorf("load buffer: %w", err)
 	}
-	if _, _, err := runTmux(ctx, "paste-buffer", "-d", "-b", bufName, "-t", paneTarget(h.Name)); err != nil {
+	if _, _, err := t.run(ctx, "paste-buffer", "-d", "-b", bufName, "-t", paneTarget(h.Name)); err != nil {
 		return fmt.Errorf("paste buffer: %w", err)
 	}
 
@@ -214,13 +256,20 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 	// programs / TUIs occasionally swallow the first Enter, so retry.
 	if strings.TrimRight(text, "\n") == "" {
 		// Nothing meaningful to verify; a single Enter is sufficient.
-		_, _, err := runTmux(ctx, "send-keys", "-t", paneTarget(h.Name), "Enter")
+		_, _, err := t.run(ctx, "send-keys", "-t", paneTarget(h.Name), "Enter")
 		return err
 	}
 
 	const maxAttempts = 5
-	const pollInterval = 300 * time.Millisecond
-	const pollTimeout = 1500 * time.Millisecond
+
+	pollInterval := t.pollInterval
+	if pollInterval <= 0 {
+		pollInterval = defaultPollInterval
+	}
+	pollTimeout := t.pollTimeout
+	if pollTimeout <= 0 {
+		pollTimeout = defaultPollTimeout
+	}
 
 	marker := lastLine(text)
 
@@ -246,7 +295,7 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 	if marker != "" {
 		deadline := time.Now().Add(pollTimeout)
 		for {
-			out, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name))
+			out, _, err := t.run(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name))
 			if err == nil && strings.Contains(tailLines(trimTrailingBlank(out), confirmWindow), marker) {
 				markerSeen = true
 				break
@@ -258,7 +307,7 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 		}
 	}
 
-	baseline, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name))
+	baseline, _, err := t.run(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name))
 	if err != nil {
 		return fmt.Errorf("capture baseline: %w", err)
 	}
@@ -290,19 +339,19 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 			// widget, the draft was necessarily submitted (the widget only
 			// renders mid-turn) and another Enter would press a quiz
 			// button instead — see LooksLikeQuizWidget.
-			if out, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name)); err == nil {
+			if out, _, err := t.run(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name)); err == nil {
 				if LooksLikeQuizWidget(tailLines(trimTrailingBlank(out), confirmWindow)) {
 					return nil
 				}
 			}
 		}
-		if _, _, err := runTmux(ctx, "send-keys", "-t", paneTarget(h.Name), "Enter"); err != nil {
+		if _, _, err := t.run(ctx, "send-keys", "-t", paneTarget(h.Name), "Enter"); err != nil {
 			return fmt.Errorf("send Enter: %w", err)
 		}
 
 		deadline := time.Now().Add(pollTimeout)
 		for {
-			full, _, err := runTmux(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name))
+			full, _, err := t.run(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name))
 			if err != nil {
 				return fmt.Errorf("poll capture-pane: %w", err)
 			}
@@ -338,6 +387,49 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 			}
 			time.Sleep(pollInterval)
 		}
+	}
+
+	// 4. Attempts exhausted. The text is now in one of two very different
+	// states, and they must not be conflated: either it WAS submitted and
+	// only the confirmation was missed (its echo sits in the pane's
+	// history area above the composer), or it is still sitting in the
+	// composer as an unsent draft — orphaned text that is
+	// indistinguishable from something a human typed and one stray Enter
+	// away from being sent (live incident, task #1050).
+	//
+	// A final whole-pane capture tells them apart, looking for the marker
+	// everywhere ABOVE the confirmWindow tail. The tail is excluded on
+	// purpose: it is the composer, and the marker is necessarily still
+	// there in the stuck case (had it left, marker-absent would already
+	// have confirmed) — so including it would find the marker either way
+	// and decide nothing. The history area above it, by contrast, only
+	// holds the marker once the message was actually submitted.
+	if marker != "" {
+		full, _, err := t.run(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name))
+		if err == nil {
+			if strings.Contains(history(trimTrailingBlank(full), confirmWindow), marker) {
+				// Delivered after all — never wipe a composer whose
+				// content actually went through.
+				return nil
+			}
+			// Marker nowhere in history: the draft really is stuck.
+			// Leave no orphan behind — C-u clears the composer's input
+			// line and kill-buffer drops the paste buffer so a stray
+			// paste cannot resurrect the text. Both are best-effort; the
+			// honest non-delivery is what the caller must see.
+			_, _, _ = t.run(ctx, "send-keys", "-t", paneTarget(h.Name), "C-u")
+			_, _, _ = t.run(ctx, "kill-buffer", "-b", bufName)
+			return fmt.Errorf("%w: after %d attempts", ErrNotDelivered, maxAttempts)
+		}
+		// The final capture itself failed, so delivery could not be
+		// established either way. Deliberately: classify as unknown
+		// (ErrSubmitUnconfirmed, not ErrNotDelivered) — a flaky capture
+		// must not turn a delivered message into a retry storm — and
+		// clear nothing. Clearing would be defensible (C-u on an
+		// already-empty composer is harmless), but it buys nothing here:
+		// the caller is told "unknown" either way and will not treat this
+		// as a non-delivery, while a blind C-u on an unreadable pane is
+		// the one case where we cannot see what we are wiping.
 	}
 
 	return fmt.Errorf("%w: after %d attempts", ErrSubmitUnconfirmed, maxAttempts)
@@ -415,6 +507,18 @@ func tailLines(s string, n int) string {
 		return s
 	}
 	return strings.Join(lines[len(lines)-n:], "\n")
+}
+
+// history returns everything in s except its last n lines — i.e. the pane
+// above the confirmation window. It is the complement of tailLines: where
+// tailLines isolates the composer/footer chrome, history isolates the
+// scrolling area a submitted message is echoed into.
+func history(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return ""
+	}
+	return strings.Join(lines[:len(lines)-n], "\n")
 }
 
 // trimTrailingBlank drops trailing blank lines from s. A captured pane

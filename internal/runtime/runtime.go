@@ -26,6 +26,11 @@ type Runtime interface {
 	// spec.Env set, and returns a Handle referring to it.
 	Create(ctx context.Context, spec CreateSpec) (Handle, error)
 	// Inject types text into the session's active pane and submits it.
+	// Beyond nil (submitted) it reports two distinct failure outcomes:
+	// ErrNotDelivered — nothing was submitted and the composer has been
+	// cleared, so re-injecting is safe and the message must not be
+	// recorded as delivered; and ErrSubmitUnconfirmed — delivery could
+	// not be established either way, where re-injecting risks a duplicate.
 	Inject(ctx context.Context, h Handle, text string) error
 	// SendKeys sends a single logical key to the session's active pane via
 	// tmux send-keys: either a key name tmux recognizes (e.g. "Enter",
