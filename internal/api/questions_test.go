@@ -511,6 +511,10 @@ func TestQuestionThread_FullLifecycle(t *testing.T) {
 	}
 }
 
+// TestQuestionReply_ResolvedConflict pins the human half of replyReopens: a
+// resolved DECISION thread is final for the human, with or without a dispute
+// flag (subtask #1181 changed only the agent half). Reopening it was never a
+// human power, so the dashboard and mobile lose nothing.
 func TestQuestionReply_ResolvedConflict(t *testing.T) {
 	d := questionsTestDeps(t)
 	srv := newTestServer(t, d)
@@ -530,6 +534,14 @@ func TestQuestionReply_ResolvedConflict(t *testing.T) {
 	}
 	if eb := decodeErr(t, resp); eb.Error.Code != "question_resolved" {
 		t.Errorf("code = %q, want question_resolved", eb.Error.Code)
+	}
+
+	// And the flag buys the human nothing: dispute is an agent's tool.
+	forced := postJSON(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/reply",
+		map[string]any{"body": "передумал", "dispute": true})
+	defer forced.Body.Close()
+	if forced.StatusCode != http.StatusConflict {
+		t.Fatalf("human reply with dispute = %d, want 409", forced.StatusCode)
 	}
 }
 
