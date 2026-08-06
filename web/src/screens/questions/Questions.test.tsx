@@ -118,6 +118,108 @@ describe('closing a thread', () => {
     expect(screen.getByRole('button', { name: /Yes, prorate downgrades/ })).toBeInTheDocument()
   })
 
+  // Navigating away is not an Undo. The pending call used to be dropped on
+  // unmount, so the human came back to a thread they had already closed —
+  // still open, still yellow, with nothing to say the click had been thrown
+  // away.
+  test('leaving the page commits a decision still inside the undo window', async () => {
+    const user = userEvent.setup()
+    const sent: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/questions/:id/answer', async ({ request }) => {
+        sent.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 3 })
+      }),
+    )
+    // Long window: the decision must go out because of the unmount, not
+    // because the timer beat us to it.
+    const view = renderQuestions(10_000)
+    await screen.findByRole('heading', { level: 2 })
+
+    await user.keyboard('x')
+    expect(screen.getByText('12/Q3 closed as not relevant')).toBeInTheDocument()
+    expect(sent).toHaveLength(0)
+
+    view.unmount()
+
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(sent[0]).toEqual({ dismiss: true })
+  })
+
+  // A closed tab never unmounts: pagehide is the last moment the browser gives
+  // us to get the decision out.
+  test('pagehide commits a decision still inside the undo window', async () => {
+    const user = userEvent.setup()
+    const sent: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/questions/:id/answer', async ({ request }) => {
+        sent.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 3 })
+      }),
+    )
+    renderQuestions(10_000)
+    await screen.findByRole('heading', { level: 2 })
+
+    await user.keyboard('x')
+    expect(sent).toHaveLength(0)
+
+    window.dispatchEvent(new Event('pagehide'))
+
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(sent[0]).toEqual({ dismiss: true })
+  })
+
+  // Backgrounding a tab on mobile often fires visibilitychange and nothing
+  // else — the tab may never come back.
+  test('hiding the tab commits a decision still inside the undo window', async () => {
+    const user = userEvent.setup()
+    const sent: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/questions/:id/answer', async ({ request }) => {
+        sent.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 3 })
+      }),
+    )
+    renderQuestions(10_000)
+    await screen.findByRole('heading', { level: 2 })
+
+    await user.keyboard('x')
+    expect(sent).toHaveLength(0)
+
+    const visibility = vi
+      .spyOn(document, 'visibilityState', 'get')
+      .mockReturnValue('hidden')
+    try {
+      document.dispatchEvent(new Event('visibilitychange'))
+      await waitFor(() => expect(sent).toHaveLength(1))
+    } finally {
+      visibility.mockRestore()
+    }
+    expect(sent[0]).toEqual({ dismiss: true })
+  })
+
+  // Undo already ran: there is nothing left to commit, and leaving must not
+  // resurrect the call the human explicitly took back.
+  test('leaving after Undo sends nothing', async () => {
+    const user = userEvent.setup()
+    const sent: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/questions/:id/answer', async ({ request }) => {
+        sent.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 3 })
+      }),
+    )
+    const view = renderQuestions(10_000)
+    await screen.findByRole('heading', { level: 2 })
+
+    await user.keyboard('x')
+    await user.click(screen.getByRole('button', { name: /Undo/ }))
+    view.unmount()
+
+    await new Promise((r) => setTimeout(r, 120))
+    expect(sent).toHaveLength(0)
+  })
+
   test('"Answer & close" refuses to close on an empty draft', async () => {
     const user = userEvent.setup()
     renderQuestions()

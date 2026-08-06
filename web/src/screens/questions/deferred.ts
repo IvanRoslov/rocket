@@ -7,12 +7,16 @@
 // replying schedules the API call instead of making it, and the toast's Undo
 // cancels the scheduled call before it is ever sent.
 //
-// Two rules keep the deferred call honest:
-//   - it fires when the toast expires (the human let it stand), and
+// Undo — the explicit take-back — is the ONLY thing that drops a scheduled
+// call. Everything else commits it:
+//   - it fires when the toast expires (the human let it stand),
 //   - it fires as soon as the human acts again, because moving to the next
-//     thread is an implicit commit of the previous one. Losing the first
-//     answer while a second one takes the slot would be a silent data loss.
-// Unmount is the one case that cancels: leaving the page is not a decision.
+//     thread is an implicit commit of the previous one, and
+//   - it fires when the page goes away — unmount, pagehide, a hidden tab.
+//     Leaving is not an Undo: the human decided, and dropping the call there
+//     lost the decision silently. They came back to the thread they had just
+//     closed, still open and still yellow, with nothing to say why.
+// Losing an answer to anything but Undo is silent data loss.
 
 export interface DeferredQueue {
   /** Arms `run` for later, flushing (not dropping) any action already pending. */
@@ -22,7 +26,7 @@ export interface DeferredQueue {
   /** Runs the pending action now. A no-op when nothing is pending. */
   flush(): void
   isPending(): boolean
-  /** Cancels and releases the timer — for unmount. */
+  /** Commits the pending action and releases the timer — for unmount. */
   dispose(): void
 }
 
@@ -59,7 +63,8 @@ export function createDeferredQueue(delayMs: number): DeferredQueue {
       return pending !== null
     },
     dispose() {
-      clear()
+      // flush(), not cancel(): the human's last decision must still go out.
+      queue.flush()
     },
   }
   return queue
