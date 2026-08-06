@@ -422,8 +422,14 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 			return fmt.Errorf("%w: after %d attempts", ErrNotDelivered, maxAttempts)
 		}
 		// The final capture itself failed, so delivery could not be
-		// established either way. Clear nothing — the text may have gone
-		// through — and report the unknown outcome.
+		// established either way. Deliberately: classify as unknown
+		// (ErrSubmitUnconfirmed, not ErrNotDelivered) — a flaky capture
+		// must not turn a delivered message into a retry storm — and
+		// clear nothing. Clearing would be defensible (C-u on an
+		// already-empty composer is harmless), but it buys nothing here:
+		// the caller is told "unknown" either way and will not treat this
+		// as a non-delivery, while a blind C-u on an unreadable pane is
+		// the one case where we cannot see what we are wiping.
 	}
 
 	return fmt.Errorf("%w: after %d attempts", ErrSubmitUnconfirmed, maxAttempts)
