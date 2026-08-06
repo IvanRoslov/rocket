@@ -33,6 +33,12 @@ type taskRow struct {
 	PRNumber     int    `json:"pr_number,omitempty"`
 	PRState      string `json:"pr_state,omitempty"`
 	CIState      string `json:"ci_state,omitempty"`
+	// PRCheckedAt is the unix time of the API's last successful GitHub poll
+	// for this subtask's PR (0 = never), and PRStale is the API's verdict on
+	// whether that is too long ago to trust. Both come from the daemon: only
+	// it knows the configured poll interval.
+	PRCheckedAt int64 `json:"pr_checked_at,omitempty"`
+	PRStale     bool  `json:"pr_stale,omitempty"`
 	// WaitingTerminal is the API's derived flag: the task's session has been
 	// sitting on interactive input long enough that nothing moves until
 	// somebody types.
@@ -1337,6 +1343,9 @@ func renderTaskCard(task taskDetailRow, docs []taskDocRow, logs []taskLogRow, qu
 			pr := "-"
 			if st.PRNumber > 0 {
 				pr = fmt.Sprintf("#%d (%s)", st.PRNumber, st.PRState)
+				if fresh := prFreshness(st, now); fresh != "" {
+					pr = fmt.Sprintf("#%d (%s, %s)", st.PRNumber, st.PRState, fresh)
+				}
 			}
 			ci := st.CIState
 			if ci == "" {
@@ -1384,6 +1393,30 @@ func renderTaskCard(task taskDetailRow, docs []taskDocRow, logs []taskLogRow, qu
 		fmt.Fprintf(w, "## Questions\n")
 		fmt.Fprint(w, renderQuestions(task.ID, questions))
 	}
+}
+
+// prStaleMark flags a PR status the daemon has not managed to refresh for
+// three poll intervals: what is shown next to it is the last thing we saw,
+// not necessarily what GitHub says now.
+const prStaleMark = "протухло"
+
+// prFreshness renders the trailing part of a subtask's PR cell: how old the
+// status is, plus the staleness mark when the daemon says it can no longer be
+// trusted. Returns "" when there is nothing to add.
+//
+// A PR the poller never reached (pr_checked_at == 0) gets no age at all —
+// formatting the zero timestamp would print "56 лет назад" — but it does keep
+// the staleness mark, because a never-confirmed status is exactly the kind
+// this feature exists to flag.
+func prFreshness(st taskRow, now time.Time) string {
+	var parts []string
+	if st.PRCheckedAt > 0 {
+		parts = append(parts, humanAge(st.PRCheckedAt, now)+" назад")
+	}
+	if st.PRStale {
+		parts = append(parts, prStaleMark)
+	}
+	return strings.Join(parts, ", ")
 }
 
 func formatAttach(attach []string) string {

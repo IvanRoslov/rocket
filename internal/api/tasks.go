@@ -11,7 +11,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
@@ -104,6 +106,40 @@ type subtaskResponse struct {
 	PRNumber int    `json:"pr_number,omitempty"`
 	PRState  string `json:"pr_state,omitempty"`
 	CIState  string `json:"ci_state,omitempty"`
+	// PRCheckedAt is the unix time of the last successful GitHub poll for the
+	// subtask's session (omitted when never polled).
+	PRCheckedAt int64 `json:"pr_checked_at,omitempty"`
+	// PRStale says the PR/CI state above has not been refreshed for long
+	// enough that it should not be trusted. It is computed server-side
+	// because only the daemon knows the configured poll interval.
+	PRStale bool `json:"pr_stale,omitempty"`
+}
+
+// defaultGithubPollInterval mirrors config's default and is used when no
+// config is wired (tests, degraded startup) so staleness never silently
+// becomes "never".
+const defaultGithubPollInterval = 2 * time.Minute
+
+// prStaleThreshold is how long a PR status may go unrefreshed before it is
+// marked stale: three poll intervals, i.e. two missed polls in a row, which
+// is well past ordinary jitter but still catches a poller that has stopped
+// visiting a session at all.
+func prStaleThreshold(cfg *config.Config) time.Duration {
+	interval := defaultGithubPollInterval
+	if cfg != nil && cfg.GithubPollInterval > 0 {
+		interval = cfg.GithubPollInterval
+	}
+	return 3 * interval
+}
+
+// prIsStale reports whether a PR status stamped at checkedAt is too old to
+// trust. A PR that was never successfully polled (checkedAt == 0) is stale by
+// definition: we have never confirmed the state we are showing.
+func prIsStale(checkedAt int64, cfg *config.Config, now time.Time) bool {
+	if checkedAt == 0 {
+		return true
+	}
+	return now.Sub(time.Unix(checkedAt, 0)) > prStaleThreshold(cfg)
 }
 
 // toTaskSessionResponse builds the session summary for a task's session_id.
@@ -464,6 +500,12 @@ func handleGetTask(w http.ResponseWriter, r *http.Request, d Deps) {
 				subOut[i].PRNumber = sess.PRNumber
 				subOut[i].PRState = sess.PRState
 				subOut[i].CIState = sess.CIState
+				subOut[i].PRCheckedAt = sess.PRCheckedAt
+				// Only a subtask that actually has a PR can have a stale PR
+				// status; without one there is nothing to distrust.
+				if sess.PRNumber != 0 {
+					subOut[i].PRStale = prIsStale(sess.PRCheckedAt, d.Cfg, time.Now())
+				}
 			}
 		}
 	}

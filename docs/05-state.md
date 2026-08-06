@@ -110,6 +110,7 @@ CREATE TABLE sessions (  -- продолжение схемы
   pr_number     INTEGER,
   pr_state      TEXT,                      -- open|merged|closed
   ci_state      TEXT,                      -- pending|passing|failing
+  pr_checked_at INTEGER,                   -- unix последнего УСПЕШНОГО опроса GitHub (NULL = не опрашивали)
   prompt        TEXT,                      -- исходный бриф
   created_at    INTEGER NOT NULL,
   updated_at    INTEGER NOT NULL

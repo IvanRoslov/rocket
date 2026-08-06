@@ -1303,7 +1303,9 @@ func TestRenderTaskCardSubtaskWithPRAndCI(t *testing.T) {
 		t.Errorf("expected PR and CI column headers in output")
 	}
 
-	// Check for PR #42 (open) in first subtask
+	// Check for PR #42 (open) in first subtask. With no freshness info the
+	// cell stays exactly as before — the age and staleness mark are appended
+	// only when the daemon has something to say (task_pr_freshness_test.go).
 	if !strings.Contains(output, "#42 (open)") {
 		t.Errorf("expected PR #42 (open) in output, got:\n%s", output)
 	}
