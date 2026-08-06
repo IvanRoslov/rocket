@@ -9,11 +9,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// DefaultInputStallThreshold is the built-in value of
-// Config.InputStallThreshold — how long a session may sit on interactive
-// input before it counts as stalled.
-const DefaultInputStallThreshold = 10 * time.Minute
-
 // DefaultQuestionStaleAfter is the built-in value of
 // Config.QuestionStaleAfter — how long an open decision thread may go without
 // movement before it counts as stale.
@@ -54,15 +49,6 @@ type Config struct {
 	LargeMessageThreshold     int           `yaml:"large_message_threshold"`
 	WorkerStallThreshold      time.Duration `yaml:"worker_stall_threshold"`
 	QuestionReminderThreshold time.Duration `yaml:"question_reminder_threshold"`
-	// InputStallThreshold is how long a session may sit on interactive input
-	// — a pending AskUserQuestion quiz, or activity "waiting_input" — before
-	// the heartbeat sweep escalates it to the cto agent's inbox. Unlike a
-	// stalled worker, such a session cannot be nudged by messaging its
-	// orchestrator: it is waiting for a keystroke nobody is there to press.
-	// A zero value means "unset": consumers that need a threshold outside a
-	// loaded config (the API's derived waiting_terminal flag, say) fall back
-	// to DefaultInputStallThreshold.
-	InputStallThreshold time.Duration `yaml:"input_stall_threshold"`
 	// QuestionStaleAfter is how long an open decision thread may go without
 	// movement — its last entry, or the question itself when nobody has
 	// replied yet — before the heartbeat reminds every participant whose turn
@@ -147,7 +133,6 @@ func Load(home string) (*Config, error) {
 		LargeMessageThreshold:     2048,
 		WorkerStallThreshold:      15 * time.Minute,
 		QuestionReminderThreshold: 30 * time.Minute,
-		InputStallThreshold:       DefaultInputStallThreshold,
 		QuestionStaleAfter:        DefaultQuestionStaleAfter,
 		MilestoneQuietAfter:       DefaultMilestoneQuietAfter,
 		GithubAPIBase:             "https://api.github.com",

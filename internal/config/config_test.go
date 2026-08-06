@@ -61,9 +61,6 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Home != tempDir {
 		t.Errorf("expected Home %s, got %s", tempDir, cfg.Home)
 	}
-	if cfg.InputStallThreshold != 10*time.Minute {
-		t.Errorf("expected InputStallThreshold 10m, got %v", cfg.InputStallThreshold)
-	}
 	if cfg.QuestionStaleAfter != DefaultQuestionStaleAfter {
 		t.Errorf("expected QuestionStaleAfter %v, got %v", DefaultQuestionStaleAfter, cfg.QuestionStaleAfter)
 	}
@@ -89,7 +86,6 @@ ready_to_idle: 10m
 queue_timeout: 1h
 github_api_base: https://ghe.example.com/api/v3
 merge_grace: 10m
-input_stall_threshold: 3m
 question_stale_after: 6h
 milestone_quiet_after: 12h
 `
@@ -139,14 +135,34 @@ milestone_quiet_after: 12h
 	if cfg.MergeGrace != 10*time.Minute {
 		t.Errorf("expected MergeGrace 10m, got %v", cfg.MergeGrace)
 	}
-	if cfg.InputStallThreshold != 3*time.Minute {
-		t.Errorf("expected InputStallThreshold 3m, got %v", cfg.InputStallThreshold)
-	}
 	if cfg.QuestionStaleAfter != 6*time.Hour {
 		t.Errorf("expected QuestionStaleAfter 6h, got %v", cfg.QuestionStaleAfter)
 	}
 	if cfg.MilestoneQuietAfter != 12*time.Hour {
 		t.Errorf("expected MilestoneQuietAfter 12h, got %v", cfg.MilestoneQuietAfter)
+	}
+}
+
+// TestLoadRetiredKey: input_stall_threshold was removed along with the
+// input-stall mechanism, but users' config.yaml files still carry it. An
+// unknown key must be ignored, not rejected — the rest of the file has to
+// keep loading.
+func TestLoadRetiredKey(t *testing.T) {
+	tempDir := t.TempDir()
+	configContent := `
+port: 9999
+input_stall_threshold: 3m
+`
+	if err := os.WriteFile(filepath.Join(tempDir, "config.yaml"), []byte(configContent), 0600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	cfg, err := Load(tempDir)
+	if err != nil {
+		t.Fatalf("Load failed on a config carrying the retired key: %v", err)
+	}
+	if cfg.Port != 9999 {
+		t.Errorf("expected Port 9999, got %d", cfg.Port)
 	}
 }
 

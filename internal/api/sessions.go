@@ -325,7 +325,7 @@ func handleListSessions(w http.ResponseWriter, r *http.Request, d Deps) {
 
 	out := make([]sessionResponse, len(sessions))
 	for i, s := range sessions {
-		out[i] = toSessionResponse(s, inputStallThreshold(d.Cfg))
+		out[i] = toSessionResponse(s, waitingTerminalAfter)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -342,7 +342,7 @@ func handleGetSession(w http.ResponseWriter, r *http.Request, d Deps) {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, toSessionResponse(s, inputStallThreshold(d.Cfg)))
+	writeJSON(w, http.StatusOK, toSessionResponse(s, waitingTerminalAfter))
 }
 
 // canKillOrRestoreSession reports whether caller may kill/restore the

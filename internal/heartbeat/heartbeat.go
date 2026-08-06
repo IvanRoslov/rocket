@@ -8,7 +8,6 @@ package heartbeat
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -18,7 +17,6 @@ import (
 	"github.com/IvanRoslov/rocket/internal/activity"
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
-	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -186,46 +184,6 @@ func (h *Heartbeat) tickOne(orch store.Session) error {
 	}
 
 	return nil
-}
-
-// InputStalled reports how long sess has been stalled on interactive input
-// and whether that exceeds threshold. A session is stalled on interactive
-// input while it holds a pending AskUserQuestion quiz, or while its activity
-// is waiting_input — in both cases nothing moves until somebody types.
-//
-// The reference point is the quiz's asked_at when a quiz is present (the
-// activity timestamp keeps moving while a quiz is open, so it would
-// understate the wait), otherwise the activity timestamp. Without a usable
-// reference point the session is reported as not stalled rather than stalled
-// since the epoch.
-//
-// The heartbeat itself acts on nothing here: the rule exists for the derived
-// waiting_terminal flag in internal/api/waiting.go, which the dashboard and
-// `rocket task ls` render. Nobody is nudged or escalated for an input stall.
-func InputStalled(sess store.Session, now time.Time, threshold time.Duration) (since time.Duration, ok bool) {
-	ref := inputStallRef(sess)
-	if ref <= 0 {
-		return 0, false
-	}
-	since = now.Sub(time.Unix(ref, 0))
-	return since, since > threshold
-}
-
-// inputStallRef returns the timestamp an input stall is measured from, or 0
-// when the session is not waiting on input at all.
-func inputStallRef(sess store.Session) int64 {
-	switch {
-	case sess.PendingQuiz != "":
-		var quiz session.Quiz
-		if err := json.Unmarshal([]byte(sess.PendingQuiz), &quiz); err == nil && quiz.AskedAt > 0 {
-			return quiz.AskedAt
-		}
-		return sess.ActivityTS
-	case activity.State(sess.Activity) == activity.WaitingInput:
-		return sess.ActivityTS
-	default:
-		return 0
-	}
 }
 
 // rootTask returns the root task (parent_id IS NULL) whose session_id

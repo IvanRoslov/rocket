@@ -3,7 +3,6 @@ package heartbeat
 import (
 	"context"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -31,7 +30,6 @@ func testConfig() *config.Config {
 		HeartbeatInterval:         5 * time.Minute,
 		WorkerStallThreshold:      15 * time.Minute,
 		QuestionReminderThreshold: 30 * time.Minute,
-		InputStallThreshold:       10 * time.Minute,
 		QuestionStaleAfter:        24 * time.Hour,
 	}
 }
@@ -97,45 +95,6 @@ func hasEvent(types []string, want string) bool {
 		}
 	}
 	return false
-}
-
-func TestInputStall(t *testing.T) {
-	now := time.Unix(1_000_000, 0)
-	old := now.Add(-20 * time.Minute).Unix()
-	fresh := now.Add(-1 * time.Minute).Unix()
-	quiz := func(askedAt int64) string {
-		return `{"questions":[{"question":"q"}],"asked_at":` + strconv.FormatInt(askedAt, 10) + `}`
-	}
-
-	tests := []struct {
-		name   string
-		sess   store.Session
-		wantOK bool
-	}{
-		{"idle orchestrator", store.Session{Activity: "idle", ActivityTS: old}, false},
-		{"active orchestrator", store.Session{Activity: "active", ActivityTS: old}, false},
-		{"ready orchestrator", store.Session{Activity: "ready", ActivityTS: old}, false},
-		{"fresh waiting_input", store.Session{Activity: "waiting_input", ActivityTS: fresh}, false},
-		{"stale waiting_input", store.Session{Activity: "waiting_input", ActivityTS: old}, true},
-		{"waiting_input without timestamp", store.Session{Activity: "waiting_input"}, false},
-		{"stale quiz while active", store.Session{Activity: "active", ActivityTS: now.Unix(), PendingQuiz: quiz(old)}, true},
-		{"fresh quiz", store.Session{Activity: "active", ActivityTS: now.Unix(), PendingQuiz: quiz(fresh)}, false},
-		{"quiz without asked_at falls back to activity ts", store.Session{Activity: "active", ActivityTS: old, PendingQuiz: `{"questions":[]}`}, true},
-		{"quiz without any timestamp", store.Session{PendingQuiz: `{"questions":[]}`}, false},
-		{"unparseable quiz falls back to activity ts", store.Session{Activity: "active", ActivityTS: old, PendingQuiz: `not json`}, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			since, ok := InputStalled(tt.sess, now, 10*time.Minute)
-			if ok != tt.wantOK {
-				t.Fatalf("InputStalled ok = %v, want %v", ok, tt.wantOK)
-			}
-			if ok && since <= 10*time.Minute {
-				t.Errorf("since = %v, want over the threshold", since)
-			}
-		})
-	}
 }
 
 // seedOrchAndTask adds an orchestrator session and its in_progress root task,
