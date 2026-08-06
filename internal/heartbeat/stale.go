@@ -115,7 +115,7 @@ const staleReminderInterval = 24 * time.Hour
 
 // staleKeyPrefix namespaces per-(thread, recipient) reminder entries in
 // lastSent, so a thread reminder and an orchestrator summary never suppress
-// each other (same trick as escalationKeyPrefix).
+// each other (same trick as quietKeyPrefix).
 const staleKeyPrefix = "stale-thread:"
 
 // staleQuoteLimit is how much of a question's body a reminder quotes: enough

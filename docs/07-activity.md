@@ -13,7 +13,7 @@
 
 Используется: очередью сообщений (когда доставлять), heartbeat'ом (кто застрял), `rocket ls`/дашбордом (наблюдаемость).
 
-`waiting_input` — вместе с непустым `pending_quiz` — это ещё и признак застревания на интерактивном вводе: `heartbeat.InputStalled` считает сессию застрявшей, пока открыт квиз `AskUserQuestion` либо `activity = waiting_input`, и если это длится дольше `input_stall_threshold` (по умолчанию 10m), heartbeat эскалирует оркестратора агенту `cto` (см. [08-orchestrators.md](08-orchestrators.md)).
+`waiting_input` — вместе с непустым `pending_quiz` — это ещё и признак застревания на интерактивном вводе: `heartbeat.InputStalled` считает сессию застрявшей, пока открыт квиз `AskUserQuestion` либо `activity = waiting_input`, и если это длится дольше `input_stall_threshold` (по умолчанию 10m), сессия помечается производным флагом `waiting_terminal` — он только рисуется в CLI и дашборде, никаких сообщений и эскалаций по нему не отправляется (см. [08-orchestrators.md](08-orchestrators.md)).
 
 ## Два канала, поллинг + push
 

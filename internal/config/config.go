@@ -56,11 +56,12 @@ type Config struct {
 	QuestionReminderThreshold time.Duration `yaml:"question_reminder_threshold"`
 	// InputStallThreshold is how long a session may sit on interactive input
 	// — a pending AskUserQuestion quiz, or activity "waiting_input" — before
-	// the heartbeat sweep escalates it to the cto agent's inbox. Unlike a
-	// stalled worker, such a session cannot be nudged by messaging its
-	// orchestrator: it is waiting for a keystroke nobody is there to press.
-	// A zero value means "unset": consumers that need a threshold outside a
-	// loaded config (the API's derived waiting_terminal flag, say) fall back
+	// it is flagged as waiting at a terminal. Nothing is sent when it passes:
+	// its only consumer is the API's derived waiting_terminal flag (see
+	// internal/api/waiting.go), which the dashboard and `rocket ls` draw for
+	// whoever chooses to look. The heartbeat used to nudge and escalate on
+	// this threshold too; that machinery is gone (docs/08-orchestrators.md).
+	// A zero value means "unset": consumers outside a loaded config fall back
 	// to DefaultInputStallThreshold.
 	InputStallThreshold time.Duration `yaml:"input_stall_threshold"`
 	// QuestionStaleAfter is how long an open decision thread may go without
