@@ -253,3 +253,60 @@ func TestAskCmdHasOptionAndFyi(t *testing.T) {
 // that exercise the command rather than its hidden alias.
 func newTaskCloseCmd0() *cobra.Command  { return newTaskCloseCmd(false) }
 func newAgentCloseCmd0() *cobra.Command { return newAgentCloseCmd(false) }
+
+// TestReplyRequestBody_Dispute: --dispute is the only thing that reopens a
+// resolved thread, and its absence must leave the request byte-identical to
+// the one the CLI sent before the flag existed (subtask #1181).
+func TestReplyRequestBody_Dispute(t *testing.T) {
+	got := threadReplyOptions{body: "ответ неверен", dispute: true}.requestBody()
+	want := map[string]any{"body": "ответ неверен", "dispute": true}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("requestBody() = %v, want %v", got, want)
+	}
+	if got := (threadReplyOptions{body: "принял"}).requestBody(); len(got) != 1 {
+		t.Errorf("requestBody() = %v, want only a body", got)
+	}
+}
+
+// TestDisputeHint: a reply that landed in a thread which stayed resolved says
+// so, because otherwise the author has no way to tell an accepted ack from a
+// dispute that silently did nothing.
+func TestDisputeHint(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  string
+		dispute bool
+		dryRun  bool
+		want    bool
+	}{
+		{"ack в закрытый тред", "resolved", false, false, true},
+		{"оспаривание", "resolved", true, false, false},
+		{"открытый тред", "open", false, false, false},
+		{"репетиция", "resolved", false, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := disputeHint(tt.status, tt.dispute, tt.dryRun)
+			if (got != "") != tt.want {
+				t.Errorf("disputeHint(%q, %v, %v) = %q", tt.status, tt.dispute, tt.dryRun, got)
+			}
+			if tt.want && !strings.Contains(got, "--dispute") {
+				t.Errorf("подсказка должна называть флаг: %q", got)
+			}
+		})
+	}
+}
+
+// TestReplyCommandsHaveDispute: both reply surfaces expose the flag, or the
+// two drift apart and the same act needs a different incantation per thread
+// kind.
+func TestReplyCommandsHaveDispute(t *testing.T) {
+	for name, cmd := range map[string]*cobra.Command{
+		"task reply":  newTaskReplyCmd(),
+		"agent reply": newAgentReplyCmd(),
+	} {
+		if cmd.Flags().Lookup("dispute") == nil {
+			t.Errorf("%s: нет флага --dispute", name)
+		}
+	}
+}
