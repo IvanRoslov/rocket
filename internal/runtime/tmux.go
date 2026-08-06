@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // ErrSubmitUnconfirmed is returned by Inject when the text was pasted and
@@ -271,6 +272,10 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 		pollTimeout = defaultPollTimeout
 	}
 
+	// marker is a *logical* line; the pane may hold it broken across rows.
+	// Every comparison against it therefore goes through ContainsMarker,
+	// never strings.Contains — see its doc for why a raw match silently
+	// turns every long message into a redelivery storm.
 	marker := lastLine(text)
 
 	// confirmWindow bounds every capture used for confirmation to a true
@@ -296,7 +301,7 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 		deadline := time.Now().Add(pollTimeout)
 		for {
 			out, _, err := t.run(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name))
-			if err == nil && strings.Contains(tailLines(trimTrailingBlank(out), confirmWindow), marker) {
+			if err == nil && ContainsMarker(tailLines(trimTrailingBlank(out), confirmWindow), marker) {
 				markerSeen = true
 				break
 			}
@@ -361,7 +366,7 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 			// Handles full-screen/alt-screen TUIs that redraw with a
 			// static line count and footer on submit. Only valid if
 			// markerSeen is true (marker was rendered in the baseline).
-			markerAbsent := markerSeen && marker != "" && !strings.Contains(out, marker)
+			markerAbsent := markerSeen && marker != "" && !ContainsMarker(out, marker)
 			// count-growth: the tail gained non-blank lines vs baseline
 			// — handles echo-style consumers (e.g. cat) where the
 			// marker lingers in the tail, and also handles cases where
@@ -407,7 +412,7 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 	if marker != "" {
 		full, _, err := t.run(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name))
 		if err == nil {
-			if strings.Contains(history(trimTrailingBlank(full), confirmWindow), marker) {
+			if ContainsMarker(history(trimTrailingBlank(full), confirmWindow), marker) {
 				// Delivered after all — never wipe a composer whose
 				// content actually went through.
 				return nil
@@ -481,6 +486,49 @@ func escapeTrailingSemicolon(s string) string {
 
 // lastLine returns the final non-blank line of s, or "" if s has no
 // non-blank content.
+// ContainsMarker reports whether haystack (a pane capture) shows marker (a
+// logical line of injected text), ignoring how the pane broke that line
+// across rows.
+//
+// A plain strings.Contains cannot answer this. The marker is one logical
+// line, but nothing guarantees the pane holds it as one row:
+//
+//   - tmux wraps any line longer than the pane is wide, so capture-pane
+//     reports it as several rows (`capture-pane -J` rejoins exactly these,
+//     and only these);
+//   - chat-style TUIs (Claude Code) do their own wrapping — they re-flow the
+//     message to their frame, prefix the first row ("❯ "), indent the rest,
+//     and pad every row to the full width. Those are real newlines printed
+//     by the application, so -J leaves them split.
+//
+// The second case is the one that bit us: the marker was findable nowhere,
+// submission could never be confirmed, Inject reported a non-delivery for
+// text that had in fact landed, and the queue redelivered it up to
+// maxAttempts (live incident: a #1186/Q5 message pasted into cto five
+// times, the agent itself replying "Дубль, не реагирую").
+//
+// Comparing with all whitespace removed is insensitive to both: wrapping
+// only ever inserts breaks, indentation and padding — never non-space
+// characters — so a marker that is present survives normalisation, while
+// the message text itself stays distinctive enough not to collide.
+func ContainsMarker(haystack, marker string) bool {
+	if strings.TrimSpace(marker) == "" {
+		return false
+	}
+	return strings.Contains(stripWhitespace(haystack), stripWhitespace(marker))
+}
+
+// stripWhitespace removes every whitespace character, collapsing wrapped,
+// indented and padded renderings of the same text to one comparable form.
+func stripWhitespace(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 func lastLine(s string) string {
 	lines := strings.Split(s, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {

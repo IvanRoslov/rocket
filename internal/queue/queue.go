@@ -639,7 +639,12 @@ func markerPresent(out, text string) bool {
 	if marker == "" {
 		return false
 	}
-	return strings.Contains(out, marker)
+	// Wrapping must not decide delivery: the pane may hold the marker broken
+	// across rows (see runtime.ContainsMarker). Here a false negative reads
+	// as "marker gone, so it was submitted" and would mark an undelivered
+	// message delivered — the mirror image of the redelivery storm the same
+	// raw comparison caused in Inject.
+	return runtime.ContainsMarker(out, marker)
 }
 
 // sleepCtx sleeps for d, honoring ctx cancellation. Returns false if ctx
