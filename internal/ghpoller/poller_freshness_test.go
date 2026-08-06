@@ -52,6 +52,11 @@ func TestTick_SkipsDeadWorkerWithTerminalPR(t *testing.T) {
 		t.Fatalf("UpdateSessionState: %v", err)
 	}
 
+	// Park the freshness stamp at a known old value; a poll would move it.
+	if err := st.MarkSessionPRChecked("w1", 1); err != nil {
+		t.Fatalf("MarkSessionPRChecked: %v", err)
+	}
+
 	mock := newMockGitHubServer()
 	srv := httptest.NewServer(mock.handler())
 	defer srv.Close()
@@ -65,7 +70,7 @@ func TestTick_SkipsDeadWorkerWithTerminalPR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)
 	}
-	if got.PRCheckedAt != 0 {
+	if got.PRCheckedAt != 1 {
 		t.Fatalf("merged PR of a dead session should not be polled, got pr_checked_at=%d", got.PRCheckedAt)
 	}
 }
@@ -124,6 +129,12 @@ func TestTick_NoStampOnFailedPoll(t *testing.T) {
 		t.Fatalf("UpdateSessionPR: %v", err)
 	}
 
+	// Park the stamp at a known old value: after a failed poll it must still
+	// read as old, otherwise a stale pr_state would look freshly confirmed.
+	if err := st.MarkSessionPRChecked("w1", 1); err != nil {
+		t.Fatalf("MarkSessionPRChecked: %v", err)
+	}
+
 	mock := newMockGitHubServer()
 	srv := httptest.NewServer(mock.handler())
 	defer srv.Close()
@@ -137,7 +148,7 @@ func TestTick_NoStampOnFailedPoll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)
 	}
-	if got.PRCheckedAt != 0 {
+	if got.PRCheckedAt != 1 {
 		t.Fatalf("failed poll must not stamp pr_checked_at, got %d", got.PRCheckedAt)
 	}
 }

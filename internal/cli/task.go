@@ -33,6 +33,12 @@ type taskRow struct {
 	PRNumber     int    `json:"pr_number,omitempty"`
 	PRState      string `json:"pr_state,omitempty"`
 	CIState      string `json:"ci_state,omitempty"`
+	// PRCheckedAt is the unix time of the API's last successful GitHub poll
+	// for this subtask's PR (0 = never), and PRStale is the API's verdict on
+	// whether that is too long ago to trust. Both come from the daemon: only
+	// it knows the configured poll interval.
+	PRCheckedAt int64 `json:"pr_checked_at,omitempty"`
+	PRStale     bool  `json:"pr_stale,omitempty"`
 	// WaitingTerminal is the API's derived flag: the task's session has been
 	// sitting on interactive input long enough that nothing moves until
 	// somebody types.
@@ -1336,7 +1342,7 @@ func renderTaskCard(task taskDetailRow, docs []taskDocRow, logs []taskLogRow, qu
 			}
 			pr := "-"
 			if st.PRNumber > 0 {
-				pr = fmt.Sprintf("#%d (%s)", st.PRNumber, st.PRState)
+				pr = fmt.Sprintf("#%d (%s, %s)", st.PRNumber, st.PRState, prFreshness(st, now))
 			}
 			ci := st.CIState
 			if ci == "" {
@@ -1384,6 +1390,48 @@ func renderTaskCard(task taskDetailRow, docs []taskDocRow, logs []taskLogRow, qu
 		fmt.Fprintf(w, "## Questions\n")
 		fmt.Fprint(w, renderQuestions(task.ID, questions))
 	}
+}
+
+// prStaleMark flags a PR status the daemon has not managed to refresh for
+// three poll intervals: what is shown next to it is the last thing we saw,
+// not necessarily what GitHub says now.
+const prStaleMark = "⚠ устарело"
+
+// prNeverChecked is the wording for a PR the poller never reached at all —
+// better than a misleading "0с назад" or a 1970 timestamp.
+const prNeverChecked = "не проверялся"
+
+// prAgeRU renders a PR check age compactly enough for a table cell: seconds,
+// minutes, hours, days. humanAge's Latin suffixes would read as a unit
+// mismatch next to the Russian "назад".
+func prAgeRU(unixSec int64, now time.Time) string {
+	d := now.Sub(time.Unix(unixSec, 0))
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%dс", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dм", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dч", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dд", int(d.Hours()/24))
+	}
+}
+
+// prFreshness renders how old a subtask's PR status is, plus the staleness
+// mark when the daemon says the status can no longer be trusted.
+func prFreshness(st taskRow, now time.Time) string {
+	age := prNeverChecked
+	if st.PRCheckedAt > 0 {
+		age = prAgeRU(st.PRCheckedAt, now) + " назад"
+	}
+	if st.PRStale {
+		return age + " " + prStaleMark
+	}
+	return age
 }
 
 func formatAttach(attach []string) string {

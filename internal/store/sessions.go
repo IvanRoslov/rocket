@@ -182,12 +182,18 @@ func (s *Store) UpdateSession(sess Session) error {
 	return checkRowsAffected(res)
 }
 
-// UpdateSessionPR updates a session's PR/CI fields and refreshes updated_at.
+// UpdateSessionPR updates a session's PR/CI fields and refreshes updated_at
+// and pr_checked_at. The freshness stamp belongs here because the only writer
+// is the GitHub poller: a PR/CI write is by construction the result of a
+// successful poll. Polls that find nothing changed never reach this method and
+// stamp freshness through MarkSessionPRChecked instead.
 // Returns ErrNotFound if the session doesn't exist.
 func (s *Store) UpdateSessionPR(id string, number int, prState, ciState string) error {
 	res, err := s.db.Exec(
-		`UPDATE sessions SET pr_number = ?, pr_state = ?, ci_state = ?, updated_at = ? WHERE id = ?`,
-		nullIfZero(int64(number)), nullIfEmpty(prState), nullIfEmpty(ciState), time.Now().Unix(), id,
+		`UPDATE sessions SET pr_number = ?, pr_state = ?, ci_state = ?,
+		        pr_checked_at = ?, updated_at = ? WHERE id = ?`,
+		nullIfZero(int64(number)), nullIfEmpty(prState), nullIfEmpty(ciState),
+		time.Now().Unix(), time.Now().Unix(), id,
 	)
 	if err != nil {
 		return fmt.Errorf("update session pr: %w", err)

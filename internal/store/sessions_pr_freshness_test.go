@@ -62,6 +62,28 @@ func TestMarkSessionPRChecked(t *testing.T) {
 	}
 }
 
+func TestUpdateSessionPR_StampsPRCheckedAt(t *testing.T) {
+	s := openTestStore(t)
+	mustSetup(t, s)
+
+	if err := s.AddSession(newPRSession("s1", "running", 0, "")); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+
+	before := time.Now().Unix()
+	if err := s.UpdateSessionPR("s1", 7, "open", "pending"); err != nil {
+		t.Fatalf("UpdateSessionPR: %v", err)
+	}
+
+	got, err := s.GetSession("s1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if got.PRCheckedAt < before {
+		t.Fatalf("PRCheckedAt = %d, want >= %d", got.PRCheckedAt, before)
+	}
+}
+
 func TestSessionPRCheckedAt_RoundTripsThroughUpdateSession(t *testing.T) {
 	s := openTestStore(t)
 	mustSetup(t, s)
