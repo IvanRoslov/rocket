@@ -831,7 +831,7 @@ func TestQuestionReply_OrchestratorReopensResolved(t *testing.T) {
 	defer cancel()
 
 	resp := postJSONWithHeader(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/reply", "orch-1",
-		map[string]any{"body": "Evidence says sqlite cannot work here: no concurrent writers."})
+		map[string]any{"body": "Evidence says sqlite cannot work here: no concurrent writers.", "dispute": true})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("status = %d, want 201 (orchestrator reply must reopen)", resp.StatusCode)
@@ -1253,5 +1253,69 @@ func TestTaskQuestion_HumanIsCanonicalOnTheWire(t *testing.T) {
 	}
 	if listed[0].Messages[0].Author != store.ParticipantHuman {
 		t.Errorf("listed messages[0].author = %q, want %q", listed[0].Messages[0].Author, store.ParticipantHuman)
+	}
+}
+
+// TestQuestionReply_AckDoesNotReopen is the point of subtask #1181: a plain
+// "принял, работаю" from the orchestrator is not a dispute. Without
+// `dispute: true` the reply lands in the history and nothing else moves —
+// the thread stays resolved, attention stays empty and no reopen event is
+// published, so the answer does not come back to the human's badge.
+func TestQuestionReply_AckDoesNotReopen(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	askResp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
+		map[string]any{"body": "Which DB?"})
+	q := decodeQuestion(t, askResp)
+	askResp.Body.Close()
+
+	ansResp := postJSON(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/answer", map[string]any{"body": "sqlite"})
+	ansResp.Body.Close()
+
+	ch, cancel := d.Bus.Subscribe()
+	defer cancel()
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/reply", "orch-1",
+		map[string]any{"body": "принял, делаю"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (an ack is recorded, not rejected)", resp.StatusCode)
+	}
+	got := decodeQuestion(t, resp)
+	if got.Status != "resolved" {
+		t.Errorf("status after ack = %q, want resolved", got.Status)
+	}
+	if len(got.Attention) != 0 {
+		t.Errorf("attention after ack = %#v, want empty", got.Attention)
+	}
+	if len(got.Messages) == 0 || got.Messages[len(got.Messages)-1].Body != "принял, делаю" {
+		t.Errorf("ack must be recorded in the thread: %+v", got.Messages)
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		select {
+		case e := <-ch:
+			if e.Type == "task.question_reopened" {
+				t.Fatalf("an ack must not publish task.question_reopened")
+			}
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+
+	// And the dashboard badge stays down: the question is still resolved.
+	taskCardResp, err := http.Get(srv.URL + "/v1/tasks/" + itoa(taskID))
+	if err != nil {
+		t.Fatalf("GET task: %v", err)
+	}
+	defer taskCardResp.Body.Close()
+	var card taskDetailResponse
+	if err := json.NewDecoder(taskCardResp.Body).Decode(&card); err != nil {
+		t.Fatalf("decode task card: %v", err)
+	}
+	if card.OpenQuestions != 0 {
+		t.Errorf("OpenQuestions = %d, want 0 after an ack", card.OpenQuestions)
 	}
 }
