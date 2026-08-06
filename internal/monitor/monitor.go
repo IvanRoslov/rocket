@@ -114,21 +114,26 @@ type Monitor struct {
 	cache    map[string]activity.State
 	chat     map[string]chatStat
 	quizMiss map[string]int
+	// inputWaitMiss counts consecutive sweeps that saw no human-blocking
+	// prompt on the pane of a session claiming waiting_input — see
+	// correctStaleInputWait.
+	inputWaitMiss map[string]int
 }
 
 // New builds a Monitor. resolveAgent is typically agent.Get.
 func New(st *store.Store, b *bus.Bus, rt runtime.Runtime, cfg *config.Config, resolveAgent func(name string) (agent.Agent, error)) *Monitor {
 	return &Monitor{
-		st:           st,
-		bus:          b,
-		rt:           rt,
-		cfg:          cfg,
-		resolveAgent: resolveAgent,
-		prober:       execProber{},
-		push:         make(map[string]pushEntry),
-		cache:        make(map[string]activity.State),
-		chat:         make(map[string]chatStat),
-		quizMiss:     make(map[string]int),
+		st:            st,
+		bus:           b,
+		rt:            rt,
+		cfg:           cfg,
+		resolveAgent:  resolveAgent,
+		prober:        execProber{},
+		push:          make(map[string]pushEntry),
+		cache:         make(map[string]activity.State),
+		chat:          make(map[string]chatStat),
+		quizMiss:      make(map[string]int),
+		inputWaitMiss: make(map[string]int),
 	}
 }
 
@@ -253,6 +258,11 @@ func (m *Monitor) sweep(ctx context.Context) {
 	for id := range m.quizMiss {
 		if !sessionIDs[id] {
 			delete(m.quizMiss, id)
+		}
+	}
+	for id := range m.inputWaitMiss {
+		if !sessionIDs[id] {
+			delete(m.inputWaitMiss, id)
 		}
 	}
 	m.mu.Unlock()
@@ -431,8 +441,87 @@ func (m *Monitor) pollSession(ctx context.Context, sess store.Session, liveSet m
 		}
 	}
 
+	if !exited {
+		state, ts = m.correctStaleInputWait(ctx, sess, state, ts)
+	}
+
 	m.applyMerge(sess, state, ts, exited, "poll")
 }
+
+// inputWaitMissThreshold is how many consecutive sweeps must observe the
+// pane WITHOUT anything that waits on a human before pollSession demotes
+// waiting_input back to ready. Two misses (~2 poll intervals) filter out
+// transient capture glitches and a prompt that is still being rendered.
+const inputWaitMissThreshold = 2
+
+// correctStaleInputWait is the waiting_input truth-check. The state itself
+// is set by Claude Code's Notification hook, which fires not only for a
+// real permission prompt but also when the agent has merely been idle for a
+// while — and nothing ever un-sets it, so a session that is alive and
+// working keeps claiming it waits on the human in `rocket status` and on
+// the dashboard.
+//
+// So every sweep, while a session claims waiting_input, look at the pane:
+// if it shows nothing that waits on a human (runtime.LooksLikeInputWait)
+// and no quiz is pending, inputWaitMissThreshold consecutive such sweeps
+// demote the state to ready. The candidate signal keeps arriving as
+// waiting_input (the agent's hook state file is stale by definition), so
+// the miss streak is deliberately NOT reset on a correction — otherwise the
+// state would flap back on the very next sweep. Any pushed entry for the
+// session is dropped too, so the stale push cannot win the applyMerge.
+//
+// A capture error is inconclusive and leaves the state alone.
+func (m *Monitor) correctStaleInputWait(ctx context.Context, sess store.Session, state activity.State, ts time.Time) (activity.State, time.Time) {
+	if state != activity.WaitingInput {
+		m.mu.Lock()
+		delete(m.inputWaitMiss, sess.ID)
+		m.mu.Unlock()
+		return state, ts
+	}
+
+	// A pending quiz IS a real wait on the human — pollQuiz owns deciding
+	// when it is over, and until it does the pane may legitimately be
+	// mid-render.
+	if sess.PendingQuiz != "" {
+		m.mu.Lock()
+		delete(m.inputWaitMiss, sess.ID)
+		m.mu.Unlock()
+		return state, ts
+	}
+
+	out, err := m.rt.Capture(ctx, runtime.Handle{Name: sess.TmuxName}, inputWaitCaptureLines)
+	if err != nil {
+		return state, ts
+	}
+	if runtime.LooksLikeInputWait(out) {
+		m.mu.Lock()
+		delete(m.inputWaitMiss, sess.ID)
+		m.mu.Unlock()
+		return state, ts
+	}
+
+	m.mu.Lock()
+	m.inputWaitMiss[sess.ID]++
+	misses := m.inputWaitMiss[sess.ID]
+	m.mu.Unlock()
+	if misses < inputWaitMissThreshold {
+		return state, ts
+	}
+
+	m.mu.Lock()
+	delete(m.push, sess.ID)
+	m.mu.Unlock()
+
+	if sess.Activity == string(activity.WaitingInput) {
+		slog.Info("monitor: stale waiting_input cleared (no prompt on pane)", "session", sess.ID)
+	}
+	return activity.Ready, time.Now()
+}
+
+// inputWaitCaptureLines is how many bottom pane rows the waiting_input
+// truth-check reads. A permission prompt (caption + options + footer) fits
+// well within it, and it matches what pollQuiz captures.
+const inputWaitCaptureLines = 15
 
 // applyMerge merges candidate (state, ts) against any pushed entry for
 // sess.ID — the newer timestamp wins, except an exited candidate from the

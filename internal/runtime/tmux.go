@@ -594,3 +594,49 @@ func LooksLikeQuizWidget(tail string) bool {
 		strings.Contains(tail, "✔ Submit") ||
 		strings.Contains(tail, "Ready to submit your answers?")
 }
+
+// inputWaitCaptions are prompt captions Claude Code (and ordinary CLI tools
+// run inside the pane) print when they are blocked on a human answer.
+var inputWaitCaptions = []string{
+	"Do you want to",    // tool-permission prompts ("Do you want to proceed?")
+	"Would you like to", // plan-mode approval
+	"Do you trust",      // first-run folder-trust prompt
+	"(y/n)", "(Y/n)", "(y/N)", "[y/n]", "[Y/n]", "[y/N]",
+}
+
+// selectionCursorRe matches the highlighted row of a numbered selection list
+// ("❯ 1. Yes"); selectionOptionRe matches a non-highlighted option row
+// ("  2. No"). Both are required — see LooksLikeInputWait.
+var (
+	selectionCursorRe = regexp.MustCompile(`(?m)^\s*❯\s*\d+[.)]\s`)
+	selectionOptionRe = regexp.MustCompile(`(?m)^\s{2,}\d+[.)]\s`)
+)
+
+// LooksLikeInputWait reports whether a pane tail is showing something that
+// is actually blocked on a human answer: Claude Code's AskUserQuestion
+// widget, a tool-permission / approval prompt, or a plain CLI yes-no
+// question.
+//
+// It exists because the waiting_input activity state is set by Claude
+// Code's Notification hook, which also fires when the agent has merely been
+// idle for a while — so a live session would keep claiming it waits on the
+// human forever (see monitor.pollSession's stale-waiting_input correction).
+// The monitor only uses a NEGATIVE answer here, and only to demote
+// waiting_input back to ready, so the checks lean deliberately generous:
+// a false positive costs nothing but one more poll interval of a stale
+// state, while a false negative would hide a real prompt from the human.
+//
+// The numbered-list check requires both the highlighted cursor row and at
+// least one further option row, so a draft the human typed into the
+// composer ("❯ 1. посмотри код") is not mistaken for a prompt.
+func LooksLikeInputWait(pane string) bool {
+	if LooksLikeQuizWidget(pane) {
+		return true
+	}
+	for _, caption := range inputWaitCaptions {
+		if strings.Contains(pane, caption) {
+			return true
+		}
+	}
+	return selectionCursorRe.MatchString(pane) && selectionOptionRe.MatchString(pane)
+}
