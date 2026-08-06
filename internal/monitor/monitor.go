@@ -114,26 +114,24 @@ type Monitor struct {
 	cache    map[string]activity.State
 	chat     map[string]chatStat
 	quizMiss map[string]int
-	// inputWaitMiss counts consecutive sweeps that saw no human-blocking
-	// prompt on the pane of a session claiming waiting_input — see
-	// correctStaleInputWait.
+	// inputWaitMiss counts consecutive sweeps that saw no prompt on the
+	// pane of a session claiming waiting_input — see correctStaleInputWait.
 	inputWaitMiss map[string]int
 }
 
 // New builds a Monitor. resolveAgent is typically agent.Get.
 func New(st *store.Store, b *bus.Bus, rt runtime.Runtime, cfg *config.Config, resolveAgent func(name string) (agent.Agent, error)) *Monitor {
 	return &Monitor{
-		st:            st,
-		bus:           b,
-		rt:            rt,
-		cfg:           cfg,
-		resolveAgent:  resolveAgent,
-		prober:        execProber{},
-		push:          make(map[string]pushEntry),
-		cache:         make(map[string]activity.State),
-		chat:          make(map[string]chatStat),
-		quizMiss:      make(map[string]int),
-		inputWaitMiss: make(map[string]int),
+		st:           st,
+		bus:          b,
+		rt:           rt,
+		cfg:          cfg,
+		resolveAgent: resolveAgent,
+		prober:       execProber{},
+		push:         make(map[string]pushEntry),
+		cache:        make(map[string]activity.State),
+		chat:         make(map[string]chatStat),
+		quizMiss:     make(map[string]int),
 	}
 }
 
@@ -448,44 +446,44 @@ func (m *Monitor) pollSession(ctx context.Context, sess store.Session, liveSet m
 	m.applyMerge(sess, state, ts, exited, "poll")
 }
 
-// inputWaitMissThreshold is how many consecutive sweeps must observe the
-// pane WITHOUT anything that waits on a human before pollSession demotes
-// waiting_input back to ready. Two misses (~2 poll intervals) filter out
-// transient capture glitches and a prompt that is still being rendered.
+// inputWaitMissThreshold is how many consecutive sweeps must observe a
+// prompt-free pane before correctStaleInputWait clears waiting_input. Two
+// misses (~2 poll intervals) filter out transient capture glitches, exactly
+// as quizMissThreshold does for the quiz backstop.
 const inputWaitMissThreshold = 2
 
-// correctStaleInputWait is the waiting_input truth-check. The state itself
-// is set by Claude Code's Notification hook, which fires not only for a
-// real permission prompt but also when the agent has merely been idle for a
-// while — and nothing ever un-sets it, so a session that is alive and
-// working keeps claiming it waits on the human in `rocket status` and on
-// the dashboard.
+// correctStaleInputWait is the waiting_input truth-check.
 //
-// So every sweep, while a session claims waiting_input, look at the pane:
-// if it shows nothing that waits on a human (runtime.LooksLikeInputWait)
-// and no quiz is pending, inputWaitMissThreshold consecutive such sweeps
-// demote the state to ready. The candidate signal keeps arriving as
-// waiting_input (the agent's hook state file is stale by definition), so
-// the miss streak is deliberately NOT reset on a correction — otherwise the
-// state would flap back on the very next sweep. Any pushed entry for the
-// session is dropped too, so the stale push cannot win the applyMerge.
+// waiting_input has exactly one source: Claude Code's Notification hook
+// (see internal/agent/claudecode, activityHookEvents), which fires not only
+// for a real permission prompt but also when the agent has merely been idle
+// for a while — and nothing ever un-sets it. The transcript-based Activity
+// signal never reports waiting_input, so the flag survives sweep after
+// sweep as the pushed entry out-timestamping the poll candidate, and a live
+// session keeps claiming it waits on the human in `rocket status`, on the
+// dashboard and in /v1/tasks.
 //
-// A capture error is inconclusive and leaves the state alone.
+// So the hook's report is treated as a suspicion the pane must confirm:
+// while a session claims waiting_input, each sweep reads the bottom of its
+// pane — reusing the Capture the sweep already does for pollQuiz — and
+// inputWaitMissThreshold consecutive sweeps showing nothing that waits on a
+// human (runtime.LooksLikeInputWait) drop the suspicion: the stale pushed
+// entry is discarded so it cannot win applyMerge, and a waiting_input poll
+// candidate becomes ready. Any other candidate (e.g. active from a fresh
+// transcript) is then left to speak for itself.
+//
+// The miss streak is deliberately NOT reset once it fires: the stale signal
+// keeps arriving every sweep, so resetting would let the flag flap straight
+// back. It is reset only by a session that stops claiming waiting_input, by
+// a prompt actually appearing on the pane, or by the session going away
+// (pruned in sweep).
+//
+// Two cases never clear the flag: a pending quiz, which is a real wait on
+// the human and whose end pollQuiz owns, and a capture error, which is
+// inconclusive.
 func (m *Monitor) correctStaleInputWait(ctx context.Context, sess store.Session, state activity.State, ts time.Time) (activity.State, time.Time) {
-	if state != activity.WaitingInput {
-		m.mu.Lock()
-		delete(m.inputWaitMiss, sess.ID)
-		m.mu.Unlock()
-		return state, ts
-	}
-
-	// A pending quiz IS a real wait on the human — pollQuiz owns deciding
-	// when it is over, and until it does the pane may legitimately be
-	// mid-render.
-	if sess.PendingQuiz != "" {
-		m.mu.Lock()
-		delete(m.inputWaitMiss, sess.ID)
-		m.mu.Unlock()
+	if !m.claimsInputWait(sess, state) || sess.PendingQuiz != "" {
+		m.forgetInputWaitMisses(sess.ID)
 		return state, ts
 	}
 
@@ -494,9 +492,7 @@ func (m *Monitor) correctStaleInputWait(ctx context.Context, sess store.Session,
 		return state, ts
 	}
 	if runtime.LooksLikeInputWait(out) {
-		m.mu.Lock()
-		delete(m.inputWaitMiss, sess.ID)
-		m.mu.Unlock()
+		m.forgetInputWaitMisses(sess.ID)
 		return state, ts
 	}
 
@@ -512,10 +508,34 @@ func (m *Monitor) correctStaleInputWait(ctx context.Context, sess store.Session,
 	delete(m.push, sess.ID)
 	m.mu.Unlock()
 
+	if state == activity.WaitingInput {
+		state, ts = activity.Ready, time.Now()
+	}
 	if sess.Activity == string(activity.WaitingInput) {
 		slog.Info("monitor: stale waiting_input cleared (no prompt on pane)", "session", sess.ID)
 	}
-	return activity.Ready, time.Now()
+	return state, ts
+}
+
+func (m *Monitor) forgetInputWaitMisses(sessionID string) {
+	m.mu.Lock()
+	delete(m.inputWaitMiss, sessionID)
+	m.mu.Unlock()
+}
+
+// claimsInputWait reports whether anything currently says this session waits
+// on the human: this sweep's poll candidate (which for a session with no
+// transcript signal is the stored state), or a pushed entry not yet merged
+// — the usual case, since the Notification hook's report reaches the
+// monitor as a push and outlives every poll candidate by timestamp.
+func (m *Monitor) claimsInputWait(sess store.Session, candidate activity.State) bool {
+	if candidate == activity.WaitingInput {
+		return true
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	pe, ok := m.push[sess.ID]
+	return ok && pe.state == activity.WaitingInput
 }
 
 // inputWaitCaptureLines is how many bottom pane rows the waiting_input

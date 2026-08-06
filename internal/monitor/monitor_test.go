@@ -971,113 +971,160 @@ func TestPollQuizWidgetReappearingResetsMissStreak(t *testing.T) {
 
 // --- waiting_input truth-check (pollSession) ---------------------------
 
-const permissionPromptTail = "Do you want to proceed?\n❯ 1. Yes\n  2. No, and tell Claude what to do differently (esc)"
+// permissionPromptTail is the tail of a pane sitting on a real Claude Code
+// tool-permission prompt (see internal/runtime/inputwait_test.go for the
+// full-pane fixture).
+const permissionPromptTail = "│ Do you want to proceed?                 │\n│ ❯ 1. Yes                                │\n│   3. No, and tell Claude what to do differently (esc) │"
+
+// inputWaitMonitor builds a monitor with one session whose pane captures
+// captureOut, already in waiting_input the way production gets there: the
+// Notification hook pushed it (the transcript-based Activity signal never
+// reports waiting_input, so the flag lives in the store and the push map).
+func inputWaitMonitor(t *testing.T, captureOut string, captureErr error) (*Monitor, *store.Store, *quizFakeRuntime) {
+	t.Helper()
+	rt := &quizFakeRuntime{
+		fakeRuntime: fakeRuntime{names: []string{"sess1"}},
+		captureOut:  captureOut,
+		captureErr:  captureErr,
+	}
+	prober := &fakeProber{onlyShell: map[string]bool{}}
+	agents := map[string]*fakeAgent{"fake": {state: activity.Ready, ts: time.Now()}}
+	m, st, _ := testMonitor(t, rt, prober, agents)
+
+	seedSession(t, st, store.Session{ID: "sess1", Agent: "fake", TmuxName: "sess1"})
+	m.PushUpdate("sess1", activity.WaitingInput, time.Now())
+	if sess, _ := st.GetSession("sess1"); sess.Activity != string(activity.WaitingInput) {
+		t.Fatalf("setup: activity = %q, want waiting_input", sess.Activity)
+	}
+	return m, st, rt
+}
+
+func activityOf(t *testing.T, st *store.Store, id string) string {
+	t.Helper()
+	sess, err := st.GetSession(id)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	return sess.Activity
+}
 
 func TestPollSessionStaleWaitingInputClearedAfterTwoMisses(t *testing.T) {
+	m, st, _ := inputWaitMonitor(t, plainComposerTail, nil)
+
+	m.sweep(context.Background())
+	if got := activityOf(t, st, "sess1"); got != string(activity.WaitingInput) {
+		t.Fatalf("activity after one miss = %q, want waiting_input (two-miss threshold)", got)
+	}
+
+	m.sweep(context.Background())
+	if got := activityOf(t, st, "sess1"); got != string(activity.Ready) {
+		t.Fatalf("activity after two misses = %q, want ready", got)
+	}
+
+	// The dropped push must not resurrect the flag on later sweeps.
+	m.sweep(context.Background())
+	if got := activityOf(t, st, "sess1"); got != string(activity.Ready) {
+		t.Fatalf("activity on the next sweep = %q, want ready", got)
+	}
+}
+
+// The other way production holds waiting_input: no transcript at all, so
+// Activity returns ErrNoSignal and the poll candidate is the stored state.
+func TestPollSessionStaleWaitingInputClearedWithoutAgentSignal(t *testing.T) {
 	rt := &quizFakeRuntime{fakeRuntime: fakeRuntime{names: []string{"sess1"}}, captureOut: plainComposerTail}
 	prober := &fakeProber{onlyShell: map[string]bool{}}
-	agents := map[string]*fakeAgent{"fake": {state: activity.WaitingInput, ts: time.Now()}}
+	agents := map[string]*fakeAgent{"fake": {err: agent.ErrNoSignal}}
 	m, st, _ := testMonitor(t, rt, prober, agents)
 
 	seedSession(t, st, store.Session{ID: "sess1", Agent: "fake", TmuxName: "sess1"})
+	m.PushUpdate("sess1", activity.WaitingInput, time.Now())
 
 	m.sweep(context.Background())
-	if sess, _ := st.GetSession("sess1"); sess.Activity != string(activity.WaitingInput) {
-		t.Fatalf("activity after one miss = %q, want waiting_input (two-miss threshold)", sess.Activity)
-	}
-
 	m.sweep(context.Background())
-	if sess, _ := st.GetSession("sess1"); sess.Activity != string(activity.Ready) {
-		t.Fatalf("activity after two misses = %q, want ready", sess.Activity)
-	}
-
-	// The agent adapter keeps reporting waiting_input (its hook state file is
-	// stale); the correction must stay applied, not flap back.
-	m.sweep(context.Background())
-	if sess, _ := st.GetSession("sess1"); sess.Activity != string(activity.Ready) {
-		t.Fatalf("activity on the sweep after correction = %q, want ready (no flapping)", sess.Activity)
+	if got := activityOf(t, st, "sess1"); got != string(activity.Ready) {
+		t.Fatalf("activity = %q, want ready", got)
 	}
 }
 
-func TestPollSessionWaitingInputKeptWhilePromptVisible(t *testing.T) {
-	rt := &quizFakeRuntime{fakeRuntime: fakeRuntime{names: []string{"sess1"}}, captureOut: permissionPromptTail}
-	prober := &fakeProber{onlyShell: map[string]bool{}}
-	agents := map[string]*fakeAgent{"fake": {state: activity.WaitingInput, ts: time.Now()}}
-	m, st, _ := testMonitor(t, rt, prober, agents)
-
-	seedSession(t, st, store.Session{ID: "sess1", Agent: "fake", TmuxName: "sess1"})
-
-	for i := 0; i < 4; i++ {
-		m.sweep(context.Background())
-	}
-	if sess, _ := st.GetSession("sess1"); sess.Activity != string(activity.WaitingInput) {
-		t.Fatalf("activity = %q, want waiting_input while prompt is on screen", sess.Activity)
-	}
-}
-
-func TestPollSessionWaitingInputKeptWhileQuizPending(t *testing.T) {
-	rt := &quizFakeRuntime{fakeRuntime: fakeRuntime{names: []string{"sess1"}}, captureOut: plainComposerTail}
-	prober := &fakeProber{onlyShell: map[string]bool{}}
-	agents := map[string]*fakeAgent{"fake": {state: activity.WaitingInput, ts: time.Now()}}
-	m, st, _ := testMonitor(t, rt, prober, agents)
-
-	seedSession(t, st, store.Session{ID: "sess1", Agent: "fake", TmuxName: "sess1"})
-	seedPendingQuiz(t, st, "sess1", time.Now().Unix())
-
-	for i := 0; i < 4; i++ {
-		m.sweep(context.Background())
-	}
-	if sess, _ := st.GetSession("sess1"); sess.Activity != string(activity.WaitingInput) {
-		t.Fatalf("activity = %q, want waiting_input while a quiz is pending", sess.Activity)
-	}
-}
-
+// A prompt reappearing between two misses restarts the streak, exactly as
+// it does for the quiz backstop.
 func TestPollSessionPromptReappearingResetsMissStreak(t *testing.T) {
-	rt := &quizFakeRuntime{fakeRuntime: fakeRuntime{names: []string{"sess1"}}, captureOut: plainComposerTail}
-	prober := &fakeProber{onlyShell: map[string]bool{}}
-	agents := map[string]*fakeAgent{"fake": {state: activity.WaitingInput, ts: time.Now()}}
-	m, st, _ := testMonitor(t, rt, prober, agents)
-
-	seedSession(t, st, store.Session{ID: "sess1", Agent: "fake", TmuxName: "sess1"})
+	m, st, rt := inputWaitMonitor(t, plainComposerTail, nil)
 
 	m.sweep(context.Background()) // miss 1
 	rt.captureOut = permissionPromptTail
 	m.sweep(context.Background()) // prompt back: streak resets
 	rt.captureOut = plainComposerTail
 	m.sweep(context.Background()) // miss 1 again — must not clear yet
-	if sess, _ := st.GetSession("sess1"); sess.Activity != string(activity.WaitingInput) {
-		t.Fatalf("activity = %q, want waiting_input after non-consecutive misses", sess.Activity)
+	if got := activityOf(t, st, "sess1"); got != string(activity.WaitingInput) {
+		t.Fatalf("activity = %q, want waiting_input after non-consecutive misses", got)
+	}
+}
+
+func TestPollSessionWaitingInputKeptWhilePromptVisible(t *testing.T) {
+	m, st, _ := inputWaitMonitor(t, permissionPromptTail, nil)
+
+	for i := 0; i < 3; i++ {
+		m.sweep(context.Background())
+	}
+	if got := activityOf(t, st, "sess1"); got != string(activity.WaitingInput) {
+		t.Fatalf("activity = %q, want waiting_input while a prompt is on screen", got)
+	}
+}
+
+func TestPollSessionWaitingInputKeptWhileQuizPending(t *testing.T) {
+	m, st, _ := inputWaitMonitor(t, plainComposerTail, nil)
+	seedPendingQuiz(t, st, "sess1", time.Now().Unix())
+
+	for i := 0; i < 3; i++ {
+		m.sweep(context.Background())
+	}
+	if got := activityOf(t, st, "sess1"); got != string(activity.WaitingInput) {
+		t.Fatalf("activity = %q, want waiting_input while a quiz is pending", got)
 	}
 }
 
 func TestPollSessionCaptureErrorKeepsWaitingInput(t *testing.T) {
-	rt := &quizFakeRuntime{fakeRuntime: fakeRuntime{names: []string{"sess1"}}, captureErr: errors.New("capture failed")}
-	prober := &fakeProber{onlyShell: map[string]bool{}}
-	agents := map[string]*fakeAgent{"fake": {state: activity.WaitingInput, ts: time.Now()}}
-	m, st, _ := testMonitor(t, rt, prober, agents)
+	m, st, _ := inputWaitMonitor(t, "", errors.New("capture failed"))
 
-	seedSession(t, st, store.Session{ID: "sess1", Agent: "fake", TmuxName: "sess1"})
-
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 3; i++ {
 		m.sweep(context.Background())
 	}
-	if sess, _ := st.GetSession("sess1"); sess.Activity != string(activity.WaitingInput) {
-		t.Fatalf("activity = %q, want waiting_input when the pane cannot be captured", sess.Activity)
+	if got := activityOf(t, st, "sess1"); got != string(activity.WaitingInput) {
+		t.Fatalf("activity = %q, want waiting_input when the pane cannot be captured", got)
 	}
 }
 
-func TestPollSessionActiveStateNotTouchedByInputWaitCheck(t *testing.T) {
+// A session that is genuinely working must be reported by its own signal,
+// not forced to ready by the truth-check.
+func TestPollSessionWaitingInputClearedToActiveWhenAgentIsWorking(t *testing.T) {
 	rt := &quizFakeRuntime{fakeRuntime: fakeRuntime{names: []string{"sess1"}}, captureOut: plainComposerTail}
 	prober := &fakeProber{onlyShell: map[string]bool{}}
 	agents := map[string]*fakeAgent{"fake": {state: activity.Active, ts: time.Now()}}
 	m, st, _ := testMonitor(t, rt, prober, agents)
 
 	seedSession(t, st, store.Session{ID: "sess1", Agent: "fake", TmuxName: "sess1"})
+	m.PushUpdate("sess1", activity.WaitingInput, time.Now())
 
-	for i := 0; i < 3; i++ {
-		m.sweep(context.Background())
+	m.sweep(context.Background())
+	m.sweep(context.Background())
+	if got := activityOf(t, st, "sess1"); got != string(activity.Active) {
+		t.Fatalf("activity = %q, want active", got)
 	}
-	if sess, _ := st.GetSession("sess1"); sess.Activity != string(activity.Active) {
-		t.Fatalf("activity = %q, want active", sess.Activity)
+}
+
+// The truth-check must not capture panes for sessions that never claimed
+// waiting_input.
+func TestPollSessionNoInputWaitClaimSkipsPaneCheck(t *testing.T) {
+	rt := &quizFakeRuntime{fakeRuntime: fakeRuntime{names: []string{"sess1"}}, captureOut: permissionPromptTail}
+	prober := &fakeProber{onlyShell: map[string]bool{}}
+	agents := map[string]*fakeAgent{"fake": {state: activity.Active, ts: time.Now()}}
+	m, st, _ := testMonitor(t, rt, prober, agents)
+
+	seedSession(t, st, store.Session{ID: "sess1", Agent: "fake", TmuxName: "sess1"})
+
+	m.sweep(context.Background())
+	if got := activityOf(t, st, "sess1"); got != string(activity.Active) {
+		t.Fatalf("activity = %q, want active (pane prompt must not set waiting_input)", got)
 	}
 }

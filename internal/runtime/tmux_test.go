@@ -641,31 +641,3 @@ func TestLooksLikeQuizWidget(t *testing.T) {
 		}
 	}
 }
-
-func TestLooksLikeInputWait(t *testing.T) {
-	cases := []struct {
-		name string
-		tail string
-		want bool
-	}{
-		{"quiz widget footer", "  3. Blue\n\nEnter to select · ↑/↓ to navigate · Esc to cancel", true},
-		{"quiz review screen", "Ready to submit your answers?\n❯ 1. Submit answers", true},
-		{"bash permission prompt", "Bash command\n  rm -rf build\n\nDo you want to proceed?\n❯ 1. Yes\n  2. No, and tell Claude what to do differently (esc)", true},
-		{"edit permission prompt", "Do you want to make this edit to tmux.go?\n❯ 1. Yes\n  2. No", true},
-		{"plan approval prompt", "Would you like to proceed?\n❯ 1. Yes, and auto-accept edits\n  2. No, keep planning", true},
-		{"numbered selection without known caption", "Select an option\n❯ 2. Something else\n  3. Cancel", true},
-		{"trust folder prompt", "Do you trust the files in this folder?\n❯ 1. Yes, proceed", true},
-		{"shell yes/no prompt", "Overwrite existing file? (y/n) ", true},
-
-		{"idle composer", "⏺ Готово.\n\n❯ \n  ⏵⏵ bypass permissions on (shift+tab to cycle)", false},
-		{"working spinner", "✻ Thinking… (12s · esc to interrupt)\n\n❯ ", false},
-		{"composer with draft text", "❯ 1. посмотри код\n", false},
-		{"agent output mentioning Enter", "Press Enter to continue in your shell\n❯ ", false},
-		{"empty", "", false},
-	}
-	for _, c := range cases {
-		if got := LooksLikeInputWait(c.tail); got != c.want {
-			t.Errorf("%s: LooksLikeInputWait = %v, want %v", c.name, got, c.want)
-		}
-	}
-}
