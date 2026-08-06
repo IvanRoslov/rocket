@@ -22,8 +22,8 @@ import (
 // Three kinds of thread never go stale: one waiting on nobody (an empty
 // attention set — there is no one to remind), an fyi note (born resolved,
 // waiting on nobody by construction), and a resolved thread. Neither does one
-// without a usable timestamp: a missing reference point means "not stale",
-// never "stale since the epoch".
+// without a usable timestamp: as in InputStalled, a missing reference point
+// means "not stalled", never "stalled since the epoch".
 //
 // It is exported because the same rule is read twice: by the heartbeat sweep
 // that sends the reminders, and by the API when it flags a thread `stale` for
