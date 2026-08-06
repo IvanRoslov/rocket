@@ -27,9 +27,14 @@ type Session struct {
 	PRNumber     int
 	PRState      string
 	CIState      string
-	PendingQuiz  string
-	CreatedAt    int64
-	UpdatedAt    int64
+	// PRCheckedAt is the unix time of the last successful GitHub poll for
+	// this session (0 = never polled). It answers "how much can I trust
+	// PRState/CIState", which pr_state alone cannot: a session that stopped
+	// being polled keeps its last known state forever.
+	PRCheckedAt int64
+	PendingQuiz string
+	CreatedAt   int64
+	UpdatedAt   int64
 }
 
 // SessionFilter narrows the results of ListSessions. If All is false, only
@@ -57,13 +62,14 @@ func (s *Store) AddSession(sess Session) error {
 		`INSERT INTO sessions (
 			id, kind, project_id, repo_id, feature_slug, parent_id, agent, branch,
 			worktree_path, tmux_name, state, activity, activity_ts, pr_number, pr_state,
-			ci_state, prompt, pending_quiz, created_at, updated_at
-		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			ci_state, prompt, pending_quiz, pr_checked_at, created_at, updated_at
+		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sess.ID, sess.Kind, sess.ProjectID, sess.RepoID, sess.FeatureSlug,
 		nullIfEmpty(sess.ParentID), sess.Agent, sess.Branch, sess.WorktreePath,
 		sess.TmuxName, sess.State, nullIfEmpty(sess.Activity), nullIfZero(sess.ActivityTS),
 		nullIfZero(int64(sess.PRNumber)), nullIfEmpty(sess.PRState), nullIfEmpty(sess.CIState),
-		nullIfEmpty(sess.Prompt), nullIfEmpty(sess.PendingQuiz), sess.CreatedAt, sess.UpdatedAt,
+		nullIfEmpty(sess.Prompt), nullIfEmpty(sess.PendingQuiz), nullIfZero(sess.PRCheckedAt),
+		sess.CreatedAt, sess.UpdatedAt,
 	)
 	if isUniqueViolation(err) {
 		return ErrExists
@@ -79,7 +85,7 @@ func (s *Store) GetSession(id string) (Session, error) {
 	row := s.db.QueryRow(
 		`SELECT id, kind, project_id, repo_id, feature_slug, parent_id, agent, branch,
 		        worktree_path, tmux_name, state, activity, activity_ts, pr_number, pr_state,
-		        ci_state, prompt, pending_quiz, created_at, updated_at
+		        ci_state, prompt, pending_quiz, pr_checked_at, created_at, updated_at
 		 FROM sessions WHERE id = ?`, id,
 	)
 	return scanSession(row)
@@ -89,7 +95,7 @@ func (s *Store) GetSession(id string) (Session, error) {
 func (s *Store) ListSessions(f SessionFilter) ([]Session, error) {
 	query := `SELECT id, kind, project_id, repo_id, feature_slug, parent_id, agent, branch,
 	                  worktree_path, tmux_name, state, activity, activity_ts, pr_number, pr_state,
-	                  ci_state, prompt, pending_quiz, created_at, updated_at
+	                  ci_state, prompt, pending_quiz, pr_checked_at, created_at, updated_at
 	          FROM sessions`
 
 	var conds []string
@@ -161,13 +167,14 @@ func (s *Store) UpdateSession(sess Session) error {
 			kind = ?, project_id = ?, repo_id = ?, feature_slug = ?, parent_id = ?,
 			agent = ?, branch = ?, worktree_path = ?, tmux_name = ?, state = ?,
 			activity = ?, activity_ts = ?, pr_number = ?, pr_state = ?, ci_state = ?,
-			prompt = ?, pending_quiz = ?, updated_at = ?
+			prompt = ?, pending_quiz = ?, pr_checked_at = ?, updated_at = ?
 		 WHERE id = ?`,
 		sess.Kind, sess.ProjectID, sess.RepoID, sess.FeatureSlug, nullIfEmpty(sess.ParentID),
 		sess.Agent, sess.Branch, sess.WorktreePath, sess.TmuxName, sess.State,
 		nullIfEmpty(sess.Activity), nullIfZero(sess.ActivityTS),
 		nullIfZero(int64(sess.PRNumber)), nullIfEmpty(sess.PRState), nullIfEmpty(sess.CIState),
-		nullIfEmpty(sess.Prompt), nullIfEmpty(sess.PendingQuiz), time.Now().Unix(), sess.ID,
+		nullIfEmpty(sess.Prompt), nullIfEmpty(sess.PendingQuiz), nullIfZero(sess.PRCheckedAt),
+		time.Now().Unix(), sess.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update session: %w", err)
@@ -184,6 +191,64 @@ func (s *Store) UpdateSessionPR(id string, number int, prState, ciState string) 
 	)
 	if err != nil {
 		return fmt.Errorf("update session pr: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
+// terminalPRStates are the pr_state values after which there is nothing left
+// to poll: a merged or closed-unmerged PR does not change again in a way that
+// matters for a session nobody is working in.
+const terminalPRStates = `('merged', 'closed')`
+
+// ListSessionsForPRPoll returns the worker sessions the GitHub poller must
+// visit: live ones (state spawning/running) PLUS any worker still holding a PR
+// in a non-terminal state, whatever the session's own state.
+//
+// The second half is the fix for the stale-status bug (task #1087): polling
+// only live sessions meant that killing a worker froze its pr_state forever,
+// so already-merged PRs kept being reported as open for hours.
+func (s *Store) ListSessionsForPRPoll() ([]Session, error) {
+	rows, err := s.db.Query(
+		`SELECT id, kind, project_id, repo_id, feature_slug, parent_id, agent, branch,
+		        worktree_path, tmux_name, state, activity, activity_ts, pr_number, pr_state,
+		        ci_state, prompt, pending_quiz, pr_checked_at, created_at, updated_at
+		 FROM sessions
+		 WHERE kind = 'worker'
+		   AND (state IN ('spawning', 'running')
+		        OR (COALESCE(pr_number, 0) != 0
+		            AND COALESCE(pr_state, '') NOT IN ` + terminalPRStates + `))
+		 ORDER BY created_at`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query sessions for pr poll: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Session
+	for rows.Next() {
+		sess, err := scanSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sess)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// MarkSessionPRChecked stamps a session with the unix time of a successful
+// GitHub poll. It deliberately does NOT touch updated_at: a poll that found
+// nothing new is not a change to the session, and bumping updated_at every
+// couple of minutes would make every session look perpetually active.
+// Returns ErrNotFound if the session doesn't exist.
+func (s *Store) MarkSessionPRChecked(id string, ts int64) error {
+	res, err := s.db.Exec(
+		`UPDATE sessions SET pr_checked_at = ? WHERE id = ?`, nullIfZero(ts), id,
+	)
+	if err != nil {
+		return fmt.Errorf("mark session pr checked: %w", err)
 	}
 	return checkRowsAffected(res)
 }
@@ -232,13 +297,13 @@ func (s *Store) ClearPendingQuiz(id string) error {
 func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 	var sess Session
 	var parentID, activity, prState, ciState, prompt, pendingQuiz sql.NullString
-	var activityTS, prNumber sql.NullInt64
+	var activityTS, prNumber, prCheckedAt sql.NullInt64
 
 	err := row.Scan(
 		&sess.ID, &sess.Kind, &sess.ProjectID, &sess.RepoID, &sess.FeatureSlug,
 		&parentID, &sess.Agent, &sess.Branch, &sess.WorktreePath, &sess.TmuxName,
 		&sess.State, &activity, &activityTS, &prNumber, &prState, &ciState, &prompt,
-		&pendingQuiz, &sess.CreatedAt, &sess.UpdatedAt,
+		&pendingQuiz, &prCheckedAt, &sess.CreatedAt, &sess.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, ErrNotFound
@@ -255,6 +320,7 @@ func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 	sess.PRState = prState.String
 	sess.CIState = ciState.String
 	sess.PendingQuiz = pendingQuiz.String
+	sess.PRCheckedAt = prCheckedAt.Int64
 
 	return sess, nil
 }
