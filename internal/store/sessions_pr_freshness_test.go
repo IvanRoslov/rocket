@@ -132,6 +132,9 @@ func TestListSessionsForPRPoll(t *testing.T) {
 		newPRSession("dead-closed", "done", 4, "closed"),
 		// A dead worker that never got a PR has nothing to poll.
 		newPRSession("dead-nopr", "killed", 0, ""),
+		// An empty pr_state is NOT terminal: it means a poll never completed,
+		// so the PR still has to be chased down.
+		newPRSession("dead-unknown-state", "killed", 5, ""),
 	}
 	for _, sess := range sessions {
 		if err := s.AddSession(sess); err != nil {
@@ -150,7 +153,10 @@ func TestListSessionsForPRPoll(t *testing.T) {
 		t.Fatalf("ListSessionsForPRPoll: %v", err)
 	}
 
-	want := map[string]bool{"live-nopr": true, "live-open": true, "spawning": true, "dead-open": true}
+	want := map[string]bool{
+		"live-nopr": true, "live-open": true, "spawning": true,
+		"dead-open": true, "dead-unknown-state": true,
+	}
 	gotIDs := map[string]bool{}
 	for _, sess := range got {
 		gotIDs[sess.ID] = true
