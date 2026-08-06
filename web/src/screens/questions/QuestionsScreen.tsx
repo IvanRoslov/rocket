@@ -12,7 +12,8 @@
 //
 // Every resolving action is DEFERRED (see deferred.ts): closing a thread is
 // final on the server, so the human gets a five-second undo window before the
-// call goes out.
+// call goes out. The window is a delay, not a maybe — leaving the page commits
+// the decision instead of dropping it.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAnswerThread, useAskThread, useReplyThread, useThreads, type ThreadRef } from '../../lib/queries'
@@ -90,9 +91,21 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
 
   const deferred = useRef(createDeferredQueue(undoMs))
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  // Every way out of this page commits the pending decision. Unmount covers
+  // navigating away inside the app; pagehide and a hidden tab cover the ways
+  // the browser leaves without ever unmounting us — a closed tab, a
+  // backgrounded phone. See deferred.ts: only Undo takes a decision back.
   useEffect(() => {
     const queue = deferred.current
+    const commit = () => queue.flush()
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') commit()
+    }
+    window.addEventListener('pagehide', commit)
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
+      window.removeEventListener('pagehide', commit)
+      document.removeEventListener('visibilitychange', onVisibility)
       queue.dispose()
       clearTimeout(toastTimer.current)
     }

@@ -62,16 +62,32 @@ test('scheduling a second action flushes the first', () => {
   expect(second).toHaveBeenCalledTimes(1)
 })
 
-// Unmount is not a decision: leaving the page must not silently fire an answer
-// the human never saw land.
-test('dispose() cancels without running', () => {
+// Leaving the page is not an Undo. The human decided; only the toast's Undo
+// may take that back. Dropping the pending call on unmount lost the decision
+// silently — the thread stayed open and yellow.
+test('dispose() commits the pending action and releases the timer', () => {
   const q = createDeferredQueue(5000)
   const run = vi.fn()
 
   q.schedule(run)
   q.dispose()
 
+  expect(run).toHaveBeenCalledTimes(1)
+  expect(q.isPending()).toBe(false)
+
+  // Released, not merely fired early: the timer must not run it a second time.
+  vi.advanceTimersByTime(60_000)
+  expect(run).toHaveBeenCalledTimes(1)
+})
+
+test('dispose() is a no-op when nothing is pending', () => {
+  const q = createDeferredQueue(5000)
+  const run = vi.fn()
+
+  q.schedule(run)
+  q.cancel()
+  q.dispose()
+
   vi.advanceTimersByTime(60_000)
   expect(run).not.toHaveBeenCalled()
-  expect(q.isPending()).toBe(false)
 })
