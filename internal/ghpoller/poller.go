@@ -164,7 +164,11 @@ func (p *Poller) Tick(ctx context.Context) error {
 		return nil
 	}
 
-	sessions, err := p.st.ListSessions(store.SessionFilter{Kind: "worker"})
+	// Live worker sessions PLUS any worker still holding a PR in a
+	// non-terminal state. The second half matters: polling only live sessions
+	// froze pr_state the moment a worker was killed, so already-merged PRs
+	// kept being reported as open for hours (task #1087).
+	sessions, err := p.st.ListSessionsForPRPoll()
 	if err != nil {
 		return err
 	}
@@ -185,6 +189,15 @@ func (p *Poller) Tick(ctx context.Context) error {
 		if err != nil {
 			slog.Error("ghpoller: tick session", "session", sess.ID, "error", err)
 			continue
+		}
+
+		// Stamp freshness only after a poll that actually reached GitHub and
+		// persisted cleanly: a failed poll must not make a stale pr_state look
+		// current. The stamp is refreshed even when nothing changed — the
+		// question it answers is "when did we last look", not "when did the
+		// state last move".
+		if err := p.st.MarkSessionPRChecked(sess.ID, time.Now().Unix()); err != nil {
+			slog.Error("ghpoller: mark pr checked", "session", sess.ID, "error", err)
 		}
 	}
 	return nil
