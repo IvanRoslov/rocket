@@ -564,15 +564,17 @@ func handlePostQuestionReply(w http.ResponseWriter, r *http.Request, d Deps) {
 	// those put a settled answer back on the addressee's badge (subtask
 	// #1181).
 	//
-	// An fyi thread is the one resolved thread the human may reply into; the
-	// same flag turns that note into a decision thread.
+	// An fyi thread is the one resolved thread the human may reply into, and
+	// that path is unchanged: the note turns out to matter, so any reply
+	// reopens it as a decision thread.
 	reopen := false
 	if q.Status != "open" {
-		if caller == nil && q.Type != store.QuestionTypeFYI {
+		humanIntoFYI := caller == nil && q.Type == store.QuestionTypeFYI
+		if caller == nil && !humanIntoFYI {
 			writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
 			return
 		}
-		reopen = req.Dispute
+		reopen = req.Dispute || humanIntoFYI
 	}
 
 	if req.DryRun {

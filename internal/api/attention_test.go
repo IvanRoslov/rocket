@@ -198,9 +198,9 @@ func TestFYIThreadIsBornResolved(t *testing.T) {
 }
 
 // TestReplyReopensFYIAsDecision: somebody did care after all, so the status
-// note becomes an ordinary thread waiting for a turn. It takes the same
-// explicit dispute a resolved decision thread takes (subtask #1181): a bare
-// "спасибо" into an fyi is history, not a new decision.
+// note becomes an ordinary thread waiting for a turn. This path is deliberate
+// and stays as it was — the human's reply into an fyi reopens it with or
+// without --dispute (subtask #1181 changed only the resolved-decision path).
 func TestReplyReopensFYIAsDecision(t *testing.T) {
 	d := questionsTestDeps(t)
 	srv, taskID := attentionTestSetup(t, d)
@@ -209,17 +209,7 @@ func TestReplyReopensFYIAsDecision(t *testing.T) {
 		"body": "Deployed to staging", "type": "fyi",
 	}, http.StatusCreated)
 
-	ack := postJSONWithHeader(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/reply", "", map[string]any{"body": "спасибо"})
-	if ack.StatusCode != http.StatusCreated {
-		t.Fatalf("ack into fyi = %d, want 201", ack.StatusCode)
-	}
-	if got := decodeQuestion(t, ack); got.Status != "resolved" || len(got.Attention) != 0 {
-		t.Errorf("an ack must leave the fyi note closed and waiting on nobody: %+v", got)
-	}
-	ack.Body.Close()
-
-	resp := postJSONWithHeader(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/reply", "",
-		map[string]any{"body": "Roll it back", "dispute": true})
+	resp := postJSONWithHeader(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/reply", "", map[string]any{"body": "Roll it back"})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("reply = %d, want 201", resp.StatusCode)

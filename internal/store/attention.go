@@ -20,7 +20,8 @@ import (
 //  2. entry     — the author LEAVES; named addressees JOIN; if the set is then
 //     empty, the turn passes to every participant but the entry's author;
 //  3. close     — attention is cleared;
-//  4. reopen    — a reply into a resolved thread is just rule 2.
+//  4. reopen    — a DISPUTING reply into a resolved thread is just rule 2;
+//     an ordinary reply into one leaves the (empty) attention alone.
 //
 // Rule 2 is what fixes the original complaint: a reply by one of several
 // people the thread waits on removes only that person, so the others stay on
