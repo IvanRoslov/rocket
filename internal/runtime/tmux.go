@@ -15,16 +15,29 @@ import (
 )
 
 // ErrSubmitUnconfirmed is returned by Inject when the text was pasted and
-// Enter was sent the configured number of times, but submission could not
-// be confirmed via the poll predicate before attempts were exhausted. This
-// does NOT necessarily mean delivery failed — the text may well have been
-// submitted; it means Inject could not verify it. Callers MUST NOT
-// blindly re-inject on this error, since the original text may already
-// have reached the target program: re-injecting risks sending a duplicate
-// message. Callers should typically surface this to the operator or fall
-// back to an out-of-band check (e.g. Capture) before deciding whether to
-// retry.
+// Enter was sent the configured number of times, submission could not be
+// confirmed via the poll predicate before attempts were exhausted, AND the
+// final whole-pane check could not settle the question either (the capture
+// itself failed). This is the genuinely unknown outcome: the text may well
+// have been submitted, and it may still be sitting in the composer.
+// Callers MUST NOT blindly re-inject on this error, since the original
+// text may already have reached the target program: re-injecting risks
+// sending a duplicate message. Callers should typically surface this to
+// the operator or fall back to an out-of-band check (e.g. Capture) before
+// deciding whether to retry.
+//
+// For the case where Inject positively established that nothing was
+// submitted, see ErrNotDelivered.
 var ErrSubmitUnconfirmed = errors.New("inject: submission unconfirmed after exhausting attempts")
+
+// ErrNotDelivered is returned by Inject when the attempts were exhausted
+// and the final whole-pane check found no trace of the text in the pane's
+// history: nothing was submitted. Inject has cleared the composer and
+// dropped the paste buffer, so no orphaned draft is left behind and the
+// text is definitively gone. Unlike ErrSubmitUnconfirmed, this carries no
+// duplicate-message risk: callers may re-inject freely, and MUST NOT
+// record the message as delivered.
+var ErrNotDelivered = errors.New("inject: text was not delivered; composer cleared")
 
 // nameRE is the set of characters permitted in a session name. It is
 // deliberately restrictive: session names are interpolated into tmux
@@ -399,14 +412,18 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 				// content actually went through.
 				return nil
 			}
+			// Marker nowhere in history: the draft really is stuck.
+			// Leave no orphan behind — C-u clears the composer's input
+			// line and kill-buffer drops the paste buffer so a stray
+			// paste cannot resurrect the text. Both are best-effort; the
+			// honest non-delivery is what the caller must see.
+			_, _, _ = t.run(ctx, "send-keys", "-t", paneTarget(h.Name), "C-u")
+			_, _, _ = t.run(ctx, "kill-buffer", "-b", bufName)
+			return fmt.Errorf("%w: after %d attempts", ErrNotDelivered, maxAttempts)
 		}
-		// Marker nowhere in history (or the capture failed): treat the
-		// draft as stuck and leave no orphan behind. C-u clears the
-		// composer's input line; kill-buffer drops the paste buffer so a
-		// stray paste cannot resurrect the text. Both are best-effort —
-		// the honest non-delivery is what the caller must see.
-		_, _, _ = t.run(ctx, "send-keys", "-t", paneTarget(h.Name), "C-u")
-		_, _, _ = t.run(ctx, "kill-buffer", "-b", bufName)
+		// The final capture itself failed, so delivery could not be
+		// established either way. Clear nothing — the text may have gone
+		// through — and report the unknown outcome.
 	}
 
 	return fmt.Errorf("%w: after %d attempts", ErrSubmitUnconfirmed, maxAttempts)

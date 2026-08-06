@@ -115,8 +115,11 @@ func TestTmux_Inject_UnconfirmedAndStuck(t *testing.T) {
 	rt := newFakeRuntime(f)
 
 	err := rt.Inject(context.Background(), Handle{Name: "sess"}, "hello")
-	if !errors.Is(err, ErrSubmitUnconfirmed) {
-		t.Fatalf("Inject: want ErrSubmitUnconfirmed, got %v", err)
+	if !errors.Is(err, ErrNotDelivered) {
+		t.Fatalf("Inject: want ErrNotDelivered, got %v", err)
+	}
+	if errors.Is(err, ErrSubmitUnconfirmed) {
+		t.Errorf("a cleared composer is a known non-delivery, not the unknown case")
 	}
 
 	if n := countCalls(f, "send-keys", "-t", paneTarget("sess"), "C-u"); n != 2 {
@@ -124,6 +127,56 @@ func TestTmux_Inject_UnconfirmedAndStuck(t *testing.T) {
 	}
 	if !f.sent("kill-buffer", "-b", "rocket-sess") {
 		t.Errorf("expected kill-buffer -b rocket-sess, calls: %v", f.calls)
+	}
+}
+
+// TestTmux_Inject_UnconfirmedAndUnknown covers the third outcome: the
+// attempts are exhausted and the final whole-pane capture itself fails, so
+// Inject cannot tell delivery from a stuck draft. It must clear nothing
+// (the text may well have gone through) and report the genuinely unknown
+// case as ErrSubmitUnconfirmed.
+func TestTmux_Inject_UnconfirmedAndUnknown(t *testing.T) {
+	f := &fakeTmux{pane: strings.Join([]string{
+		"filler-1",
+		"filler-2",
+		"filler-3",
+		"---footer---",
+		"> hello",
+	}, "\n")}
+	rt := newFakeRuntime(f)
+	// An already-expired poll timeout makes each attempt poll exactly
+	// once, so "the second capture after the fifth Enter" is
+	// deterministically the final whole-pane one — the only capture this
+	// fake breaks. The in-loop polling keeps working, so the attempts are
+	// exhausted normally.
+	rt.pollTimeout = time.Nanosecond
+	enters, capturesAfterLastEnter := 0, 0
+	rt.runFn = func(ctx context.Context, args ...string) (string, string, error) {
+		if containsRun(args, []string{"send-keys", "-t", paneTarget("sess"), "Enter"}) {
+			enters++
+		}
+		if len(args) > 0 && args[0] == "capture-pane" && enters >= 5 {
+			capturesAfterLastEnter++
+			if capturesAfterLastEnter > 1 {
+				f.calls = append(f.calls, args)
+				return "", "", errors.New("capture-pane: no such pane")
+			}
+		}
+		return f.run(ctx, args...)
+	}
+
+	err := rt.Inject(context.Background(), Handle{Name: "sess"}, "hello")
+	if !errors.Is(err, ErrSubmitUnconfirmed) {
+		t.Fatalf("Inject: want ErrSubmitUnconfirmed, got %v", err)
+	}
+	if errors.Is(err, ErrNotDelivered) {
+		t.Errorf("an unreadable pane is not proof of non-delivery")
+	}
+	if n := countCalls(f, "send-keys", "-t", paneTarget("sess"), "C-u"); n != 1 {
+		t.Errorf("C-u sent %d times, want exactly 1 (the initial pre-paste clear)", n)
+	}
+	if f.sent("kill-buffer") {
+		t.Errorf("kill-buffer must not be issued when delivery could not be determined")
 	}
 }
 
