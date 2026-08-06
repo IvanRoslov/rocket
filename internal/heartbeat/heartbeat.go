@@ -22,25 +22,6 @@ import (
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
-// escalationAgent is the persistent agent an input-stalled orchestrator is
-// escalated to. Its inbox — not the message queue — is the target: the agent
-// may well not be running, and an escalation must not be lost when it isn't.
-const escalationAgent = "cto"
-
-// taskLogAuthor is what the heartbeat signs its task_log entries with. Not
-// the stalled orchestrator's id — the entry is written BY the heartbeat ABOUT
-// the orchestrator, and attributing it to the orchestrator reads as a
-// confession it never made. Not the empty author either: `rocket task show`
-// renders that as "user" (see internal/cli/task.go), which would credit the
-// human. task_log.author is a free-text column with no foreign key, so a
-// named non-session author is both allowed and the only spelling that
-// displays honestly.
-const taskLogAuthor = "heartbeat"
-
-// escalationKeyPrefix namespaces input-stall entries in lastSent so an
-// ordinary heartbeat summary and an escalation never suppress each other.
-const escalationKeyPrefix = "input-stall:"
-
 // Heartbeat runs the periodic stall-detection and question-reminder sweep.
 type Heartbeat struct {
 	st          *store.Store
@@ -54,12 +35,6 @@ type Heartbeat struct {
 
 	mu       sync.Mutex
 	lastSent map[string]time.Time
-	// lastStallRef remembers, per orchestrator, the reference timestamp of the
-	// input stall already acted on. The nudge and the problem-log entry fire
-	// once per stall EPISODE (not once per interval like the cto escalation):
-	// while the same prompt is still open the reference does not move, and
-	// nothing is repeated.
-	lastStallRef map[string]int64
 }
 
 // New builds a Heartbeat. getActivity is typically Monitor.Activity; wake is
@@ -69,14 +44,13 @@ type Heartbeat struct {
 // package from the concrete *queue.Queue type.
 func New(st *store.Store, b *bus.Bus, cfg *config.Config, getActivity func(sessionID string) (activity.State, bool), wake func(to string)) *Heartbeat {
 	return &Heartbeat{
-		st:           st,
-		bus:          b,
-		cfg:          cfg,
-		getActivity:  getActivity,
-		wake:         wake,
-		nowFunc:      time.Now,
-		lastSent:     make(map[string]time.Time),
-		lastStallRef: make(map[string]int64),
+		st:          st,
+		bus:         b,
+		cfg:         cfg,
+		getActivity: getActivity,
+		wake:        wake,
+		nowFunc:     time.Now,
+		lastSent:    make(map[string]time.Time),
 	}
 }
 
@@ -142,12 +116,6 @@ func (h *Heartbeat) tickOne(orch store.Session) error {
 	if !ok || !store.IsActiveTaskStatus(task.Status) {
 		return nil
 	}
-
-	// The orchestrator's own input stall is escalated outward, independently
-	// of the worker/question summary below: that summary is addressed to the
-	// orchestrator itself, which is exactly the party that cannot act while
-	// it waits for a keystroke.
-	h.escalateInputStall(orch, task)
 
 	workers, err := h.st.ListSessions(store.SessionFilter{Kind: "worker", All: true})
 	if err != nil {
@@ -230,6 +198,10 @@ func (h *Heartbeat) tickOne(orch store.Session) error {
 // understate the wait), otherwise the activity timestamp. Without a usable
 // reference point the session is reported as not stalled rather than stalled
 // since the epoch.
+//
+// The heartbeat itself acts on nothing here: the rule exists for the derived
+// waiting_terminal flag in internal/api/waiting.go, which the dashboard and
+// `rocket task ls` render. Nobody is nudged or escalated for an input stall.
 func InputStalled(sess store.Session, now time.Time, threshold time.Duration) (since time.Duration, ok bool) {
 	ref := inputStallRef(sess)
 	if ref <= 0 {
@@ -240,9 +212,7 @@ func InputStalled(sess store.Session, now time.Time, threshold time.Duration) (s
 }
 
 // inputStallRef returns the timestamp an input stall is measured from, or 0
-// when the session is not waiting on input at all. It doubles as the identity
-// of the stall episode: it stays put for as long as the same prompt or quiz is
-// open, and moves when a new one starts.
+// when the session is not waiting on input at all.
 func inputStallRef(sess store.Session) int64 {
 	switch {
 	case sess.PendingQuiz != "":
@@ -256,146 +226,6 @@ func inputStallRef(sess store.Session) int64 {
 	default:
 		return 0
 	}
-}
-
-// escalateInputStall writes an escalation to the cto agent's inbox and
-// publishes orchestrator.input_stalled when orch has been waiting on
-// interactive input longer than the configured threshold. Failures are
-// logged, never returned: one unreachable escalation must not abort the
-// sweep over the remaining orchestrators.
-func (h *Heartbeat) escalateInputStall(orch store.Session, task store.Task) {
-	now := h.nowFunc()
-	since, stalled := InputStalled(orch, now, h.cfg.InputStallThreshold)
-	if !stalled {
-		return
-	}
-	if !h.antiSpamOK(escalationKeyPrefix+orch.ID, now, h.cfg.HeartbeatInterval) {
-		return
-	}
-
-	kind := "prompt"
-	question := ""
-	if orch.PendingQuiz != "" {
-		kind = "quiz"
-		var quiz session.Quiz
-		if err := json.Unmarshal([]byte(orch.PendingQuiz), &quiz); err == nil && len(quiz.Questions) > 0 {
-			question = quiz.Questions[0].Question
-		}
-	}
-
-	if _, err := h.st.AddInboxMessage(store.InboxMessage{
-		AgentID: escalationAgent,
-		From:    orch.ID,
-		Body:    escalationBody(orch, task, since, kind, question),
-	}); err != nil {
-		// Most likely the cto agent is not registered (agent_inbox has a
-		// foreign key to agents): the bus event below still carries the
-		// signal to the dashboard and `rocket events`.
-		slog.Warn("heartbeat: escalate input stall to agent inbox",
-			"agent", escalationAgent, "orchestrator", orch.ID, "error", err)
-	}
-
-	h.mu.Lock()
-	h.lastSent[escalationKeyPrefix+orch.ID] = now
-	h.mu.Unlock()
-
-	h.nudgeInputStall(orch, task, since, kind)
-
-	if h.bus != nil {
-		h.bus.Publish("orchestrator.input_stalled", orch.ID, map[string]any{
-			"task_id":       task.ID,
-			"session_id":    orch.ID,
-			"since_seconds": int64(since.Seconds()),
-			"kind":          kind,
-		})
-	}
-}
-
-// nudgeInputStall is the half of the response addressed to the stalled
-// orchestrator itself: a message telling it to stop asking through a terminal
-// nobody watches, plus a `problem` entry in its task log so the episode is
-// visible afterwards in `rocket task show`.
-//
-// Both fire once per stall episode (not once per heartbeat interval): the log
-// is a record of "this happened", and a fresh copy every five minutes would
-// bury the task's other entries.
-//
-// Nothing is sent while a quiz is pending. An open AskUserQuestion quiz pauses
-// delivery to the session entirely (docs/06-messaging.md), so a nudge would
-// only queue up behind the very thing it is meant to break — for that case the
-// escalation to cto above is the whole answer.
-func (h *Heartbeat) nudgeInputStall(orch store.Session, task store.Task, since time.Duration, kind string) {
-	if kind != "prompt" {
-		return
-	}
-
-	ref := inputStallRef(orch)
-	h.mu.Lock()
-	already := h.lastStallRef[orch.ID] == ref && ref != 0
-	if !already {
-		h.lastStallRef[orch.ID] = ref
-	}
-	h.mu.Unlock()
-	if already {
-		return
-	}
-
-	body := nudgeBody(task)
-	if id, err := h.st.AddMessage(store.Message{ToSession: orch.ID, Body: body}); err != nil {
-		slog.Warn("heartbeat: queue input-stall nudge", "orchestrator", orch.ID, "error", err)
-	} else {
-		if h.bus != nil {
-			h.bus.Publish("message.queued", orch.ID, map[string]any{"id": id, "from": "", "to": orch.ID})
-		}
-		if h.wake != nil {
-			h.wake(orch.ID)
-		}
-	}
-
-	if _, err := h.st.AddTaskLog(store.TaskLogEntry{
-		TaskID: task.ID,
-		Kind:   "problem",
-		Body: fmt.Sprintf(
-			"Оркестратор %s висит на интерактивном промпте %dm — ждёт нажатия клавиши, которого никто не видит. "+
-				"Ожидание в терминале невыразимо в системе: спрашивать надо тредом (rocket task ask), а не промптом.",
-			orch.ID, int(since.Minutes())),
-		Author: taskLogAuthor,
-	}); err != nil {
-		slog.Warn("heartbeat: log input stall as a problem",
-			"orchestrator", orch.ID, "task", task.ID, "error", err)
-	}
-}
-
-// nudgeBody is the message injected into a prompt-stalled orchestrator. It
-// names the exact way out rather than describing the situation: the recipient
-// is an agent that will act on the first actionable line it reads.
-func nudgeBody(task store.Task) string {
-	return fmt.Sprintf(
-		"[rocket] You are stalled on an interactive prompt nobody watches. "+
-			"Never ask through the terminal — ask through the task instead: "+
-			"rocket task ask %d \"<question>\" (add --to <who> to name whose turn it is, "+
-			"--option \"A\" --option \"B\" to offer choices). "+
-			"Answer the prompt you are sitting on now, then re-ask that way.",
-		task.ID)
-}
-
-// escalationBody assembles the inbox message: what is stuck, for how long,
-// what it is being asked, and how to unstick it.
-func escalationBody(orch store.Session, task store.Task, since time.Duration, kind, question string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "[rocket input stall] Orchestrator %s (task #%d %q, feature %s) has been waiting on interactive input for %dm.\n",
-		orch.ID, task.ID, task.Title, orch.FeatureSlug, int(since.Minutes()))
-	if kind == "quiz" {
-		b.WriteString("It is showing an AskUserQuestion quiz")
-		if question != "" {
-			fmt.Fprintf(&b, ": %q", question)
-		}
-		b.WriteString("\n")
-	} else {
-		b.WriteString("It is sitting at a text prompt (activity waiting_input).\n")
-	}
-	fmt.Fprintf(&b, "Answer it: `rocket attach %s`, or use the quiz bubble in the dashboard chat.", orch.ID)
-	return b.String()
 }
 
 // rootTask returns the root task (parent_id IS NULL) whose session_id
@@ -508,7 +338,7 @@ func (h *Heartbeat) reminderLine(q store.Question, now time.Time) (string, bool,
 // antiSpamOK reports whether more than window has passed since the last
 // message sent under key (or none has ever been sent). key is an orchestrator
 // id for the ordinary summary, and a prefixed compound for the other senders
-// (see escalationKeyPrefix, staleKeyPrefix) so they never suppress each other.
+// (see staleKeyPrefix, quietKeyPrefix) so they never suppress each other.
 func (h *Heartbeat) antiSpamOK(key string, now time.Time, window time.Duration) bool {
 	h.mu.Lock()
 	last, ok := h.lastSent[key]

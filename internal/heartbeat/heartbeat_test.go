@@ -36,13 +36,31 @@ func testConfig() *config.Config {
 	}
 }
 
-// addCTOAgent registers the persistent agent input-stall escalations go to.
-// agent_inbox rows carry a foreign key to agents(id), so the row must exist.
+// escalationAgent is the persistent agent used as a fixture for the inbox
+// deliveries of the stale-thread and quiet-milestone sweeps.
+const escalationAgent = "cto"
+
+// addCTOAgent registers that agent: agent_inbox rows carry a foreign key to
+// agents(id), so the row must exist before anything is delivered to it.
 func addCTOAgent(t *testing.T, st *store.Store) {
 	t.Helper()
 	if err := st.AddAgent(store.Agent{ID: escalationAgent, Enabled: true}); err != nil {
 		t.Fatalf("AddAgent(%s): %v", escalationAgent, err)
 	}
+}
+
+// inboxBodies returns the bodies of everything delivered to that agent's inbox.
+func inboxBodies(t *testing.T, st *store.Store) []string {
+	t.Helper()
+	msgs, err := st.ListInboxMessages(escalationAgent, "", 0)
+	if err != nil {
+		t.Fatalf("ListInboxMessages: %v", err)
+	}
+	var out []string
+	for _, m := range msgs {
+		out = append(out, m.Body)
+	}
+	return out
 }
 
 // setOrchInputState puts the orchestrator session into an interactive-input
@@ -57,19 +75,6 @@ func setOrchInputState(t *testing.T, st *store.Store, id, activityState string, 
 			t.Fatalf("SetPendingQuiz: %v", err)
 		}
 	}
-}
-
-func inboxBodies(t *testing.T, st *store.Store) []string {
-	t.Helper()
-	msgs, err := st.ListInboxMessages(escalationAgent, "", 0)
-	if err != nil {
-		t.Fatalf("ListInboxMessages: %v", err)
-	}
-	var out []string
-	for _, m := range msgs {
-		out = append(out, m.Body)
-	}
-	return out
 }
 
 func eventTypes(t *testing.T, st *store.Store) []string {
@@ -92,194 +97,6 @@ func hasEvent(types []string, want string) bool {
 		}
 	}
 	return false
-}
-
-func TestTick_OrchestratorPendingQuizOverThreshold_EscalatesToCTOInbox(t *testing.T) {
-	st := openTestStore(t)
-	b := bus.New(st)
-	cfg := testConfig()
-	addCTOAgent(t, st)
-
-	taskID := seedOrchAndTask(t, st, "orch1", "in_progress")
-	askedAt := time.Now().Add(-20 * time.Minute).Unix()
-	setOrchInputState(t, st, "orch1", "active", time.Now().Unix(),
-		`{"questions":[{"question":"Ship or hold?"}],"asked_at":`+strconv.FormatInt(askedAt, 10)+`}`)
-
-	hb := New(st, b, cfg, unknownActivity, func(string) {})
-	if err := hb.Tick(context.Background()); err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-
-	bodies := inboxBodies(t, st)
-	if len(bodies) != 1 {
-		t.Fatalf("expected 1 inbox message for %s, got %d", escalationAgent, len(bodies))
-	}
-	for _, want := range []string{"orch1", "#" + strconv.FormatInt(taskID, 10), "root task", "Ship or hold?", "rocket attach orch1"} {
-		if !strings.Contains(bodies[0], want) {
-			t.Errorf("expected body to contain %q, got %q", want, bodies[0])
-		}
-	}
-	if !hasEvent(eventTypes(t, st), "orchestrator.input_stalled") {
-		t.Errorf("expected an orchestrator.input_stalled event, got %v", eventTypes(t, st))
-	}
-}
-
-func TestTick_OrchestratorWaitingInputOverThreshold_EscalatesToCTOInbox(t *testing.T) {
-	st := openTestStore(t)
-	b := bus.New(st)
-	cfg := testConfig()
-	addCTOAgent(t, st)
-
-	seedOrchAndTask(t, st, "orch1", "in_progress")
-	setOrchInputState(t, st, "orch1", "waiting_input", time.Now().Add(-20*time.Minute).Unix(), "")
-
-	hb := New(st, b, cfg, unknownActivity, func(string) {})
-	if err := hb.Tick(context.Background()); err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-
-	bodies := inboxBodies(t, st)
-	if len(bodies) != 1 {
-		t.Fatalf("expected 1 inbox message, got %d", len(bodies))
-	}
-	if !strings.Contains(bodies[0], "orch1") || !strings.Contains(bodies[0], "20m") {
-		t.Errorf("expected body to name the session and the duration, got %q", bodies[0])
-	}
-
-	evs, err := st.ListEvents(0, 0, "")
-	if err != nil {
-		t.Fatalf("ListEvents: %v", err)
-	}
-	var found bool
-	for _, e := range evs {
-		if e.Type != "orchestrator.input_stalled" {
-			continue
-		}
-		found = true
-		if e.Data["kind"] != "prompt" {
-			t.Errorf("event kind = %v, want prompt", e.Data["kind"])
-		}
-		if e.SessionID != "orch1" {
-			t.Errorf("event session_id = %q, want orch1", e.SessionID)
-		}
-	}
-	if !found {
-		t.Error("expected an orchestrator.input_stalled event")
-	}
-}
-
-func TestTick_OrchestratorWaitingInputBelowThreshold_NoEscalation(t *testing.T) {
-	st := openTestStore(t)
-	b := bus.New(st)
-	cfg := testConfig()
-	addCTOAgent(t, st)
-
-	seedOrchAndTask(t, st, "orch1", "in_progress")
-	setOrchInputState(t, st, "orch1", "waiting_input", time.Now().Add(-2*time.Minute).Unix(), "")
-
-	hb := New(st, b, cfg, unknownActivity, func(string) {})
-	if err := hb.Tick(context.Background()); err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-
-	if bodies := inboxBodies(t, st); len(bodies) != 0 {
-		t.Fatalf("expected no escalation below threshold, got %v", bodies)
-	}
-}
-
-// A session waiting on input is by definition not doing anything, but its
-// last known activity may still be reported as active by the poller; the
-// escalation must not be suppressed by the "don't interrupt an active
-// orchestrator" rule that guards the ordinary heartbeat summary, because the
-// summary goes to the stalled orchestrator itself and the escalation does not.
-func TestTick_InputStalledOrchestratorReportedActive_StillEscalates(t *testing.T) {
-	st := openTestStore(t)
-	b := bus.New(st)
-	cfg := testConfig()
-	addCTOAgent(t, st)
-
-	seedOrchAndTask(t, st, "orch1", "in_progress")
-	setOrchInputState(t, st, "orch1", "waiting_input", time.Now().Add(-20*time.Minute).Unix(), "")
-
-	hb := New(st, b, cfg, fixedActivity(activity.Active), func(string) {})
-	if err := hb.Tick(context.Background()); err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-
-	if bodies := inboxBodies(t, st); len(bodies) != 1 {
-		t.Fatalf("expected 1 escalation, got %d", len(bodies))
-	}
-}
-
-func TestTick_InputStallAntiSpam_TwoTicksWithinIntervalEscalateOnce(t *testing.T) {
-	st := openTestStore(t)
-	b := bus.New(st)
-	cfg := testConfig()
-	addCTOAgent(t, st)
-
-	seedOrchAndTask(t, st, "orch1", "in_progress")
-	setOrchInputState(t, st, "orch1", "waiting_input", time.Now().Add(-20*time.Minute).Unix(), "")
-
-	hb := New(st, b, cfg, unknownActivity, func(string) {})
-	now := time.Now()
-	hb.nowFunc = func() time.Time { return now }
-	if err := hb.Tick(context.Background()); err != nil {
-		t.Fatalf("Tick 1: %v", err)
-	}
-	hb.nowFunc = func() time.Time { return now.Add(1 * time.Minute) }
-	if err := hb.Tick(context.Background()); err != nil {
-		t.Fatalf("Tick 2: %v", err)
-	}
-
-	if bodies := inboxBodies(t, st); len(bodies) != 1 {
-		t.Fatalf("expected 1 escalation after two ticks within the interval, got %d", len(bodies))
-	}
-}
-
-func TestTick_InputStallAntiSpam_EscalatesAgainAfterInterval(t *testing.T) {
-	st := openTestStore(t)
-	b := bus.New(st)
-	cfg := testConfig()
-	addCTOAgent(t, st)
-
-	seedOrchAndTask(t, st, "orch1", "in_progress")
-	setOrchInputState(t, st, "orch1", "waiting_input", time.Now().Add(-20*time.Minute).Unix(), "")
-
-	hb := New(st, b, cfg, unknownActivity, func(string) {})
-	now := time.Now()
-	hb.nowFunc = func() time.Time { return now }
-	if err := hb.Tick(context.Background()); err != nil {
-		t.Fatalf("Tick 1: %v", err)
-	}
-	hb.nowFunc = func() time.Time { return now.Add(cfg.HeartbeatInterval + time.Minute) }
-	if err := hb.Tick(context.Background()); err != nil {
-		t.Fatalf("Tick 2: %v", err)
-	}
-
-	if bodies := inboxBodies(t, st); len(bodies) != 2 {
-		t.Fatalf("expected 2 escalations once the anti-spam window passed, got %d", len(bodies))
-	}
-}
-
-// The cto agent is a convention, not a guarantee: when it isn't registered
-// there is no inbox to write to (agent_inbox has a foreign key to agents),
-// and the sweep must degrade to the bus event instead of failing the tick.
-func TestTick_InputStalled_NoCTOAgent_PublishesEventWithoutError(t *testing.T) {
-	st := openTestStore(t)
-	b := bus.New(st)
-	cfg := testConfig()
-
-	seedOrchAndTask(t, st, "orch1", "in_progress")
-	setOrchInputState(t, st, "orch1", "waiting_input", time.Now().Add(-20*time.Minute).Unix(), "")
-
-	hb := New(st, b, cfg, unknownActivity, func(string) {})
-	if err := hb.Tick(context.Background()); err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-
-	if !hasEvent(eventTypes(t, st), "orchestrator.input_stalled") {
-		t.Errorf("expected an orchestrator.input_stalled event, got %v", eventTypes(t, st))
-	}
 }
 
 func TestInputStall(t *testing.T) {
@@ -779,75 +596,6 @@ func TestTick_OrchestratorBlocked_Skipped(t *testing.T) {
 	}
 }
 
-// TestTick_OrchestratorPromptStall_NudgesAndLogsProblem: a prompt stall is
-// answerable by the orchestrator itself once it is told to stop asking through
-// the terminal — so it gets the nudge, and the task log gets the problem.
-func TestTick_OrchestratorPromptStall_NudgesAndLogsProblem(t *testing.T) {
-	st := openTestStore(t)
-	addCTOAgent(t, st)
-	taskID := seedOrchAndTask(t, st, "orch1", "in_progress")
-	setOrchInputState(t, st, "orch1", "waiting_input", time.Now().Add(-20*time.Minute).Unix(), "")
-
-	hb := New(st, bus.New(st), testConfig(), unknownActivity, func(string) {})
-	if err := hb.Tick(context.Background()); err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-
-	if !containsBody(queuedBodies(t, st, "orch1"), "interactive prompt nobody watches") {
-		t.Errorf("queued = %q, want a nudge", queuedBodies(t, st, "orch1"))
-	}
-	if !containsBody(queuedBodies(t, st, "orch1"), "rocket task ask") {
-		t.Errorf("the nudge must name the way out: rocket task ask")
-	}
-
-	entries, err := st.ListTaskLog(taskID, "problem")
-	if err != nil {
-		t.Fatalf("ListTaskLog: %v", err)
-	}
-	if len(entries) != 1 || !strings.Contains(entries[0].Body, "orch1") {
-		t.Fatalf("problem log = %+v, want exactly one entry naming orch1", entries)
-	}
-	// The entry is written by the heartbeat about the orchestrator: signing it
-	// with orch1 would read as a confession, and an empty author renders as
-	// "user" — crediting the human for a machine's observation.
-	if entries[0].Author != taskLogAuthor {
-		t.Errorf("problem log author = %q, want %q", entries[0].Author, taskLogAuthor)
-	}
-
-	// The same stall episode must not be re-logged on the next sweep.
-	hb.nowFunc = func() time.Time { return time.Now().Add(time.Hour) }
-	if err := hb.Tick(context.Background()); err != nil {
-		t.Fatalf("second Tick: %v", err)
-	}
-	entries, err = st.ListTaskLog(taskID, "problem")
-	if err != nil {
-		t.Fatalf("ListTaskLog: %v", err)
-	}
-	if len(entries) != 1 {
-		t.Errorf("problem log = %d entries, want 1: one entry per stall episode", len(entries))
-	}
-}
-
-// TestTick_OrchestratorQuizStall_DoesNotNudge: a pending quiz pauses message
-// delivery, so a nudge would sit in the queue unread — the escalation to cto
-// is the only thing that can reach anybody.
-func TestTick_OrchestratorQuizStall_DoesNotNudge(t *testing.T) {
-	st := openTestStore(t)
-	addCTOAgent(t, st)
-	seedOrchAndTask(t, st, "orch1", "in_progress")
-	askedAt := time.Now().Add(-20 * time.Minute).Unix()
-	setOrchInputState(t, st, "orch1", "active", time.Now().Unix(),
-		`{"questions":[{"question":"Ship or hold?"}],"asked_at":`+strconv.FormatInt(askedAt, 10)+`}`)
-
-	hb := New(st, bus.New(st), testConfig(), unknownActivity, func(string) {})
-	if err := hb.Tick(context.Background()); err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-	if containsBody(queuedBodies(t, st, "orch1"), "interactive prompt nobody watches") {
-		t.Error("a pending quiz pauses delivery: the nudge must not be queued")
-	}
-}
-
 // queuedBodies returns the bodies of messages addressed to sessionID.
 func queuedBodies(t *testing.T, st *store.Store, sessionID string) []string {
 	t.Helper()
@@ -869,52 +617,4 @@ func containsBody(bodies []string, want string) bool {
 		}
 	}
 	return false
-}
-
-// TestTick_BrainstormingOrchestrator_StillEscalates: the brainstorming phase
-// is where an orchestrator stalls on a prompt most often, so it is exactly
-// the phase where the escalation must still reach the human. A task in
-// brainstorm is live work, not a task nobody has started.
-func TestTick_BrainstormingOrchestrator_StillEscalates(t *testing.T) {
-	st := openTestStore(t)
-	b := bus.New(st)
-	cfg := testConfig()
-	addCTOAgent(t, st)
-
-	seedOrchAndTask(t, st, "orch1", "brainstorm")
-	setOrchInputState(t, st, "orch1", "waiting_input", time.Now().Add(-20*time.Minute).Unix(), "")
-
-	hb := New(st, b, cfg, unknownActivity, func(string) {})
-	if err := hb.Tick(context.Background()); err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-
-	if bodies := inboxBodies(t, st); len(bodies) != 1 {
-		t.Fatalf("expected 1 escalation for a brainstorming orchestrator, got %d: %v",
-			len(bodies), bodies)
-	}
-}
-
-// TestTick_NotStartedOrCloneOrchestrator_NoEscalation is the other half of the
-// same rule: statuses that are not active work stay silent.
-func TestTick_NotStartedOrClosedOrchestrator_NoEscalation(t *testing.T) {
-	for _, status := range []string{"backlog", "review", "done", "cancelled"} {
-		t.Run(status, func(t *testing.T) {
-			st := openTestStore(t)
-			b := bus.New(st)
-			cfg := testConfig()
-			addCTOAgent(t, st)
-
-			seedOrchAndTask(t, st, "orch1", status)
-			setOrchInputState(t, st, "orch1", "waiting_input", time.Now().Add(-20*time.Minute).Unix(), "")
-
-			hb := New(st, b, cfg, unknownActivity, func(string) {})
-			if err := hb.Tick(context.Background()); err != nil {
-				t.Fatalf("Tick: %v", err)
-			}
-			if bodies := inboxBodies(t, st); len(bodies) != 0 {
-				t.Fatalf("status %q: expected no escalation, got %v", status, bodies)
-			}
-		})
-	}
 }
