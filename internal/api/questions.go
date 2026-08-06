@@ -553,28 +553,13 @@ func handlePostQuestionReply(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
-	// A resolved question is final for the human (409), but the task's own
-	// orchestrator may dispute the final answer: with dispute:true its reply
-	// REOPENS the thread (status back to open, resolution cleared) so the
-	// disagreement continues in the same thread with full context, instead of
-	// a disconnected new question. See docs/12-tasks.md «Q&A».
-	//
-	// Without that flag the reply is just an entry in the history: most
-	// replies into a closed thread are «принял, работаю», and reopening on
-	// those put a settled answer back on the addressee's badge (subtask
-	// #1181).
-	//
-	// An fyi thread is the one resolved thread the human may reply into, and
-	// that path is unchanged: the note turns out to matter, so any reply
-	// reopens it as a decision thread.
-	reopen := false
-	if q.Status != "open" {
-		humanIntoFYI := caller == nil && q.Type == store.QuestionTypeFYI
-		if caller == nil && !humanIntoFYI {
-			writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
-			return
-		}
-		reopen = req.Dispute || humanIntoFYI
+	// Who may reopen a resolved thread, and with what, lives in replyReopens
+	// (docs/12-tasks.md «Q&A»): agents need an explicit dispute, the human's
+	// path is unchanged.
+	reopen, conflict := replyReopens(caller, q.Status, q.Type, req.Dispute)
+	if conflict {
+		writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
+		return
 	}
 
 	if req.DryRun {

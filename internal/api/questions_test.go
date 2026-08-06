@@ -1287,8 +1287,12 @@ func TestQuestionReply_AckDoesNotReopen(t *testing.T) {
 	if got.Status != "resolved" {
 		t.Errorf("status after ack = %q, want resolved", got.Status)
 	}
-	if len(got.Attention) != 0 {
-		t.Errorf("attention after ack = %#v, want empty", got.Attention)
+	// The stored attention set must not move: a resolved thread waits on
+	// nobody, and an ack must not pull the acking orchestrator (or anyone
+	// else) back in.
+	if len(got.Attention) != 0 || len(got.WaitingOn) != 0 || got.YourTurn {
+		t.Errorf("attention after ack = %#v/%#v, your_turn = %v; want untouched and empty",
+			got.Attention, got.WaitingOn, got.YourTurn)
 	}
 	if len(got.Messages) == 0 || got.Messages[len(got.Messages)-1].Body != "принял, делаю" {
 		t.Errorf("ack must be recorded in the thread: %+v", got.Messages)
@@ -1317,5 +1321,36 @@ func TestQuestionReply_AckDoesNotReopen(t *testing.T) {
 	}
 	if card.OpenQuestions != 0 {
 		t.Errorf("OpenQuestions = %d, want 0 after an ack", card.OpenQuestions)
+	}
+}
+
+// TestReplyReopens is the whole rule in one table: who may reopen a resolved
+// thread, with what, and who gets a conflict instead (subtask #1181).
+func TestReplyReopens(t *testing.T) {
+	agent := &store.Session{ID: "orch-1"}
+	tests := []struct {
+		name         string
+		caller       *store.Session
+		status       string
+		threadType   string
+		dispute      bool
+		wantReopen   bool
+		wantConflict bool
+	}{
+		{"открытый тред", agent, "open", store.QuestionTypeDecision, false, false, false},
+		{"ack агента", agent, "resolved", store.QuestionTypeDecision, false, false, false},
+		{"оспаривание агента", agent, "resolved", store.QuestionTypeDecision, true, true, false},
+		{"человек в resolved", nil, "resolved", store.QuestionTypeDecision, false, false, true},
+		{"человек в fyi без флага", nil, "resolved", store.QuestionTypeFYI, false, true, false},
+		{"агент в fyi без флага", agent, "resolved", store.QuestionTypeFYI, false, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reopen, conflict := replyReopens(tt.caller, tt.status, tt.threadType, tt.dispute)
+			if reopen != tt.wantReopen || conflict != tt.wantConflict {
+				t.Errorf("replyReopens = (%v, %v), want (%v, %v)",
+					reopen, conflict, tt.wantReopen, tt.wantConflict)
+			}
+		})
 	}
 }

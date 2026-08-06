@@ -392,13 +392,11 @@ func handlePostAgentQuestionReply(w http.ResponseWriter, r *http.Request, d Deps
 		return
 	}
 
-	reopen := false
-	if q.Status != "open" {
-		if caller == nil && q.Type != store.QuestionTypeFYI {
-			writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
-			return
-		}
-		reopen = req.Dispute
+	// Same rule as task threads, decided in one place (replyReopens).
+	reopen, conflict := replyReopens(caller, q.Status, q.Type, req.Dispute)
+	if conflict {
+		writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
+		return
 	}
 
 	if req.DryRun {
