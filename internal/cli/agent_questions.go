@@ -149,7 +149,7 @@ func newAgentReplyCmd() *cobra.Command {
 	var file string
 
 	const usage = "usage: rocket agent reply <role>/Q<n>|<question-id> \"<текст>\" | --file <path> " +
-		"[--to <id,...>] [--dry-run] [--join]"
+		"[--to <id,...>] [--dry-run] [--join] [--dispute]"
 
 	cmd := &cobra.Command{
 		Use:   "reply <role>/Q<n>|<question-id> [\"<текст>\"]",
@@ -184,6 +184,7 @@ func newAgentReplyCmd() *cobra.Command {
 				return printJSON(cmd, resp)
 			}
 			cmd.Print(renderWriteResult("реплика добавлена в", resp))
+			cmd.Print(disputeHint(resp.Status, opts.dispute, opts.dryRun))
 			return nil
 		},
 	}
@@ -191,6 +192,7 @@ func newAgentReplyCmd() *cobra.Command {
 	cmd.Flags().StringVar(&file, "file", "", "файл с текстом ('-' — stdin)")
 	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", false, dryRunFlagUsage)
 	cmd.Flags().BoolVar(&opts.join, "join", false, joinFlagUsage)
+	cmd.Flags().BoolVar(&opts.dispute, "dispute", false, disputeFlagUsage)
 	return cmd
 }
 

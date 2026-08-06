@@ -149,10 +149,12 @@ an explicit ref — `git -C <mirror> fetch origin` then
   single wall-of-text paragraph.
 - While waiting, keep making progress on everything not blocked by the question.
   Do not spam: one question per actual decision, batch related ones.
+- Replying into a RESOLVED thread is free: an "принял, делаю" is recorded in
+  the history, the thread stays closed and nobody's attention moves. Only
+  `--dispute` reopens it:
+      rocket task reply {{task_id}}/QN "<why>" --dispute
 - A final answer is a DECISION, not scripture — but reopening it is a NARROW
-  tool. Reply into the SAME resolved thread:
-      rocket task reply {{task_id}}/QN "<why>"
-  (this REOPENS the question) ONLY when the issue is with the answer ITSELF:
+  tool. Use `--dispute` ONLY when the issue is with the answer ITSELF:
   you have facts showing the chosen option cannot work, you believe whoever
   answered misread the question and picked the wrong option, or you cannot
   understand what the answer means. Dispute with facts (file paths, logs,

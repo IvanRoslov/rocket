@@ -333,6 +333,9 @@ type postAgentQuestionReplyRequest struct {
 	To     []string `json:"to"`
 	Join   bool     `json:"join"`
 	DryRun bool     `json:"dry_run"`
+	// Dispute is the explicit "this answer is wrong": only with it does a
+	// reply into a resolved thread reopen it (subtask #1181).
+	Dispute bool `json:"dispute"`
 }
 
 // handlePostAgentQuestionReply serves POST /v1/agent-questions/{id}/reply
@@ -342,9 +345,10 @@ type postAgentQuestionReplyRequest struct {
 // API/CLI.
 //
 // A resolved thread is final for the human (409), but the role may dispute the
-// answer: its reply REOPENS the thread, so the disagreement continues with
-// full context instead of in a disconnected new question — same rule as task
-// questions (docs/12-tasks.md «Q&A»).
+// answer: with dispute:true its reply REOPENS the thread, so the disagreement
+// continues with full context instead of in a disconnected new question — same
+// rule as task questions (docs/12-tasks.md «Q&A»). Without the flag the reply
+// is only recorded: an ack must not put a settled answer back on a badge.
 func handlePostAgentQuestionReply(w http.ResponseWriter, r *http.Request, d Deps) {
 	id, ok := parseAgentQuestionID(w, r)
 	if !ok {
@@ -388,13 +392,11 @@ func handlePostAgentQuestionReply(w http.ResponseWriter, r *http.Request, d Deps
 		return
 	}
 
-	reopen := false
-	if q.Status != "open" {
-		if caller == nil && q.Type != store.QuestionTypeFYI {
-			writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
-			return
-		}
-		reopen = true
+	// Same rule as task threads, decided in one place (replyReopens).
+	reopen, conflict := replyReopens(caller, q.Status, q.Type, req.Dispute)
+	if conflict {
+		writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
+		return
 	}
 
 	if req.DryRun {
@@ -441,9 +443,12 @@ func handlePostAgentQuestionReply(w http.ResponseWriter, r *http.Request, d Deps
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	if err := d.Store.AttentionOnEntry(id, author, req.To, recipients); err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
+	// A thread that stayed resolved waits on nobody: leave its attention be.
+	if q.Status == "open" || reopen {
+		if err := d.Store.AttentionOnEntry(id, author, req.To, recipients); err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
 	}
 	if err := participantFanOut(d, subj, ordinal, "reply", author, req.Body, recipients); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())

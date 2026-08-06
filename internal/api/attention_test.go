@@ -198,7 +198,9 @@ func TestFYIThreadIsBornResolved(t *testing.T) {
 }
 
 // TestReplyReopensFYIAsDecision: somebody did care after all, so the status
-// note becomes an ordinary thread waiting for a turn.
+// note becomes an ordinary thread waiting for a turn. This path is deliberate
+// and stays as it was — the human's reply into an fyi reopens it with or
+// without --dispute (subtask #1181 changed only the resolved-decision path).
 func TestReplyReopensFYIAsDecision(t *testing.T) {
 	d := questionsTestDeps(t)
 	srv, taskID := attentionTestSetup(t, d)

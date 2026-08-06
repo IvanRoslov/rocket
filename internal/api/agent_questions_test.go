@@ -262,9 +262,21 @@ func TestAgentQuestion_ReplyAnswerAndReopen(t *testing.T) {
 		t.Fatalf("double answer status = %d, want 409", resp.StatusCode)
 	}
 
-	// The role may dispute a resolved thread: its reply reopens it.
+	// An ack into the resolved thread is not a dispute: it is recorded and
+	// the thread stays closed (subtask #1181).
 	resp = postJSONWithHeader(t, srv.URL+"/v1/agent-questions/"+qid+"/reply", "sre",
-		map[string]any{"body": "вариант Б не сработает"})
+		map[string]any{"body": "принял"})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("ack status = %d, want 201", resp.StatusCode)
+	}
+	q = decodeAgentQuestion(t, resp)
+	if q.Status != "resolved" || q.Resolution != "answered" || q.WhoseTurn != "" {
+		t.Fatalf("an ack must not reopen: %+v", q)
+	}
+
+	// The role may dispute a resolved thread: with --dispute its reply reopens it.
+	resp = postJSONWithHeader(t, srv.URL+"/v1/agent-questions/"+qid+"/reply", "sre",
+		map[string]any{"body": "вариант Б не сработает", "dispute": true})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("reopen status = %d, want 201", resp.StatusCode)
 	}

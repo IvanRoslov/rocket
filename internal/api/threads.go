@@ -435,3 +435,34 @@ func lastOf(msgs []store.QuestionMessage) *store.QuestionMessage {
 	}
 	return &msgs[len(msgs)-1]
 }
+
+// replyReopens decides what a reply into a thread does to its status, and is
+// shared by the two reply handlers so task threads and role threads can never
+// answer the question differently (subtask #1181).
+//
+// It returns whether the reply reopens the thread, and whether the write must
+// be refused as a conflict instead.
+//
+// The rule is asymmetric on purpose:
+//
+//   - AGENTS must say dispute:true to reopen. Most agent replies into a closed
+//     thread are «принял, работаю», and reopening on those bounced a settled
+//     answer back onto somebody's attention (and fed the stall detector of
+//     task #1050).
+//   - The HUMAN keeps the older semantics untouched: a resolved decision
+//     thread is final (409), and a reply into an fyi note reopens it as a
+//     decision thread with no flag at all. The dashboard has no flags to
+//     press, so requiring one would leave the human unable to reopen an fyi
+//     note — a product regression, not a cleanup.
+func replyReopens(caller *store.Session, status, threadType string, dispute bool) (reopen, conflict bool) {
+	if status == "open" {
+		return false, false
+	}
+	if caller == nil {
+		if threadType != store.QuestionTypeFYI {
+			return false, true
+		}
+		return true, false
+	}
+	return dispute, false
+}

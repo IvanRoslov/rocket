@@ -17,6 +17,7 @@ const (
 	chooseFlagUsage  = "закрыть тред выбором варианта по его номеру (1-based)"
 	dryRunFlagUsage  = "показать цель записи и ничего не отправлять"
 	joinFlagUsage    = "войти в тред, участником которого вы не являетесь (осознанно)"
+	disputeFlagUsage = "оспорить финальный ответ: реплика переоткрывает закрытый тред"
 	optionFlagUsage  = "вариант ответа (можно повторять)"
 	fyiFlagUsage     = "статусная заметка: тред создаётся закрытым и никого не ждёт"
 )
@@ -28,13 +29,32 @@ type threadReplyOptions struct {
 	to     []string
 	join   bool
 	dryRun bool
+	// dispute is the explicit "the answer itself is wrong": only with it does
+	// a reply into a resolved thread reopen it (subtask #1181).
+	dispute bool
 }
 
 func (o threadReplyOptions) requestBody() map[string]any {
 	req := map[string]any{"body": o.body}
 	setTo(req, o.to)
 	setConfirmations(req, o.join, o.dryRun)
+	if o.dispute {
+		req["dispute"] = true
+	}
 	return req
+}
+
+// disputeHint is what a reply prints when it landed in a thread that stayed
+// resolved. Nothing visible changes on such a write — the entry goes into the
+// history and nobody's attention moves — so a caller who MEANT to dispute has
+// to be told which flag they forgot. A rehearsal prints nothing: it wrote
+// nothing either.
+func disputeHint(status string, dispute, dryRun bool) string {
+	if dryRun || dispute || status != "resolved" {
+		return ""
+	}
+	return "тред закрыт: реплика записана в историю, статус и attention не изменились.\n" +
+		"оспорить финальный ответ фактами (и переоткрыть тред) — тот же вызов с --dispute\n"
 }
 
 // threadCloseOptions is a close, in one of three mutually exclusive flavours:

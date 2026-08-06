@@ -992,7 +992,7 @@ func newTaskReplyCmd() *cobra.Command {
 	var file string
 
 	const usage = "usage: rocket task reply <task-id>/Q<n>|<question-id> \"<текст>\" | --file <path> " +
-		"[--task <task-id>] [--to <id,...>] [--dry-run] [--join]"
+		"[--task <task-id>] [--to <id,...>] [--dry-run] [--join] [--dispute]"
 
 	cmd := &cobra.Command{
 		Use:   "reply <task-id>/Q<n>|<question-id> [\"<текст>\"]",
@@ -1026,6 +1026,7 @@ func newTaskReplyCmd() *cobra.Command {
 				return printJSON(cmd, resp)
 			}
 			cmd.Print(renderWriteResult("реплика добавлена в", resp))
+			cmd.Print(disputeHint(resp.Status, opts.dispute, opts.dryRun))
 			return nil
 		},
 	}
@@ -1034,6 +1035,7 @@ func newTaskReplyCmd() *cobra.Command {
 	cmd.Flags().StringVar(&file, "file", "", "файл с текстом ('-' — stdin)")
 	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", false, dryRunFlagUsage)
 	cmd.Flags().BoolVar(&opts.join, "join", false, joinFlagUsage)
+	cmd.Flags().BoolVar(&opts.dispute, "dispute", false, disputeFlagUsage)
 	return cmd
 }
 
