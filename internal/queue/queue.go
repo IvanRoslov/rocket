@@ -450,6 +450,16 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 			retryEligible = true
 		}
 
+		// Every redelivery is a duplicate the recipient actually sees, so
+		// leave a trace of why one was decided. Without this the only
+		// evidence of a duplicate storm was the agent's own pane: nothing
+		// in the log said Inject had reported a non-delivery, let alone
+		// which of its checks came up empty (incidents #1186/Q5 and
+		// papercuts-sdk-app-21 were both diagnosed by hand from tmux).
+		slog.Warn("queue: delivery attempt failed, message will be redelivered",
+			"id", msg.ID, "to", msg.ToSession, "attempt", msg.Attempts,
+			"max_attempts", maxAttempts, "retry_eligible", retryEligible, "error", err)
+
 		if !retryEligible || msg.Attempts >= maxAttempts {
 			q.fail(msg, "delivery_failed")
 			return

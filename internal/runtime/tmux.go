@@ -53,6 +53,13 @@ const (
 	defaultPollTimeout  = 1500 * time.Millisecond
 )
 
+// finalCheckScrollback is how many lines of scrollback Inject's final
+// delivered-or-stuck check looks back through. It has to cover whatever the
+// agent rendered between the submit and that check — a few seconds of an
+// agent's turn, which can be long — while staying far short of the pane's
+// full history, which would make every failed injection capture megabytes.
+const finalCheckScrollback = 500
+
 // tmuxRuntime is the tmux-backed implementation of Runtime.
 type tmuxRuntime struct {
 	// settleFn is called with a duration to pause before the first Enter
@@ -409,8 +416,19 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
 	// have confirmed) — so including it would find the marker either way
 	// and decide nothing. The history area above it, by contrast, only
 	// holds the marker once the message was actually submitted.
+	// This capture — unlike the polling ones above, which examine the
+	// composer at the bottom of the visible screen — must include the
+	// scrollback (-S). A busy agent starts rendering its turn the instant
+	// the message is submitted, so within the few seconds the retry loop
+	// takes the message is pushed off the visible screen entirely. Judging
+	// by the visible screen alone, a delivered message is indistinguishable
+	// from a stuck draft: Inject reports a non-delivery, the queue retries,
+	// and the agent gets the same message several times (live incidents
+	// #1186/Q5 and papercuts-sdk-app-21, where the marker was provably in
+	// the pane's scrollback and absent from the visible screen).
 	if marker != "" {
-		full, _, err := t.run(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name))
+		full, _, err := t.run(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name),
+			"-S", fmt.Sprintf("-%d", finalCheckScrollback))
 		if err == nil {
 			if ContainsMarker(history(trimTrailingBlank(full), confirmWindow), marker) {
 				// Delivered after all — never wipe a composer whose
