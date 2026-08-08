@@ -26,9 +26,12 @@ type threadInboxEntry struct {
 	Subject string `json:"subject"`
 	// ID is the global question id, kept for clients that still address
 	// threads by it.
-	ID           int64    `json:"id"`
-	Ordinal      int      `json:"ordinal"`
-	AskedBy      string   `json:"asked_by"`
+	ID      int64  `json:"id"`
+	Ordinal int    `json:"ordinal"`
+	AskedBy string `json:"asked_by"`
+	// Title is the thread's one-line heading — what a listing renders instead
+	// of a truncated body.
+	Title        string   `json:"title"`
 	Body         string   `json:"body"`
 	Status       string   `json:"status"`
 	Resolution   string   `json:"resolution,omitempty"`
@@ -150,6 +153,7 @@ func handleGetThreads(w http.ResponseWriter, r *http.Request, d Deps) {
 			ID:         q.ID,
 			Ordinal:    ordinals[q.ID],
 			AskedBy:    wireParticipant(q.AskedBy),
+			Title:      q.Title,
 			Body:       q.Body,
 			Status:     q.Status,
 			Resolution: q.Resolution,

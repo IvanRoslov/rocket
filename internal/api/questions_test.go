@@ -165,8 +165,13 @@ func TestPostTaskQuestions_HappyPath(t *testing.T) {
 		t.Fatalf("status = %d, want 201", resp.StatusCode)
 	}
 	q := decodeQuestion(t, resp)
-	if q.Body != "Which approach?" || q.Context != "some context" {
+	// The deprecated context is folded into the body; the response field stays
+	// but is always empty now (task #1264).
+	if q.Body != "Which approach?"+store.ContextSeparator+"some context" || q.Context != "" {
 		t.Errorf("q = %+v", q)
+	}
+	if q.Title != "Which approach?" {
+		t.Errorf("Title = %q, want it derived from the body", q.Title)
 	}
 	if q.Status != "open" {
 		t.Errorf("Status = %q, want open", q.Status)
@@ -234,7 +239,7 @@ func TestPostTaskQuestions_HumanOpensThreadToOrchestrator(t *testing.T) {
 }
 
 // TestPostTaskQuestions_HumanOpensThreadWithContext verifies the context is
-// appended to the injected body.
+// appended to the injected body with the canonical separator.
 func TestPostTaskQuestions_HumanOpensThreadWithContext(t *testing.T) {
 	d := questionsTestDeps(t)
 	srv := newTestServer(t, d)
@@ -247,7 +252,8 @@ func TestPostTaskQuestions_HumanOpensThreadWithContext(t *testing.T) {
 		t.Fatalf("status = %d, want 201", resp.StatusCode)
 	}
 
-	wantBody := "[#" + itoa(taskID) + "/Q1 question from human] What's the status?\n\nextra info"
+	wantBody := "[#" + itoa(taskID) + "/Q1 question from human] What's the status?" +
+		store.ContextSeparator + "extra info"
 	msgs, err := d.Store.ListMessages("orch-1", 10)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
