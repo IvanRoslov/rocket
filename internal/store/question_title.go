@@ -1,9 +1,15 @@
 package store
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
+
+// ContextSeparator joins a question's legacy context to the end of its body.
+// The migration and the API both use it, so a body assembled by either reads
+// the same way.
+const ContextSeparator = "\n\n---\n\n"
 
 // TitleMaxRunes is the longest title DeriveTitle produces. It bounds only the
 // DERIVED title: a title passed in explicitly is stored as given, because the
@@ -98,4 +104,46 @@ func truncateTitle(s string) string {
 		cut = cut[:i]
 	}
 	return strings.TrimRight(cut, " \t") + titleEllipsis
+}
+
+// backfillQuestionTitles gives a title to every question that has none. It runs
+// after the migrations on every Open because the derivation lives in Go and SQL
+// cannot repeat it; it only ever touches rows whose title is empty, so a title
+// somebody wrote by hand is never overwritten and reopening the store is free.
+func (s *Store) backfillQuestionTitles() error {
+	rows, err := s.db.Query(`SELECT id, body FROM questions WHERE title = ''`)
+	if err != nil {
+		return fmt.Errorf("query untitled questions: %w", err)
+	}
+	type untitled struct {
+		id   int64
+		body string
+	}
+	var pending []untitled
+	for rows.Next() {
+		var u untitled
+		if err := rows.Scan(&u.id, &u.body); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan untitled question: %w", err)
+		}
+		pending = append(pending, u)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+
+	for _, u := range pending {
+		title := DeriveTitle(u.body)
+		if title == "" {
+			// A body that derives nothing (blank) would be re-read on every
+			// Open anyway; writing "" back changes nothing.
+			continue
+		}
+		if _, err := s.db.Exec(`UPDATE questions SET title = ? WHERE id = ?`, title, u.id); err != nil {
+			return fmt.Errorf("set title of question %d: %w", u.id, err)
+		}
+	}
+	return nil
 }

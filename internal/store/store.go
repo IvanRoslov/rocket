@@ -59,6 +59,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	if err := s.backfillQuestionTitles(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("backfill question titles: %w", err)
+	}
 
 	return s, nil
 }

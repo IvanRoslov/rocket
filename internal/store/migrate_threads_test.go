@@ -89,6 +89,15 @@ func seedPre0009(t *testing.T) string {
 	return path
 }
 
+// firstLineSQL renders a question body's first line. Migration 0014 appends the
+// legacy context to the body, so these tests — which identify a thread by the
+// body it was seeded with — match on that first line rather than on the whole
+// body.
+const firstLineSQL = `substr(%s, 1, instr(%s || char(10), char(10)) - 1)`
+
+// bodyHead returns firstLineSQL bound to a column reference (e.g. "q.body").
+func bodyHead(col string) string { return fmt.Sprintf(firstLineSQL, col, col) }
+
 // queryStrings runs a single-column query and returns its rows.
 func queryStrings(t *testing.T, s *Store, query string, args ...any) []string {
 	t.Helper()
@@ -121,7 +130,7 @@ func TestMigrate0009_TaskThreadsKeepTheirIdentity(t *testing.T) {
 	defer s.Close()
 
 	got := queryStrings(t, s,
-		`SELECT body || '|' || COALESCE(task_id, 0) || '|' || COALESCE(role_id, '')
+		`SELECT `+bodyHead("body")+` || '|' || COALESCE(task_id, 0) || '|' || COALESCE(role_id, '')
 		 FROM questions WHERE id IN (1, 2) ORDER BY id`)
 	want := []string{"task q1|1|", "task q2|1|"}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
@@ -140,7 +149,7 @@ func TestMigrate0009_RoleThreadsMoveInWithHistory(t *testing.T) {
 	// Both role threads landed with role_id set and no task, at ids beyond
 	// every task thread.
 	got := queryStrings(t, s,
-		`SELECT body FROM questions WHERE role_id = 'cto' AND task_id IS NULL
+		`SELECT `+bodyHead("body")+` FROM questions WHERE role_id = 'cto' AND task_id IS NULL
 		 AND id > (SELECT MAX(id) FROM questions WHERE task_id IS NOT NULL)
 		 ORDER BY id`)
 	if fmt.Sprint(got) != fmt.Sprint([]string{"role q1", "role q2"}) {
@@ -150,7 +159,7 @@ func TestMigrate0009_RoleThreadsMoveInWithHistory(t *testing.T) {
 	// The moved message still points at the thread it belonged to — role q2,
 	// not role q1 and not a task thread.
 	got = queryStrings(t, s,
-		`SELECT q.body FROM question_messages m JOIN questions q ON q.id = m.question_id
+		`SELECT `+bodyHead("q.body")+` FROM question_messages m JOIN questions q ON q.id = m.question_id
 		 WHERE m.body = 'cto on role q2'`)
 	if fmt.Sprint(got) != fmt.Sprint([]string{"role q2"}) {
 		t.Errorf("moved message belongs to %v, want [role q2]", got)
@@ -176,7 +185,7 @@ func TestMigrate0009_OrdinalsSurvive(t *testing.T) {
 	got := queryStrings(t, s, `
 		SELECT CAST((SELECT COUNT(*) FROM questions p
 		             WHERE p.role_id = q.role_id AND p.id <= q.id) AS TEXT)
-		FROM questions q WHERE q.body = 'role q2'`)
+		FROM questions q WHERE `+bodyHead("q.body")+` = 'role q2'`)
 	if fmt.Sprint(got) != fmt.Sprint([]string{"2"}) {
 		t.Errorf("ordinal of role q2 = %v, want [2]", got)
 	}
@@ -184,7 +193,7 @@ func TestMigrate0009_OrdinalsSurvive(t *testing.T) {
 	got = queryStrings(t, s, `
 		SELECT CAST((SELECT COUNT(*) FROM questions p
 		             WHERE p.task_id = q.task_id AND p.id <= q.id) AS TEXT)
-		FROM questions q WHERE q.body = 'task q2'`)
+		FROM questions q WHERE `+bodyHead("q.body")+` = 'task q2'`)
 	if fmt.Sprint(got) != fmt.Sprint([]string{"2"}) {
 		t.Errorf("ordinal of task q2 = %v, want [2]", got)
 	}
@@ -232,7 +241,7 @@ func TestMigrate0009_BackfillsParticipants(t *testing.T) {
 		got := queryStrings(t, s,
 			`SELECT p.participant_id FROM question_participants p
 			 JOIN questions q ON q.id = p.question_id
-			 WHERE q.body = ? ORDER BY p.participant_id`, tc.body)
+			 WHERE `+bodyHead("q.body")+` = ? ORDER BY p.participant_id`, tc.body)
 		if fmt.Sprint(got) != fmt.Sprint(tc.want) {
 			t.Errorf("participants of %q = %v, want %v", tc.body, got, tc.want)
 		}

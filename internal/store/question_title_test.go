@@ -33,3 +33,34 @@ func TestDeriveTitle(t *testing.T) {
 		})
 	}
 }
+
+// TestAddQuestionDerivesTitle checks the store's choke point: a question stored
+// without a title gets one, and a title passed in is kept verbatim.
+func TestAddQuestionDerivesTitle(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+
+	id, err := s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch", Body: "## Какой CIDR\n\nдетали"})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+	q, err := s.GetQuestion(id)
+	if err != nil {
+		t.Fatalf("GetQuestion: %v", err)
+	}
+	if q.Title != "Какой CIDR" {
+		t.Fatalf("derived title = %q, want %q", q.Title, "Какой CIDR")
+	}
+
+	id, err = s.AddQuestion(Question{TaskID: taskID, AskedBy: "orch", Title: "Свой заголовок", Body: "## Какой CIDR"})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+	q, err = s.GetQuestion(id)
+	if err != nil {
+		t.Fatalf("GetQuestion: %v", err)
+	}
+	if q.Title != "Свой заголовок" {
+		t.Fatalf("title = %q, want it stored as given", q.Title)
+	}
+}
