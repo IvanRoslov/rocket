@@ -221,6 +221,18 @@
   color: var(--q-ghost);
 }
 
+.q__ask-title {
+  width: 100%;
+  display: block;
+  margin-bottom: 9px;
+  padding: 10px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn-lg);
+  outline: none;
+  font: 600 14.5px var(--font-ui);
+  background: var(--surface);
+}
+
 .q__textarea {
   width: 100%;
   display: block;

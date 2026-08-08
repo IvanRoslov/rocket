@@ -1037,14 +1037,14 @@ export type AskTarget = { kind: 'task'; id: number } | { kind: 'role'; id: strin
 export function useAskThread(): UseMutationResult<
   unknown,
   Error,
-  { target: AskTarget; body: string; type?: ThreadType }
+  { target: AskTarget; body: string; title?: string; type?: ThreadType }
 > {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ target, body, type }) => {
+    mutationFn: ({ target, body, title, type }) => {
       const path =
         target.kind === 'task' ? `/v1/tasks/${target.id}/questions` : `/v1/agents/${target.id}/questions`
-      return api.post(path, type ? { body, type } : { body })
+      return api.post(path, { body, ...(title ? { title } : {}), ...(type ? { type } : {}) })
     },
     onSuccess: (_data, { target }) => {
       if (target.kind === 'task') {

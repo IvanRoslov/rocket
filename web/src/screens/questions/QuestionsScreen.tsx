@@ -393,8 +393,8 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
         <AskComposer
           onCancel={() => setAskOpen(false)}
           onEmpty={() => flash('Write the question first')}
-          onSubmit={({ target, body, type }) => {
-            ask.mutate({ target, body, ...(type === 'fyi' ? { type } : {}) })
+          onSubmit={({ target, body, title, type }) => {
+            ask.mutate({ target, body, ...(title ? { title } : {}), ...(type === 'fyi' ? { type } : {}) })
             setAskOpen(false)
             const name = target.kind === 'task' ? `#${target.id}` : target.id
             flash(type === 'fyi' ? `Note posted → ${name}` : `Question opened → ${name}`)
