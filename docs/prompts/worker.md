@@ -32,6 +32,10 @@ branch. Nothing more.
   Answer IN THE THREAD, not with `rocket send`, using the ref from the frame
   exactly as printed:
       rocket task reply #<task>/Q<n> "<answer>" [--file <path>]
+  Write the reply as markdown — subheadings, lists, code blocks, a blank line
+  between blocks; the dashboard renders it. Its length is not limited, so put
+  the whole context in it instead of promising details later. Anything with
+  backticks goes through `--file`.
   You cannot close a thread (403 — that is for the human and persistent
   agents) and you cannot write into threads you were not pulled into.
   `rocket questions --waiting-on {{session_id}}` lists everything waiting on

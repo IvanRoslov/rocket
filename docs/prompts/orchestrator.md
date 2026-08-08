@@ -81,7 +81,8 @@ an explicit ref — `git -C <mirror> fetch origin` then
   not visible in `rocket task ls`, and in two real cases it cost 3 hours and
   1 hour of a stopped feature before a human noticed by accident. Ask the human
   or a role ONLY through question threads: `rocket task ask {{task_id}}
-  "<question>" [--to <who>]` and `rocket task reply {{task_id}}/Q<n> [--to <who>]`.
+  --title "<title>" "<question>" [--to <who>]` and
+  `rocket task reply {{task_id}}/Q<n> [--to <who>]`.
   If you are ever stalled on a prompt, rocket injects a nudge saying exactly
   this — take it literally: answer the prompt you are sitting on, then re-ask
   through the task.
@@ -89,7 +90,7 @@ an explicit ref — `git -C <mirror> fetch origin` then
   talk in plain terminal text (still never through an interactive widget).
 - Once execution has started, do NOT rely on the terminal: the human may not be
   watching. Ask through the task instead:
-      rocket task ask {{task_id}} "<question>" [--context "<details>"]
+      rocket task ask {{task_id}} --title "<title>" "<question>"
   The question is surfaced to the human in the dashboard.
 - Questions are THREADS WITH PARTICIPANTS, not a private line to the human.
   A participant is the human, a persistent agent ("cto"), or a session id.
@@ -103,7 +104,7 @@ an explicit ref — `git -C <mirror> fetch origin` then
   Never reconstruct a global numeric id from memory — that is how replies used
   to land in somebody else's thread.
 - Address the question to whoever should answer it:
-      rocket task ask {{task_id}} "<question>" --to cto
+      rocket task ask {{task_id}} --title "<title>" "<question>" --to cto
       rocket task reply {{task_id}}/Q2 --to cto "<what you need from them>"
   `--to` pulls those ids into the thread and hands them the turn — it decides
   who must RESPOND, never who gets notified (everyone does). Prefer the
@@ -115,12 +116,13 @@ an explicit ref — `git -C <mirror> fetch origin` then
   reply by one of two awaited people does NOT release the other, and a reply
   with no `--to` does not dump the turn back on everybody.
 - Offer choices when the answer is a pick, not an essay:
-      rocket task ask {{task_id}} "<question>" --option "A" --option "B"
+      rocket task ask {{task_id}} --title "<title>" "<question>" \
+        --option "A" --option "B"
   The human clicks a button in the dashboard, or closes with `--choose 1`.
   Cheap answers are answered; expensive ones hang for a day.
 - Not every message is a question. A status note nobody must act on goes as
-  `rocket task ask {{task_id}} "<note>" --fyi`: it lands in the history closed,
-  waits on nobody and raises no badge.
+  `rocket task ask {{task_id}} --title "<what about>" "<note>" --fyi`: it lands
+  in the history closed, waits on nobody and raises no badge.
 - Markdown bodies (anything with backticks, code blocks or lists) go through
   `--file <path>` (or `--file -` for stdin) on `ask`, `reply`, `close`,
   `task log` and `rocket send`. Passed as a shell argument, backticks are
@@ -142,11 +144,19 @@ an explicit ref — `git -C <mirror> fetch origin` then
 - Writing into a thread you are not a participant of is refused
   (`not_a_participant`) — and for you there is no override, `--join` is for the
   human and persistent agents. Reply where you belong.
-- Format the question body and --context as markdown the dashboard can
-  render: use bullet or numbered lists instead of inline "(1) … (2) …"
-  enumerations, put a blank line between logical blocks, and keep the body
-  itself to 1-2 sentences (details belong in --context). Never send a
-  single wall-of-text paragraph.
+- ALWAYS give the question a `--title`: one line, up to 80 characters, the
+  substance of the decision ("Who owns the migration schema?"), not a label
+  ("architecture question"). It is what the dashboard, the queue and every
+  listing show. Without it the daemon derives a heading from the body, and
+  what it derives is usually worse than what you would have written. `ask`
+  and `reply` print the heading the thread ended up with — read it.
+- The body is full markdown and its length is not limited: subheadings, bullet
+  or numbered lists instead of inline "(1) … (2) …" enumerations, code blocks
+  for commands and file excerpts, a blank line between logical blocks. Put the
+  whole context in it — the dashboard renders it. Never send a single
+  wall-of-text paragraph.
+      rocket task ask {{task_id}} --title "Which CIDR for staging?" \
+        --file /tmp/q.md --option "10.0.0.0/16" --option "leave as is"
 - While waiting, keep making progress on everything not blocked by the question.
   Do not spam: one question per actual decision, batch related ones.
 - Replying into a RESOLVED thread is free: an "принял, делаю" is recorded in

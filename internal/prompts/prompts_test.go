@@ -234,7 +234,7 @@ func TestRenderKickoffTemplate(t *testing.T) {
 	if !strings.Contains(result, "reopens this gate") {
 		t.Error("kickoff template missing spec re-confirmation gate phrase")
 	}
-	if !strings.Contains(result, `rocket task ask 123 "Confirm spec v<N>`) {
+	if !strings.Contains(result, `rocket task ask 123 --title "Confirm spec v<N>`) {
 		t.Error("kickoff template missing rocket task ask confirmation command")
 	}
 }
@@ -583,5 +583,25 @@ func TestNoInteractiveQuestionsRule(t *testing.T) {
 				t.Errorf("%s template does not point at %q as the question channel", tc.template, tc.channel)
 			}
 		})
+	}
+}
+
+// TestQuestionTemplatesTeachTitle: the orchestrator template is where the
+// question-formatting rule lives, and since task #1264 the rule is "--title
+// always, everything else in a markdown body". A template that still teaches
+// --context teaches a deprecated field whose content the daemon just appends
+// to the body.
+func TestQuestionTemplatesTeachTitle(t *testing.T) {
+	for _, name := range []string{"kickoff", "orchestrator"} {
+		result, err := Render("", name, completeVars())
+		if err != nil {
+			t.Fatalf("render %s: %v", name, err)
+		}
+		if !strings.Contains(result, "--title") {
+			t.Errorf("%s template does not teach --title", name)
+		}
+		if strings.Contains(result, "--context") {
+			t.Errorf("%s template still mentions the deprecated --context", name)
+		}
 	}
 }

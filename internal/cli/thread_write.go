@@ -126,8 +126,11 @@ func setConfirmations(req map[string]any, join, dryRun bool) {
 // askRequestBody builds the body of a thread-opening request. Absent flags add
 // no keys at all: a client that asks nothing new must produce the request it
 // always produced.
-func askRequestBody(body, context string, to, options []string, fyi bool) map[string]any {
+func askRequestBody(title, body, context string, to, options []string, fyi bool) map[string]any {
 	req := map[string]any{"body": body}
+	if title != "" {
+		req["title"] = title
+	}
 	if context != "" {
 		req["context"] = context
 	}
@@ -157,18 +160,31 @@ func validateAskFlags(options []string, fyi bool, usage string) error {
 type threadWriteResult interface {
 	ref() string
 	echo() string
+	title() string
 	dryRun() bool
 }
 
 func (q questionRow) ref() string {
 	return threadRef(q.LocalRef, strconv.FormatInt(q.TaskID, 10), q.Ordinal)
 }
-func (q questionRow) echo() string { return q.Echo }
-func (q questionRow) dryRun() bool { return q.DryRun }
+func (q questionRow) echo() string  { return q.Echo }
+func (q questionRow) title() string { return q.Title }
+func (q questionRow) dryRun() bool  { return q.DryRun }
 
-func (q agentQuestionRow) ref() string  { return threadRef(q.LocalRef, q.RoleID, q.Ordinal) }
-func (q agentQuestionRow) echo() string { return q.Echo }
-func (q agentQuestionRow) dryRun() bool { return q.DryRun }
+func (q agentQuestionRow) ref() string   { return threadRef(q.LocalRef, q.RoleID, q.Ordinal) }
+func (q agentQuestionRow) echo() string  { return q.Echo }
+func (q agentQuestionRow) title() string { return q.Title }
+func (q agentQuestionRow) dryRun() bool  { return q.DryRun }
+
+// titleLine reports the heading the thread ended up with. The server derives
+// it from the body when --title is absent, so printing it is the only way the
+// author sees what the dashboard will show (task #1264).
+func titleLine(title string) string {
+	if title == "" {
+		return ""
+	}
+	return fmt.Sprintf("заголовок: «%s»\n", title)
+}
 
 // renderWriteResult renders the line a write prints. It always names the
 // target — the echo when the daemon sent one, the local ref otherwise — so a
@@ -182,6 +198,7 @@ func renderWriteResult(action string, res threadWriteResult) string {
 	} else {
 		fmt.Fprintf(&sb, "%s %s\n", action, res.ref())
 	}
+	sb.WriteString(titleLine(res.title()))
 	if e := res.echo(); e != "" {
 		sb.WriteString(e + "\n")
 	} else if res.dryRun() {

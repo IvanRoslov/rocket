@@ -140,6 +140,7 @@ type questionRow struct {
 	Ordinal    int    `json:"ordinal"`
 	AskedBy    string `json:"asked_by"`
 	Body       string `json:"body"`
+	Title      string `json:"title,omitempty"`
 	Context    string `json:"context,omitempty"`
 	Status     string `json:"status"`
 	Resolution string `json:"resolution,omitempty"`
@@ -769,13 +770,14 @@ func newTaskLogCmd() *cobra.Command {
 // (its session id is auto-attached via $ROCKET_SESSION_ID); the server
 // rejects any other caller.
 func newTaskAskCmd() *cobra.Command {
+	var title string
 	var context string
 	var to []string
 	var file string
 	var options []string
 	var fyi bool
 
-	const usage = "usage: rocket task ask <task-id> \"<вопрос>\" | --file <path> [--context <md>] [--to <id,...>] [--option <текст>]... [--fyi]"
+	const usage = "usage: rocket task ask <task-id> \"<вопрос>\" | --file <path> [--title <строка>] [--context <md>] [--to <id,...>] [--option <текст>]... [--fyi]"
 
 	cmd := &cobra.Command{
 		Use:   "ask <task-id> [\"<вопрос>\"]",
@@ -805,7 +807,7 @@ func newTaskAskCmd() *cobra.Command {
 				return err
 			}
 
-			reqBody := askRequestBody(body, context, parseTo(to), options, fyi)
+			reqBody := askRequestBody(title, body, context, parseTo(to), options, fyi)
 
 			path := apiPath("v1", "tasks", args[0], "questions")
 			var resp questionRow
@@ -817,10 +819,12 @@ func newTaskAskCmd() *cobra.Command {
 				return printJSON(cmd, resp)
 			}
 			cmd.Printf("тред %s открыт\n", resp.ref())
+			cmd.Print(titleLine(resp.Title))
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&context, "context", "", "дополнительный контекст (MD)")
+	cmd.Flags().StringVar(&title, "title", "", "заголовок вопроса (одна строка); без него сервер выведет его из тела")
+	cmd.Flags().StringVar(&context, "context", "", "deprecated: содержимое дописывается к телу вопроса")
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
 	cmd.Flags().StringVar(&file, "file", "", "файл с вопросом ('-' — stdin)")
 	cmd.Flags().StringArrayVar(&options, "option", nil, optionFlagUsage)
@@ -835,13 +839,14 @@ func newTaskAskCmd() *cobra.Command {
 // orchestrator replies in-thread (rocket task reply); only the human who
 // opened it can resolve it (rocket task answer).
 func newTaskAskOrchCmd() *cobra.Command {
+	var title string
 	var context string
 	var to []string
 	var file string
 	var options []string
 	var fyi bool
 
-	const usage = "usage: rocket task ask-orch <task-id> \"<вопрос>\" | --file <path> [--context <md>] [--to <id,...>] [--option <текст>]... [--fyi]"
+	const usage = "usage: rocket task ask-orch <task-id> \"<вопрос>\" | --file <path> [--title <строка>] [--context <md>] [--to <id,...>] [--option <текст>]... [--fyi]"
 
 	cmd := &cobra.Command{
 		Use:   "ask-orch <task-id> [\"<вопрос>\"]",
@@ -867,7 +872,7 @@ func newTaskAskOrchCmd() *cobra.Command {
 				return err
 			}
 
-			reqBody := askRequestBody(body, context, parseTo(to), options, fyi)
+			reqBody := askRequestBody(title, body, context, parseTo(to), options, fyi)
 
 			path := apiPath("v1", "tasks", args[0], "questions")
 			var resp questionRow
@@ -879,10 +884,12 @@ func newTaskAskOrchCmd() *cobra.Command {
 				return printJSON(cmd, resp)
 			}
 			cmd.Printf("тред %s открыт для оркестратора\n", resp.ref())
+			cmd.Print(titleLine(resp.Title))
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&context, "context", "", "дополнительный контекст (MD)")
+	cmd.Flags().StringVar(&title, "title", "", "заголовок вопроса (одна строка); без него сервер выведет его из тела")
+	cmd.Flags().StringVar(&context, "context", "", "deprecated: содержимое дописывается к телу вопроса")
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
 	cmd.Flags().StringVar(&file, "file", "", "файл с вопросом ('-' — stdin)")
 	cmd.Flags().StringArrayVar(&options, "option", nil, optionFlagUsage)

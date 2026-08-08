@@ -198,7 +198,7 @@ func TestReplyCmdHasConfirmationFlags(t *testing.T) {
 // TestAskRequestBodyOptionsAndFyi: --option and --fyi ride the fields the API
 // already accepts, and their absence leaves the request exactly as before.
 func TestAskRequestBodyOptionsAndFyi(t *testing.T) {
-	got := askRequestBody("вопрос?", "контекст", []string{"cto"}, []string{"A", "B"}, false)
+	got := askRequestBody("", "вопрос?", "контекст", []string{"cto"}, []string{"A", "B"}, false)
 	want := map[string]any{
 		"body": "вопрос?", "context": "контекст", "to": []string{"cto"},
 		"options": []string{"A", "B"},
@@ -207,12 +207,12 @@ func TestAskRequestBodyOptionsAndFyi(t *testing.T) {
 		t.Errorf("askRequestBody = %v, want %v", got, want)
 	}
 
-	fyi := askRequestBody("выкатили", "", nil, nil, true)
+	fyi := askRequestBody("", "выкатили", "", nil, nil, true)
 	if !reflect.DeepEqual(fyi, map[string]any{"body": "выкатили", "type": "fyi"}) {
 		t.Errorf("askRequestBody fyi = %v", fyi)
 	}
 
-	plain := askRequestBody("вопрос?", "", nil, nil, false)
+	plain := askRequestBody("", "вопрос?", "", nil, nil, false)
 	if !reflect.DeepEqual(plain, map[string]any{"body": "вопрос?"}) {
 		t.Errorf("askRequestBody plain = %v, want only a body", plain)
 	}
@@ -308,5 +308,71 @@ func TestReplyCommandsHaveDispute(t *testing.T) {
 		if cmd.Flags().Lookup("dispute") == nil {
 			t.Errorf("%s: нет флага --dispute", name)
 		}
+	}
+}
+
+// TestAskCmdHasTitle: all three ask surfaces accept the optional --title, and
+// --context says in its help that it is deprecated — the server appends its
+// content to the question body (task #1264).
+func TestAskCmdHasTitle(t *testing.T) {
+	for name, cmd := range map[string]*cobra.Command{
+		"task ask":      newTaskAskCmd(),
+		"task ask-orch": newTaskAskOrchCmd(),
+		"agent ask":     newAgentAskCmd(),
+	} {
+		title := cmd.Flags().Lookup("title")
+		if title == nil {
+			t.Errorf("%s: нет флага --title", name)
+			continue
+		}
+		if err := cmd.Flags().Parse([]string{"--title", "Короткий заголовок"}); err != nil {
+			t.Errorf("%s: --title не разбирается: %v", name, err)
+		}
+		ctxFlag := cmd.Flags().Lookup("context")
+		if ctxFlag == nil {
+			t.Errorf("%s: флаг --context пропал, а он должен остаться принимаемым", name)
+			continue
+		}
+		if !strings.Contains(ctxFlag.Usage, "deprecated") {
+			t.Errorf("%s: --context не помечен deprecated: %q", name, ctxFlag.Usage)
+		}
+	}
+}
+
+// TestAskRequestBodyTitle: --title rides the request field the API already
+// accepts; without it the request carries no "title" key at all, so the
+// server derives the heading from the body.
+func TestAskRequestBodyTitle(t *testing.T) {
+	got := askRequestBody("Короткий заголовок", "тело", "", nil, nil, false)
+	want := map[string]any{"title": "Короткий заголовок", "body": "тело"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("askRequestBody = %v, want %v", got, want)
+	}
+
+	noTitle := askRequestBody("", "тело", "", nil, nil, false)
+	if !reflect.DeepEqual(noTitle, map[string]any{"body": "тело"}) {
+		t.Errorf("askRequestBody без --title = %v, want только body", noTitle)
+	}
+
+	withContext := askRequestBody("", "тело", "детали", nil, nil, false)
+	if withContext["context"] != "детали" {
+		t.Errorf("deprecated --context должен уходить в запрос: %v", withContext)
+	}
+}
+
+// TestRenderWriteResultTitle: a write echoes the resulting heading, so the
+// author sees what the dashboard will show — especially when the server
+// derived it instead of taking a --title.
+func TestRenderWriteResultTitle(t *testing.T) {
+	got := renderWriteResult("тред открыт", questionRow{LocalRef: "1264/Q1", Title: "Какой CIDR выставить"})
+	if !strings.Contains(got, "Какой CIDR выставить") {
+		t.Errorf("result = %q, want the resulting title", got)
+	}
+	if strings.Contains(renderWriteResult("тред открыт", questionRow{LocalRef: "1264/Q1"}), "заголовок") {
+		t.Error("без заголовка строку про заголовок печатать нечего")
+	}
+	agent := renderWriteResult("тред открыт", agentQuestionRow{LocalRef: "cto/Q1", Title: "Кто владеет решением"})
+	if !strings.Contains(agent, "Кто владеет решением") {
+		t.Errorf("agent result = %q, want the resulting title", agent)
 	}
 }
