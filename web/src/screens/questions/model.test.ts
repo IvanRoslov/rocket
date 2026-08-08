@@ -116,6 +116,12 @@ describe('matchesQuery', () => {
     expect(matchesQuery(t, 'referral')).toBe(false)
   })
 
+  // The heading can say something the body never spells out — a search that
+  // ignored it would miss the row a human is looking at (task #1264).
+  test('matches the thread heading', () => {
+    expect(matchesQuery(thread({ id: 2, title: 'Backfill strategy' }), 'backfill')).toBe(true)
+  })
+
   test('an empty query matches everything', () => {
     expect(matchesQuery(t, '   ')).toBe(true)
   })

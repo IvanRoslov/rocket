@@ -69,11 +69,11 @@ export function statusChip(entry: ThreadInboxEntry, resolutionText?: string): St
   return { label: `waiting on ${other ? participantLabel(other) : 'nobody'}`, tone: 'waiting' }
 }
 
-/** Free-text search over everything a human would type: ref, subject, body. */
+/** Free-text search over everything a human would type: ref, subject, heading, body. */
 export function matchesQuery(entry: ThreadInboxEntry, query: string): boolean {
   const q = query.trim().toLowerCase()
   if (!q) return true
-  const haystack = [entry.local_ref, entry.subject, entry.task_title ?? '', entry.body]
+  const haystack = [entry.local_ref, entry.subject, entry.task_title ?? '', entry.title ?? '', entry.body]
     .join(' ')
     .toLowerCase()
   return haystack.includes(q)
