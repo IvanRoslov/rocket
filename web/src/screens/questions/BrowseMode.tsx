@@ -5,6 +5,7 @@
 // on that thread, so there is exactly one place where a thread gets answered.
 
 import { timeAgo } from '../../lib/format'
+import { questionTitle } from '../../lib/thread'
 import type { ThreadInboxEntry } from '../../lib/types'
 import { browseCounts, browseGroups, statusChip, type BrowseFilter } from './model'
 
@@ -87,7 +88,7 @@ export function BrowseMode(props: BrowseModeProps) {
                       <span className="q__row-ref">{t.local_ref}</span>
                       <span className="q__row-subject">{t.subject}</span>
                       <span className={open ? 'q__row-body' : 'q__row-body q__row-body--closed'}>
-                        {t.body}
+                        {questionTitle(t)}
                       </span>
                       {open && (t.options?.length ?? 0) > 0 && (
                         <span className="q__row-opts">{t.options?.length} opts</span>

@@ -1,16 +1,15 @@
 // The full conversation behind one inbox row.
 //
-// `GET /v1/threads` deliberately carries the question only — no context, no
-// messages (internal/api/thread_inbox.go), so the inbox stays cheap however
-// long the conversations get. The focus card needs all three, and they come
-// from the same per-subject endpoint the task and agent pages already read, so
-// the two views can never disagree about a thread.
+// `GET /v1/threads` deliberately carries the question only — no messages
+// (internal/api/thread_inbox.go), so the inbox stays cheap however long the
+// conversations get. The focus card needs the thread too, and it comes from
+// the same per-subject endpoint the task and agent pages already read, so the
+// two views can never disagree about a thread.
 
 import { useAgentQuestions, useTaskQuestions } from '../../lib/queries'
 import type { QuestionMessage, ThreadInboxEntry } from '../../lib/types'
 
 export interface ThreadDetail {
-  context?: string
   messages: QuestionMessage[]
   /**
    * The words the thread was closed with — the last `answer` message. The
@@ -40,7 +39,6 @@ export function useThreadDetail(entry?: ThreadInboxEntry): ThreadDetail {
   const answer = [...messages].reverse().find((m) => m.kind === 'answer')
 
   return {
-    context: thread?.context,
     messages,
     resolutionText: answer?.body,
     closedBy: answer?.author,

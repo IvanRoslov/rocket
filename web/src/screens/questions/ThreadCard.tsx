@@ -5,10 +5,12 @@
 // here: every control calls up into QuestionsScreen, which owns the deferred
 // action behind the undo window.
 
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Markdown } from '../../components/Markdown'
 import { timeAgo } from '../../lib/format'
 import { isHuman, threadParticipantLabel } from '../../lib/participants'
+import { questionTitle, splitReplies } from '../../lib/thread'
 import type { ThreadInboxEntry } from '../../lib/types'
 import { statusChip } from './model'
 import type { ThreadDetail } from './useThreadDetail'
@@ -35,10 +37,6 @@ export interface ThreadCardProps {
   onDraft: (value: string) => void
   picks: string[]
   onTogglePick: (participant: string) => void
-  contextOpen: boolean
-  onToggleContext: () => void
-  conversationOpen: boolean
-  onToggleConversation: () => void
   onChoose: (index: number) => void
   onAnswerClose: () => void
   onReply: () => void
@@ -50,12 +48,15 @@ export interface ThreadCardProps {
 
 export function ThreadCard(props: ThreadCardProps) {
   const { entry, detail, pendingResolution } = props
+  // Resets itself per thread: QuestionsScreen keys the card by thread id.
+  const [allReplies, setAllReplies] = useState(false)
   const closed = entry.status !== 'open' || pendingResolution !== undefined
   const resolutionText = pendingResolution ?? detail.resolutionText
   const chip = statusChip(entry, resolutionText)
   const options = entry.options ?? []
   const others = (entry.participants ?? []).filter((p) => !isHuman(p))
   const label = (id?: string) => threadParticipantLabel(id, undefined, entry.participants)
+  const replies = splitReplies(detail.messages, allReplies)
 
   return (
     <div className="q__card">
@@ -87,7 +88,10 @@ export function ThreadCard(props: ThreadCardProps) {
         </div>
       )}
 
-      <h2 className="q__question">{entry.body}</h2>
+      <h2 className="q__question">{questionTitle(entry)}</h2>
+      <div className="q__body">
+        <Markdown>{entry.body}</Markdown>
+      </div>
       <div className="q__asked-by">
         <Avatar id={entry.asked_by} />
         <span>asked by {label(entry.asked_by)}</span>
@@ -113,33 +117,18 @@ export function ThreadCard(props: ThreadCardProps) {
         </>
       )}
 
-      <div className="q__toggles">
-        {detail.context && (
-          <button type="button" className="q__toggle" onClick={props.onToggleContext}>
-            {props.contextOpen ? 'Hide context' : 'Show context'} <span className="q__key">E</span>
-          </button>
-        )}
-        {detail.messages.length > 0 && (
-          <button type="button" className="q__toggle" onClick={props.onToggleConversation}>
-            {props.conversationOpen
-              ? 'Hide conversation'
-              : `Conversation · ${detail.messages.length}`}
-          </button>
-        )}
-      </div>
-
-      {props.contextOpen && detail.context && (
-        <div className="q__context">
-          <div className="q__context-head">Context</div>
-          <div className="q__context-body">
-            <Markdown compact>{detail.context}</Markdown>
-          </div>
-        </div>
-      )}
-
-      {props.conversationOpen && detail.messages.length > 0 && (
+      {detail.messages.length > 0 && (
         <div className="q__conversation">
-          {detail.messages.map((m) => (
+          {replies.hidden > 0 && (
+            <button
+              type="button"
+              className="q__more"
+              onClick={() => setAllReplies(true)}
+            >
+              Show {replies.hidden} earlier {replies.hidden === 1 ? 'reply' : 'replies'}
+            </button>
+          )}
+          {replies.shown.map((m) => (
             <div key={m.id} className="q__msg">
               <div className="q__msg-head">
                 <Avatar id={m.author} />
@@ -149,7 +138,9 @@ export function ThreadCard(props: ThreadCardProps) {
                 )}
                 <span className="q__msg-when">{timeAgo(m.created_at)}</span>
               </div>
-              <div className="q__msg-body">{m.body}</div>
+              <div className="q__msg-body">
+                <Markdown compact>{m.body}</Markdown>
+              </div>
             </div>
           ))}
         </div>

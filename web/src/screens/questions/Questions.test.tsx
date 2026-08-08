@@ -59,7 +59,7 @@ describe('Decide mode', () => {
     renderQuestions()
 
     expect(await screen.findByRole('heading', { level: 2 })).toHaveTextContent(
-      'Should we support prorated refunds for mid-cycle downgrades?',
+      'Prorated refunds for mid-cycle downgrades',
     )
     expect(screen.getByRole('button', { name: /Yes, prorate downgrades/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /No, keep next-cycle/ })).toBeInTheDocument()
@@ -310,7 +310,7 @@ describe('Browse mode', () => {
     await user.click(within(row).getByRole('button', { name: 'Open' }))
 
     expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(
-      'Should we backfill existing rows',
+      'Backfill existing rows, or new ones only?',
     )
   })
 })

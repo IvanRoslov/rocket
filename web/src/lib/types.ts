@@ -380,7 +380,17 @@ export interface Question {
   ordinal: number
   /** Session id of the orchestrator that asked the question. */
   asked_by: string
+  /**
+   * One-line heading, derived from the body when the author sent none.
+   * Optional on the wire only for a daemon older than task #1264 — read it
+   * through `questionTitle()`, which falls back to the body.
+   */
+  title?: string
   body: string
+  /**
+   * @deprecated Task #1264 folded the context into the body. The API still
+   * sends the field for older clients, but it is always empty.
+   */
   context?: string
   status: QuestionStatus
   resolution?: QuestionResolution
@@ -451,6 +461,8 @@ export interface ThreadInboxEntry {
   id: number
   ordinal: number
   asked_by: string
+  /** One-line heading; absent on a daemon older than task #1264. */
+  title?: string
   body: string
   status: QuestionStatus
   resolution?: QuestionResolution
@@ -593,7 +605,12 @@ export interface AgentQuestion {
   role_id: string
   ordinal: number
   asked_by: string
+  /** One-line heading; absent on a daemon older than task #1264. */
+  title?: string
   body: string
+  /**
+   * @deprecated Task #1264 folded the context into the body; always empty.
+   */
   context?: string
   status: 'open' | 'resolved'
   resolution?: string

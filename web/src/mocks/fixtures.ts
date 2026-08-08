@@ -489,6 +489,7 @@ export const questions: Question[] = [
     task_id: 12,
     ordinal: 1,
     asked_by: 's-billing-v2-orch',
+    title: 'Default the v2 flag on for internal test accounts?',
     body: 'Should the v2 flag default on for internal test accounts?',
     status: 'resolved',
     resolution: 'answered',
@@ -521,6 +522,7 @@ export const questions: Question[] = [
     task_id: 12,
     ordinal: 2,
     asked_by: 's-billing-v2-orch',
+    title: 'Rounding mode for invoice totals',
     body: 'Which currency rounding mode for invoice totals — half-up or banker’s?',
     status: 'resolved',
     resolution: 'answered',
@@ -553,8 +555,9 @@ export const questions: Question[] = [
     task_id: 12,
     ordinal: 3,
     asked_by: 's-billing-v2-orch',
-    body: 'Should we support prorated refunds for mid-cycle downgrades?',
-    context:
+    title: 'Prorated refunds for mid-cycle downgrades',
+    body:
+      'Should we support prorated refunds for mid-cycle downgrades?\n\n---\n\n' +
       'Current plan only prorates upgrades. Downgrades take effect at the ' +
       'next billing cycle. Finance wants to know if v2 should change that.',
     status: 'open',
@@ -615,6 +618,7 @@ export const questions: Question[] = [
     ordinal: 4,
     local_ref: '12/Q4',
     asked_by: 's-billing-v2-orch',
+    title: 'Refunds migration deployed to staging',
     body: 'Deployed the refunds migration to staging.',
     status: 'resolved',
     resolution: 'fyi',
@@ -637,6 +641,7 @@ export const questions: Question[] = [
     task_id: 13,
     ordinal: 1,
     asked_by: '',
+    title: 'Backfill existing rows, or new ones only?',
     body: 'Should we backfill existing rows or only handle new ones going forward?',
     status: 'open',
     participants: ['human', 's-billing-v2-w1'],
@@ -651,6 +656,7 @@ export const questions: Question[] = [
     task_id: 13,
     ordinal: 2,
     asked_by: '',
+    title: 'Is the migration safe to run live?',
     body: 'Is the migration safe to run while the app is live, or does it need a maintenance window?',
     status: 'open',
     participants: ['human', 's-billing-v2-w1'],
@@ -968,8 +974,10 @@ export const agentQuestions: AgentQuestion[] = [
     local_ref: 'sre/Q1',
     type: 'decision',
     asked_by: 'sre',
-    body: 'Should I close acme/platform#42 now?',
-    context: 'The task is in review and the team has not confirmed yet.',
+    title: 'Close acme/platform#42 now?',
+    body:
+      'Should I close acme/platform#42 now?\n\n---\n\n' +
+      'The task is in review and the team has not confirmed yet.',
     status: 'open',
     participants: ['human', 'sre'],
     waiting_on: ['human'],
@@ -985,6 +993,7 @@ export const agentQuestions: AgentQuestion[] = [
     local_ref: 'sre/Q2',
     type: 'decision',
     asked_by: '',
+    title: 'What is blocking acme/platform#43?',
     body: 'What is blocking acme/platform#43?',
     status: 'resolved',
     resolution: 'answered',
