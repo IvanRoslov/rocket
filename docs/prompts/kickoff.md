@@ -32,9 +32,10 @@ Start now:
    superpowers:writing-plans for the decomposition plan. Store both in the task
    (task doc put --kind spec / --kind plan). Store the spec in the task, then
    ask for confirmation THROUGH THE TASK:
-   `rocket task ask {{task_id}} "Confirm spec v<N> (see task docs): ok to start
-   implementation?" --option "go" --option "needs changes"` (the summary of what
-   they are confirming goes in `--context`, or `--file` if it is long markdown).
+   `rocket task ask {{task_id}} --title "Confirm spec v<N>: ok to start
+   implementation?" --file <summary.md> --option "go" --option "needs changes"`
+   (the summary of what they are confirming is the body — markdown, via
+   `--file`).
    A chat "yes" about the design is NOT spec confirmation.
    Do not spawn workers until that question is answered. ANY later edit to the
    spec — including rationale-only edits — reopens this gate: store the new
