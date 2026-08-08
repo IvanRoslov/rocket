@@ -15,12 +15,15 @@ import (
 // reuses questionMessageResponse for thread entries so web/mobile can share
 // one thread component.
 type agentQuestionResponse struct {
-	ID         int64  `json:"id"`
-	RoleID     string `json:"role_id"`
-	Ordinal    int    `json:"ordinal"`
-	AskedBy    string `json:"asked_by"`
+	ID      int64  `json:"id"`
+	RoleID  string `json:"role_id"`
+	Ordinal int    `json:"ordinal"`
+	AskedBy string `json:"asked_by"`
+	// Title and Context mirror questionResponse: a one-line heading, and the
+	// pre-#1264 context field kept empty for old clients.
+	Title      string `json:"title"`
 	Body       string `json:"body"`
-	Context    string `json:"context,omitempty"`
+	Context    string `json:"context"`
 	Status     string `json:"status"`
 	Resolution string `json:"resolution,omitempty"`
 	// Participants, WaitingOn and YourTurn mirror questionResponse; WhoseTurn
@@ -97,8 +100,8 @@ func buildAgentQuestionResponse(d Deps, caller *store.Session, q store.AgentQues
 		RoleID:       q.RoleID,
 		Ordinal:      ordinal,
 		AskedBy:      wireParticipant(q.AskedBy),
+		Title:        q.Title,
 		Body:         q.Body,
-		Context:      q.Context,
 		Status:       q.Status,
 		Resolution:   q.Resolution,
 		Participants: participants,
@@ -219,6 +222,9 @@ func handleGetAgentQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 }
 
 type postAgentQuestionRequest struct {
+	// Title is derived from Body when absent; Context is deprecated and is
+	// appended to Body (see postQuestionRequest).
+	Title   string   `json:"title"`
 	Body    string   `json:"body"`
 	Context string   `json:"context"`
 	To      []string `json:"to"`
@@ -268,8 +274,8 @@ func handlePostAgentQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 	newQ := store.AgentQuestion{
 		RoleID:      a.ID,
 		AskedBy:     callerAuthor(caller),
-		Body:        req.Body,
-		Context:     req.Context,
+		Title:       req.Title,
+		Body:        withContext(req.Body, req.Context),
 		AddressedTo: req.To,
 		Type:        threadType,
 		Options:     req.Options,
@@ -312,11 +318,7 @@ func handlePostAgentQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 			return
 		}
 	}
-	text := req.Body
-	if req.Context != "" {
-		text += "\n\n" + req.Context
-	}
-	if err := participantFanOut(d, subj, ordinal, "question", author, text, participants); err != nil {
+	if err := participantFanOut(d, subj, ordinal, "question", author, q.Body, participants); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}

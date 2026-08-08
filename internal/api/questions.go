@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -49,12 +50,17 @@ func toQuestionMessageResponse(m store.QuestionMessage) questionMessageResponse 
 // questionResponse is the JSON shape of a question and its thread as
 // returned by the API.
 type questionResponse struct {
-	ID         int64  `json:"id"`
-	TaskID     int64  `json:"task_id"`
-	Ordinal    int    `json:"ordinal"`
-	AskedBy    string `json:"asked_by"`
-	Body       string `json:"body"`
-	Context    string `json:"context,omitempty"`
+	ID      int64  `json:"id"`
+	TaskID  int64  `json:"task_id"`
+	Ordinal int    `json:"ordinal"`
+	AskedBy string `json:"asked_by"`
+	// Title is the thread's one-line heading; Body is the markdown question.
+	Title string `json:"title"`
+	Body  string `json:"body"`
+	// Context is what the pre-#1264 API carried alongside the body. It is
+	// always empty now — a context sent on creation is appended to the body —
+	// and stays in the shape only so clients written against it keep parsing.
+	Context    string `json:"context"`
 	Status     string `json:"status"`
 	Resolution string `json:"resolution,omitempty"`
 	// Participants is everyone taking part in the thread; WaitingOn is the
@@ -124,8 +130,8 @@ func buildQuestionResponse(d Deps, caller *store.Session, q store.Question) (que
 		TaskID:       q.TaskID,
 		Ordinal:      ordinal,
 		AskedBy:      wireParticipant(q.AskedBy),
+		Title:        q.Title,
 		Body:         q.Body,
-		Context:      q.Context,
 		Status:       q.Status,
 		Resolution:   q.Resolution,
 		Participants: participants,
@@ -299,8 +305,23 @@ func getQuestionOr404(w http.ResponseWriter, d Deps, id int64) (store.Question, 
 	return q, true
 }
 
+// withContext folds a deprecated `context` field into the question body. The
+// two used to be separate fields nobody could tell apart (task #1264); joining
+// them here means the rest of the system only ever sees one piece of markdown,
+// while a client still sending `context` loses nothing.
+func withContext(body, context string) string {
+	if strings.TrimSpace(context) == "" {
+		return body
+	}
+	return body + store.ContextSeparator + context
+}
+
 type postQuestionRequest struct {
-	Body    string `json:"body"`
+	// Title is the thread's heading. Left out, it is derived from Body.
+	Title string `json:"title"`
+	Body  string `json:"body"`
+	// Context is deprecated: whatever comes in here is appended to Body with
+	// store.ContextSeparator, so a thread is one piece of markdown.
 	Context string `json:"context"`
 	// To narrows who is expected to respond. Its ids join the thread as
 	// participants and are stored as the message's addressed_to.
@@ -366,8 +387,8 @@ func handlePostTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 	newQ := store.Question{
 		TaskID:  id,
 		AskedBy: callerAuthor(caller),
-		Body:    req.Body,
-		Context: req.Context,
+		Title:   req.Title,
+		Body:    withContext(req.Body, req.Context),
 		// --to seeds the attention set of the new thread.
 		AddressedTo: req.To,
 		Type:        threadType,
@@ -420,11 +441,7 @@ func handlePostTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 			return
 		}
 	}
-	text := req.Body
-	if req.Context != "" {
-		text += "\n\n" + req.Context
-	}
-	if err := participantFanOut(d, subj, ordinal, "question", author, text, participants); err != nil {
+	if err := participantFanOut(d, subj, ordinal, "question", author, q.Body, participants); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}

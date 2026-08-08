@@ -92,7 +92,8 @@ func TestPostAgentQuestion_FromRoleInstanceAwaitsUser(t *testing.T) {
 		t.Fatalf("status = %d, want 201", resp.StatusCode)
 	}
 	q := decodeAgentQuestion(t, resp)
-	if q.AskedBy != "sre" || q.WhoseTurn != "user" || q.Context != "детали" {
+	if q.AskedBy != "sre" || q.WhoseTurn != "user" ||
+		q.Body != "нужно ваше решение"+store.ContextSeparator+"детали" || q.Context != "" {
 		t.Fatalf("question = %+v", q)
 	}
 

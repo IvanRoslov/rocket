@@ -25,12 +25,14 @@ func IsHuman(id string) bool {
 // Question is a Q&A thread's originating question. A thread is bound to a
 // task, to a persistent agent's role, or to neither.
 type Question struct {
-	ID         int64
-	TaskID     int64  // 0 = not bound to a task
-	RoleID     string // "" = not bound to a role
-	AskedBy    string // session id of the asker; "" = the human
+	ID      int64
+	TaskID  int64  // 0 = not bound to a task
+	RoleID  string // "" = not bound to a role
+	AskedBy string // session id of the asker; "" = the human
+	// Title is a one-line plain-text heading. It is what listings show; an
+	// empty one on input is filled from Body by DeriveTitle.
+	Title      string
 	Body       string
-	Context    string // optional markdown context
 	Status     string // open|resolved
 	Resolution string // answered|dismissed (set once resolved)
 	// AddressedTo narrows who is expected to respond before the thread has
@@ -75,7 +77,7 @@ type QuestionMessage struct {
 
 // questionColumns is the column list every Question scan relies on; it must
 // stay in sync with scanQuestion.
-const questionColumns = `id, task_id, role_id, asked_by, body, context, status, resolution, addressed_to, type, options, asked_at, resolved_at`
+const questionColumns = `id, task_id, role_id, asked_by, title, body, status, resolution, addressed_to, type, options, asked_at, resolved_at`
 
 // encodeOptions renders answer choices as the JSON stored in
 // questions.options. An empty list stores as "" rather than "[]", so a thread
@@ -134,8 +136,13 @@ func canonicalParticipant(id string) string {
 }
 
 // AddQuestion inserts a new question with status "open" and AskedAt
-// defaulted to now (unless already set). Returns the assigned id.
+// defaulted to now (unless already set). A question stored without a title
+// gets one derived from its body here, at the single choke point every write
+// path goes through, so no row can end up untitled. Returns the assigned id.
 func (s *Store) AddQuestion(q Question) (int64, error) {
+	if q.Title == "" {
+		q.Title = DeriveTitle(q.Body)
+	}
 	if q.AskedAt == 0 {
 		q.AskedAt = time.Now().Unix()
 	}
@@ -147,9 +154,9 @@ func (s *Store) AddQuestion(q Question) (int64, error) {
 	}
 
 	res, err := s.db.Exec(
-		`INSERT INTO questions (task_id, role_id, asked_by, body, context, status, resolution, addressed_to, type, options, asked_at, resolved_at)
+		`INSERT INTO questions (task_id, role_id, asked_by, title, body, status, resolution, addressed_to, type, options, asked_at, resolved_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		nullIfZero(q.TaskID), nullIfEmpty(q.RoleID), q.AskedBy, q.Body, nullIfEmpty(q.Context),
+		nullIfZero(q.TaskID), nullIfEmpty(q.RoleID), q.AskedBy, q.Title, q.Body,
 		q.Status, nullIfEmpty(q.Resolution), encodeAddressedTo(q.AddressedTo),
 		q.Type, encodeOptions(q.Options),
 		q.AskedAt, nullIfZero(q.ResolvedAt),
@@ -324,12 +331,12 @@ func (s *Store) ListAllOpenQuestions() ([]Question, error) {
 
 func scanQuestion(row interface{ Scan(...any) error }) (Question, error) {
 	var q Question
-	var roleID, context, resolution, addressedTo sql.NullString
+	var roleID, resolution, addressedTo sql.NullString
 	var qType, options sql.NullString
 	var taskID, resolvedAt sql.NullInt64
 
 	err := row.Scan(
-		&q.ID, &taskID, &roleID, &q.AskedBy, &q.Body, &context, &q.Status, &resolution,
+		&q.ID, &taskID, &roleID, &q.AskedBy, &q.Title, &q.Body, &q.Status, &resolution,
 		&addressedTo, &qType, &options, &q.AskedAt, &resolvedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -341,7 +348,6 @@ func scanQuestion(row interface{ Scan(...any) error }) (Question, error) {
 
 	q.TaskID = taskID.Int64
 	q.RoleID = roleID.String
-	q.Context = context.String
 	q.Resolution = resolution.String
 	q.AddressedTo = decodeAddressedTo(addressedTo.String)
 	q.Type = qType.String
