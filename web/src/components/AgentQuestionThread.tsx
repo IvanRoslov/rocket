@@ -47,8 +47,8 @@ export function AgentQuestionThread({ roleId, question }: AgentQuestionThreadPro
     <QuestionThreadView
       ordinal={question.ordinal}
       localRef={question.local_ref}
+      title={question.title}
       body={question.body}
-      context={question.context}
       messages={question.messages}
       turnLabel={whoseTurnLabel(question, roleId)}
       turnWarn={!!question.your_turn}

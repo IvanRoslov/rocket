@@ -94,49 +94,28 @@
   padding: 22px 26px;
 }
 
-.question-thread__question {
-  margin: 0 0 18px;
-  font: 650 20px/1.45 var(--font-ui);
+/* Title carries the weight; the question below it is body copy (task #1264). */
+.question-thread__title {
+  margin: 0 0 8px;
+  font: 650 22px/1.35 var(--font-ui);
   color: var(--text);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
+  text-wrap: pretty;
 }
 
-.question-thread__context {
-  margin: 0 0 24px;
-  border: 1px solid var(--border);
-  border-radius: 11px;
-  overflow: hidden;
-}
-.question-thread__context-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 9px 15px;
-  background: var(--surface-4);
-  border-bottom: 1px solid var(--divider);
-  font: 600 11px var(--font-ui);
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.question-thread__context-header button {
-  background: none;
-  border: none;
-  font: 12px var(--font-ui);
-  color: var(--text-3);
-  cursor: pointer;
-}
-.question-thread__context-body {
-  padding: 15px 18px;
-  font: 13.5px/1.6 var(--font-ui);
+.question-thread__question {
+  margin: 0 0 18px;
+  font: 14.5px/1.7 var(--font-ui);
   color: var(--text-2);
+  text-wrap: pretty;
 }
-.question-thread__context-toggle {
-  display: block;
-  margin: 0 0 20px;
+
+.question-thread__more {
+  align-self: flex-start;
+  margin: 0 0 4px;
+  padding: 0;
   background: none;
   border: none;
-  padding: 0;
   font: 12.5px var(--font-ui);
   color: var(--accent);
   cursor: pointer;

@@ -7,6 +7,7 @@
 // threads stop piling up unanswered.
 
 import { useAnswerQuestion } from '../../lib/queries'
+import { questionTitle } from '../../lib/thread'
 import type { Question } from '../../lib/types'
 import './QuestionBanner.css'
 
@@ -40,7 +41,7 @@ export function QuestionBanner({ taskId, question, onOpen }: QuestionBannerProps
             stale
           </span>
         )}
-        <span className="question-banner__text">{question.body}</span>
+        <span className="question-banner__text">{questionTitle(question)}</span>
         <span className="question-banner__cta">Open thread →</span>
       </button>
 

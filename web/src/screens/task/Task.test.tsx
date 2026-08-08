@@ -63,7 +63,7 @@ describe('TaskScreen', () => {
     expect(await screen.findByText('Billing v2')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('tab', { name: /Questions/ }))
 
-    const row = (await screen.findByText('Deployed the refunds migration to staging.')).closest(
+    const row = (await screen.findByText('Refunds migration deployed to staging')).closest(
       '.questions-tab__resolved-row',
     ) as HTMLElement
     expect(within(row).getByText('fyi')).toBeInTheDocument()
@@ -92,7 +92,7 @@ describe('TaskScreen', () => {
     // Option #2 was picked, so that option's own text — not the first one —
     // is the answer the thread closed with.
     await userEvent.click(screen.getByRole('tab', { name: /Questions/ }))
-    const row = await screen.findByText(/prorated refunds for mid-cycle downgrades/)
+    const row = await screen.findByText(/Prorated refunds for mid-cycle downgrades/)
     await userEvent.click(row)
     expect(await screen.findByText('No, keep next-cycle')).toBeInTheDocument()
   })
@@ -213,7 +213,7 @@ describe('TaskScreen', () => {
     // The open thread card is gone; the question now shows collapsed in Resolved.
     await waitFor(() => expect(document.querySelector('.question-thread')).not.toBeInTheDocument())
     expect(document.querySelector('.questions-tab__resolved-row')).toBeInTheDocument()
-    expect(screen.getByText(/prorated refunds for mid-cycle downgrades/)).toBeInTheDocument()
+    expect(screen.getByText(/Prorated refunds for mid-cycle downgrades/)).toBeInTheDocument()
   })
 
   it('clicking a resolved thread expands it to show the full thread messages', async () => {
@@ -222,7 +222,7 @@ describe('TaskScreen', () => {
     await userEvent.click(screen.getByRole('tab', { name: /^Questions/ }))
 
     const row = await screen.findByRole('button', {
-      name: /Should the v2 flag default on for internal test accounts\?/,
+      name: /Default the v2 flag on for internal test accounts\?/,
     })
     expect(row).toHaveAttribute('aria-expanded', 'false')
 

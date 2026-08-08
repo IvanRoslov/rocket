@@ -4,6 +4,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
+import { QuestionThreadView } from '../../components/QuestionThreadView'
 import { describe, expect, it, vi } from 'vitest'
 import type { ThreadInboxEntry } from '../../lib/types'
 import { ThreadCard, type ThreadCardProps } from './ThreadCard'
@@ -125,5 +126,37 @@ describe('ThreadCard', () => {
     renderCard({ detail: { messages: [], isLoading: false } })
 
     expect(screen.queryByText(/context/i)).not.toBeInTheDocument()
+  })
+})
+
+// The two screens must not drift apart: the task screen used to keep the whole
+// thread open while the global card kept it collapsed, and the same thread
+// read differently depending on where you opened it (task #1264 spec §5).
+describe('the task screen and the global card', () => {
+  const messages = [1, 2, 3, 4, 5, 6].map(reply)
+
+  it('show the same number of replies for the same thread', () => {
+    const card = renderCard({ detail: { messages, isLoading: false } })
+    const inCard = card.container.querySelectorAll('.q__msg').length
+    card.unmount()
+
+    const view = render(
+      <QuestionThreadView
+        ordinal={3}
+        title={entry.title}
+        body={entry.body}
+        messages={messages}
+        turnLabel="awaiting you"
+        turnWarn
+        askerLabel="billing-v2-orch asked"
+        onClarify={vi.fn()}
+        onAnswer={vi.fn()}
+        onDismiss={vi.fn()}
+      />,
+    )
+    const inView = view.container.querySelectorAll('.question-thread__message').length
+
+    expect(inCard).toBe(3)
+    expect(inView).toBe(inCard)
   })
 })

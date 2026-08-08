@@ -7,6 +7,7 @@ import { Markdown } from '../../components/Markdown'
 import { QuestionThread, authorLabel } from '../../components/QuestionThread'
 import { isHuman } from '../../lib/participants'
 import { timeAgo } from '../../lib/format'
+import { questionTitle } from '../../lib/thread'
 import { useAskOrchestrator } from '../../lib/queries'
 import { usePasteImage } from '../../lib/usePasteImage'
 import type { Question } from '../../lib/types'
@@ -132,7 +133,7 @@ function ResolvedThreadRow({ question, orchestratorName }: ResolvedThreadRowProp
           {question.local_ref ?? `Q${question.ordinal}`}
         </span>
         <span className="questions-tab__resolved-badge">{resolutionLabel(question)}</span>
-        <span className="questions-tab__resolved-text">{question.body}</span>
+        <span className="questions-tab__resolved-text">{questionTitle(question)}</span>
         <span className="questions-tab__resolved-when">
           {question.resolved_at ? timeAgo(question.resolved_at) : ''}
         </span>
@@ -144,17 +145,6 @@ function ResolvedThreadRow({ question, orchestratorName }: ResolvedThreadRowProp
           <div className="questions-tab__resolved-question">
             <Markdown>{question.body}</Markdown>
           </div>
-
-          {question.context && (
-            <div className="question-thread__context">
-              <div className="question-thread__context-header">
-                <span>Context</span>
-              </div>
-              <div className="question-thread__context-body">
-                <Markdown compact>{question.context}</Markdown>
-              </div>
-            </div>
-          )}
 
           {question.messages.length > 0 && (
             <div className="question-thread__messages">

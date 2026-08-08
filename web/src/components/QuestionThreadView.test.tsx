@@ -217,3 +217,52 @@ describe('QuestionThreadView', () => {
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
   })
 })
+
+// Task #1264: the task screen renders a thread exactly like the global
+// Questions card — a standalone title, a markdown body, no context control,
+// and only the tail of a long discussion.
+describe('QuestionThreadView, rebuilt card', () => {
+  const reply = (n: number) => ({
+    id: n,
+    author: 'sre-run-3',
+    body: `**reply ${n}**`,
+    created_at: 1_800_000_000 + n,
+  })
+
+  it('renders the title as a heading, apart from the body', () => {
+    render(<QuestionThreadView {...base} title="Close the incident?" body="Ship **it**?" />)
+
+    const heading = screen.getByRole('heading', { level: 2 })
+    expect(heading).toHaveTextContent('Close the incident?')
+    expect(heading.textContent).not.toContain('Ship')
+  })
+
+  it('falls back to the body when the daemon sent no title', () => {
+    render(<QuestionThreadView {...base} body="Ship it?" />)
+
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('Ship it?')
+  })
+
+  it('renders the body as markdown', () => {
+    const { container } = render(<QuestionThreadView {...base} body="Ship **it**?" />)
+
+    expect(container.querySelector('.question-thread__question strong')).toHaveTextContent('it')
+  })
+
+  it('shows the last three replies and reveals the rest on demand', async () => {
+    render(<QuestionThreadView {...base} messages={[1, 2, 3, 4, 5, 6].map(reply)} />)
+
+    expect(screen.queryByText('reply 3')).not.toBeInTheDocument()
+    expect(screen.getByText('reply 4')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Show 3 earlier replies' }))
+
+    expect(screen.getByText('reply 1')).toBeInTheDocument()
+  })
+
+  it('has no context control', () => {
+    render(<QuestionThreadView {...base} />)
+
+    expect(screen.queryByText(/context/i)).not.toBeInTheDocument()
+  })
+})

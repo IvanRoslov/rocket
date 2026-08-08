@@ -1,6 +1,6 @@
 // The presentational half of a question thread: header with the turn chip,
-// collapsible context, the reply thread and the composer with its three
-// actions. Extracted from QuestionThread so role threads (docs/10-agents.md
+// the title, the markdown question, the reply thread and the composer with its
+// three actions. Extracted from QuestionThread so role threads (docs/10-agents.md
 // «Q&A-треды роли») render exactly the same UI as task threads and only differ
 // in the mutations wired into the callbacks below.
 
@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { Markdown } from './Markdown'
 import { timeAgo } from '../lib/format'
 import { isHuman, threadParticipantLabel } from '../lib/participants'
+import { questionTitle, splitReplies } from '../lib/thread'
 import { usePasteImage } from '../lib/usePasteImage'
 import './questionthread.css'
 
@@ -33,8 +34,9 @@ export interface QuestionThreadViewProps {
    * bare `Q<ordinal>` is all there is.
    */
   localRef?: string
+  /** One-line heading; derived from the body when the daemon sent none. */
+  title?: string
   body: string
-  context?: string
   messages: ThreadEntry[]
   /** Empty when nobody is waiting (a resolved thread). */
   turnLabel: string
@@ -75,8 +77,8 @@ export interface QuestionThreadViewProps {
 export function QuestionThreadView({
   ordinal,
   localRef,
+  title,
   body: question,
-  context,
   messages,
   turnLabel,
   turnWarn,
@@ -93,11 +95,12 @@ export function QuestionThreadView({
   onDismiss,
   onChoose,
 }: QuestionThreadViewProps) {
-  const [ctxOpen, setCtxOpen] = useState(true)
   const [body, setBody] = useState('')
+  const [allReplies, setAllReplies] = useState(false)
   const [to, setTo] = useState<string[]>([])
   const paste = usePasteImage(setBody)
   const ref = localRef ?? `Q${ordinal}`
+  const replies = splitReplies(messages, allReplies)
 
   // You are never your own addressee, so the human is not a candidate.
   const addressees = (participants ?? []).filter((p) => !isHuman(p))
@@ -147,38 +150,25 @@ export function QuestionThreadView({
         </div>
       )}
       <div className="question-thread__body">
+        <h2 className="question-thread__title">{questionTitle({ title, body: question })}</h2>
         <div className="question-thread__question">
           <Markdown>{question}</Markdown>
         </div>
-
-        {context &&
-          (ctxOpen ? (
-            <div className="question-thread__context">
-              <div className="question-thread__context-header">
-                <span>Context</span>
-                <button type="button" onClick={() => setCtxOpen(false)}>
-                  Hide ▴
-                </button>
-              </div>
-              <div className="question-thread__context-body">
-                <Markdown compact>{context}</Markdown>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="question-thread__context-toggle"
-              onClick={() => setCtxOpen(true)}
-            >
-              ＋ Show context
-            </button>
-          ))}
 
         <div className="question-thread__discussion-label">
           Discussion · {messages.length} replies
         </div>
         <div className="question-thread__messages" aria-label="Discussion">
-          {messages.map((m) => {
+          {replies.hidden > 0 && (
+            <button
+              type="button"
+              className="question-thread__more"
+              onClick={() => setAllReplies(true)}
+            >
+              Show {replies.hidden} earlier {replies.hidden === 1 ? 'reply' : 'replies'}
+            </button>
+          )}
+          {replies.shown.map((m) => {
             const fromAgent = !isHuman(m.author)
             return (
               <div key={m.id} className="question-thread__message">
