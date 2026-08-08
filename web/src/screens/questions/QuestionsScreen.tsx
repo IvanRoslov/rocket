@@ -55,7 +55,6 @@ function refOf(entry: ThreadInboxEntry): ThreadRef {
 const FOCUS_HINTS = [
   { key: '1–9', label: 'pick an option' },
   { key: 'J / K', label: 'next / previous' },
-  { key: 'E', label: 'context' },
   { key: 'S', label: 'later' },
   { key: 'X', label: 'not relevant' },
   { key: 'B', label: 'browse' },
@@ -82,8 +81,6 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
   const [cleared, setCleared] = useState(0)
   const [drafts, setDrafts] = useState<Record<number, string>>({})
   const [picks, setPicks] = useState<Record<number, string[]>>({})
-  const [contextOpen, setContextOpen] = useState(false)
-  const [conversationOpen, setConversationOpen] = useState<Record<number, boolean>>({})
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<BrowseFilter>('open')
   const [askOpen, setAskOpen] = useState(false)
@@ -164,22 +161,17 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
     const i = queue.findIndex((t) => t.id === fromId)
     const next = queue[i + 1] ?? queue.find((t) => t.id !== fromId)
     setCurrentId(next?.id)
-    setContextOpen(false)
   }
 
   function step(delta: number) {
     if (!current) return
     const i = queue.findIndex((t) => t.id === current.id)
     const next = queue[Math.min(queue.length - 1, Math.max(0, i + delta))]
-    if (next) {
-      setCurrentId(next.id)
-      setContextOpen(false)
-    }
+    if (next) setCurrentId(next.id)
   }
 
   function select(id: number) {
     setCurrentId(id)
-    setContextOpen(false)
     setMode('focus')
   }
 
@@ -300,11 +292,6 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
         step(-1)
         return
       }
-      if (k === 'e') {
-        e.preventDefault()
-        setContextOpen((v) => !v)
-        return
-      }
       if (current.status !== 'open') return
       if (/^[1-9]$/.test(k)) {
         e.preventDefault()
@@ -356,12 +343,6 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
           }
         })
       }
-      contextOpen={contextOpen}
-      onToggleContext={() => setContextOpen((v) => !v)}
-      conversationOpen={conversationOpen[current.id] ?? false}
-      onToggleConversation={() =>
-        setConversationOpen((c) => ({ ...c, [current.id]: !(c[current.id] ?? false) }))
-      }
       onChoose={(i) => choose(current, i)}
       onAnswerClose={() => answerClose(current)}
       onReply={() => askBack(current)}
@@ -369,7 +350,6 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
       onDismiss={() => dismiss(current)}
       onBackToQueue={() => {
         setCurrentId(queue[0]?.id)
-        setContextOpen(false)
         setMode('focus')
       }}
       onBrowse={() => setMode('browse')}
@@ -413,8 +393,8 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
         <AskComposer
           onCancel={() => setAskOpen(false)}
           onEmpty={() => flash('Write the question first')}
-          onSubmit={({ target, body, type }) => {
-            ask.mutate({ target, body, ...(type === 'fyi' ? { type } : {}) })
+          onSubmit={({ target, body, title, type }) => {
+            ask.mutate({ target, body, ...(title ? { title } : {}), ...(type === 'fyi' ? { type } : {}) })
             setAskOpen(false)
             const name = target.kind === 'task' ? `#${target.id}` : target.id
             flash(type === 'fyi' ? `Note posted → ${name}` : `Question opened → ${name}`)

@@ -59,7 +59,7 @@ describe('Decide mode', () => {
     renderQuestions()
 
     expect(await screen.findByRole('heading', { level: 2 })).toHaveTextContent(
-      'Should we support prorated refunds for mid-cycle downgrades?',
+      'Prorated refunds for mid-cycle downgrades',
     )
     expect(screen.getByRole('button', { name: /Yes, prorate downgrades/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /No, keep next-cycle/ })).toBeInTheDocument()
@@ -310,7 +310,7 @@ describe('Browse mode', () => {
     await user.click(within(row).getByRole('button', { name: 'Open' }))
 
     expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(
-      'Should we backfill existing rows',
+      'Backfill existing rows, or new ones only?',
     )
   })
 })
@@ -359,5 +359,28 @@ describe('Ask an agent', () => {
 
     await waitFor(() => expect(sent).toHaveLength(1))
     expect(sent[0]).toEqual({ body: 'Staging is back', type: 'fyi' })
+  })
+
+  // Task #1264: the dashboard shows the title as the primary line, so this
+  // form must be able to set one — like the task screen's ask form does.
+  test('sends the optional heading with the question', async () => {
+    const user = userEvent.setup()
+    const sent: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/tasks/:id/questions', async ({ request }) => {
+        sent.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 99 }, { status: 201 })
+      }),
+    )
+    renderQuestions()
+    await screen.findByRole('heading', { level: 2 })
+
+    await user.click(screen.getByRole('button', { name: 'Ask an agent' }))
+    await user.type(screen.getByLabelText('Question heading (optional)'), 'Deploy plan')
+    await user.type(screen.getByLabelText('What to ask'), 'What is the deploy plan?')
+    await user.click(screen.getByRole('button', { name: 'Open question' }))
+
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(sent[0]).toEqual({ body: 'What is the deploy plan?', title: 'Deploy plan' })
   })
 })

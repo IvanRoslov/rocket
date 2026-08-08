@@ -6,6 +6,7 @@
 
 import type { ReactNode } from 'react'
 import { timeAgo } from '../../lib/format'
+import { questionTitle } from '../../lib/thread'
 import type { ThreadInboxEntry } from '../../lib/types'
 
 /** "2h ago" -> "2h": the rail has room for the number, not the sentence. */
@@ -60,7 +61,7 @@ export function FocusMode(props: FocusModeProps) {
                 <span className="q__spacer" />
                 <span className="q__qrow-age">{shortAge(t.updated_at)}</span>
               </span>
-              <span className="q__qrow-body">{t.body}</span>
+              <span className="q__qrow-body">{questionTitle(t)}</span>
               {options > 0 && (
                 <span className="q__opt-hint">{options} options · one tap</span>
               )}

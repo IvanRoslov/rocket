@@ -63,7 +63,7 @@ describe('TaskScreen', () => {
     expect(await screen.findByText('Billing v2')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('tab', { name: /Questions/ }))
 
-    const row = (await screen.findByText('Deployed the refunds migration to staging.')).closest(
+    const row = (await screen.findByText('Refunds migration deployed to staging')).closest(
       '.questions-tab__resolved-row',
     ) as HTMLElement
     expect(within(row).getByText('fyi')).toBeInTheDocument()
@@ -92,7 +92,7 @@ describe('TaskScreen', () => {
     // Option #2 was picked, so that option's own text — not the first one —
     // is the answer the thread closed with.
     await userEvent.click(screen.getByRole('tab', { name: /Questions/ }))
-    const row = await screen.findByText(/prorated refunds for mid-cycle downgrades/)
+    const row = await screen.findByText(/Prorated refunds for mid-cycle downgrades/)
     await userEvent.click(row)
     expect(await screen.findByText('No, keep next-cycle')).toBeInTheDocument()
   })
@@ -213,7 +213,7 @@ describe('TaskScreen', () => {
     // The open thread card is gone; the question now shows collapsed in Resolved.
     await waitFor(() => expect(document.querySelector('.question-thread')).not.toBeInTheDocument())
     expect(document.querySelector('.questions-tab__resolved-row')).toBeInTheDocument()
-    expect(screen.getByText(/prorated refunds for mid-cycle downgrades/)).toBeInTheDocument()
+    expect(screen.getByText(/Prorated refunds for mid-cycle downgrades/)).toBeInTheDocument()
   })
 
   it('clicking a resolved thread expands it to show the full thread messages', async () => {
@@ -222,7 +222,7 @@ describe('TaskScreen', () => {
     await userEvent.click(screen.getByRole('tab', { name: /^Questions/ }))
 
     const row = await screen.findByRole('button', {
-      name: /Should the v2 flag default on for internal test accounts\?/,
+      name: /Default the v2 flag on for internal test accounts\?/,
     })
     expect(row).toHaveAttribute('aria-expanded', 'false')
 
@@ -359,6 +359,35 @@ describe('TaskScreen', () => {
 
       await waitFor(() => expect(capturedBody).toEqual({ body: 'What is the deploy plan?' }))
       expect(capturedHeader).toBeNull()
+    })
+
+    // Task #1264: the form asks for a heading, not for a context to split the
+    // question across — `context` must not be sent at all any more.
+    it('sends the title with the body, and never a context', async () => {
+      let capturedBody: unknown
+      server.use(
+        http.post('/v1/tasks/:id/questions', async ({ request }) => {
+          capturedBody = await request.json()
+          return HttpResponse.json(
+            { id: 99, task_id: 12, ordinal: 4, asked_by: '', title: 'Deploy plan', body: 'What is the deploy plan?', status: 'open', whose_turn: 'orchestrator', asked_at: 1, messages: [] },
+            { status: 201 },
+          )
+        }),
+      )
+
+      renderTask()
+      expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('tab', { name: /^Questions/ }))
+
+      await userEvent.click(await screen.findByRole('button', { name: '+ Ask the orchestrator' }))
+      expect(screen.queryByRole('button', { name: /Add context/ })).not.toBeInTheDocument()
+      await userEvent.type(screen.getByLabelText('Question heading (optional)'), 'Deploy plan')
+      await userEvent.type(screen.getByLabelText('Ask the orchestrator'), 'What is the deploy plan?')
+      await userEvent.click(screen.getByRole('button', { name: 'Ask' }))
+
+      await waitFor(() =>
+        expect(capturedBody).toEqual({ body: 'What is the deploy plan?', title: 'Deploy plan' }),
+      )
     })
 
     it('disables the toggle when the task has no live orchestrator session', async () => {

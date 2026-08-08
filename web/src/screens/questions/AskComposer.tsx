@@ -11,7 +11,7 @@ import { useAgents, useTasks, type AskTarget } from '../../lib/queries'
 import type { ThreadType } from '../../lib/types'
 
 export interface AskComposerProps {
-  onSubmit: (payload: { target: AskTarget; body: string; type: ThreadType }) => void
+  onSubmit: (payload: { target: AskTarget; body: string; title?: string; type: ThreadType }) => void
   onCancel: () => void
   /** Shown when the human submits nothing — the screen owns the toast. */
   onEmpty: () => void
@@ -28,6 +28,7 @@ export function AskComposer(props: AskComposerProps) {
   const { data: agents } = useAgents()
   const [kind, setKind] = useState<ThreadType>('decision')
   const [selected, setSelected] = useState<string>()
+  const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
 
   const targets: TargetOption[] = [
@@ -52,7 +53,10 @@ export function AskComposer(props: AskComposerProps) {
       props.onEmpty()
       return
     }
-    props.onSubmit({ target: current.target, body: text, type: kind })
+    // The heading is optional: the daemon derives one from the body when it
+    // is left empty (task #1264).
+    props.onSubmit({ target: current.target, body: text, title: title.trim() || undefined, type: kind })
+    setTitle('')
     setBody('')
   }
 
@@ -93,6 +97,14 @@ export function AskComposer(props: AskComposerProps) {
             {kind === 'fyi' ? 'posted closed · no turn, no badge' : 'opens a decision thread'}
           </span>
         </div>
+        <input
+          type="text"
+          className="q__ask-title"
+          aria-label="Question heading (optional)"
+          placeholder="Heading — one line, optional"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
         <textarea
           className="q__textarea"
           aria-label="What to ask"
