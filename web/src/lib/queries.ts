@@ -605,7 +605,7 @@ export function useAnswerQuestion(): UseMutationResult<
  */
 export function useAskOrchestrator(
   taskId: number | undefined,
-): UseMutationResult<Question, Error, { body: string; context?: string }> {
+): UseMutationResult<Question, Error, { body: string; title?: string }> {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (payload) => api.post<Question>(`/v1/tasks/${taskId}/questions`, payload),

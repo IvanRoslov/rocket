@@ -361,6 +361,35 @@ describe('TaskScreen', () => {
       expect(capturedHeader).toBeNull()
     })
 
+    // Task #1264: the form asks for a heading, not for a context to split the
+    // question across — `context` must not be sent at all any more.
+    it('sends the title with the body, and never a context', async () => {
+      let capturedBody: unknown
+      server.use(
+        http.post('/v1/tasks/:id/questions', async ({ request }) => {
+          capturedBody = await request.json()
+          return HttpResponse.json(
+            { id: 99, task_id: 12, ordinal: 4, asked_by: '', title: 'Deploy plan', body: 'What is the deploy plan?', status: 'open', whose_turn: 'orchestrator', asked_at: 1, messages: [] },
+            { status: 201 },
+          )
+        }),
+      )
+
+      renderTask()
+      expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('tab', { name: /^Questions/ }))
+
+      await userEvent.click(await screen.findByRole('button', { name: '+ Ask the orchestrator' }))
+      expect(screen.queryByRole('button', { name: /Add context/ })).not.toBeInTheDocument()
+      await userEvent.type(screen.getByLabelText('Question heading (optional)'), 'Deploy plan')
+      await userEvent.type(screen.getByLabelText('Ask the orchestrator'), 'What is the deploy plan?')
+      await userEvent.click(screen.getByRole('button', { name: 'Ask' }))
+
+      await waitFor(() =>
+        expect(capturedBody).toEqual({ body: 'What is the deploy plan?', title: 'Deploy plan' }),
+      )
+    })
+
     it('disables the toggle when the task has no live orchestrator session', async () => {
       server.use(
         http.get('/v1/sessions', () =>

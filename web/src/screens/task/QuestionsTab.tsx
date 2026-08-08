@@ -36,23 +36,22 @@ interface AskOrchestratorFormProps {
 
 function AskOrchestratorForm({ taskId, disabled }: AskOrchestratorFormProps) {
   const [open, setOpen] = useState(false)
+  const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
-  const [context, setContext] = useState('')
-  const [ctxOpen, setCtxOpen] = useState(false)
   const ask = useAskOrchestrator(taskId)
   const pasteBody = usePasteImage(setBody)
-  const pasteContext = usePasteImage(setContext)
 
   function reset() {
     setOpen(false)
+    setTitle('')
     setBody('')
-    setContext('')
-    setCtxOpen(false)
   }
 
   function handleSubmit() {
     if (!body.trim()) return
-    ask.mutate({ body, context: context.trim() || undefined }, { onSuccess: reset })
+    // The title is optional: the daemon derives one from the body when it is
+    // left empty (task #1264).
+    ask.mutate({ body, title: title.trim() || undefined }, { onSuccess: reset })
   }
 
   if (!open) {
@@ -71,34 +70,28 @@ function AskOrchestratorForm({ taskId, disabled }: AskOrchestratorFormProps) {
 
   return (
     <div className="questions-tab__ask-form">
+      <input
+        type="text"
+        className="questions-tab__ask-title"
+        aria-label="Question heading (optional)"
+        placeholder="Heading — one line, optional"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+      />
       <textarea
         aria-label="Ask the orchestrator"
-        placeholder="What do you want to ask the orchestrator?"
-        rows={3}
+        placeholder="What do you want to ask the orchestrator? Markdown is fine."
+        rows={4}
         value={body}
         onChange={(e) => setBody(e.target.value)}
         onPaste={pasteBody.onPaste}
       />
-      {ctxOpen ? (
-        <textarea
-          aria-label="Context (optional, markdown)"
-          placeholder="Optional context (markdown)…"
-          rows={3}
-          value={context}
-          onChange={(e) => setContext(e.target.value)}
-          onPaste={pasteContext.onPaste}
-        />
-      ) : (
-        <button type="button" className="questions-tab__ask-context-toggle" onClick={() => setCtxOpen(true)}>
-          ＋ Add context
-        </button>
-      )}
       <div className="questions-tab__ask-actions">
         <button
           type="button"
           className="questions-tab__ask-submit"
           onClick={handleSubmit}
-          disabled={ask.isPending || pasteBody.uploading || pasteContext.uploading || !body.trim()}
+          disabled={ask.isPending || pasteBody.uploading || !body.trim()}
         >
           Ask
         </button>
@@ -106,8 +99,8 @@ function AskOrchestratorForm({ taskId, disabled }: AskOrchestratorFormProps) {
           Cancel
         </button>
       </div>
-      {(pasteBody.error ?? pasteContext.error) && (
-        <div className="question-thread__paste-error">Upload failed: {pasteBody.error ?? pasteContext.error}</div>
+      {pasteBody.error && (
+        <div className="question-thread__paste-error">Upload failed: {pasteBody.error}</div>
       )}
     </div>
   )
