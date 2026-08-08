@@ -16,6 +16,7 @@ type agentQuestionRow struct {
 	Ordinal    int    `json:"ordinal"`
 	AskedBy    string `json:"asked_by"`
 	Body       string `json:"body"`
+	Title      string `json:"title,omitempty"`
 	Context    string `json:"context,omitempty"`
 	Status     string `json:"status"`
 	Resolution string `json:"resolution,omitempty"`
@@ -43,13 +44,14 @@ type agentQuestionRow struct {
 // command serves both: run by a human it asks the role (and wakes it); run
 // inside a role instance it escalates to the human.
 func newAgentAskCmd() *cobra.Command {
+	var title string
 	var context string
 	var to []string
 	var file string
 	var options []string
 	var fyi bool
 
-	const usage = "usage: rocket agent ask <role> \"<вопрос>\" | --file <path> [--context <md>] [--to <id,...>] [--option <текст>]... [--fyi]"
+	const usage = "usage: rocket agent ask <role> \"<вопрос>\" | --file <path> [--title <строка>] [--context <md>] [--to <id,...>] [--option <текст>]... [--fyi]"
 
 	cmd := &cobra.Command{
 		Use:   "ask <role> [\"<вопрос>\"]",
@@ -73,7 +75,7 @@ func newAgentAskCmd() *cobra.Command {
 				return err
 			}
 
-			reqBody := askRequestBody(body, context, parseTo(to), options, fyi)
+			reqBody := askRequestBody(title, body, context, parseTo(to), options, fyi)
 
 			var resp agentQuestionRow
 			if err := c.Post(apiPath("v1", "agents", args[0], "questions"), reqBody, &resp); err != nil {
@@ -84,10 +86,12 @@ func newAgentAskCmd() *cobra.Command {
 				return printJSON(cmd, resp)
 			}
 			cmd.Printf("тред %s открыт\n", resp.ref())
+			cmd.Print(titleLine(resp.Title))
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&context, "context", "", "дополнительный контекст (MD)")
+	cmd.Flags().StringVar(&title, "title", "", "заголовок вопроса (одна строка); без него сервер выведет его из тела")
+	cmd.Flags().StringVar(&context, "context", "", "deprecated: содержимое дописывается к телу вопроса")
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
 	cmd.Flags().StringVar(&file, "file", "", "файл с вопросом ('-' — stdin)")
 	cmd.Flags().StringArrayVar(&options, "option", nil, optionFlagUsage)
