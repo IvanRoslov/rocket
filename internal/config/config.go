@@ -19,6 +19,12 @@ const DefaultInputStallThreshold = 10 * time.Minute
 // movement before it counts as stale.
 const DefaultQuestionStaleAfter = 24 * time.Hour
 
+// DefaultComposerBusyDeadline is the built-in value of
+// Config.ComposerBusyDeadline — how long a recipient's composer may keep
+// holding an unsent draft before a queued message is delivered anyway,
+// erasing it.
+const DefaultComposerBusyDeadline = 10 * time.Minute
+
 // DefaultMilestoneQuietAfter is the built-in value of
 // Config.MilestoneQuietAfter — how long a milestone in progress may show no
 // trace of the agent holding it before it counts as quiet.
@@ -82,9 +88,21 @@ type Config struct {
 	// reminder's anti-spam window: that one is fixed at
 	// heartbeat.quietReminderInterval.
 	MilestoneQuietAfter time.Duration `yaml:"milestone_quiet_after"`
-	GithubAPIBase       string        `yaml:"github_api_base"`
-	GithubCloneBase     string        `yaml:"github_clone_base"`
-	MergeGrace          time.Duration `yaml:"merge_grace"`
+	// ComposerBusyDeadline is how long delivery to one recipient is
+	// deferred while its composer holds what looks like an unsent human
+	// draft (see runtime.LooksLikeUserDraft). Until it passes, the message
+	// stays queued and burns no retry attempts — nothing is typed into a
+	// pane someone is typing into. Once it passes, delivery proceeds the
+	// old way (C-u clears the composer first), so a draft that was
+	// abandoned — or a false positive of the heuristic — cannot block that
+	// recipient's queue indefinitely. The global queue_timeout still
+	// applies on top and eventually fails the message. A zero value means
+	// "unset": consumers outside a loaded config fall back to
+	// DefaultComposerBusyDeadline.
+	ComposerBusyDeadline time.Duration `yaml:"composer_busy_deadline"`
+	GithubAPIBase        string        `yaml:"github_api_base"`
+	GithubCloneBase      string        `yaml:"github_clone_base"`
+	MergeGrace           time.Duration `yaml:"merge_grace"`
 	// AgentNotifyInterval is the anti-spam floor between two "N unread"
 	// notifications injected into the same live agent session. A fresh
 	// notification is only due at all once new unread messages have arrived
@@ -151,6 +169,7 @@ func Load(home string) (*Config, error) {
 		InputStallThreshold:       DefaultInputStallThreshold,
 		QuestionStaleAfter:        DefaultQuestionStaleAfter,
 		MilestoneQuietAfter:       DefaultMilestoneQuietAfter,
+		ComposerBusyDeadline:      DefaultComposerBusyDeadline,
 		GithubAPIBase:             "https://api.github.com",
 		GithubCloneBase:           "",
 		MergeGrace:                5 * time.Minute,

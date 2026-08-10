@@ -16,11 +16,17 @@ type fakeTmux struct {
 	pane string
 	// calls holds the argument list of every invocation, in order.
 	calls [][]string
+	// captureErr, when non-nil, is returned for every capture-pane call —
+	// an unreadable pane.
+	captureErr error
 }
 
 func (f *fakeTmux) run(ctx context.Context, args ...string) (string, string, error) {
 	f.calls = append(f.calls, args)
 	if len(args) > 0 && args[0] == "capture-pane" {
+		if f.captureErr != nil {
+			return "", "", f.captureErr
+		}
 		return f.pane, "", nil
 	}
 	return "", "", nil
@@ -84,7 +90,7 @@ func TestTmux_Inject_UnconfirmedButDelivered(t *testing.T) {
 	}, "\n")}
 	rt := newFakeRuntime(f)
 
-	err := rt.Inject(context.Background(), Handle{Name: "sess"}, "hello")
+	err := rt.Inject(context.Background(), Handle{Name: "sess"}, "hello", InjectOpts{})
 	if err != nil {
 		t.Fatalf("Inject: want nil (marker found in history), got %v", err)
 	}
@@ -114,7 +120,7 @@ func TestTmux_Inject_UnconfirmedAndStuck(t *testing.T) {
 	}, "\n")}
 	rt := newFakeRuntime(f)
 
-	err := rt.Inject(context.Background(), Handle{Name: "sess"}, "hello")
+	err := rt.Inject(context.Background(), Handle{Name: "sess"}, "hello", InjectOpts{})
 	if !errors.Is(err, ErrNotDelivered) {
 		t.Fatalf("Inject: want ErrNotDelivered, got %v", err)
 	}
@@ -165,7 +171,7 @@ func TestTmux_Inject_UnconfirmedAndUnknown(t *testing.T) {
 		return f.run(ctx, args...)
 	}
 
-	err := rt.Inject(context.Background(), Handle{Name: "sess"}, "hello")
+	err := rt.Inject(context.Background(), Handle{Name: "sess"}, "hello", InjectOpts{})
 	if !errors.Is(err, ErrSubmitUnconfirmed) {
 		t.Fatalf("Inject: want ErrSubmitUnconfirmed, got %v", err)
 	}

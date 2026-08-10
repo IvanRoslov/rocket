@@ -25,7 +25,9 @@ type fakeRuntime struct {
 func (f *fakeRuntime) Create(context.Context, runtime.CreateSpec) (runtime.Handle, error) {
 	return runtime.Handle{}, nil
 }
-func (f *fakeRuntime) Inject(context.Context, runtime.Handle, string) error          { return nil }
+func (f *fakeRuntime) Inject(context.Context, runtime.Handle, string, runtime.InjectOpts) error {
+	return nil
+}
 func (f *fakeRuntime) SendKeys(context.Context, runtime.Handle, string, bool) error  { return nil }
 func (f *fakeRuntime) Capture(context.Context, runtime.Handle, int) (string, error)  { return "", nil }
 func (f *fakeRuntime) Alive(context.Context, runtime.Handle) bool                    { return false }

@@ -40,6 +40,17 @@ var ErrSubmitUnconfirmed = errors.New("inject: submission unconfirmed after exha
 // record the message as delivered.
 var ErrNotDelivered = errors.New("inject: text was not delivered; composer cleared")
 
+// ErrComposerBusy is returned by Inject when the recipient's composer holds
+// what looks like an unsent draft a human is typing (see
+// LooksLikeUserDraft). Nothing was cleared, pasted or submitted: the guard
+// runs before the pre-paste C-u precisely so that the human's text survives.
+// Unlike ErrNotDelivered this is not a failed delivery attempt but a
+// deferral — the caller is expected to hold the message and try again
+// later, without burning a retry attempt, and to eventually fall back to
+// InjectOpts{Force: true} so an abandoned draft cannot block a queue
+// forever.
+var ErrComposerBusy = errors.New("inject: composer holds a user draft; nothing was cleared or sent")
+
 // nameRE is the set of characters permitted in a session name. It is
 // deliberately restrictive: session names are interpolated into tmux
 // targets as "=name", and tmux target syntax treats many characters
@@ -218,9 +229,30 @@ func (t *tmuxRuntime) Create(ctx context.Context, spec CreateSpec) (Handle, erro
 // error, since by that point the text has very likely already been
 // delivered to the target program even though Inject could not verify
 // it — see ErrSubmitUnconfirmed's doc comment for the caller contract.
-func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string) error {
+func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts InjectOpts) error {
 	if err := validateName(h.Name); err != nil {
 		return err
+	}
+
+	// 0. Draft guard. The C-u below is indiscriminate: it erases whatever
+	// sits on the input line, including a message a human is halfway
+	// through typing (which is exactly what it looked like to the person
+	// who lost their text). Check for that immediately before clearing —
+	// not in the caller — so the window between "looked free" and "cleared"
+	// stays as small as the two tmux calls that bracket it.
+	//
+	// Fail-open by design: a capture error, or any composer rendering
+	// LooksLikeUserDraft does not positively recognise, proceeds exactly
+	// as before the guard existed. The cost of a wrong "busy" is a delayed
+	// message (recoverable: the queue retries, and its busy-deadline forces
+	// delivery through), but the cost of a wrong "free" is destroyed human
+	// input — so the uncertain case must never be the destructive one.
+	if !opts.Force {
+		if out, _, err := t.run(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name)); err == nil {
+			if LooksLikeUserDraft(out) {
+				return fmt.Errorf("%w: session %q", ErrComposerBusy, h.Name)
+			}
+		}
 	}
 
 	// 1. Clear any existing draft on the input line. send-keys and

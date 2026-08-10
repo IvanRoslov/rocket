@@ -28,7 +28,7 @@ type systemFakeRuntime struct {
 func (f *systemFakeRuntime) Create(ctx context.Context, spec runtime.CreateSpec) (runtime.Handle, error) {
 	return runtime.Handle{Name: spec.Name}, nil
 }
-func (f *systemFakeRuntime) Inject(ctx context.Context, h runtime.Handle, text string) error {
+func (f *systemFakeRuntime) Inject(ctx context.Context, h runtime.Handle, text string, opts runtime.InjectOpts) error {
 	return nil
 }
 func (f *systemFakeRuntime) SendKeys(ctx context.Context, h runtime.Handle, key string, literal bool) error {

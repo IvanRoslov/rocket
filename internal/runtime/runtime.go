@@ -17,6 +17,17 @@ type CreateSpec struct {
 	Env     map[string]string
 }
 
+// InjectOpts tunes a single Inject call.
+type InjectOpts struct {
+	// Force skips the draft guard: Inject clears the composer with C-u
+	// even when it holds what looks like an unsent human draft, erasing
+	// it. Only the queue sets this, and only after the recipient's
+	// composer has looked busy for longer than composer_busy_deadline —
+	// otherwise one abandoned draft would block that recipient's queue
+	// forever.
+	Force bool
+}
+
 // Runtime manages agent sessions running inside a terminal multiplexer.
 //
 // These signatures are load-bearing: the session manager and phase 2
@@ -26,12 +37,15 @@ type Runtime interface {
 	// spec.Env set, and returns a Handle referring to it.
 	Create(ctx context.Context, spec CreateSpec) (Handle, error)
 	// Inject types text into the session's active pane and submits it.
-	// Beyond nil (submitted) it reports two distinct failure outcomes:
+	// Beyond nil (submitted) it reports three distinct failure outcomes:
 	// ErrNotDelivered — nothing was submitted and the composer has been
 	// cleared, so re-injecting is safe and the message must not be
-	// recorded as delivered; and ErrSubmitUnconfirmed — delivery could
-	// not be established either way, where re-injecting risks a duplicate.
-	Inject(ctx context.Context, h Handle, text string) error
+	// recorded as delivered; ErrSubmitUnconfirmed — delivery could
+	// not be established either way, where re-injecting risks a duplicate;
+	// and ErrComposerBusy — the composer holds an unsent human draft, so
+	// nothing at all was touched (see InjectOpts.Force for the escape
+	// hatch and the queue's busy-deadline for who uses it).
+	Inject(ctx context.Context, h Handle, text string, opts InjectOpts) error
 	// SendKeys sends a single logical key to the session's active pane via
 	// tmux send-keys: either a key name tmux recognizes (e.g. "Enter",
 	// "Tab", "Down", "Space", a bare digit) when literal is false, or raw

@@ -23,19 +23,45 @@ import (
 type fakeRuntime struct {
 	mu sync.Mutex
 
-	injectCalls []string // texts passed to Inject, in call order
+	injectCalls []string             // texts passed to Inject, in call order
+	injectOpts  []runtime.InjectOpts // options of each Inject call, same order
 	injectFn    func(callIdx int, h runtime.Handle, text string) error
 	captureFn   func(h runtime.Handle, lines int) (string, error)
+}
+
+// setInject and setCapture install per-call behaviour under the same lock
+// the delivery goroutine reads them through.
+func (f *fakeRuntime) setInject(fn func(callIdx int, h runtime.Handle, text string) error) {
+	f.mu.Lock()
+	f.injectFn = fn
+	f.mu.Unlock()
+}
+
+func (f *fakeRuntime) setCapture(fn func(h runtime.Handle, lines int) (string, error)) {
+	f.mu.Lock()
+	f.captureFn = fn
+	f.mu.Unlock()
+}
+
+// optsAt returns the InjectOpts of the i-th Inject call.
+func (f *fakeRuntime) optsAt(i int) runtime.InjectOpts {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if i >= len(f.injectOpts) {
+		return runtime.InjectOpts{}
+	}
+	return f.injectOpts[i]
 }
 
 func (f *fakeRuntime) Create(ctx context.Context, spec runtime.CreateSpec) (runtime.Handle, error) {
 	return runtime.Handle{Name: spec.Name}, nil
 }
 
-func (f *fakeRuntime) Inject(ctx context.Context, h runtime.Handle, text string) error {
+func (f *fakeRuntime) Inject(ctx context.Context, h runtime.Handle, text string, opts runtime.InjectOpts) error {
 	f.mu.Lock()
 	idx := len(f.injectCalls)
 	f.injectCalls = append(f.injectCalls, text)
+	f.injectOpts = append(f.injectOpts, opts)
 	fn := f.injectFn
 	f.mu.Unlock()
 

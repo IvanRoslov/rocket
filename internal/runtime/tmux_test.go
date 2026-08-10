@@ -59,7 +59,7 @@ func TestTmux_CreateInjectCaptureDestroy(t *testing.T) {
 		t.Fatalf("expected session alive after Create")
 	}
 
-	if err := rt.Inject(ctx, h, "hello"); err != nil {
+	if err := rt.Inject(ctx, h, "hello", InjectOpts{}); err != nil {
 		t.Fatalf("Inject: %v", err)
 	}
 
@@ -388,7 +388,7 @@ done`
 
 	done := make(chan error, 1)
 	go func() {
-		done <- rt.Inject(ctx, h, "hello")
+		done <- rt.Inject(ctx, h, "hello", InjectOpts{})
 	}()
 
 	select {
@@ -474,7 +474,7 @@ rm -f /tmp/hist.$$`
 
 	done := make(chan error, 1)
 	go func() {
-		done <- rt.Inject(ctx, h, "hello-marker")
+		done <- rt.Inject(ctx, h, "hello-marker", InjectOpts{})
 	}()
 
 	select {
@@ -510,7 +510,7 @@ func TestTmux_InvalidNameRejected(t *testing.T) {
 	if _, err := rt.Create(ctx, CreateSpec{Name: h.Name, Dir: t.TempDir(), Command: "cat"}); err == nil {
 		t.Fatalf("expected Create to reject invalid name")
 	}
-	if err := rt.Inject(ctx, h, "x"); err == nil {
+	if err := rt.Inject(ctx, h, "x", InjectOpts{}); err == nil {
 		t.Fatalf("expected Inject to reject invalid name")
 	}
 	if _, err := rt.Capture(ctx, h, 10); err == nil {
@@ -555,7 +555,7 @@ func TestTmux_Inject_SettlePauseForLargeText(t *testing.T) {
 		// echoes multi-line pastes idiosyncratically (each embedded newline
 		// acts like its own Enter), so don't assert on Inject's error here —
 		// only on whether the pause fired.
-		_ = rt.Inject(ctx, h, text)
+		_ = rt.Inject(ctx, h, text, InjectOpts{})
 
 		if len(calls) != 1 {
 			t.Fatalf("settleFn called %d times, want 1", len(calls))
@@ -582,7 +582,7 @@ func TestTmux_Inject_SettlePauseForLargeText(t *testing.T) {
 		}
 		text := strings.Join(lines, "\n")
 
-		_ = rt.Inject(ctx, h, text)
+		_ = rt.Inject(ctx, h, text, InjectOpts{})
 
 		if len(calls) != 0 {
 			t.Fatalf("settleFn called %d times, want 0", len(calls))
@@ -611,7 +611,7 @@ func TestTmux_Inject_SettlePauseCappedAt2s(t *testing.T) {
 	}
 	text := strings.Join(lines, "\n")
 
-	_ = rt.Inject(ctx, h, text)
+	_ = rt.Inject(ctx, h, text, InjectOpts{})
 
 	if len(calls) != 1 {
 		t.Fatalf("settleFn called %d times, want 1", len(calls))

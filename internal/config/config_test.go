@@ -70,6 +70,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.MilestoneQuietAfter != DefaultMilestoneQuietAfter {
 		t.Errorf("expected MilestoneQuietAfter %v, got %v", DefaultMilestoneQuietAfter, cfg.MilestoneQuietAfter)
 	}
+	if cfg.ComposerBusyDeadline != DefaultComposerBusyDeadline {
+		t.Errorf("expected ComposerBusyDeadline %v, got %v", DefaultComposerBusyDeadline, cfg.ComposerBusyDeadline)
+	}
 }
 
 func TestLoadWithConfig(t *testing.T) {
@@ -92,6 +95,7 @@ merge_grace: 10m
 input_stall_threshold: 3m
 question_stale_after: 6h
 milestone_quiet_after: 12h
+composer_busy_deadline: 2m
 `
 	configPath := filepath.Join(tempDir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
@@ -147,6 +151,9 @@ milestone_quiet_after: 12h
 	}
 	if cfg.MilestoneQuietAfter != 12*time.Hour {
 		t.Errorf("expected MilestoneQuietAfter 12h, got %v", cfg.MilestoneQuietAfter)
+	}
+	if cfg.ComposerBusyDeadline != 2*time.Minute {
+		t.Errorf("expected ComposerBusyDeadline 2m, got %v", cfg.ComposerBusyDeadline)
 	}
 }
 
