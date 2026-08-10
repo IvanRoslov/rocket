@@ -51,6 +51,12 @@ var ErrNotDelivered = errors.New("inject: text was not delivered; composer clear
 // forever.
 var ErrComposerBusy = errors.New("inject: composer holds a user draft; nothing was cleared or sent")
 
+// ErrHeldDialog reports that the recipient's pane is showing Claude Code's
+// held-peer-message approval dialog, so nothing was cleared or sent. Like
+// ErrComposerBusy this is a deferral, not a failure: the caller must put the
+// message back and try again once the dialog is gone.
+var ErrHeldDialog = errors.New("inject: recipient is showing a held-message dialog; nothing was cleared or sent")
+
 // nameRE is the set of characters permitted in a session name. It is
 // deliberately restrictive: session names are interpolated into tmux
 // targets as "=name", and tmux target syntax treats many characters
@@ -247,14 +253,27 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 	// message (recoverable: the queue retries, and its busy-deadline forces
 	// delivery through), but the cost of a wrong "free" is destroyed human
 	// input — so the uncertain case must never be the destructive one.
-	if !opts.Force {
-		// -e keeps the pane's escape sequences: the dim attribute is the
-		// only thing that tells a typed draft from Claude Code's ghost-text
-		// autosuggestion, which renders identically without it.
-		if out, _, err := t.run(ctx, "capture-pane", "-p", "-e", "-t", paneTarget(h.Name)); err == nil {
-			if LooksLikeUserDraft(out) {
-				return fmt.Errorf("%w: session %q", ErrComposerBusy, h.Name)
-			}
+	//
+	// The same capture also feeds the held-dialog guard below, which — unlike
+	// the draft guard — is NOT subject to opts.Force, so the capture happens
+	// unconditionally.
+	//
+	// -e keeps the pane's escape sequences: the dim attribute is the only
+	// thing that tells a typed draft from Claude Code's ghost-text
+	// autosuggestion, which renders identically without it.
+	if out, _, err := t.run(ctx, "capture-pane", "-p", "-e", "-t", paneTarget(h.Name)); err == nil {
+		// 0a. Held-dialog guard. While Claude Code's held-peer-message
+		// approval dialog is on screen, keystrokes drive its selector rather
+		// than the composer: the paste+Enter below would dismiss the dialog
+		// (dropping the held copy) AND never reach the conversation — both
+		// copies of the message lost. Force does not bypass this: it is the
+		// escape hatch for an abandoned draft, whose loss is recoverable,
+		// whereas this one never is.
+		if LooksLikeHeldPeerDialog(out) {
+			return fmt.Errorf("%w: session %q", ErrHeldDialog, h.Name)
+		}
+		if !opts.Force && LooksLikeUserDraft(out) {
+			return fmt.Errorf("%w: session %q", ErrComposerBusy, h.Name)
 		}
 	}
 
@@ -465,7 +484,12 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 		full, _, err := t.run(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name),
 			"-S", fmt.Sprintf("-%d", finalCheckScrollback))
 		if err == nil {
-			if ContainsMarker(history(trimTrailingBlank(full), confirmWindow), marker) {
+			// StripHeldPeerBanner first: a session that ever held one of our
+			// messages keeps a banner quoting that message's text back in its
+			// «preview» forever. Left in, it makes this check confirm a
+			// message that provably never reached the conversation — the
+			// exact non-delivery the held-dialog blocker exists to prevent.
+			if ContainsMarker(StripHeldPeerBanner(history(trimTrailingBlank(full), confirmWindow)), marker) {
 				// Delivered after all — never wipe a composer whose
 				// content actually went through.
 				return nil

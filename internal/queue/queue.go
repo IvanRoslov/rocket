@@ -426,23 +426,55 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 		force := false
 		if viaSocket {
 			busySince = time.Time{}
-		} else if out, capErr := q.rt.CaptureEscaped(ctx, runtime.Handle{Name: sess.TmuxName}, composerWindow); capErr == nil && runtime.LooksLikeUserDraft(out) {
-			if busySince.IsZero() {
-				busySince = time.Now()
-			}
-			if time.Since(busySince) < q.composerBusyDeadline() {
-				slog.Info("queue: recipient composer holds a user draft, deferring delivery",
-					"id", msg.ID, "to", msg.ToSession, "busy_for", time.Since(busySince).Round(time.Second))
+		} else {
+			out, capErr := q.rt.CaptureEscaped(ctx, runtime.Handle{Name: sess.TmuxName}, composerWindow)
+			switch {
+			case capErr != nil:
+				busySince = time.Time{}
+
+			case runtime.LooksLikeHeldPeerDialog(out):
+				// Held-dialog blocker. The recipient is showing Claude Code's
+				// held-peer-message approval dialog: typing into that pane
+				// drives the dialog's selector, not the composer, so the
+				// injection would dismiss it — dropping the held copy AND
+				// swallowing the injected text, while the dialog's scrollback
+				// banner quotes our own text back and makes the confirmation
+				// probe report "delivered". Hold the message exactly like the
+				// pending-quiz case above.
+				//
+				// Deliberately NOT subject to the composer busy-deadline: an
+				// abandoned draft is worth overwriting after a while, but
+				// forcing an injection through this dialog is precisely the
+				// data loss being prevented. The global queue_timeout is the
+				// backstop, so a pathological false positive fails the message
+				// visibly instead of blocking a queue forever.
+				busySince = time.Time{}
+				slog.Info("queue: recipient is showing a held-message dialog, deferring delivery",
+					"id", msg.ID, "to", msg.ToSession)
 				if !q.waitForReady(ctx, msg.ToSession) {
 					return // ctx cancelled
 				}
 				continue
+
+			case runtime.LooksLikeUserDraft(out):
+				if busySince.IsZero() {
+					busySince = time.Now()
+				}
+				if time.Since(busySince) < q.composerBusyDeadline() {
+					slog.Info("queue: recipient composer holds a user draft, deferring delivery",
+						"id", msg.ID, "to", msg.ToSession, "busy_for", time.Since(busySince).Round(time.Second))
+					if !q.waitForReady(ctx, msg.ToSession) {
+						return // ctx cancelled
+					}
+					continue
+				}
+				slog.Warn("queue: composer busy past the deadline, delivering anyway (draft will be cleared)",
+					"id", msg.ID, "to", msg.ToSession, "deadline", q.composerBusyDeadline())
+				force = true
+
+			default:
+				busySince = time.Time{}
 			}
-			slog.Warn("queue: composer busy past the deadline, delivering anyway (draft will be cleared)",
-				"id", msg.ID, "to", msg.ToSession, "deadline", q.composerBusyDeadline())
-			force = true
-		} else {
-			busySince = time.Time{}
 		}
 
 		if !q.attemptDelivery(ctx, msg, sess, force, viaSocket) {
@@ -560,12 +592,26 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 				// parked them for user approval, where they expire silently.
 				// Worth a warning — it means that worker's inbound policy is
 				// not the accept we spawn workers with.
-				slog.Warn("queue: recipient held the message, falling back to tmux injection",
+				//
+				// Do NOT inject in this same pass. A hold is precisely what
+				// puts the approval dialog on the recipient's screen, and it
+				// takes a moment to render: an injection racing it types into
+				// the dialog, which dismisses it — the held copy is dropped
+				// and the typed text never reaches the conversation, while
+				// the dialog's scrollback banner echoes our own text back and
+				// fools the delivery confirmation. Hand the message back
+				// untouched (no attempt consumed) and let deliver's
+				// held-dialog gate decide when the pane is safe again.
+				slog.Warn("queue: recipient held the message, deferring the tmux fallback until its dialog clears",
 					"id", msg.ID, "to", msg.ToSession, "error", sendErr)
-			} else {
-				slog.Info("queue: socket delivery failed, falling back to tmux injection",
-					"id", msg.ID, "to", msg.ToSession, "error", sendErr)
+				msg.Attempts--
+				if err := q.st.UpdateMessageStatus(msg.ID, "queued", msg.Attempts, 0, ""); err != nil {
+					slog.Error("queue: requeue message after a hold", "id", msg.ID, "error", err)
+				}
+				return false
 			}
+			slog.Info("queue: socket delivery failed, falling back to tmux injection",
+				"id", msg.ID, "to", msg.ToSession, "error", sendErr)
 			// Don't retry the socket on later attempts of this delivery: it
 			// just failed, and tmux is the fallback we want from here on.
 			viaSocket = false
@@ -592,6 +638,18 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 		case err == nil:
 			q.deliverSuccess(msg)
 			return true
+		case errors.Is(err, runtime.ErrHeldDialog):
+			// The held-message dialog opened between deliver's gate and
+			// Inject's own re-check. Nothing was cleared and nothing was
+			// sent, so — exactly like the composer-busy case below — this is
+			// a deferral, not an attempt.
+			msg.Attempts--
+			if err := q.st.UpdateMessageStatus(msg.ID, "queued", msg.Attempts, 0, ""); err != nil {
+				slog.Error("queue: requeue message after held-dialog refusal", "id", msg.ID, "error", err)
+			}
+			slog.Info("queue: held-message dialog opened mid-delivery, message requeued",
+				"id", msg.ID, "to", msg.ToSession)
+			return false
 		case errors.Is(err, runtime.ErrComposerBusy):
 			// The human started typing between deliver's probe and Inject's
 			// own guard. Nothing was cleared and nothing was sent, so this
@@ -821,6 +879,13 @@ func writeInboxFile(worktreePath string, id int64, body string) (string, error) 
 // markerPresent reports whether the last non-empty line of text is still
 // present in out (i.e. the injected text appears not to have been
 // submitted yet).
+//
+// Deliberately NOT filtered through runtime.StripHeldPeerBanner, unlike
+// Inject's final scrollback check. Here a match means "not submitted, retry",
+// so a held banner quoting our own text back can only cause a redelivery —
+// recoverable and visible. Stripping it would push the uncertain case toward
+// "delivered", which is the silent loss this whole change exists to prevent.
+// Its input is a 5-row tail anyway, where the banner rarely reaches.
 func markerPresent(out, text string) bool {
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
 	var marker string
