@@ -28,6 +28,7 @@ import (
 	"github.com/IvanRoslov/rocket/internal/queue"
 	"github.com/IvanRoslov/rocket/internal/runtime"
 	"github.com/IvanRoslov/rocket/internal/session"
+	"github.com/IvanRoslov/rocket/internal/socketmsg"
 	"github.com/IvanRoslov/rocket/internal/store"
 	"github.com/IvanRoslov/rocket/internal/workspace"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -74,6 +75,10 @@ func Run(cfg *config.Config) error {
 
 	mon := monitor.New(st, b, rt, cfg, agent.Get)
 	q := queue.New(st, b, rt, cfg, mon.Activity)
+	// Claude Code recipients get their messages over the cross-session UDS
+	// inbox whenever one is reachable; every other agent keeps using tmux, and
+	// so does this path whenever the socket is missing or refuses the write.
+	q.SetSocketSender(queue.NewClaudeSocketSender(socketmsg.SessionsDir()))
 	hb := heartbeat.New(st, b, cfg, mon.Activity, q.Wake)
 	ms := mirror.NewSyncer(st, cfg)
 	agentWatch := agentwatch.New(st, rt, cfg, mgr, q.Wake)
