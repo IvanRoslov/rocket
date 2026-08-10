@@ -57,7 +57,20 @@ type Config struct {
 	// (see internal/queue's deliver doc comment for why: injecting large
 	// pastes directly into the TUI intermittently loses them). Messages to
 	// recipients without a worktree always inject the full body.
-	LargeMessageThreshold     int           `yaml:"large_message_threshold"`
+	LargeMessageThreshold int `yaml:"large_message_threshold"`
+	// SocketDelivery enables delivering queued messages to Claude Code
+	// recipients over their cross-session UDS inbox instead of injecting text
+	// into their tmux pane (see internal/queue/socket.go). Socket delivery
+	// never sends C-u and never touches the recipient's composer, so it is
+	// the only path that can deliver while a human is mid-draft — the draft
+	// guard defers the tmux path in exactly that case.
+	//
+	// Any failure on the socket path falls back to tmux injection within the
+	// same attempt, so turning this off costs the draft-preserving property,
+	// never delivery itself. It is the escape hatch if the (reverse
+	// engineered) Claude Code protocol shifts under us — see
+	// docs/design/cc-socket-protocol.md §9.
+	SocketDelivery            bool          `yaml:"socket_delivery"`
 	WorkerStallThreshold      time.Duration `yaml:"worker_stall_threshold"`
 	QuestionReminderThreshold time.Duration `yaml:"question_reminder_threshold"`
 	// InputStallThreshold is how long a session may sit on interactive input
@@ -164,6 +177,7 @@ func Load(home string) (*Config, error) {
 		ReadyToIdle:               5 * time.Minute,
 		QueueTimeout:              30 * time.Minute,
 		LargeMessageThreshold:     2048,
+		SocketDelivery:            true,
 		WorkerStallThreshold:      15 * time.Minute,
 		QuestionReminderThreshold: 30 * time.Minute,
 		InputStallThreshold:       DefaultInputStallThreshold,
