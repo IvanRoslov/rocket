@@ -10,7 +10,9 @@
 
 ## Global Constraints
 
-- Rebase on latest `origin/main` before starting — `internal/socketmsg` must be present. (Already verified: HEAD is `ce5360d`.)
+- Rebase on latest `origin/main` before starting. Required ancestors: `ce5360d` (`internal/socketmsg`) and `d449e10` (draft guard, PR #69). Already done: this branch sits on `d449e10`.
+- Post-#69 interface facts this plan is written against: `Inject(ctx, h, text, opts runtime.InjectOpts)` takes a fourth argument; `runtime.ErrComposerBusy` means nothing was cleared or sent; `attemptDelivery(ctx, msg, sess, force) bool` returns `false` only for the composer-busy deferral; `config.ComposerBusyDeadline` exists.
+- **Socket delivery is exempt from the draft guard.** That exemption is the point of this task, not a side effect: #69 defers delivery while a human is typing, and the socket makes deferring unnecessary because it never touches the composer.
 - Registry match key: tmux prefix before `':'` in the registry entry's `tmux` field == `store.Session.TmuxName`. Additionally require `PeerProtocol == 1`, non-empty `MessagingSocketPath`, and a successful `socketmsg.Probe`. Any miss at any step → tmux injection.
 - Put the registry entry's `SessionID` into the message's `session_id` field (closes the pid-reuse race).
 - Do **not** set `from-mode`. Do **not** set `hop-chain` / `from-session`.
@@ -443,7 +445,7 @@ git commit -m "queue: add SocketSender seam and Claude Code registry lookup"
 
 `prepareText` is **not** changed: both transports carry the text it returns.
 
-**Behavior being built (the brief's matrix):**
+**Behavior being built (the brief's matrix, plus the draft-guard row #69 makes necessary):**
 
 | case | expectation |
 |---|---|
@@ -452,6 +454,8 @@ git commit -m "queue: add SocketSender seam and Claude Code registry lookup"
 | `socket_delivery: false` | straight to `Inject`; sender never consulted |
 | quiz pending + socket available | delivered over socket |
 | quiz pending + no socket | stays `queued`, no attempts burned |
+| composer holds a draft + socket available | delivered over socket, no deferral, draft untouched |
+| composer holds a draft + no socket | unchanged #69 behavior: deferred, stays `queued` |
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -609,6 +613,60 @@ func TestQuizPendingWithoutSocketStaysQueued(t *testing.T) {
 }
 ```
 
+Add the draft-guard pair. `#69`'s own tests show how to make `LooksLikeUserDraft` fire from a fake `Capture` — read `internal/queue/queue_test.go` for the exact pane fixture it uses and reuse that constant rather than inventing a new one:
+
+```go
+func TestComposerBusyDeliversOverSocket(t *testing.T) {
+	h := newQueueHarness(t)
+	h.sess.Agent = "claude-code"
+	h.putSession(h.sess)
+	h.act.set(h.sess.ID, activity.Idle)
+
+	// Recipient is mid-draft: the tmux path would defer for
+	// composer_busy_deadline. The socket must ignore that entirely.
+	h.rt.captureFn = func(runtime.Handle, int) (string, error) {
+		return draftPaneFixture, nil
+	}
+
+	sock := &fakeSocket{available: true}
+	h.q.SetSocketSender(sock)
+
+	id := h.enqueue("draft must survive")
+	h.waitStatus(id, "delivered")
+
+	if sock.sendCount() != 1 {
+		t.Errorf("socket sends = %d, want 1", sock.sendCount())
+	}
+	if n := h.rt.callCount(); n != 0 {
+		t.Errorf("Inject called %d times, want 0: the draft must never be cleared", n)
+	}
+}
+
+func TestComposerBusyWithoutSocketStillDefers(t *testing.T) {
+	h := newQueueHarness(t)
+	h.sess.Agent = "claude-code"
+	h.putSession(h.sess)
+	h.act.set(h.sess.ID, activity.Idle)
+
+	h.rt.captureFn = func(runtime.Handle, int) (string, error) {
+		return draftPaneFixture, nil
+	}
+
+	sock := &fakeSocket{available: false}
+	h.q.SetSocketSender(sock)
+
+	id := h.enqueue("no socket, draft on screen")
+	time.Sleep(300 * time.Millisecond)
+
+	if got := h.messageStatus(id); got != "queued" {
+		t.Errorf("status = %q, want queued: #69's draft guard must be untouched without a socket", got)
+	}
+	if n := h.rt.callCount(); n != 0 {
+		t.Errorf("Inject called %d times, want 0", n)
+	}
+}
+```
+
 This test file assumes a harness (`newQueueHarness`, `h.enqueue`, `h.waitStatus`, `h.messageStatus`, `h.messageAttempts`, `h.putSession`, fields `q`, `rt`, `act`, `cfg`, `sess`). Before writing the tests, read `internal/queue/queue_test.go` and reuse whatever setup helper already exists there; if the existing tests build their queue inline, extract that setup into `newQueueHarness` in `queue_test.go` first (a pure refactor — run `go test ./internal/queue/` before and after to confirm nothing changed) and only then write the file above against it. Do not duplicate a second harness.
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -643,10 +701,19 @@ func (q *Queue) socketReady(sess store.Session) bool {
 }
 ```
 
-3c. Replace the pending-quiz gate in `deliver` (currently lines 319-330) with:
+3c. Resolve the transport once per pass. Immediately after the `sess.State` switch in `deliver` (before the pending-quiz gate), insert:
 
 ```go
-		if sess.PendingQuiz != "" && !q.socketReady(sess) {
+		// Resolve the transport once per pass: it decides both gates below
+		// and the delivery itself, and each resolution costs a connect() to
+		// the recipient's socket.
+		viaSocket := q.socketReady(sess)
+```
+
+3d. Replace the pending-quiz gate in `deliver` with:
+
+```go
+		if sess.PendingQuiz != "" && !viaSocket {
 			// Recipient has a pending AskUserQuestion quiz on screen: text
 			// injected now would corrupt the TUI widget, and no socket is
 			// available to route around it. Hold the message (stays queued,
@@ -665,49 +732,90 @@ func (q *Queue) socketReady(sess store.Session) bool {
 		}
 ```
 
-3d. In `attemptDelivery`, leave the text preparation exactly as it is —
+3e. Exempt the socket from the draft guard in `deliver`. Wrap #69's draft-guard block (the `force := false` … `busySince = time.Time{}` stanza) so it only runs on the tmux path:
 
 ```go
+		// Draft guard — tmux path only. Socket delivery never sends C-u and
+		// never touches the composer, so there is no draft to protect and
+		// nothing to defer for: that is the whole reason this transport
+		// exists. Leaving busySince zero here is deliberate — a socket
+		// delivery must not accumulate "busyness" toward the force deadline.
+		force := false
+		if !viaSocket {
+			if out, capErr := q.rt.Capture(ctx, runtime.Handle{Name: sess.TmuxName}, composerWindow); capErr == nil && runtime.LooksLikeUserDraft(out) {
+				if busySince.IsZero() {
+					busySince = time.Now()
+				}
+				if time.Since(busySince) < q.composerBusyDeadline() {
+					slog.Info("queue: recipient composer holds a user draft, deferring delivery",
+						"id", msg.ID, "to", msg.ToSession, "busy_for", time.Since(busySince).Round(time.Second))
+					if !q.waitForReady(ctx, msg.ToSession) {
+						return // ctx cancelled
+					}
+					continue
+				}
+				slog.Warn("queue: composer busy past the deadline, delivering anyway (draft will be cleared)",
+					"id", msg.ID, "to", msg.ToSession, "deadline", q.composerBusyDeadline())
+				force = true
+			} else {
+				busySince = time.Time{}
+			}
+		}
+```
+
+Then pass the transport into the call below it:
+
+```go
+		if !q.attemptDelivery(ctx, msg, sess, force, viaSocket) {
+```
+
+3f. In `attemptDelivery`, widen the signature and add the socket attempt. The head becomes:
+
+```go
+func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess store.Session, force, viaSocket bool) bool {
 	handle := runtime.Handle{Name: sess.TmuxName}
 	text := q.prepareText(msg, sess)
 ```
 
-— because both transports deliver that same text. Replace only the injection line:
-
-```go
-		err := q.rt.Inject(ctx, handle, text)
-```
-
-with:
+Text preparation is unchanged — both transports deliver exactly that text. Inside the retry loop, insert the socket attempt directly above the `Inject` call:
 
 ```go
 		// Socket first: it delivers without touching the composer, so a
-		// half-typed human draft survives. Any failure here is not the
-		// message's failure — fall through to tmux within this same attempt.
-		if q.socketReady(sess) {
-			if sendErr := q.socket.Send(sess, socketFromName(msg), text); sendErr == nil {
+		// half-typed human draft survives. A socket failure is not the
+		// message's failure — fall through to tmux in this same attempt.
+		if viaSocket {
+			sendErr := q.socket.Send(sess, socketFromName(msg), text)
+			if sendErr == nil {
 				q.deliverSuccess(msg)
-				return
-			} else {
-				slog.Info("queue: socket delivery failed, falling back to tmux injection",
-					"id", msg.ID, "to", msg.ToSession, "error", sendErr)
+				return true
 			}
-		} else if sess.PendingQuiz != "" {
-			// The socket vanished between deliver()'s gate and here, and a
-			// quiz is on screen: injecting would corrupt the widget. Treat
-			// it as a retryable attempt rather than injecting anyway.
-			slog.Info("queue: socket unavailable during pending quiz, deferring",
-				"id", msg.ID, "to", msg.ToSession)
-			if !sleepCtx(ctx, q.backoff(msg.Attempts)) {
-				return
+			slog.Info("queue: socket delivery failed, falling back to tmux injection",
+				"id", msg.ID, "to", msg.ToSession, "error", sendErr)
+			// Don't retry the socket on later attempts of this delivery: it
+			// just failed, and Inject is the fallback we want from here on.
+			viaSocket = false
+
+			if sess.PendingQuiz != "" {
+				// The socket died between deliver's gate and here, and a quiz
+				// is on screen: injecting would corrupt the widget. Hand the
+				// message back exactly like the composer-busy deferral does —
+				// nothing was sent, so no attempt is consumed.
+				msg.Attempts--
+				if err := q.st.UpdateMessageStatus(msg.ID, "queued", msg.Attempts, 0, ""); err != nil {
+					slog.Error("queue: requeue message after socket loss during quiz", "id", msg.ID, "error", err)
+				}
+				slog.Info("queue: socket lost during a pending quiz, message requeued",
+					"id", msg.ID, "to", msg.ToSession)
+				return false
 			}
-			continue
 		}
 
-		err := q.rt.Inject(ctx, handle, text)
+		err := q.rt.Inject(ctx, handle, text, runtime.InjectOpts{Force: force})
 ```
 
-3e. Add `socketFromName` next to `formatBody`:
+Note what this buys for free: if the socket fails while a *draft* (not a quiz) is on screen, the code falls through to `Inject`, whose own guard returns `ErrComposerBusy`, and #69's existing branch requeues the message untouched. The next pass re-evaluates with `viaSocket` false and the draft guard applies normally.
+
+3g. Add `socketFromName` next to `formatBody`:
 
 ```go
 // socketFromName is the display name the recipient sees for this message:
@@ -793,11 +901,13 @@ Replace the `доставщик` block (lines 16-22) with:
 ```
 доставщик (в демоне, пер-получатель):
   ждёт activity получателя ∈ {ready, idle, waiting_input}
-  → status=delivering
+  → выбор транспорта (один раз за проход)
   → транспорт 1: сокет Claude Code (если доступен)
+       # composer не трогаем: ни draft guard, ни pending-квиз не блокируют
        socketmsg.Send(<сокет получателя>, "[from <from>] <body>")
        → успешная запись = delivered
   → транспорт 2 (фолбэк, при любой ошибке выше):
+       проверка черновика в composer'е: занят — остаёмся в queued (draft guard)
        runtime.Inject(получатель, "[from <from>] <body>")  # C-u, paste-buffer, адаптивный Enter
        → подтверждение: черновик покинул composer (capture-pane)
   → status=delivered, событие message.delivered
@@ -835,7 +945,15 @@ Insert a new section before «Почему всё же инжекция в те�
 **Конфиг.** `socket_delivery: false` в `config.yaml` выключает транспорт целиком — вся доставка идёт через tmux. Выключение не ломает доставку, а лишь возвращает старое поведение со стиранием черновика.
 ```
 
-- [ ] **Step 3: Update the pending-quiz rule**
+- [ ] **Step 3: Update the draft-guard rule (line 30)**
+
+The draft guard is now a tmux-path rule. Append to that bullet:
+
+```markdown
+Всё это относится к tmux-пути. Если получатель достижим по сокету Claude Code (см. «Транспорты доставки»), гвард не применяется вовсе: сокет не шлёт `C-u` и не трогает строку ввода, поэтому черновик человека переживает доставку без всякого откладывания — сообщение приходит сразу, черновик остаётся на месте. `composer_busy_deadline` при этом не тикает: «занятость» копится только на tmux-пути, где ей есть что стирать. Именно ради этого сценария транспорт и делался.
+```
+
+- [ ] **Step 4: Update the pending-quiz rule**
 
 Replace the «Pending-квиз блокирует доставку» bullet (line 28) with:
 
@@ -843,7 +961,7 @@ Replace the «Pending-квиз блокирует доставку» bullet (lin
 - **Pending-квиз блокирует tmux-доставку, но не сокет.** Пока у получателя открыт TUI-квиз AskUserQuestion (`pending_quiz` сессии непустой — см. [13-chat.md](13-chat.md), раздел «Квизы»), инжекция текста сломала бы виджет, поэтому tmux-путь закрыт. Если доступен сокет — сообщение доставляется по нему прямо во время квиза: он не трогает TUI. Если сокета нет, сообщение остаётся `queued`: попытки не тратятся, `failed` не ставится. После закрытия квиза (`session.quiz_resolved`) доставка возобновляется сразу — событие будит воркер очереди, 2-секундный фолбэк-тикер страхует.
 ```
 
-- [ ] **Step 4: Update the closing section**
+- [ ] **Step 5: Update the closing section**
 
 In «Почему всё же инжекция в терминал, а не „настоящий“ канал», append:
 
@@ -851,7 +969,7 @@ In «Почему всё же инжекция в терминал, а не „�
 Обновление: у Claude Code такой канал появился — cross-session UDS-инбокс, и rocket уже предпочитает его инжекции (см. «Транспорты доставки»). Модель данных очереди при этом не изменилась, что и предсказывал абзац выше: транспорт встал за тот же интерфейс. Инжекция остаётся универсальным фолбэком для всех остальных агентов и для сессий Claude Code без живого сокета.
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add docs/06-messaging.md
