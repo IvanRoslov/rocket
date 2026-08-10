@@ -25,8 +25,9 @@ type LaunchSpec struct {
 
 ## Адаптер claude-code (основной)
 
-- **Launch:** `claude --dangerously-skip-permissions --append-system-prompt "$(cat <prompt-file>)" [-–model X] -- "<first message>"` — позиционный аргумент авто-сабмитит первый ход, оставляя интерактивный режим.
-- **Env:** `CLAUDECODE=""` (анти-nesting) + стандартные ROCKET_*.
+- **Launch:** `claude --dangerously-skip-permissions --settings '{"crossSessionInbound":"accept"}' --append-system-prompt "$(cat <prompt-file>)" [-–model X] -- "<first message>"` — позиционный аргумент авто-сабмитит первый ход, оставляя интерактивный режим.
+- **`--settings`:** инлайновый JSON на сессию. `crossSessionInbound: "accept"` нужен, чтобы входящие cross-session сообщения (через них rocket доставляет очередь) сразу попадали агенту. Без явного `accept` сессия с обойдёнными правами (а это все воркеры) *придерживает* сообщение до подтверждения человеком — и оно молча протухает. Настройка идёт именно флагом, а не через `.claude/settings.local.json` в worktree: repo-уровень может только *ужесточать* `crossSessionInbound`, поэтому `accept` оттуда был бы проигнорирован.
+- **Env:** `CLAUDECODE=""` (анти-nesting) + стандартные ROCKET_*. Ни spawn-env, ни командная строка не выставляют `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_TELEMETRY`, `DO_NOT_TRACK`, `DISABLE_GROWTHBOOK`: они выключают вычисление feature-флагов, а cross-session messaging живёт за флагом — inbox сессии просто не поднимется (на это есть тесты).
 - **SetupWorkspace:** идемпотентный upsert `.claude/settings.json` в worktree — hook-скрипт активности (`SessionStart/Stop/PreToolUse/PostToolUse/Notification/...` → `POST /v1/internal/activity` через `curl --unix-socket`).
 - **Superpowers:** промпты rocket ([prompts/](../docs/prompts/)) требуют от агентов навыков плагина Superpowers (brainstorming, writing-plans, TDD, systematic-debugging, verification-before-completion). Для claude-code это предусловие: `rocket doctor` проверяет, что плагин установлен, и предупреждает, если нет. Для агентов без поддержки skills секции про Superpowers из промптов вырезаются адаптером (шаблоны помечают их условным блоком `{{#if skills}}`).
 - **Activity:** нативный JSONL-транскрипт `~/.claude/projects/<путь-как-slug>/*.jsonl`: тип последней записи + mtime → active/ready/idle/blocked; push-hooks дают waiting_input.

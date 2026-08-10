@@ -480,9 +480,34 @@ func lockClaudeJSON(path string) (func(), error) {
 	}, nil
 }
 
+// sessionSettingsJSON is the inline settings document rocket passes to every
+// spawned Claude Code session via --settings.
+//
+// crossSessionInbound: rocket delivers queue messages into a session's
+// cross-session inbox. With the setting unset, Claude Code falls back to
+// permission-mode parity: a sender that asserts no permission-mode class has
+// its message *held* for the user's approval whenever the receiving session
+// bypasses permission prompts — which every rocket worker does
+// (--dangerously-skip-permissions). Nobody sits at a worker's terminal, so a
+// held message just expires unseen. "accept" delivers it instead.
+//
+// This goes through --settings rather than the worktree's
+// .claude/settings.local.json on purpose: repo-level settings may only
+// *tighten* crossSessionInbound, so an "accept" written there would be
+// ignored. Only the flag/user/managed sources can loosen it, and the flag is
+// the one rocket owns per session.
+const sessionSettingsJSON = `{"crossSessionInbound":"accept"}`
+
 // LaunchCommand builds the command to launch claude with the given spec.
+//
+// Note what this command deliberately does NOT carry: none of
+// CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, DISABLE_TELEMETRY, DO_NOT_TRACK
+// or DISABLE_GROWTHBOOK. Those switch off Claude Code's feature-flag
+// evaluation, and cross-session messaging is gated behind a feature flag, so
+// setting any of them would silently disable the session's inbox — the very
+// channel sessionSettingsJSON opens up. Same for Env below.
 func (c *ClaudeCode) LaunchCommand(spec agent.LaunchSpec) []string {
-	cmd := []string{"claude", "--dangerously-skip-permissions"}
+	cmd := []string{"claude", "--dangerously-skip-permissions", "--settings", sessionSettingsJSON}
 
 	if spec.SystemPrompt != "" {
 		cmd = append(cmd, "--append-system-prompt", spec.SystemPrompt)
