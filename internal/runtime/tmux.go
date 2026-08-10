@@ -248,7 +248,10 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 	// delivery through), but the cost of a wrong "free" is destroyed human
 	// input — so the uncertain case must never be the destructive one.
 	if !opts.Force {
-		if out, _, err := t.run(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name)); err == nil {
+		// -e keeps the pane's escape sequences: the dim attribute is the
+		// only thing that tells a typed draft from Claude Code's ghost-text
+		// autosuggestion, which renders identically without it.
+		if out, _, err := t.run(ctx, "capture-pane", "-p", "-e", "-t", paneTarget(h.Name)); err == nil {
 			if LooksLikeUserDraft(out) {
 				return fmt.Errorf("%w: session %q", ErrComposerBusy, h.Name)
 			}
@@ -661,6 +664,22 @@ func (t *tmuxRuntime) Capture(ctx context.Context, h Handle, lines int) (string,
 		return "", fmt.Errorf("capture pane %q: %w", h.Name, err)
 	}
 	return tailLines(trimTrailingBlank(out), lines), nil
+}
+
+// CaptureEscaped is Capture with `-e`, so the pane comes back with its ANSI
+// escape sequences intact. Blank-padding is trimmed on each row's VISIBLE
+// text: with escapes kept, an unwritten row still carries the sequences tmux
+// re-emits per line, and a byte-level blankness check would count it as
+// content and push the composer out of the window.
+func (t *tmuxRuntime) CaptureEscaped(ctx context.Context, h Handle, lines int) (string, error) {
+	if err := validateName(h.Name); err != nil {
+		return "", err
+	}
+	out, _, err := runTmux(ctx, "capture-pane", "-p", "-e", "-t", paneTarget(h.Name), "-S", fmt.Sprintf("-%d", lines))
+	if err != nil {
+		return "", fmt.Errorf("capture pane %q: %w", h.Name, err)
+	}
+	return tailVisibleLines(out, lines), nil
 }
 
 func (t *tmuxRuntime) Alive(ctx context.Context, h Handle) bool {

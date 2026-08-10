@@ -1130,3 +1130,15 @@ func TestPollSessionNoInputWaitClaimSkipsPaneCheck(t *testing.T) {
 		t.Fatalf("activity = %q, want active (pane prompt must not set waiting_input)", got)
 	}
 }
+
+// CaptureEscaped serves the same pane as Capture: these fakes carry no
+// escape sequences, which is what the draft guard treats conservatively.
+func (f *fakeRuntime) CaptureEscaped(ctx context.Context, h runtime.Handle, lines int) (string, error) {
+	return f.Capture(ctx, h, lines)
+}
+
+// CaptureEscaped serves the same pane as Capture: these fakes carry no
+// escape sequences, which is what the draft guard treats conservatively.
+func (f *quizFakeRuntime) CaptureEscaped(ctx context.Context, h runtime.Handle, lines int) (string, error) {
+	return f.Capture(ctx, h, lines)
+}

@@ -319,6 +319,23 @@ func trimTrailingBlankLines(lines []paneLine) []paneLine {
 	return lines[:end]
 }
 
+// tailVisibleLines is tailLines+trimTrailingBlank for a capture that still
+// carries escape sequences: it drops trailing rows with no VISIBLE text and
+// returns the last n rows unchanged — raw bytes, attributes and all.
+func tailVisibleLines(pane string, n int) string {
+	raw := strings.Split(pane, "\n")
+	parsed := parsePane(pane)
+	end := len(raw)
+	for end > 0 && strings.TrimSpace(parsed[end-1].text()) == "" {
+		end--
+	}
+	raw = raw[:end]
+	if len(raw) > n {
+		raw = raw[len(raw)-n:]
+	}
+	return strings.Join(raw, "\n")
+}
+
 // tailPaneLines is tailLines over parsed rows.
 func tailPaneLines(lines []paneLine, n int) []paneLine {
 	if len(lines) <= n {

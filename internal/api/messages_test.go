@@ -470,3 +470,9 @@ func TestPostMessage_UnknownRecipientStill404(t *testing.T) {
 	}
 	resp.Body.Close()
 }
+
+// CaptureEscaped serves the same pane as Capture: these fakes carry no
+// escape sequences, which is what the draft guard treats conservatively.
+func (r msgFakeRuntime) CaptureEscaped(ctx context.Context, h runtime.Handle, lines int) (string, error) {
+	return r.Capture(ctx, h, lines)
+}

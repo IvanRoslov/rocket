@@ -426,7 +426,7 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 		force := false
 		if viaSocket {
 			busySince = time.Time{}
-		} else if out, capErr := q.rt.Capture(ctx, runtime.Handle{Name: sess.TmuxName}, composerWindow); capErr == nil && runtime.LooksLikeUserDraft(out) {
+		} else if out, capErr := q.rt.CaptureEscaped(ctx, runtime.Handle{Name: sess.TmuxName}, composerWindow); capErr == nil && runtime.LooksLikeUserDraft(out) {
 			if busySince.IsZero() {
 				busySince = time.Now()
 			}

@@ -1452,3 +1452,9 @@ func TestComplete_IdempotentOnAlreadyDone(t *testing.T) {
 		t.Errorf("workspace.Destroy should still run on idempotent Complete: %v", ws.destroyed)
 	}
 }
+
+// CaptureEscaped serves the same pane as Capture: these fakes carry no
+// escape sequences, which is what the draft guard treats conservatively.
+func (f *fakeRuntime) CaptureEscaped(ctx context.Context, h runtime.Handle, lines int) (string, error) {
+	return f.Capture(ctx, h, lines)
+}
