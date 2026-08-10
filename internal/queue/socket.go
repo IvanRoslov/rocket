@@ -2,7 +2,12 @@ package queue
 
 import (
 	"errors"
+	"fmt"
+	"log/slog"
+	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/IvanRoslov/rocket/internal/socketmsg"
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -43,17 +48,56 @@ type ClaudeSocketSender struct {
 	// sessionsDir is the Claude Code session registry directory
 	// (~/.claude/sessions by default).
 	sessionsDir string
+
+	// receipts is rocket's own listening socket, advertised as the reply
+	// address so the recipient can tell us a message was held. nil disables
+	// the wait entirely: we write and hope, which is the pre-receipt behavior.
+	receipts *socketmsg.Receipts
+
+	// heldWait overrides defaultHeldWait; tests shorten or lengthen it.
+	heldWait time.Duration
+
+	// heldSessions remembers Claude sessionIds that held a message. Its
+	// lifetime is deliberately the daemon's: a sessionId is a fresh UUID per
+	// claude process, so the memory expires by construction when the worker
+	// restarts, and a daemon restart costs at most one more wait per session.
+	heldMu       sync.Mutex
+	heldSessions map[string]bool
 }
 
 // NewClaudeSocketSender builds a sender reading the registry at sessionsDir.
 // Pass socketmsg.SessionsDir() for the real one.
 func NewClaudeSocketSender(sessionsDir string) *ClaudeSocketSender {
-	return &ClaudeSocketSender{sessionsDir: sessionsDir}
+	return &ClaudeSocketSender{
+		sessionsDir:  sessionsDir,
+		heldWait:     defaultHeldWait,
+		heldSessions: make(map[string]bool),
+	}
 }
+
+// SetReceipts installs the reply channel. It is called once during daemon
+// wiring, before delivery starts.
+func (s *ClaudeSocketSender) SetReceipts(r *socketmsg.Receipts) { s.receipts = r }
 
 // ErrNoSocket reports that a session has no reachable Claude Code socket. The
 // queue turns it into a tmux injection, never into a delivery failure.
 var ErrNoSocket = errors.New("queue: no live claude code socket for recipient")
+
+// ErrHeld reports that the recipient accepted the bytes but did NOT queue the
+// message: it sits in their hold buffer awaiting the user's approval, and if
+// nobody approves it, it expires silently after a few minutes (protocol doc
+// §6). That is a non-delivery, so the queue must treat it exactly like a
+// socket failure and fall back to tmux injection.
+var ErrHeld = errors.New("queue: recipient held the message for user approval")
+
+// defaultHeldWait is how long Send waits for a peer_message_status receipt
+// after the write. The recipient emits `held` immediately from its inbound
+// handler, so this only has to cover a local UDS round trip plus a busy Node
+// event loop. Silence means accept — an accepted message never produces a
+// receipt at all — so this window is pure added latency on the happy path and
+// must stay small. It is paid at most once per recipient process, thanks to
+// heldSessions.
+const defaultHeldWait = 2 * time.Second
 
 // Available implements SocketSender.
 func (s *ClaudeSocketSender) Available(sess store.Session) bool {
@@ -67,22 +111,113 @@ func (s *ClaudeSocketSender) Send(sess store.Session, fromName, text string) err
 	if !ok {
 		return ErrNoSocket
 	}
-	_, err := socketmsg.Send(cc.MessagingSocketPath, text, socketmsg.Options{
+	// The reply address, the msg id and the waiter must all exist BEFORE the
+	// write: the `held` receipt is emitted from the recipient's inbound
+	// handler and can land before Send returns.
+	//
+	// The address has to sit in the recipient's own socket directory and end
+	// in .sock or the receipt is silently never sent (protocol doc §7) —
+	// hence deriving the directory from the recipient's path.
+	var (
+		from   string
+		msgID  string
+		wait   <-chan socketmsg.Message
+		cancel = func() {}
+	)
+	if s.receipts != nil {
+		addr, addrErr := s.receipts.Addr(filepath.Dir(cc.MessagingSocketPath))
+		id, idErr := socketmsg.NewMsgID()
+		switch {
+		case addrErr != nil:
+			// No reply channel: deliver blind rather than not at all.
+			slog.Warn("queue: no receipt listener, socket delivery cannot detect a hold",
+				"error", addrErr)
+		case idErr != nil:
+			slog.Warn("queue: cannot mint a msg id for receipt correlation", "error", idErr)
+		default:
+			from, msgID = addr, id
+			wait, cancel = s.receipts.Watch(id)
+		}
+	}
+	defer cancel()
+
+	if _, err := socketmsg.Send(cc.MessagingSocketPath, text, socketmsg.Options{
+		From:     from,
+		MsgID:    msgID,
 		FromName: fromName,
 		Priority: socketmsg.PriorityNext,
 		// Pin the recipient's identity: if the pid was recycled between the
 		// registry read and this write, the new owner of the socket drops the
 		// message instead of showing a stranger's text (protocol doc §8).
 		SessionID: cc.SessionID,
-		// From is deliberately empty: rocket does not listen for receipts,
-		// and receipts only exist for the held path, which rocket-spawned
-		// workers never take (they run with crossSessionInbound=accept).
-		//
-		// from-mode is likewise never asserted — claiming "bypass" would let
-		// our messages through a bypass-mode recipient's guard with
-		// privileges we have no business claiming (protocol doc §5.2).
-	})
+		// from-mode is deliberately never asserted — claiming "bypass" would
+		// let our messages through a bypass-mode recipient's guard with
+		// privileges we have no business claiming (protocol doc §5.2). We
+		// take the hold and route around it instead.
+	}); err != nil {
+		return err
+	}
+
+	if wait == nil {
+		return nil
+	}
+	err := s.awaitReceipt(wait)
+	if errors.Is(err, ErrHeld) {
+		s.rememberHeld(cc.SessionID)
+	}
 	return err
+}
+
+// awaitReceipt turns the recipient's verdict into an error, or nil.
+//
+// Silence is success: `accept` never produces a receipt (protocol doc §7), so
+// the only thing this window can realistically catch is a hold, which is
+// emitted at once. `denied`/`expired` only ever follow a `held` we already
+// reacted to, but they are handled here too in case one races into the window.
+func (s *ClaudeSocketSender) awaitReceipt(wait <-chan socketmsg.Message) error {
+	window := s.heldWait
+	if window <= 0 {
+		window = defaultHeldWait
+	}
+	timer := time.NewTimer(window)
+	defer timer.Stop()
+	select {
+	case m := <-wait:
+		switch m.Status {
+		case "held", "denied", "expired":
+			return fmt.Errorf("%w (status %s)", ErrHeld, m.Status)
+		default:
+			// "delivered" (the user approved it before our window closed) and
+			// anything unknown: the message is in the recipient's queue.
+			return nil
+		}
+	case <-timer.C:
+		return nil
+	}
+}
+
+// rememberHeld records that sessionID holds peer messages, so later deliveries
+// skip the socket instead of paying the wait again.
+func (s *ClaudeSocketSender) rememberHeld(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	s.heldMu.Lock()
+	defer s.heldMu.Unlock()
+	if s.heldSessions == nil {
+		s.heldSessions = make(map[string]bool)
+	}
+	if !s.heldSessions[sessionID] {
+		slog.Warn("queue: recipient holds peer messages, preferring tmux for it from now on",
+			"claude_session_id", sessionID)
+	}
+	s.heldSessions[sessionID] = true
+}
+
+func (s *ClaudeSocketSender) heldRecently(sessionID string) bool {
+	s.heldMu.Lock()
+	defer s.heldMu.Unlock()
+	return s.heldSessions[sessionID]
 }
 
 // lookup resolves sess to a live Claude Code registry entry.
@@ -127,6 +262,12 @@ func (s *ClaudeSocketSender) lookup(sess store.Session) (socketmsg.Session, bool
 		found++
 	}
 	if found != 1 {
+		return socketmsg.Session{}, false
+	}
+	if s.heldRecently(match.SessionID) {
+		// This process already held one of our messages. Its inbound policy
+		// cannot change while it lives, so the socket is a dead end for it:
+		// report no match and let tmux carry everything from here.
 		return socketmsg.Session{}, false
 	}
 	return match, true

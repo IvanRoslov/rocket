@@ -351,3 +351,27 @@ func TestSocketLostDuringQuizRequeues(t *testing.T) {
 		t.Errorf("attempts = %d, want 0: a deferral is not a failed attempt", m.Attempts)
 	}
 }
+
+// TestHeldMessageFallsBackToInject pins the hole this whole receipt channel
+// exists to close: the recipient held the message instead of queueing it, and
+// rocket used to mark that "delivered". ErrHeld must send the delivery down
+// the tmux path in the same attempt, so the message actually arrives.
+func TestHeldMessageFallsBackToInject(t *testing.T) {
+	h := newTestQueue(t)
+	h.addRunningSession(t, "recv", activity.Idle)
+
+	sock := &fakeSocket{available: true, sendErr: ErrHeld}
+	h.q.SetSocketSender(sock)
+
+	id, err := h.st.AddMessage(store.Message{FromSession: "orch", ToSession: "recv", Body: "важное"})
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+	h.q.Wake("recv")
+
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" },
+		"delivered via tmux after a hold")
+	if n := h.rt.callCount(); n != 1 {
+		t.Errorf("Inject called %d times, want 1 — a held message must go out over tmux", n)
+	}
+}

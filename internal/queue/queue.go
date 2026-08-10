@@ -555,8 +555,17 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 				q.deliverSuccess(msg)
 				return true
 			}
-			slog.Info("queue: socket delivery failed, falling back to tmux injection",
-				"id", msg.ID, "to", msg.ToSession, "error", sendErr)
+			if errors.Is(sendErr, ErrHeld) {
+				// Not a transport failure: the recipient took the bytes and
+				// parked them for user approval, where they expire silently.
+				// Worth a warning — it means that worker's inbound policy is
+				// not the accept we spawn workers with.
+				slog.Warn("queue: recipient held the message, falling back to tmux injection",
+					"id", msg.ID, "to", msg.ToSession, "error", sendErr)
+			} else {
+				slog.Info("queue: socket delivery failed, falling back to tmux injection",
+					"id", msg.ID, "to", msg.ToSession, "error", sendErr)
+			}
 			// Don't retry the socket on later attempts of this delivery: it
 			// just failed, and tmux is the fallback we want from here on.
 			viaSocket = false

@@ -77,8 +77,17 @@ func Run(cfg *config.Config) error {
 	q := queue.New(st, b, rt, cfg, mon.Activity)
 	// Claude Code recipients get their messages over the cross-session UDS
 	// inbox whenever one is reachable; every other agent keeps using tmux, and
-	// so does this path whenever the socket is missing or refuses the write.
-	q.SetSocketSender(queue.NewClaudeSocketSender(socketmsg.SessionsDir()))
+	// so does this path whenever the socket is missing, refuses the write, or
+	// the recipient holds the message for the user's approval.
+	//
+	// receipts is rocket's own listening socket: it is the only way to learn
+	// about a hold, and it is created lazily inside the recipient's socket
+	// directory, because that is where the CLI is willing to send receipts.
+	receipts := socketmsg.NewReceipts("rocketd")
+	defer receipts.Close()
+	socketSender := queue.NewClaudeSocketSender(socketmsg.SessionsDir())
+	socketSender.SetReceipts(receipts)
+	q.SetSocketSender(socketSender)
 	hb := heartbeat.New(st, b, cfg, mon.Activity, q.Wake)
 	ms := mirror.NewSyncer(st, cfg)
 	agentWatch := agentwatch.New(st, rt, cfg, mgr, q.Wake)
