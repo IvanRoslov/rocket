@@ -879,6 +879,13 @@ func writeInboxFile(worktreePath string, id int64, body string) (string, error) 
 // markerPresent reports whether the last non-empty line of text is still
 // present in out (i.e. the injected text appears not to have been
 // submitted yet).
+//
+// Deliberately NOT filtered through runtime.StripHeldPeerBanner, unlike
+// Inject's final scrollback check. Here a match means "not submitted, retry",
+// so a held banner quoting our own text back can only cause a redelivery —
+// recoverable and visible. Stripping it would push the uncertain case toward
+// "delivered", which is the silent loss this whole change exists to prevent.
+// Its input is a 5-row tail anyway, where the banner rarely reaches.
 func markerPresent(out, text string) bool {
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
 	var marker string

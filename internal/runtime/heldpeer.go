@@ -27,6 +27,41 @@ var heldDialogOptions = []string{
 // «preview» quotes the injected text back and false-matches the marker.
 const heldBannerMarker = "Held peer message —"
 
+// StripHeldPeerBanner removes every held-peer-message banner block from a
+// pane capture, so a delivery-confirmation search cannot match the message
+// text the banner quotes back in its «preview».
+//
+// This is the second half of the same bug: even with the blocker in place, a
+// session that ever held one of our messages keeps that banner in its
+// scrollback forever, and Inject's final check looks for the marker across
+// the scrollback. Matching it there turns a message that was never delivered
+// into a "delivered".
+//
+// A banner is the line carrying heldBannerMarker plus its wrapped
+// continuation rows, which run up to the next blank line.
+func StripHeldPeerBanner(pane string) string {
+	if !strings.Contains(pane, heldBannerMarker) {
+		return pane
+	}
+	lines := strings.Split(pane, "\n")
+	kept := make([]string, 0, len(lines))
+	inBanner := false
+	for _, line := range lines {
+		switch {
+		case inBanner && strings.TrimSpace(line) == "":
+			inBanner = false
+			kept = append(kept, line)
+		case inBanner:
+			// continuation row of the wrapped banner
+		case strings.Contains(line, heldBannerMarker):
+			inBanner = true
+		default:
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
 // LooksLikeHeldPeerDialog reports whether a pane is currently showing the
 // held-peer-message approval dialog.
 //

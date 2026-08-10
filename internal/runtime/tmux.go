@@ -484,7 +484,12 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 		full, _, err := t.run(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name),
 			"-S", fmt.Sprintf("-%d", finalCheckScrollback))
 		if err == nil {
-			if ContainsMarker(history(trimTrailingBlank(full), confirmWindow), marker) {
+			// StripHeldPeerBanner first: a session that ever held one of our
+			// messages keeps a banner quoting that message's text back in its
+			// «preview» forever. Left in, it makes this check confirm a
+			// message that provably never reached the conversation — the
+			// exact non-delivery the held-dialog blocker exists to prevent.
+			if ContainsMarker(StripHeldPeerBanner(history(trimTrailingBlank(full), confirmWindow)), marker) {
 				// Delivered after all — never wipe a composer whose
 				// content actually went through.
 				return nil
