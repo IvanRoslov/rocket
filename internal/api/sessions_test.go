@@ -1014,3 +1014,15 @@ func TestPostSessionSpawnKeepsManualStatus(t *testing.T) {
 		t.Errorf("root Status = %q, want review (a human's move wins)", root.Status)
 	}
 }
+
+// CaptureEscaped serves the same pane as Capture: these fakes carry no
+// escape sequences, which is what the draft guard treats conservatively.
+func (r sessFakeRuntime) CaptureEscaped(ctx context.Context, h runtime.Handle, lines int) (string, error) {
+	return r.Capture(ctx, h, lines)
+}
+
+// CaptureEscaped serves the same pane as Capture: these fakes carry no
+// escape sequences, which is what the draft guard treats conservatively.
+func (r sessFakeRuntimeErrorOnCreate) CaptureEscaped(ctx context.Context, h runtime.Handle, lines int) (string, error) {
+	return r.Capture(ctx, h, lines)
+}

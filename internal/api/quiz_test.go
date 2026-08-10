@@ -466,3 +466,9 @@ func TestPostQuizAnswer_UnconfirmedTimerFires(t *testing.T) {
 		}
 	}
 }
+
+// CaptureEscaped serves the same pane as Capture: these fakes carry no
+// escape sequences, which is what the draft guard treats conservatively.
+func (f *quizAnswerFakeRuntime) CaptureEscaped(ctx context.Context, h runtime.Handle, lines int) (string, error) {
+	return f.Capture(ctx, h, lines)
+}

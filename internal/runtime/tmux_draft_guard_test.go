@@ -81,6 +81,47 @@ func TestTmux_Inject_DraftGuard_EmptyComposer(t *testing.T) {
 	}
 }
 
+// ghostPane is a real `capture-pane -p -e` rendering of a composer holding
+// only Claude Code's ghost-text autosuggestion: the content sits entirely
+// inside an SGR-2 (dim) span. Without -e it is byte-identical to draftPane.
+var ghostPane = strings.Join([]string{
+	"\x1b[38;5;246m✻\x1b[39m \x1b[38;5;246mBrewed for 2m 38s\x1b[39m",
+	"\x1b[38;5;244m────────────────────────────────\x1b[39m",
+	"\x1b[39m❯ \x1b[2mdrop the deprecated always-auth key\x1b[0m",
+	"\x1b[38;5;244m────────────────────────────────\x1b[39m",
+	"\x1b[39m  \x1b[38;5;211m⏵⏵ bypass permissions on\x1b[39m",
+}, "\n")
+
+// TestTmux_Inject_DraftGuard_CapturesEscapes pins the capture the guard
+// depends on: only `capture-pane -e` carries the dim attribute that tells a
+// typed draft from a rendered suggestion. A plain capture gives the guard
+// nothing to tell them apart with, so it must never be the one it reads.
+func TestTmux_Inject_DraftGuard_CapturesEscapes(t *testing.T) {
+	f := &fakeTmux{pane: emptyComposerPane}
+	rt := newFakeRuntime(f)
+
+	_ = rt.Inject(context.Background(), Handle{Name: "sess"}, "hello", InjectOpts{})
+	if !f.sent("capture-pane", "-p", "-e", "-t", paneTarget("sess")) {
+		t.Errorf("the draft guard must capture with escape sequences (-e); calls: %v", f.calls)
+	}
+}
+
+// TestTmux_Inject_DraftGuard_GhostText is the false positive this guard
+// grew a parser for: a suggestion Claude Code rendered on its own is not a
+// human draft, and delivery must not be deferred for it.
+func TestTmux_Inject_DraftGuard_GhostText(t *testing.T) {
+	f := &fakeTmux{pane: ghostPane}
+	rt := newFakeRuntime(f)
+
+	err := rt.Inject(context.Background(), Handle{Name: "sess"}, "hello", InjectOpts{})
+	if errors.Is(err, ErrComposerBusy) {
+		t.Fatalf("Inject: a ghost-text suggestion must not be busy, got %v", err)
+	}
+	if !f.sent("send-keys", "-t", paneTarget("sess"), "C-u") {
+		t.Errorf("Inject must proceed past a ghost-text suggestion")
+	}
+}
+
 // TestTmux_Inject_DraftGuard_CaptureFails documents the fail-open rule: if
 // the pane cannot be read, the guard cannot claim a draft is there, and
 // delivery must not be blocked by an unreadable pane.

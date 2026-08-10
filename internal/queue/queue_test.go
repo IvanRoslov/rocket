@@ -27,6 +27,11 @@ type fakeRuntime struct {
 	injectOpts  []runtime.InjectOpts // options of each Inject call, same order
 	injectFn    func(callIdx int, h runtime.Handle, text string) error
 	captureFn   func(h runtime.Handle, lines int) (string, error)
+	// captureEscFn answers CaptureEscaped; when nil the fake serves
+	// captureFn's pane, i.e. an escape-free capture — the conservative
+	// input LooksLikeUserDraft used to get before the guard read
+	// attributes.
+	captureEscFn func(h runtime.Handle, lines int) (string, error)
 }
 
 // setInject and setCapture install per-call behaviour under the same lock
@@ -83,6 +88,22 @@ func (f *fakeRuntime) Capture(ctx context.Context, h runtime.Handle, lines int) 
 		return fn(h, lines)
 	}
 	return "", nil
+}
+
+func (f *fakeRuntime) CaptureEscaped(ctx context.Context, h runtime.Handle, lines int) (string, error) {
+	f.mu.Lock()
+	fn := f.captureEscFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(h, lines)
+	}
+	return f.Capture(ctx, h, lines)
+}
+
+func (f *fakeRuntime) setCaptureEscaped(fn func(h runtime.Handle, lines int) (string, error)) {
+	f.mu.Lock()
+	f.captureEscFn = fn
+	f.mu.Unlock()
 }
 
 func (f *fakeRuntime) Alive(ctx context.Context, h runtime.Handle) bool { return true }

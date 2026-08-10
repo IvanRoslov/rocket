@@ -36,6 +36,13 @@ const draftRuleGlyphs = "─━-╌═╭╮╰╯└┘┌┐│  "
 // holding text a human typed but has not submitted yet — i.e. text that
 // Inject's pre-paste C-u would silently erase.
 //
+// pane may be captured with or without escape sequences. Captured WITH them
+// (`capture-pane -p -e`, what the guard's call sites use) the answer is
+// strictly better, because the dim attribute separates typed text from
+// Claude Code's ghost-text autosuggestion, which is otherwise byte-identical
+// to a draft; captured without them every rune counts as typed, which is the
+// behaviour this function had before it learned about attributes.
+//
 // Recognized composer shapes (verified against live panes, 2026-08-10):
 //
 //   - Claude Code, rule style — a "❯ " line at column 0 sandwiched between
@@ -59,7 +66,7 @@ const draftRuleGlyphs = "─━-╌═╭╮╰╯└┘┌┐│  "
 // identify a composer: no closing rule/border, no prompt line, or content
 // that matches a known placeholder.
 func LooksLikeUserDraft(pane string) bool {
-	lines := strings.Split(tailLines(trimTrailingBlank(pane), draftWindow), "\n")
+	lines := tailPaneLines(trimTrailingBlankLines(parsePane(pane)), draftWindow)
 
 	// The composer is the LAST prompt line in the window: earlier matches
 	// are history (e.g. Claude Code lists queued messages as "  ❯ …" above
@@ -68,7 +75,7 @@ func LooksLikeUserDraft(pane string) bool {
 	start := -1
 	boxed := false
 	for i, line := range lines {
-		if b, ok := composerPromptLine(line); ok {
+		if b, ok := composerPromptLine(line.text()); ok {
 			start, boxed = i, b
 		}
 	}
@@ -80,11 +87,11 @@ func LooksLikeUserDraft(pane string) bool {
 	closed := false
 	for i := start + 1; i < len(lines); i++ {
 		line := lines[i]
-		if isComposerRule(line) {
+		if isComposerRule(line.text()) {
 			closed = true
 			break
 		}
-		if _, ok := composerPromptLine(line); ok {
+		if _, ok := composerPromptLine(line.text()); ok {
 			// A second prompt line right below: not a shape we understand.
 			break
 		}
@@ -146,31 +153,195 @@ func trimLeftSpace(s string) string {
 }
 
 // composerContent strips a composer line's chrome — prompt sigil, box
-// borders — and returns the bare text on it. ok is false for a line that
-// does not belong to the composer region at all (in the boxed style, one
-// that has no left border), which ends the region.
-func composerContent(line string, boxed bool) (text string, ok bool) {
+// borders — and returns the bare text on it, with dim runes dropped (see
+// paneLine.normalIntensity). ok is false for a line that does not belong to
+// the composer region at all (in the boxed style, one that has no left
+// border), which ends the region.
+//
+// Chrome is matched on the FULL visible text, dim or not: a TUI is free to
+// paint its rules, borders and prompt sigil dim (Claude Code paints them in
+// a grey 256-colour), and losing them would make every composer
+// unrecognisable — i.e. would silently disable the guard.
+func composerContent(l paneLine, boxed bool) (text string, ok bool) {
+	from, to := 0, len(l.runes)
 	if boxed {
-		rest, found := strings.CutPrefix(line, "│")
-		if !found {
+		if to == 0 || l.runes[0] != '│' {
 			return "", false
 		}
-		rest = strings.TrimSuffix(strings.TrimRightFunc(rest, unicode.IsSpace), "│")
-		rest = trimLeftSpace(rest)
-		if after, found := strings.CutPrefix(rest, ">"); found {
-			rest = after
+		from = 1
+		for to > from && unicode.IsSpace(l.runes[to-1]) {
+			to--
 		}
-		return strings.TrimSpace(rest), true
+		if to > from && l.runes[to-1] == '│' {
+			to--
+		}
+		for from < to && unicode.IsSpace(l.runes[from]) {
+			from++
+		}
+		if from < to && l.runes[from] == '>' {
+			from++
+		}
+		return l.normalIntensity(from, to), true
 	}
-	if rest, found := strings.CutPrefix(line, "❯"); found {
-		return strings.TrimSpace(rest), true
+	if to > 0 && l.runes[0] == '❯' {
+		return l.normalIntensity(1, to), true
 	}
 	// A continuation row of a multi-line draft: indented plain text. A
 	// blank row ends the region (an empty composer padded to two rows).
-	if strings.TrimSpace(line) == "" {
+	if strings.TrimSpace(l.text()) == "" {
 		return "", false
 	}
-	return strings.TrimSpace(line), true
+	return l.normalIntensity(0, to), true
+}
+
+// paneLine is one captured pane row: its visible runes, plus for each rune
+// whether it was painted dim (SGR 2). A pane captured without `-e` carries
+// no attributes at all and therefore has an all-false mask, which makes
+// every rune count as normal intensity — exactly the pre-escape behaviour.
+type paneLine struct {
+	runes []rune
+	dim   []bool
+}
+
+func (l paneLine) text() string { return string(l.runes) }
+
+// normalIntensity returns the runes of l[from:to) that are NOT dim,
+// space-trimmed. Dim runes are dropped rather than kept because that is the
+// signal this whole file turns on: Claude Code renders its ghost-text
+// autosuggestion — a message it predicts, that the human never typed —
+// entirely inside an SGR-2 span, while real keystrokes come back at normal
+// intensity. A composer holding only a suggestion therefore yields "" and
+// is not a draft; one holding any typed rune keeps it and is.
+func (l paneLine) normalIntensity(from, to int) string {
+	var b strings.Builder
+	for i := from; i < to && i < len(l.runes); i++ {
+		if l.dim[i] {
+			continue
+		}
+		b.WriteRune(l.runes[i])
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// parsePane splits a captured pane into rows of visible runes, consuming
+// the ANSI escape sequences `tmux capture-pane -e` emits and tracking the
+// only attribute this file cares about: SGR 2 (dim/faint), turned off by
+// SGR 22 and by the SGR 0 reset. Every other sequence — colours, OSC 8
+// hyperlinks, cursor moves — is dropped, contributing no visible runes.
+func parsePane(pane string) []paneLine {
+	var lines []paneLine
+	for _, raw := range strings.Split(pane, "\n") {
+		src := []rune(raw)
+		line := paneLine{}
+		dim := false
+		for i := 0; i < len(src); {
+			if src[i] != 0x1b {
+				line.runes = append(line.runes, src[i])
+				line.dim = append(line.dim, dim)
+				i++
+				continue
+			}
+			n, sgr, isSGR := scanEscape(src[i:])
+			if isSGR {
+				dim = applySGR(dim, sgr)
+			}
+			i += n
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// scanEscape measures the escape sequence starting at src[0] (which is ESC)
+// and, for a CSI sequence ending in 'm', returns its parameter body so the
+// caller can read the SGR codes out of it. A malformed or truncated
+// sequence consumes the rest of the input: half an escape sequence has no
+// visible text in it either way.
+func scanEscape(src []rune) (n int, params string, isSGR bool) {
+	if len(src) < 2 {
+		return len(src), "", false
+	}
+	switch src[1] {
+	case '[': // CSI: ESC [ params final
+		for i := 2; i < len(src); i++ {
+			if src[i] >= 0x40 && src[i] <= 0x7e {
+				return i + 1, string(src[2:i]), src[i] == 'm'
+			}
+		}
+		return len(src), "", false
+	case ']': // OSC: ESC ] payload (BEL | ESC \)
+		for i := 2; i < len(src); i++ {
+			if src[i] == 0x07 {
+				return i + 1, "", false
+			}
+			if src[i] == 0x1b && i+1 < len(src) && src[i+1] == '\\' {
+				return i + 2, "", false
+			}
+		}
+		return len(src), "", false
+	default: // two-rune escape (ESC \, ESC =, …)
+		return 2, "", false
+	}
+}
+
+// applySGR folds one SGR parameter body into the running dim state. Codes
+// other than 2 (dim on), 22 (normal intensity) and 0 (reset everything)
+// leave it alone; an empty body means 0.
+func applySGR(dim bool, params string) bool {
+	if params == "" {
+		return false
+	}
+	for _, p := range strings.Split(params, ";") {
+		// Sub-parameters (38:2:…) never carry an intensity code.
+		if idx := strings.IndexByte(p, ':'); idx >= 0 {
+			p = p[:idx]
+		}
+		switch strings.TrimLeft(p, "0") {
+		case "": // "0", "00", "" — reset
+			dim = false
+		case "2":
+			dim = true
+		case "22":
+			dim = false
+		}
+	}
+	return dim
+}
+
+// trimTrailingBlankLines is trimTrailingBlank over parsed rows: a row that
+// carried only escape sequences has no visible text and counts as blank
+// padding, which a byte-level check on the raw capture would miss.
+func trimTrailingBlankLines(lines []paneLine) []paneLine {
+	end := len(lines)
+	for end > 0 && strings.TrimSpace(lines[end-1].text()) == "" {
+		end--
+	}
+	return lines[:end]
+}
+
+// tailVisibleLines is tailLines+trimTrailingBlank for a capture that still
+// carries escape sequences: it drops trailing rows with no VISIBLE text and
+// returns the last n rows unchanged — raw bytes, attributes and all.
+func tailVisibleLines(pane string, n int) string {
+	raw := strings.Split(pane, "\n")
+	parsed := parsePane(pane)
+	end := len(raw)
+	for end > 0 && strings.TrimSpace(parsed[end-1].text()) == "" {
+		end--
+	}
+	raw = raw[:end]
+	if len(raw) > n {
+		raw = raw[len(raw)-n:]
+	}
+	return strings.Join(raw, "\n")
+}
+
+// tailPaneLines is tailLines over parsed rows.
+func tailPaneLines(lines []paneLine, n int) []paneLine {
+	if len(lines) <= n {
+		return lines
+	}
+	return lines[len(lines)-n:]
 }
 
 // isComposerRule reports whether line is one of the horizontal rules (or a

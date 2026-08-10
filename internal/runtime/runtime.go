@@ -59,6 +59,11 @@ type Runtime interface {
 	SendKeys(ctx context.Context, h Handle, key string, literal bool) error
 	// Capture returns the last `lines` lines of the session's pane output.
 	Capture(ctx context.Context, h Handle, lines int) (string, error)
+	// CaptureEscaped is Capture with the pane's ANSI escape sequences kept
+	// instead of stripped. It exists for LooksLikeUserDraft, which needs
+	// the dim attribute to tell a human's unsent draft from an agent's
+	// ghost-text suggestion; every other reader wants the plain Capture.
+	CaptureEscaped(ctx context.Context, h Handle, lines int) (string, error)
 	// Alive reports whether the session still exists.
 	Alive(ctx context.Context, h Handle) bool
 	// Destroy terminates the session. Destroying a session that does not

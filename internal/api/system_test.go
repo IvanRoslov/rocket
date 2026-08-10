@@ -524,3 +524,9 @@ func seedSystemSessionState(t *testing.T, st *store.Store, worktreesRootDir, ses
 		t.Fatalf("AddSession: %v", err)
 	}
 }
+
+// CaptureEscaped serves the same pane as Capture: these fakes carry no
+// escape sequences, which is what the draft guard treats conservatively.
+func (f *systemFakeRuntime) CaptureEscaped(ctx context.Context, h runtime.Handle, lines int) (string, error) {
+	return f.Capture(ctx, h, lines)
+}

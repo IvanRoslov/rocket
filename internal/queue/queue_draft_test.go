@@ -72,6 +72,46 @@ func TestQueue_DraftHoldsDeliveryThenResumes(t *testing.T) {
 	}
 }
 
+// ghostPane is what `capture-pane -p -e` returns for a composer holding
+// only Claude Code's ghost-text autosuggestion: the content lives inside an
+// SGR-2 (dim) span. Stripped of escapes it is byte-identical to draftPane —
+// which is exactly how a rendered suggestion used to hold a delivery back
+// for the whole busy deadline.
+var ghostPane = strings.Join([]string{
+	"\x1b[38;5;246m\u271b\x1b[39m \x1b[38;5;246mBrewed for 2m 38s\x1b[39m",
+	"\x1b[38;5;244m\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\x1b[39m",
+	"\x1b[39m\u276f \x1b[2mdrop the deprecated always-auth key\x1b[0m",
+	"\x1b[38;5;244m\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\x1b[39m",
+	"\x1b[39m  \x1b[38;5;211m\u23f5\u23f5 bypass permissions on\x1b[39m",
+}, "\n")
+
+// TestQueue_GhostTextDoesNotDeferDelivery is the bug this guard was tuned
+// for: an agent-rendered suggestion is not a human draft, so the queue must
+// deliver immediately instead of sitting out the busy deadline. The fake
+// answers the plain capture with a draft-shaped pane and the escape-aware
+// one with the suggestion — delivery therefore also proves the guard reads
+// the escape-aware capture, the only one carrying the dim attribute.
+func TestQueue_GhostTextDoesNotDeferDelivery(t *testing.T) {
+	h := newTestQueue(t)
+	h.q.cfg.ComposerBusyDeadline = time.Hour
+	h.addRunningSession(t, "recv", activity.Ready)
+
+	h.rt.setCapture(func(_ runtime.Handle, _ int) (string, error) { return draftPane, nil })
+	h.rt.setCaptureEscaped(func(_ runtime.Handle, _ int) (string, error) { return ghostPane, nil })
+
+	id, err := h.st.AddMessage(store.Message{ToSession: "recv", Body: "hello"})
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+	h.q.Wake("recv")
+
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" },
+		"message delivered past a ghost-text suggestion")
+	if opts := h.rt.optsAt(0); opts.Force {
+		t.Errorf("delivery past a suggestion must not be forced: nothing was busy")
+	}
+}
+
 // TestQueue_DraftDeadlineForcesDelivery covers the safety valve: an
 // abandoned draft (or a false positive of the heuristic) must not block a
 // recipient's queue forever, so past composer_busy_deadline the message is
