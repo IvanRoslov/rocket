@@ -74,6 +74,11 @@ type Options struct {
 	Timeout time.Duration
 	// Raw отключает конверт cross-session-message: тело уходит как есть.
 	Raw bool
+	// MsgID — идентификатор сообщения. Пустая строка означает «сгенерировать».
+	// Задавать его нужно, чтобы зарегистрировать ожидание квитанции ДО записи
+	// в сокет: held отправляется получателем немедленно и способен обогнать
+	// возврат из Send.
+	MsgID string
 }
 
 // ErrEmptyText — CLI молча игнорирует user-сообщения с пустым content.
@@ -101,9 +106,12 @@ func Send(socketPath, text string, opt Options) (string, error) {
 	if !opt.Raw {
 		body = Envelope(from, opt.FromName, text)
 	}
-	id, err := newUUID()
-	if err != nil {
-		return "", err
+	id := opt.MsgID
+	if id == "" {
+		var err error
+		if id, err = newUUID(); err != nil {
+			return "", err
+		}
 	}
 	msg := Message{
 		MsgV:      ProtocolVersion,
@@ -181,6 +189,10 @@ func writeLine(socketPath string, msg Message, timeout time.Duration) error {
 	}
 	return nil
 }
+
+// NewMsgID возвращает msg_id в формате, который принимает CLI (UUIDv4).
+// Нужен, когда отправитель хочет подписаться на квитанцию до самой отправки.
+func NewMsgID() (string, error) { return newUUID() }
 
 func newUUID() (string, error) {
 	var b [16]byte
