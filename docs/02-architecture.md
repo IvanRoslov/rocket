@@ -35,7 +35,7 @@ SQLite (`~/.rocket/rocket.db`, драйвер без cgo — `modernc.org/sqlite
 ```go
 type Runtime interface {
     Create(ctx, CreateSpec) (Handle, error) // new-session -d -s <name> -c <dir> -e K=V... <cmd>
-    Inject(ctx, Handle, text string) error  // paste-buffer + адаптивный Enter
+    Inject(ctx, Handle, text string, opts InjectOpts) error // draft guard + paste-buffer + адаптивный Enter
     Capture(ctx, Handle, lines int) (string, error)
     Alive(ctx, Handle) bool
     Destroy(ctx, Handle) error
