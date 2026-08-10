@@ -33,6 +33,14 @@ type SocketSender interface {
 	// Available reports whether sess is reachable over a live socket right
 	// now. It is a point-in-time answer: a socket can die between Available
 	// and Send, which is why Send returns its own error.
+	//
+	// Contract the queue depends on: once Send has answered ErrHeld for a
+	// session, Available must report false for it from then on. A hold is a
+	// property of the recipient process's inbound policy, which cannot change
+	// while it lives, so retrying the socket would only re-hold the message —
+	// and the queue defers the tmux fallback until the hold's dialog clears,
+	// so a sender that kept saying "available" would loop forever instead of
+	// ever delivering. ClaudeSocketSender implements this via heldSessions.
 	Available(sess store.Session) bool
 
 	// Send delivers text to sess. fromName is the display name the recipient

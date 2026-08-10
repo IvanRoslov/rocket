@@ -16,6 +16,7 @@ type fakeSocket struct {
 	mu        sync.Mutex
 	available bool
 	sendErr   error
+	attempts  int      // Send calls, including the ones that returned sendErr
 	sends     []string // texts passed to Send, in call order
 	names     []string // fromName passed alongside each send
 }
@@ -29,12 +30,27 @@ func (f *fakeSocket) Available(store.Session) bool {
 func (f *fakeSocket) Send(_ store.Session, fromName, text string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.attempts++
 	if f.sendErr != nil {
+		if errors.Is(f.sendErr, ErrHeld) {
+			// Mirror ClaudeSocketSender's heldSessions memory, which the
+			// SocketSender contract requires: a process that held one message
+			// holds them all, so it stops being "available".
+			f.available = false
+		}
 		return f.sendErr
 	}
 	f.sends = append(f.sends, text)
 	f.names = append(f.names, fromName)
 	return nil
+}
+
+// attemptCount is every Send call, unlike sendCount which counts only the
+// ones that got as far as accepting the text.
+func (f *fakeSocket) attemptCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.attempts
 }
 
 func (f *fakeSocket) sendCount() int {
@@ -355,7 +371,13 @@ func TestSocketLostDuringQuizRequeues(t *testing.T) {
 // TestHeldMessageFallsBackToInject pins the hole this whole receipt channel
 // exists to close: the recipient held the message instead of queueing it, and
 // rocket used to mark that "delivered". ErrHeld must send the delivery down
-// the tmux path in the same attempt, so the message actually arrives.
+// the tmux path so the message actually arrives.
+//
+// It must NOT do so in the same pass, though: a hold is exactly what puts the
+// approval dialog on the recipient's screen, and the dialog needs a moment to
+// render. Injecting into it dismisses it and loses both copies of the message,
+// so the hold requeues and the next pass re-evaluates the pane (where the
+// held-dialog gate takes over).
 func TestHeldMessageFallsBackToInject(t *testing.T) {
 	h := newTestQueue(t)
 	h.addRunningSession(t, "recv", activity.Idle)
@@ -369,9 +391,22 @@ func TestHeldMessageFallsBackToInject(t *testing.T) {
 	}
 	h.q.Wake("recv")
 
-	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" },
-		"delivered via tmux after a hold")
+	waitUntil(t, func() bool { return sock.attemptCount() >= 1 }, "socket send attempted")
+	if n := h.rt.callCount(); n != 0 {
+		t.Errorf("Inject called %d times right after the hold, want 0 — the dialog is rendering", n)
+	}
+
+	waitUntilTimeout(t, 5*time.Second,
+		func() bool { return messageStatus(t, h.st, id) == "delivered" },
+		"delivered via tmux on a later pass after a hold")
 	if n := h.rt.callCount(); n != 1 {
 		t.Errorf("Inject called %d times, want 1 — a held message must go out over tmux", n)
+	}
+	m, err := h.st.GetMessage(id)
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if m.Attempts != 1 {
+		t.Errorf("attempts = %d, want 1 — the hold is a deferral, not a burned attempt", m.Attempts)
 	}
 }
