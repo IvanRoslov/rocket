@@ -31,11 +31,79 @@ func TestLaunchCommandMinimal(t *testing.T) {
 	}
 
 	cmd := cc.LaunchCommand(spec)
-	if len(cmd) != 2 {
-		t.Errorf("expected 2 args, got %d: %v", len(cmd), cmd)
+	if len(cmd) != 4 {
+		t.Errorf("expected 4 args, got %d: %v", len(cmd), cmd)
 	}
 	if cmd[0] != "claude" || cmd[1] != "--dangerously-skip-permissions" {
-		t.Errorf("expected [claude --dangerously-skip-permissions], got %v", cmd)
+		t.Errorf("expected [claude --dangerously-skip-permissions ...], got %v", cmd)
+	}
+	if cmd[2] != "--settings" || cmd[3] != sessionSettingsJSON {
+		t.Errorf("settings args wrong: [%s, %s]", cmd[2], cmd[3])
+	}
+}
+
+// TestLaunchCommandAcceptsCrossSessionInbound pins the payload of the
+// --settings flag: rocket delivers queue messages into a session's
+// cross-session inbox, and a bypass-permissions session holds (then expires)
+// inbound peer messages unless crossSessionInbound is explicitly "accept".
+func TestLaunchCommandAcceptsCrossSessionInbound(t *testing.T) {
+	cc := New()
+	cmd := cc.LaunchCommand(agent.LaunchSpec{SessionID: "sess-123"})
+
+	idx := -1
+	for i, arg := range cmd {
+		if arg == "--settings" {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 || idx+1 >= len(cmd) {
+		t.Fatalf("no --settings flag with a value in %v", cmd)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal([]byte(cmd[idx+1]), &settings); err != nil {
+		t.Fatalf("--settings value is not valid JSON (%q): %v", cmd[idx+1], err)
+	}
+	if got := settings["crossSessionInbound"]; got != "accept" {
+		t.Errorf(`settings["crossSessionInbound"] = %v, expected "accept"`, got)
+	}
+}
+
+// featureFlagKillSwitches are the env vars that switch off Claude Code's
+// feature-flag evaluation. Cross-session messaging is gated behind a feature
+// flag, so a spawned session that inherits any of these silently loses its
+// inbox.
+var featureFlagKillSwitches = []string{
+	"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+	"DISABLE_TELEMETRY",
+	"DO_NOT_TRACK",
+	"DISABLE_GROWTHBOOK",
+}
+
+func TestEnvKeepsFeatureFlagsEnabled(t *testing.T) {
+	cc := New()
+	env := cc.Env(agent.LaunchSpec{SessionID: "sess-123"})
+
+	for _, key := range featureFlagKillSwitches {
+		if val, ok := env[key]; ok {
+			t.Errorf("spawn env sets %s=%q, which disables feature-flag evaluation "+
+				"(and with it cross-session messaging)", key, val)
+		}
+	}
+}
+
+func TestLaunchCommandKeepsFeatureFlagsEnabled(t *testing.T) {
+	cc := New()
+	cmd := cc.LaunchCommand(agent.LaunchSpec{SessionID: "sess-123"})
+
+	for _, key := range featureFlagKillSwitches {
+		for _, arg := range cmd {
+			if strings.Contains(arg, key) {
+				t.Errorf("launch command mentions %s (%q): it would disable "+
+					"feature-flag evaluation", key, arg)
+			}
+		}
 	}
 }
 
@@ -58,8 +126,8 @@ func TestLaunchCommandFull(t *testing.T) {
 
 	cmd := cc.LaunchCommand(spec)
 
-	// Expected: ["claude", "--dangerously-skip-permissions", "--append-system-prompt", "You are a code assistant.", "--model", "claude-opus", "--permission-mode", "strict", "--", "Help me write a function."]
-	expectedLen := 10
+	// Expected: ["claude", "--dangerously-skip-permissions", "--settings", <json>, "--append-system-prompt", "You are a code assistant.", "--model", "claude-opus", "--permission-mode", "strict", "--", "Help me write a function."]
+	expectedLen := 12
 	if len(cmd) != expectedLen {
 		t.Errorf("expected %d args, got %d: %v", expectedLen, len(cmd), cmd)
 	}
@@ -68,20 +136,24 @@ func TestLaunchCommandFull(t *testing.T) {
 		t.Errorf("first two args wrong: %v", cmd[:2])
 	}
 
-	if cmd[2] != "--append-system-prompt" || cmd[3] != "You are a code assistant." {
-		t.Errorf("system prompt args wrong: [%s, %s]", cmd[2], cmd[3])
+	if cmd[2] != "--settings" || cmd[3] != sessionSettingsJSON {
+		t.Errorf("settings args wrong: [%s, %s]", cmd[2], cmd[3])
 	}
 
-	if cmd[4] != "--model" || cmd[5] != "claude-opus" {
-		t.Errorf("model args wrong: [%s, %s]", cmd[4], cmd[5])
+	if cmd[4] != "--append-system-prompt" || cmd[5] != "You are a code assistant." {
+		t.Errorf("system prompt args wrong: [%s, %s]", cmd[4], cmd[5])
 	}
 
-	if cmd[6] != "--permission-mode" || cmd[7] != "strict" {
-		t.Errorf("permission-mode args wrong: [%s, %s]", cmd[6], cmd[7])
+	if cmd[6] != "--model" || cmd[7] != "claude-opus" {
+		t.Errorf("model args wrong: [%s, %s]", cmd[6], cmd[7])
 	}
 
-	if cmd[8] != "--" || cmd[9] != "Help me write a function." {
-		t.Errorf("first message args wrong: [%s, %s]", cmd[8], cmd[9])
+	if cmd[8] != "--permission-mode" || cmd[9] != "strict" {
+		t.Errorf("permission-mode args wrong: [%s, %s]", cmd[8], cmd[9])
+	}
+
+	if cmd[10] != "--" || cmd[11] != "Help me write a function." {
+		t.Errorf("first message args wrong: [%s, %s]", cmd[10], cmd[11])
 	}
 }
 
