@@ -1,0 +1,22 @@
+
+
+[38;5;220m⏺[39m [38;5;220mHeld peer message — from an unidentified session [verified pid 25805] (peer claims name: rocket); preview: [39m
+  [38;5;220m«ROCKETPROBE held dialog recon marker alpha» — not delivered to Claude (1 held). The sender did not attest its[39m
+  [38;5;220mpermission mode and this session bypasses prompts. Review it below, or set "crossSessionInbound" to "accept".[39m
+
+[38;5;220m⏺[39m [38;5;220mHeld peer message — from an unidentified session [verified pid 28729] (peer claims name: rocket); preview: [39m
+  [38;5;220m«ROCKETPROBE gamma approve path» — not delivered to Claude (1 held). The sender did not attest its permission [39m
+  [38;5;220mmode and this session bypasses prompts. Review it below, or set "crossSessionInbound" to "accept".[39m
+
+[38;5;220m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m [1m[38;5;153mHeld message from another session[0m
+
+  Another Claude session sent a message: from an unidentified session [verified pid 28729] (peer claims name: rocket)
+
+  [38;5;246mThe sender did not attest its permission mode, and this session bypasses permission prompts.[39m
+
+  [38;5;246mMessage body (this is what will be delivered):[39m
+  «ROCKETPROBE gamma approve path»
+
+  [38;5;153m❯[39m [38;5;153mDeny — drop it and tell the sender it was declined[39m
+    Deliver this message to Claude
