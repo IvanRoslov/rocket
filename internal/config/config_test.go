@@ -49,6 +49,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.LargeMessageThreshold != 2048 {
 		t.Errorf("expected LargeMessageThreshold 2048, got %d", cfg.LargeMessageThreshold)
 	}
+	if !cfg.SocketDelivery {
+		t.Error("expected SocketDelivery to default to true")
+	}
 	if cfg.GithubAPIBase != "https://api.github.com" {
 		t.Errorf("expected GithubAPIBase https://api.github.com, got %q", cfg.GithubAPIBase)
 	}
@@ -380,5 +383,26 @@ func TestMirrorSyncIntervalZeroDisables(t *testing.T) {
 	}
 	if cfg.MirrorSyncInterval != 0 {
 		t.Errorf("MirrorSyncInterval = %v, want 0", cfg.MirrorSyncInterval)
+	}
+}
+
+// TestLoadSocketDeliveryOverride pins that socket delivery can be turned off
+// from config.yaml. It is the escape hatch if the Claude Code protocol shifts
+// under us (docs/design/cc-socket-protocol.md §9), so it has to actually work.
+func TestLoadSocketDeliveryOverride(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("ROCKET_HOME", "")
+
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"),
+		[]byte("socket_delivery: false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(home)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.SocketDelivery {
+		t.Error("expected socket_delivery: false to disable socket delivery")
 	}
 }

@@ -141,6 +141,14 @@ type testHarness struct {
 	b  *bus.Bus
 	rt *fakeRuntime
 	ac *fakeActivity
+
+	// ctx is the context every delivery worker in this harness runs under,
+	// and cancel stops them. The harness owns this lifecycle so that no
+	// worker outlives the test; tests that want to observe cancellation
+	// use these rather than making a context of their own (installing a
+	// second one would leave the harness's workers running).
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func newTestQueue(t *testing.T) *testHarness {
@@ -156,12 +164,39 @@ func newTestQueue(t *testing.T) *testHarness {
 	b := bus.New(st)
 	rt := &fakeRuntime{}
 	ac := newFakeActivity()
-	cfg := &config.Config{QueueTimeout: 30 * time.Minute, LargeMessageThreshold: 2048}
+	// SocketDelivery mirrors the production default. It only takes effect
+	// once a test installs a SocketSender via SetSocketSender; the tmux-only
+	// tests leave q.socket nil and are unaffected.
+	cfg := &config.Config{QueueTimeout: 30 * time.Minute, LargeMessageThreshold: 2048, SocketDelivery: true}
 
 	q := New(st, b, rt, cfg, ac.get)
 	q.backoff = func(attempt int) time.Duration { return time.Millisecond }
 
-	return &testHarness{q: q, st: st, b: b, rt: rt, ac: ac}
+	// Give delivery workers a cancellable context and stop them when the test
+	// ends. Without this, Wake-spawned goroutines outlive the test (runCtx
+	// falls back to context.Background() because tests never call Run) and
+	// keep touching the store while t.TempDir() is being removed — SQLite
+	// recreates its -wal/-shm sidecars and RemoveAll fails with "directory
+	// not empty". That surfaced as a ~5% flake across the package.
+	//
+	// Cleanups run LIFO, so registering this last means: cancel and drain
+	// first, then st.Close(), then the TempDir removal.
+	ctx, cancel := context.WithCancel(context.Background())
+	q.ctxMu.Lock()
+	q.runCtxVal = ctx
+	q.ctxMu.Unlock()
+	t.Cleanup(func() {
+		cancel()
+		// Workers park in waitForReady/sleepCtx, both of which select on
+		// ctx.Done(); give them a moment to observe it and unwind.
+		waitUntilTimeout(t, 2*time.Second, func() bool {
+			q.mu.Lock()
+			defer q.mu.Unlock()
+			return len(q.workers) == 0
+		}, "delivery workers to exit after context cancellation")
+	})
+
+	return &testHarness{q: q, st: st, b: b, rt: rt, ac: ac, ctx: ctx, cancel: cancel}
 }
 
 // addRunningSession inserts a session row in state "running" with the given
@@ -522,10 +557,9 @@ func TestQueue_RunRecoversOrphanedDeliveringMessages(t *testing.T) {
 		t.Fatalf("precondition: status = %q, want delivering", got)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	h.q.Recover(ctx)
-	go h.q.Run(ctx)
+	// Use the harness's context: it already backs the delivery workers.
+	h.q.Recover(h.ctx)
+	go h.q.Run(h.ctx)
 
 	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" },
 		"orphaned delivering message recovered and delivered")
@@ -562,9 +596,9 @@ func TestQueue_CtxCancelStopsWaitingWorker(t *testing.T) {
 		t.Fatalf("AddMessage: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	h.q.Recover(ctx)
-	go h.q.Run(ctx)
+	// Use the harness's context: it already backs the delivery workers.
+	h.q.Recover(h.ctx)
+	go h.q.Run(h.ctx)
 
 	// Let Recover's startup Wake spin the worker up into its wait loop.
 	waitUntil(t, func() bool {
@@ -573,7 +607,7 @@ func TestQueue_CtxCancelStopsWaitingWorker(t *testing.T) {
 		return h.q.workers["recv"]
 	}, "worker registered")
 
-	cancel()
+	h.cancel()
 
 	waitUntil(t, func() bool {
 		h.q.mu.Lock()
@@ -1227,8 +1261,12 @@ func TestQueue_TimeoutExpiryAlsoNotifiesSender(t *testing.T) {
 	h := newTestQueue(t)
 	h.q.cfg.QueueTimeout = time.Hour
 
-	// Add a live sender.
-	h.addRunningSession(t, "sender", activity.Ready)
+	// Add a live sender, deliberately busy. notifySenderOfFailure calls
+	// Wake("sender"), and a Ready sender's worker races this test by
+	// delivering the notice — emptying the very queue the assertions below
+	// inspect. Active parks the worker in waitForReady instead, so the notice
+	// stays queued and observable, which is all this test is about.
+	h.addRunningSession(t, "sender", activity.Active)
 
 	// Create an old message (outside timeout window) from sender to a recipient.
 	old := time.Now().Add(-2 * time.Hour).Unix()

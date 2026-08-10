@@ -3,6 +3,7 @@ package queue
 import (
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,9 +31,12 @@ func TestQueue_DraftHoldsDeliveryThenResumes(t *testing.T) {
 	h.q.cfg.ComposerBusyDeadline = time.Hour
 	h.addRunningSession(t, "recv", activity.Ready)
 
-	busy := true
+	// atomic: the delivery goroutine reads this through setCapture while the
+	// test body flips it below.
+	var busy atomic.Bool
+	busy.Store(true)
 	h.rt.setCapture(func(_ runtime.Handle, _ int) (string, error) {
-		if busy {
+		if busy.Load() {
 			return draftPane, nil
 		}
 		return "", nil
@@ -60,7 +64,7 @@ func TestQueue_DraftHoldsDeliveryThenResumes(t *testing.T) {
 		t.Errorf("attempts = %d while deferred, want 0 (a deferral is not a failed attempt)", m.Attempts)
 	}
 
-	busy = false
+	busy.Store(false)
 	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" },
 		"message delivered once the composer is free")
 	if opts := h.rt.optsAt(0); opts.Force {
