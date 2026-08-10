@@ -55,7 +55,7 @@ func TestInjectConfirmsFromScrollbackAfterMessageScrolledOff(t *testing.T) {
 	rt := newFakeRuntime(nil)
 	rt.runFn = f.run
 
-	err := rt.Inject(context.Background(), Handle{Name: "cto"}, text)
+	err := rt.Inject(context.Background(), Handle{Name: "cto"}, text, InjectOpts{})
 
 	if errors.Is(err, ErrNotDelivered) {
 		t.Fatal("Inject reported a non-delivery for a message that is present in the " +
@@ -80,7 +80,7 @@ func TestInjectStillReportsGenuineNonDelivery(t *testing.T) {
 	rt := newFakeRuntime(nil)
 	rt.runFn = f.run
 
-	err := rt.Inject(context.Background(), Handle{Name: "cto"}, text)
+	err := rt.Inject(context.Background(), Handle{Name: "cto"}, text, InjectOpts{})
 	if !errors.Is(err, ErrNotDelivered) {
 		t.Fatalf("Inject = %v, want ErrNotDelivered for a draft stuck in the composer", err)
 	}

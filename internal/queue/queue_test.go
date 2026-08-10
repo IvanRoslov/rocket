@@ -32,7 +32,7 @@ func (f *fakeRuntime) Create(ctx context.Context, spec runtime.CreateSpec) (runt
 	return runtime.Handle{Name: spec.Name}, nil
 }
 
-func (f *fakeRuntime) Inject(ctx context.Context, h runtime.Handle, text string) error {
+func (f *fakeRuntime) Inject(ctx context.Context, h runtime.Handle, text string, opts runtime.InjectOpts) error {
 	f.mu.Lock()
 	idx := len(f.injectCalls)
 	f.injectCalls = append(f.injectCalls, text)

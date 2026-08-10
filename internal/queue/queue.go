@@ -414,7 +414,7 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 			slog.Error("queue: update message delivering", "id", msg.ID, "error", err)
 		}
 
-		err := q.rt.Inject(ctx, handle, text)
+		err := q.rt.Inject(ctx, handle, text, runtime.InjectOpts{})
 
 		var retryEligible bool
 		switch {
