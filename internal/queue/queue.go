@@ -31,6 +31,11 @@ const maxAttempts = 5
 // direct injection — see prepareText.
 const largeMessageLineThreshold = 20
 
+// composerWindow is how many bottom rows of a recipient's pane the draft
+// probe captures. The composer plus its surrounding rules and footer sit
+// well inside this; runtime.LooksLikeUserDraft narrows further on its own.
+const composerWindow = 10
+
 // defaultBackoff returns the real backoff schedule: 1s, 2s, 4s, 8s, 16s for
 // attempt 1..5 (attempt is 1-based, the number of the attempt that just
 // failed).
@@ -282,6 +287,10 @@ func (q *Queue) unregisterIfStillEmpty(to string) bool {
 // deliver handles a single message end to end: eligibility checks, waiting
 // for the recipient to be ready, injecting, and retrying/failing.
 func (q *Queue) deliver(ctx context.Context, msg store.Message) {
+	// busySince is when the recipient's composer was first seen holding a
+	// user draft during THIS delivery; zero while it is free.
+	var busySince time.Time
+
 	for {
 		sess, err := q.getSession(msg.ToSession)
 		if err != nil {
@@ -344,9 +353,64 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 			continue
 		}
 
-		q.attemptDelivery(ctx, msg, sess)
+		// Draft guard. Someone may be typing into the recipient's composer
+		// right now, and delivery starts by clearing that composer with
+		// C-u. Hold the message exactly like the pending-quiz case above —
+		// it stays "queued", so no retry attempt is burned and the global
+		// queue_timeout (expireTimedOut, which only looks at queued rows)
+		// keeps applying unchanged — and re-check on the next tick.
+		//
+		// The hold deliberately happens BEFORE ClaimMessage: a claimed
+		// message is "delivering", which no longer expires and would need
+		// its own bookkeeping to be released.
+		//
+		// busySince is local to this deliver call, which handles exactly one
+		// message end to end, so the deadline measures continuous busyness
+		// for THIS delivery. Once it passes, delivery proceeds the old way
+		// (force) — an abandoned draft, or a false positive of the
+		// heuristic, must not block a recipient's queue forever.
+		force := false
+		if out, capErr := q.rt.Capture(ctx, runtime.Handle{Name: sess.TmuxName}, composerWindow); capErr == nil && runtime.LooksLikeUserDraft(out) {
+			if busySince.IsZero() {
+				busySince = time.Now()
+			}
+			if time.Since(busySince) < q.composerBusyDeadline() {
+				slog.Info("queue: recipient composer holds a user draft, deferring delivery",
+					"id", msg.ID, "to", msg.ToSession, "busy_for", time.Since(busySince).Round(time.Second))
+				if !q.waitForReady(ctx, msg.ToSession) {
+					return // ctx cancelled
+				}
+				continue
+			}
+			slog.Warn("queue: composer busy past the deadline, delivering anyway (draft will be cleared)",
+				"id", msg.ID, "to", msg.ToSession, "deadline", q.composerBusyDeadline())
+			force = true
+		} else {
+			busySince = time.Time{}
+		}
+
+		if !q.attemptDelivery(ctx, msg, sess, force) {
+			// Inject hit the draft guard after all (the human started
+			// typing between the probe above and the C-u): the message is
+			// back to "queued" untouched. Wait a tick and re-evaluate from
+			// the top rather than spinning on it.
+			if !q.waitForReady(ctx, msg.ToSession) {
+				return // ctx cancelled
+			}
+			continue
+		}
 		return
 	}
+}
+
+// composerBusyDeadline is how long a recipient's composer may keep holding
+// a user draft before delivery is forced through. A zero config value means
+// "unset" (e.g. a Queue built without a loaded config).
+func (q *Queue) composerBusyDeadline() time.Duration {
+	if q.cfg != nil && q.cfg.ComposerBusyDeadline > 0 {
+		return q.cfg.ComposerBusyDeadline
+	}
+	return config.DefaultComposerBusyDeadline
 }
 
 // waitForReady blocks until a bus event signals the recipient may be ready
@@ -382,8 +446,15 @@ func (q *Queue) waitForReady(ctx context.Context, to string) bool {
 
 // attemptDelivery runs the full retry loop for a single message: inject,
 // interpret the result, retry with backoff on eligible errors, and fail
-// after maxAttempts.
-func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess store.Session) {
+// after maxAttempts. force bypasses Inject's draft guard (see the
+// busy-deadline in deliver).
+//
+// It returns false — and only false — when Inject reported ErrComposerBusy:
+// nothing was typed, nothing was cleared, no attempt was consumed and the
+// message is back to "queued" for the caller to re-evaluate. Every other
+// outcome (delivered, failed, ctx cancelled) is terminal for this message
+// and returns true.
+func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess store.Session, force bool) bool {
 	handle := runtime.Handle{Name: sess.TmuxName}
 	text := q.prepareText(msg, sess)
 
@@ -401,11 +472,11 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 			ok, err := q.st.ClaimMessage(msg.ID)
 			if err != nil {
 				slog.Error("queue: claim message", "id", msg.ID, "error", err)
-				return
+				return true
 			}
 			if !ok {
 				slog.Warn("queue: message no longer queued at claim time, skipping delivery", "id", msg.ID)
-				return
+				return true
 			}
 			claimed = true
 		}
@@ -414,13 +485,26 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 			slog.Error("queue: update message delivering", "id", msg.ID, "error", err)
 		}
 
-		err := q.rt.Inject(ctx, handle, text, runtime.InjectOpts{})
+		err := q.rt.Inject(ctx, handle, text, runtime.InjectOpts{Force: force})
 
 		var retryEligible bool
 		switch {
 		case err == nil:
 			q.deliverSuccess(msg)
-			return
+			return true
+		case errors.Is(err, runtime.ErrComposerBusy):
+			// The human started typing between deliver's probe and Inject's
+			// own guard. Nothing was cleared and nothing was sent, so this
+			// is a deferral, not an attempt: undo the increment, hand the
+			// message back to the queue untouched and let deliver decide
+			// when to look again.
+			msg.Attempts--
+			if err := q.st.UpdateMessageStatus(msg.ID, "queued", msg.Attempts, 0, ""); err != nil {
+				slog.Error("queue: requeue message after composer-busy", "id", msg.ID, "error", err)
+			}
+			slog.Info("queue: composer became busy mid-delivery, message requeued",
+				"id", msg.ID, "to", msg.ToSession)
+			return false
 		case errors.Is(err, runtime.ErrNotDelivered):
 			// Inject positively established that nothing was submitted and
 			// cleared the composer, so there is no duplicate-message risk
@@ -444,7 +528,7 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 				// Marker gone (or capture failed): treat as delivered —
 				// submission likely went through and confirmation was missed.
 				q.deliverSuccess(msg)
-				return
+				return true
 			}
 		default:
 			retryEligible = true
@@ -462,11 +546,11 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 
 		if !retryEligible || msg.Attempts >= maxAttempts {
 			q.fail(msg, "delivery_failed")
-			return
+			return true
 		}
 
 		if !sleepCtx(ctx, q.backoff(msg.Attempts)) {
-			return
+			return true
 		}
 	}
 }
