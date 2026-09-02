@@ -832,6 +832,9 @@ export const githubRepos: GithubRepo[] = [
   { full_name: 'acme/docs', private: false, default_branch: 'main' },
   { full_name: 'acme/billing-sdk', private: true, default_branch: 'main' },
   { full_name: 'acme/notifications', private: true, default_branch: 'develop' },
+  // Dot in the repo name: the server derives the id via normalizeID
+  // (internal/api/repos.go), so this registers as `status-page`.
+  { full_name: 'acme/status.page', private: false, default_branch: 'main' },
 ]
 
 // GitHub issues — internal/api/github_issues.go, keyed by registered repo id

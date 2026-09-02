@@ -7,6 +7,7 @@
 
 import { http, HttpResponse } from 'msw'
 import { isHuman } from '../lib/participants'
+import { slugify } from '../lib/slug'
 import type {
   Agent,
   AgentInboxMessage,
@@ -936,7 +937,9 @@ export const handlers = [
     if (body.github) {
       const gh = githubRepos.find((r) => r.full_name === body.github)
       const name = body.github.split('/').pop() ?? body.github
-      const id = body.id ?? name
+      // The real handler derives the id via normalizeID (internal/api/repos.go),
+      // so `acme/status.page` registers as `status-page`, not `status.page`.
+      const id = body.id ?? slugify(name)
       if (reposState.some((r) => r.id === id)) {
         return HttpResponse.json(
           { error: { code: 'repo_exists', message: `repo id ${id} already exists` } },
@@ -960,7 +963,7 @@ export const handlers = [
     const name = path.split('/').filter(Boolean).pop() ?? 'repo'
     return HttpResponse.json(
       {
-        id: body.id ?? name,
+        id: body.id ?? slugify(name),
         path,
         default_branch: 'main',
         auto_cleanup: true,

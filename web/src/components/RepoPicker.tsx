@@ -10,6 +10,7 @@
 import { useState } from 'react'
 import { ApiError } from '../lib/api'
 import { useGithubRepos, useProjects, useRegisterRepo, useRepos, useUpdateSettings } from '../lib/queries'
+import { slugify } from '../lib/slug'
 import type { GithubRepo, Repo } from '../lib/types'
 import { Badge } from './Badge'
 import { Button } from './Button'
@@ -28,8 +29,15 @@ export interface RepoPickerProps {
   onSelect: (id: string) => void
 }
 
+// The id a GitHub repo registers under: the server derives it with
+// normalizeID (internal/api/repos.go), which lowercases the repo name and
+// collapses anything outside [a-z0-9-] into a single '-'. `slugify` applies
+// the same rule, so `acme/status.page` resolves to `status-page` here too —
+// without it a dotted name would be carried into POST /v1/projects verbatim
+// and rejected as repo_not_found.
 function githubRepoId(fullName: string): string {
-  return fullName.split('/').pop() ?? fullName
+  const name = fullName.split('/').pop() ?? fullName
+  return slugify(name)
 }
 
 function usedIn(repoId: string, projects: { id: string; main: string; linked: string[] }[] | undefined): string {
