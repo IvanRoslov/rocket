@@ -184,6 +184,78 @@ describe('WizardScreen — GitHub tab with a token', () => {
     await waitFor(() => expect(apiItem.className).toContain('repo-picker__item--picked'))
   })
 
+  // A dot in the GitHub repo name: the server normalizes the derived id
+  // (`status.page` -> `status-page`), so the wizard must carry the id the
+  // server returned, not the raw repo name — otherwise POST /v1/projects
+  // fails with repo_not_found.
+  it('carries the server-normalized id for a repo whose name contains a dot', async () => {
+    let capturedProject: unknown
+    server.use(
+      http.post('/v1/projects', async ({ request }) => {
+        capturedProject = await request.json()
+        return HttpResponse.json({
+          id: 'some-project',
+          name: 'Some Project',
+          main: 'status-page',
+          linked: [],
+          live_sessions: 0,
+          tasks: { backlog: 0, in_progress: 0, review: 0, done: 0 },
+          created_at: 1_800_000_000,
+        })
+      }),
+    )
+    const user = userEvent.setup()
+    await gotoGithubTabWithToken(user)
+
+    const item = screen.getByText('acme/status.page').closest('button')!
+    await user.click(item)
+    await waitFor(() => expect(item.className).toContain('repo-picker__item--picked'))
+
+    await user.click(screen.getByRole('button', { name: /Continue/ }))
+    await user.click(await screen.findByRole('button', { name: 'Skip' }))
+    await user.click(await screen.findByRole('button', { name: /Create project/ }))
+
+    await waitFor(() =>
+      expect(capturedProject).toEqual({ id: 'some-project', name: 'Some Project', main: 'status-page', linked: [] }),
+    )
+  })
+
+  it('selects the normalized id when a dotted repo is already registered (409 repo_exists)', async () => {
+    server.use(
+      http.post('/v1/repos', () =>
+        HttpResponse.json({ error: { code: 'repo_exists', message: 'repo id status-page already exists' } }, { status: 409 }),
+      ),
+    )
+    const user = userEvent.setup()
+    await gotoGithubTabWithToken(user)
+
+    let capturedProject: unknown
+    server.use(
+      http.post('/v1/projects', async ({ request }) => {
+        capturedProject = await request.json()
+        return HttpResponse.json({
+          id: 'some-project',
+          name: 'Some Project',
+          main: 'status-page',
+          linked: [],
+          live_sessions: 0,
+          tasks: { backlog: 0, in_progress: 0, review: 0, done: 0 },
+          created_at: 1_800_000_000,
+        })
+      }),
+    )
+
+    const item = screen.getByText('acme/status.page').closest('button')!
+    await user.click(item)
+    await waitFor(() => expect(item.className).toContain('repo-picker__item--picked'))
+
+    await user.click(screen.getByRole('button', { name: /Continue/ }))
+    await user.click(await screen.findByRole('button', { name: 'Skip' }))
+    await user.click(await screen.findByRole('button', { name: /Create project/ }))
+
+    await waitFor(() => expect((capturedProject as { main?: string } | null)?.main).toBe('status-page'))
+  })
+
   it('clone failure (502 clone_failed) shows a sanitized error with a retry control', async () => {
     server.use(
       http.post('/v1/repos', () =>
