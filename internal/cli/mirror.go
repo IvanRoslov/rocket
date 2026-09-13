@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -43,9 +44,45 @@ type repoRow struct {
 	DefaultBranch string `json:"default_branch"`
 }
 
-// mirrorCheckTimeout bounds the whole freshness pass. Check only runs local
-// git commands, but a wedged filesystem must not hang the CLI.
-const mirrorCheckTimeout = 15 * time.Second
+// mirrorCheckTimeout bounds ONE mirror's freshness check. Check runs about
+// five local git commands, so five seconds is already generous; the point is
+// that a wedged mirror costs its own row and nothing else.
+//
+// It used to be 15s covering the entire sweep, written when the sweep was a
+// courtesy line under `rocket status`. On a real fleet of 83 mirrors that
+// budget ran out mid-pass and every remaining row rendered as "resolve HEAD:
+// signal: killed" — a broken-repository message for what was only impatience.
+const mirrorCheckTimeout = 5 * time.Second
+
+// mirrorSweepBase and mirrorSweepPerMirror shape the overall ceiling. A
+// wedged filesystem must still not hang the CLI, but the ceiling has to grow
+// with the fleet or it re-creates the bug above: the base covers process
+// startup and the registry round trip, and each mirror adds its own share.
+// The share is deliberately smaller than mirrorCheckTimeout — a fleet where
+// every mirror needs its full budget is a broken host, not a slow one.
+const (
+	mirrorSweepBase      = 10 * time.Second
+	mirrorSweepPerMirror = 2 * time.Second
+)
+
+// mirrorSweepTimeout is the whole sweep's ceiling for a fleet of n mirrors.
+func mirrorSweepTimeout(n int) time.Duration {
+	if n < 0 {
+		n = 0
+	}
+	return mirrorSweepBase + time.Duration(n)*mirrorSweepPerMirror
+}
+
+// errMirrorCheckTimeout is the error a mirror gets when we ran out of time
+// rather than when the repository is broken. The distinction is the whole
+// point: "signal: killed" reads as a corrupt mirror and sends a human
+// digging into a repository that is perfectly fine.
+var errMirrorCheckTimeout = errors.New("превышено время проверки")
+
+// mirrorChecker is mirror.Check's shape, injected so the timeout behaviour
+// can be tested against a checker that blocks instead of a real sweep that
+// would have to actually take seconds.
+type mirrorChecker func(ctx context.Context, repo store.Repo, staleAfter time.Duration, now time.Time) (mirror.Freshness, error)
 
 // mirrorStaleFallback is the staleness threshold used when the daemon's
 // mirror sync interval is 0, i.e. background sync is disabled.
@@ -73,20 +110,47 @@ func mirrorSyncInterval(cfg *config.Config) time.Duration {
 }
 
 // checkMirrors computes freshness for every repo, in the order given. A repo
-// whose check fails yields a row carrying the error, so one broken mirror
-// never hides the others.
+// whose check fails — or takes too long — yields a row carrying the error, so
+// one broken or wedged mirror never hides the others.
 func checkMirrors(ctx context.Context, repos []repoRow, staleAfter time.Duration, now time.Time) []mirrorRow {
+	return checkMirrorsWith(ctx, mirror.Check, repos,
+		mirrorCheckTimeout, mirrorSweepTimeout(len(repos)), staleAfter, now)
+}
+
+// checkMirrorsWith is checkMirrors with the checker and both budgets handed
+// in. Every mirror is checked under its own perMirror budget, nested inside
+// one overall ceiling for the sweep.
+func checkMirrorsWith(ctx context.Context, check mirrorChecker, repos []repoRow,
+	perMirror, overall, staleAfter time.Duration, now time.Time) []mirrorRow {
+	sweepCtx, cancelSweep := context.WithTimeout(ctx, overall)
+	defer cancelSweep()
+
 	rows := make([]mirrorRow, 0, len(repos))
 	for _, r := range repos {
 		row := mirrorRow{RepoID: r.ID}
-		row.Fresh, row.Err = mirror.Check(ctx, store.Repo{
-			ID:            r.ID,
-			Path:          r.Path,
-			DefaultBranch: r.DefaultBranch,
-		}, staleAfter, now)
+		row.Fresh, row.Err = checkOneMirror(sweepCtx, check, r, perMirror, staleAfter, now)
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+// checkOneMirror runs a single check under its own deadline and translates a
+// deadline that fired into errMirrorCheckTimeout: the git error left behind
+// by a killed command describes the symptom, not the cause.
+func checkOneMirror(ctx context.Context, check mirrorChecker, r repoRow,
+	perMirror, staleAfter time.Duration, now time.Time) (mirror.Freshness, error) {
+	ctx, cancel := context.WithTimeout(ctx, perMirror)
+	defer cancel()
+
+	fr, err := check(ctx, store.Repo{
+		ID:            r.ID,
+		Path:          r.Path,
+		DefaultBranch: r.DefaultBranch,
+	}, staleAfter, now)
+	if err != nil && ctx.Err() != nil {
+		return mirror.Freshness{}, errMirrorCheckTimeout
+	}
+	return fr, err
 }
 
 // mirrorFreshness fetches the repo registry and computes freshness for every
@@ -138,10 +202,10 @@ func mirrorsOnly(repos []repoRow, reposDir string) []repoRow {
 	return out
 }
 
-// checkMirrorsWithTimeout runs checkMirrors under mirrorCheckTimeout.
+// checkMirrorsWithTimeout runs checkMirrors with the staleness threshold
+// derived from the daemon's sync interval. The timeouts themselves live in
+// checkMirrors, which is the only place that knows the fleet size.
 func checkMirrorsWithTimeout(ctx context.Context, repos []repoRow, syncInterval time.Duration, now time.Time) []mirrorRow {
-	ctx, cancel := context.WithTimeout(ctx, mirrorCheckTimeout)
-	defer cancel()
 	return checkMirrors(ctx, repos, mirrorStaleAfter(syncInterval), now)
 }
 
@@ -195,6 +259,9 @@ func renderMirrors(rows []mirrorRow, w io.Writer, now time.Time) {
 // (which no amount of waiting will fix) over a lagging working tree over a
 // merely old fetch.
 func mirrorLine(row mirrorRow, now time.Time) string {
+	if errors.Is(row.Err, errMirrorCheckTimeout) {
+		return fmt.Sprintf("mirror %s: свежесть неизвестна — %v", row.RepoID, errMirrorCheckTimeout)
+	}
 	if row.Err != nil {
 		return fmt.Sprintf("mirror %s: свежесть неизвестна (%v)", row.RepoID, row.Err)
 	}
