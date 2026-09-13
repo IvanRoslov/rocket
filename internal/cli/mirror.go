@@ -145,6 +145,40 @@ func checkMirrorsWithTimeout(ctx context.Context, repos []repoRow, syncInterval 
 	return checkMirrors(ctx, repos, mirrorStaleAfter(syncInterval), now)
 }
 
+// taskMirrorJSON is one mirror's freshness as `rocket task show --json`
+// emits it: the same mirrorJSON shape `rocket repo ls --json` already
+// carries, plus the repo it belongs to. Reusing the shape is the point —
+// a second vocabulary for the same fact is a second thing to get wrong.
+type taskMirrorJSON struct {
+	RepoID string `json:"repo_id"`
+	mirrorJSON
+}
+
+// taskMirrorJSONRows converts freshness rows for --json. It always returns
+// an array, never nil: `jq '.mirrors[]'` must work on a host with no
+// mirrors registered at all.
+func taskMirrorJSONRows(rows []mirrorRow) []taskMirrorJSON {
+	out := make([]taskMirrorJSON, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, taskMirrorJSON{RepoID: row.RepoID, mirrorJSON: toMirrorJSON(row)})
+	}
+	return out
+}
+
+// unfreshMirrors keeps the rows worth a reader's attention: stale mirrors,
+// and mirrors whose freshness could not be computed at all. A mirror we
+// could not check is the loudest case, not the quietest — "unknown" must
+// never be dropped into the same silence as "fine".
+func unfreshMirrors(rows []mirrorRow) []mirrorRow {
+	out := make([]mirrorRow, 0, len(rows))
+	for _, row := range rows {
+		if row.Err != nil || row.Fresh.Stale {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
 // renderMirrors writes one freshness line per mirror, in the order given.
 // Nothing at all is written when there are no mirrors.
 func renderMirrors(rows []mirrorRow, w io.Writer, now time.Time) {

@@ -112,7 +112,7 @@ func TestRenderTaskCardMilestone(t *testing.T) {
 	renderTaskCard(taskDetailRow{
 		ID: 42, Title: "Agents UX", Status: "in_progress",
 		Milestone: true, AssignedRole: "cto",
-	}, nil, nil, nil, &buf, time.Now())
+	}, nil, nil, nil, nil, &buf, time.Now())
 
 	out := buf.String()
 	for _, want := range []string{"Milestone: yes", "Agent: cto", "rocket agent attach cto"} {
@@ -123,14 +123,14 @@ func TestRenderTaskCardMilestone(t *testing.T) {
 
 	buf.Reset()
 	renderTaskCard(taskDetailRow{ID: 43, Title: "Agents UX", Status: "backlog", Milestone: true},
-		nil, nil, nil, &buf, time.Now())
+		nil, nil, nil, nil, &buf, time.Now())
 	if !strings.Contains(buf.String(), "Agent: не взят") {
 		t.Errorf("untaken milestone card:\n%s", buf.String())
 	}
 
 	buf.Reset()
 	renderTaskCard(taskDetailRow{ID: 44, Title: "regular", Status: "backlog", ProjectID: "rocket"},
-		nil, nil, nil, &buf, time.Now())
+		nil, nil, nil, nil, &buf, time.Now())
 	if strings.Contains(buf.String(), "Milestone") {
 		t.Errorf("regular task card mentions milestones:\n%s", buf.String())
 	}
