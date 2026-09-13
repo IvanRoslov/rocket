@@ -67,6 +67,18 @@ type Freshness struct {
 	// origin: it is behind, blocked, or has not been fetched recently
 	// enough.
 	Stale bool
+	// Head is the commit the mirror's working tree is actually on — the
+	// content an agent reading this mirror gets.
+	Head string
+	// Upstream is the commit origin/<default_branch> points at.
+	Upstream string
+	// Branch is the checked-out branch, empty for a detached HEAD. The
+	// package does not invent a name for a detached HEAD; naming it is the
+	// caller's job.
+	Branch string
+	// Dirty is true when the mirror has uncommitted changes or untracked
+	// files.
+	Dirty bool
 }
 
 // Check computes a mirror's freshness. It makes no network calls and no
@@ -86,9 +98,17 @@ func Check(ctx context.Context, repo store.Repo, staleAfter time.Duration, now t
 	}
 
 	upstream := "origin/" + repo.DefaultBranch
-	if _, err := runGit(ctx, repo.Path, "rev-parse", "--verify", "--quiet", upstream+"^{commit}"); err != nil {
+	upstreamSHA, err := runGit(ctx, repo.Path, "rev-parse", "--verify", "--quiet", upstream+"^{commit}")
+	if err != nil {
 		return Freshness{}, fmt.Errorf("mirror %s: %s not found: %w", repo.ID, upstream, err)
 	}
+	fr.Upstream = strings.TrimSpace(upstreamSHA)
+
+	headSHA, err := runGit(ctx, repo.Path, "rev-parse", "HEAD")
+	if err != nil {
+		return Freshness{}, fmt.Errorf("mirror %s: resolve HEAD: %w", repo.ID, err)
+	}
+	fr.Head = strings.TrimSpace(headSHA)
 
 	behindOut, err := runGit(ctx, repo.Path, "rev-list", "--count", "HEAD.."+upstream)
 	if err != nil {
@@ -106,10 +126,11 @@ func Check(ctx context.Context, repo store.Repo, staleAfter time.Duration, now t
 	}
 	fr.LastFetch = lastFetch
 
-	fr.Blocked, err = blockedReason(ctx, repo, upstream)
+	state, err := inspect(ctx, repo, upstream)
 	if err != nil {
 		return Freshness{}, fmt.Errorf("mirror %s: %w", repo.ID, err)
 	}
+	fr.Blocked, fr.Branch, fr.Dirty = state.Blocked, state.Branch, state.Dirty
 
 	fr.Stale = fr.BehindCommits > 0 ||
 		fr.Blocked != "" ||
@@ -119,33 +140,55 @@ func Check(ctx context.Context, repo store.Repo, staleAfter time.Duration, now t
 	return fr, nil
 }
 
-// blockedReason runs Sync's three guards read-only, in the same order Sync
-// applies them, and returns the first one that would stop the fast-forward.
-func blockedReason(ctx context.Context, repo store.Repo, upstream string) (string, error) {
+// treeState is everything Sync's guards observe about a mirror's working
+// tree. The guards have to look at the tree and the branch anyway, so the
+// observations are handed back rather than thrown away: Check reports them
+// as fields and would otherwise have to run the same two git commands twice.
+type treeState struct {
+	Dirty   bool
+	Branch  string
+	Blocked string
+}
+
+// inspect runs Sync's three guards read-only, in the same order Sync applies
+// them, and reports the first reason that would stop the fast-forward along
+// with what it saw on the way.
+func inspect(ctx context.Context, repo store.Repo, upstream string) (treeState, error) {
+	var st treeState
+
 	dirty, err := isDirty(ctx, repo.Path)
 	if err != nil {
-		return "", err
+		return st, err
 	}
-	if dirty {
-		return BlockedDirty, nil
-	}
+	st.Dirty = dirty
 
 	branch, err := currentBranch(ctx, repo.Path)
 	if err != nil {
-		return "", err
+		return st, err
 	}
-	if branch != repo.DefaultBranch {
-		return BlockedNotOnDefault(repo.DefaultBranch), nil
+	st.Branch = branch
+
+	switch {
+	case dirty:
+		st.Blocked = BlockedDirty
+	case branch != repo.DefaultBranch:
+		st.Blocked = BlockedNotOnDefault(repo.DefaultBranch)
+	default:
+		// `merge-base --is-ancestor` exits 1 (without a message) when HEAD
+		// is not an ancestor of upstream, i.e. when the merge would not be
+		// a fast-forward.
+		if _, err := runGit(ctx, repo.Path, "merge-base", "--is-ancestor", "HEAD", upstream); err != nil {
+			st.Blocked = BlockedNoFF
+		}
 	}
 
-	// `merge-base --is-ancestor` exits 1 (without a message) when HEAD is
-	// not an ancestor of upstream, i.e. when the merge would not be a
-	// fast-forward.
-	if _, err := runGit(ctx, repo.Path, "merge-base", "--is-ancestor", "HEAD", upstream); err != nil {
-		return BlockedNoFF, nil
-	}
+	return st, nil
+}
 
-	return "", nil
+// blockedReason is inspect for the callers that only want the reason.
+func blockedReason(ctx context.Context, repo store.Repo, upstream string) (string, error) {
+	st, err := inspect(ctx, repo, upstream)
+	return st.Blocked, err
 }
 
 // Sync brings a mirror up to date with origin: it fetches (the only network
