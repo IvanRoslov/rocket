@@ -90,6 +90,17 @@ func Acquire(ctx context.Context, locksDir, repoID, operation string, timeout ti
 	}
 
 	started := time.Now()
+
+	// An uncontended lock is taken without queueing at all. This is not an
+	// optimisation: the timeout bounds how long Acquire WAITS, and a caller
+	// that is not willing to wait (timeout 0) must still get a lock nobody
+	// holds. Going straight to the blocking path below would race the timer
+	// and refuse a free mirror, which reads as "busy" with no holder in
+	// sight and silently stops a caller from ever syncing.
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+		return newLock(f, 0, operation)
+	}
+
 	// The blocking flock cannot be interrupted, so it runs in its own
 	// goroutine. If it succeeds after we have already given up, that
 	// goroutine releases it — otherwise the mirror would stay locked by
@@ -130,7 +141,12 @@ func Acquire(ctx context.Context, locksDir, repoID, operation string, timeout ti
 		return nil, busy
 	}
 
-	l := &Lock{f: f, waited: time.Since(started)}
+	return newLock(f, time.Since(started), operation)
+}
+
+// newLock stamps the holder record on a file whose flock we already hold.
+func newLock(f *os.File, waited time.Duration, operation string) (*Lock, error) {
+	l := &Lock{f: f, waited: waited}
 	if err := writeHolder(f, Holder{PID: os.Getpid(), Operation: operation, Since: time.Now()}); err != nil {
 		_ = l.Release()
 		return nil, err

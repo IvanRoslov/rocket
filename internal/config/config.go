@@ -127,7 +127,34 @@ type Config struct {
 	// mirrors directly, so without a sweep they serve whatever commit they
 	// were cloned at. "0s" disables background syncing.
 	MirrorSyncInterval time.Duration `yaml:"mirror_sync_interval"`
-	Home               string        `yaml:"-"`
+
+	// The four mirror-lock knobs. Every writer of a mirror under ReposDir
+	// takes that mirror's exclusive lock first (see internal/mirrorlock);
+	// these say how long each of them is willing to wait for it. They are
+	// separate keys because the callers want genuinely different things,
+	// and one shared timeout would have to be wrong for three of them.
+
+	// MirrorLockTimeoutBackground bounds the unattended sweep's wait. It is
+	// short on purpose: a mirror somebody else is holding is one this tick
+	// skips and the next tick picks up, and a sweep that queued behind a
+	// two-minute `--repair` would stall every other mirror behind it.
+	MirrorLockTimeoutBackground time.Duration `yaml:"mirror_lock_timeout_background"`
+	// MirrorLockTimeoutCLI bounds `rocket repo sync` and `--repair`. A human
+	// who just asked for a sync would rather wait out a running sweep than
+	// be told the mirror is busy, so this is the generous one.
+	MirrorLockTimeoutCLI time.Duration `yaml:"mirror_lock_timeout_cli"`
+	// MirrorLockTimeoutClone bounds the pre-spawn sync and clone of a
+	// mirror. It sits between the other two: a spawn that waits forever is
+	// a stopped feature, and one that gives up instantly cuts the worktree
+	// from a stale branch point.
+	MirrorLockTimeoutClone time.Duration `yaml:"mirror_lock_timeout_clone"`
+	// MirrorIndexLockMaxAge is how old a mirror's .git/index.lock must be
+	// before a lock holder removes it as abandoned. "0s" disables reaping
+	// entirely — it must never be read as "reap everything", which would
+	// clobber a git that is genuinely running.
+	MirrorIndexLockMaxAge time.Duration `yaml:"mirror_index_lock_max_age"`
+
+	Home string `yaml:"-"`
 
 	// SocketOverride, when non-empty, takes precedence over the default
 	// <home>/rocket.sock path returned by SocketPath. It is populated from
@@ -164,32 +191,36 @@ func Load(home string) (*Config, error) {
 
 	// Set defaults
 	cfg := &Config{
-		Port:                      4477,
-		Host:                      "127.0.0.1",
-		TLSPort:                   4478,
-		HeartbeatInterval:         5 * time.Minute,
-		GithubPollInterval:        2 * time.Minute,
-		DefaultAgent:              "claude-code",
-		ReposDir:                  filepath.Join(home, "repos"),
-		WorktreesDir:              filepath.Join(home, "worktrees"),
-		AttachmentsDir:            filepath.Join(home, "attachments"),
-		ActivityPollInterval:      5 * time.Second,
-		ReadyToIdle:               5 * time.Minute,
-		QueueTimeout:              30 * time.Minute,
-		LargeMessageThreshold:     2048,
-		SocketDelivery:            true,
-		WorkerStallThreshold:      15 * time.Minute,
-		QuestionReminderThreshold: 30 * time.Minute,
-		InputStallThreshold:       DefaultInputStallThreshold,
-		QuestionStaleAfter:        DefaultQuestionStaleAfter,
-		MilestoneQuietAfter:       DefaultMilestoneQuietAfter,
-		ComposerBusyDeadline:      DefaultComposerBusyDeadline,
-		GithubAPIBase:             "https://api.github.com",
-		GithubCloneBase:           "",
-		MergeGrace:                5 * time.Minute,
-		AgentNotifyInterval:       5 * time.Minute,
-		MirrorSyncInterval:        5 * time.Minute,
-		Home:                      home,
+		Port:                        4477,
+		Host:                        "127.0.0.1",
+		TLSPort:                     4478,
+		HeartbeatInterval:           5 * time.Minute,
+		GithubPollInterval:          2 * time.Minute,
+		DefaultAgent:                "claude-code",
+		ReposDir:                    filepath.Join(home, "repos"),
+		WorktreesDir:                filepath.Join(home, "worktrees"),
+		AttachmentsDir:              filepath.Join(home, "attachments"),
+		ActivityPollInterval:        5 * time.Second,
+		ReadyToIdle:                 5 * time.Minute,
+		QueueTimeout:                30 * time.Minute,
+		LargeMessageThreshold:       2048,
+		SocketDelivery:              true,
+		WorkerStallThreshold:        15 * time.Minute,
+		QuestionReminderThreshold:   30 * time.Minute,
+		InputStallThreshold:         DefaultInputStallThreshold,
+		QuestionStaleAfter:          DefaultQuestionStaleAfter,
+		MilestoneQuietAfter:         DefaultMilestoneQuietAfter,
+		ComposerBusyDeadline:        DefaultComposerBusyDeadline,
+		GithubAPIBase:               "https://api.github.com",
+		GithubCloneBase:             "",
+		MergeGrace:                  5 * time.Minute,
+		AgentNotifyInterval:         5 * time.Minute,
+		MirrorSyncInterval:          5 * time.Minute,
+		MirrorLockTimeoutBackground: 5 * time.Second,
+		MirrorLockTimeoutCLI:        2 * time.Minute,
+		MirrorLockTimeoutClone:      60 * time.Second,
+		MirrorIndexLockMaxAge:       10 * time.Minute,
+		Home:                        home,
 	}
 
 	// Try to load config.yaml

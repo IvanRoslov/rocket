@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/IvanRoslov/rocket/internal/mirror"
 )
 
 // newTestMirror builds an origin with two commits and a clone stuck on the
@@ -44,7 +46,7 @@ func writeTestFile(t *testing.T, path, content string) {
 func TestSyncMirrorsAdvancesRealMirror(t *testing.T) {
 	m := newTestMirror(t)
 
-	got := syncMirrors(context.Background(), []repoRow{m}, realSyncOps(""), false, time.Now())
+	got := syncMirrors(context.Background(), []repoRow{m}, realSyncOps(testLockOpts(m)), false, time.Now())
 
 	if len(got) != 1 {
 		t.Fatalf("outcomes = %+v", got)
@@ -66,7 +68,7 @@ func TestSyncMirrorsRepairsDirtyMirrorEndToEnd(t *testing.T) {
 	gitInTest(t, m.Path, "checkout", "-b", "feature/someones-work")
 	writeTestFile(t, filepath.Join(m.Path, "scratch.txt"), "uncommitted\n")
 
-	without := syncMirrors(context.Background(), []repoRow{m}, realSyncOps(""), false, time.Now())
+	without := syncMirrors(context.Background(), []repoRow{m}, realSyncOps(testLockOpts(m)), false, time.Now())
 	if without[0].Blocked == "" {
 		t.Fatalf("dirty mirror reported as fine without --repair: %+v", without[0])
 	}
@@ -75,7 +77,7 @@ func TestSyncMirrorsRepairsDirtyMirrorEndToEnd(t *testing.T) {
 	}
 
 	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
-	with := syncMirrors(context.Background(), []repoRow{m}, realSyncOps(""), true, now)
+	with := syncMirrors(context.Background(), []repoRow{m}, realSyncOps(testLockOpts(m)), true, now)
 	o := with[0]
 
 	if o.Err != nil {
@@ -122,4 +124,15 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
 	}
 	return out
+}
+
+// testLockOpts locks and records under the mirror's own parent directory, so
+// the end-to-end tests above go through the same locked path production
+// does rather than a special unlocked one.
+func testLockOpts(m repoRow) mirror.LockOptions {
+	return mirror.LockOptions{
+		ReposDir:        filepath.Dir(m.Path),
+		Timeout:         10 * time.Second,
+		IndexLockMaxAge: 10 * time.Minute,
+	}
 }

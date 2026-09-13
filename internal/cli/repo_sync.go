@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/mirror"
+	"github.com/IvanRoslov/rocket/internal/mirrorlock"
 	"github.com/IvanRoslov/rocket/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -64,6 +65,11 @@ type syncOutcome struct {
 	// RescueBranch names the branch the mirror's uncommitted changes were
 	// committed to, empty when there was nothing to rescue.
 	RescueBranch string
+	// Busy means another process holds the mirror's lock, so this pass did
+	// not touch it at all — no advance, no behind count, no block. It is an
+	// outcome, not a failure: the other mirrors are still processed and the
+	// command still exits 0.
+	Busy *mirrorlock.ErrBusy
 	// Err is what stopped us from examining the mirror at all.
 	Err error
 	// FetchErr is a failed `git fetch`. Sync fast-forwards from the refs
@@ -96,6 +102,14 @@ func renderSync(outcomes []syncOutcome, unknown []string, w io.Writer) {
 func syncLine(o syncOutcome) string {
 	if o.Err != nil {
 		return fmt.Sprintf("mirror %s: ошибка — %v", o.RepoID, o.Err)
+	}
+	// The holder is named because "занято" alone leaves the reader with no
+	// next step. With a pid and an operation they can see whether it is the
+	// daemon's sweep (wait a moment) or a repair somebody started by hand.
+	if o.Busy != nil {
+		return fmt.Sprintf("mirror %s: занято другим процессом (держит %s, pid %d, уже %s)",
+			o.RepoID, o.Busy.Holder.Operation, o.Busy.Holder.PID,
+			humanAgeRU(time.Since(o.Busy.Holder.Since)))
 	}
 
 	prefix := fmt.Sprintf("mirror %s: ", o.RepoID)
@@ -145,15 +159,17 @@ type syncOps struct {
 	repair func(ctx context.Context, repo store.Repo, now time.Time) (mirror.RepairResult, error)
 }
 
-// realSyncOps wires syncOps to git and to the mirror package. stateDir is
-// where the last sync result is recorded for `rocket repo status`; empty
-// records nothing, which is what a host with no repos_dir gets.
-func realSyncOps(stateDir string) *syncOps {
+// realSyncOps wires syncOps to git and to the mirror package. opts carries
+// the mirror root (whence the lock and sidecar directories) and how long a
+// human at a terminal is willing to wait for a mirror somebody else holds;
+// an empty ReposDir neither locks nor records, which is what a host with no
+// repos_dir gets.
+func realSyncOps(opts mirror.LockOptions) *syncOps {
 	return &syncOps{
 		head:  gitHead,
 		count: gitCountCommits,
 		sync: func(ctx context.Context, repo store.Repo) (mirror.SyncResult, error) {
-			return mirror.SyncAndRecord(ctx, repo, stateDir, mirror.OpRepoSync)
+			return mirror.SyncLocked(ctx, repo, opts, mirror.OpRepoSync)
 		},
 		check: func(ctx context.Context, repo store.Repo) (mirror.Freshness, error) {
 			// staleAfter and now only feed Freshness.Stale, which this
@@ -161,12 +177,12 @@ func realSyncOps(stateDir string) *syncOps {
 			// the mirror looks.
 			return mirror.Check(ctx, repo, mirrorStaleFallback, time.Now())
 		},
+		// The repair runs under the lock for its WHOLE sequence — rescue
+		// commit, checkout, fast-forward. Locking the individual git calls
+		// would not have prevented #3576: it was the gap between the commit
+		// and the checkout that stranded 18 mirrors on rescue/*.
 		repair: func(ctx context.Context, repo store.Repo, now time.Time) (mirror.RepairResult, error) {
-			res, err := mirror.Repair(ctx, repo, now)
-			// Repair ends with a Sync of its own, so its result — not the
-			// one from the pass before the repair — is the mirror's state.
-			mirror.RecordSync(repo.ID, stateDir, mirror.OpRepoSyncRepair, res.Sync)
-			return res, err
+			return mirror.RepairLocked(ctx, repo, now, opts, mirror.OpRepoSyncRepair)
 		},
 	}
 }
@@ -202,7 +218,14 @@ func syncMirror(ctx context.Context, m repoRow, ops *syncOps, repair bool, now t
 	// refs already on disk after a failed fetch, and a failed merge leaves
 	// the mirror exactly as it was. Both are shown alongside the outcome
 	// rather than instead of it.
-	syncRes, _ := ops.sync(ctx, repo)
+	syncRes, syncErr := ops.sync(ctx, repo)
+
+	// A mirror we could not lock was not touched, so there is nothing to
+	// measure and nothing to repair. Report who holds it and move on.
+	if busy, ok := mirror.LockBusy(syncErr); ok {
+		out.Busy = busy
+		return out
+	}
 
 	fr, err := ops.check(ctx, repo)
 	if err != nil {
@@ -213,6 +236,10 @@ func syncMirror(ctx context.Context, m repoRow, ops *syncOps, repair bool, now t
 
 	if fr.Blocked != "" && repair {
 		res, err := ops.repair(ctx, repo, now)
+		if busy, ok := mirror.LockBusy(err); ok {
+			out.Busy = busy
+			return out
+		}
 		if err != nil {
 			out.Err = err
 			return out
@@ -262,6 +289,8 @@ func syncExitError(outcomes []syncOutcome) error {
 		return errors.New("нет зеркал для синхронизации")
 	}
 	for _, o := range outcomes {
+		// A busy mirror counts as processed: we reported the truth about
+		// it, which is what the command was asked to do.
 		if o.Err == nil {
 			return nil
 		}
@@ -324,8 +353,13 @@ func newRepoSyncCmd() *cobra.Command {
 				return err
 			}
 
+			lockOpts := mirror.LockOptions{
+				ReposDir:        cfg.ReposDir,
+				Timeout:         cfg.MirrorLockTimeoutCLI,
+				IndexLockMaxAge: cfg.MirrorIndexLockMaxAge,
+			}
 			selected, unknown := selectMirrors(mirrorsOnly(repos, cfg.ReposDir), args)
-			outcomes := syncMirrors(cmd.Context(), selected, realSyncOps(mirror.StateDir(cfg.ReposDir)), repair, time.Now())
+			outcomes := syncMirrors(cmd.Context(), selected, realSyncOps(lockOpts), repair, time.Now())
 
 			if flags.JSON {
 				if err := printJSON(cmd, syncJSON(outcomes, unknown)); err != nil {
@@ -345,15 +379,25 @@ func newRepoSyncCmd() *cobra.Command {
 
 // syncRow is one mirror's outcome in --json.
 type syncRow struct {
-	Repo         string `json:"repo"`
-	Advanced     int    `json:"advanced"`
-	Behind       int    `json:"behind"`
-	Blocked      string `json:"blocked,omitempty"`
-	Repaired     bool   `json:"repaired,omitempty"`
-	RescueBranch string `json:"rescue_branch,omitempty"`
-	FetchError   string `json:"fetch_error,omitempty"`
-	MergeError   string `json:"merge_error,omitempty"`
-	Error        string `json:"error,omitempty"`
+	Repo         string   `json:"repo"`
+	Advanced     int      `json:"advanced"`
+	Behind       int      `json:"behind"`
+	Blocked      string   `json:"blocked,omitempty"`
+	Repaired     bool     `json:"repaired,omitempty"`
+	RescueBranch string   `json:"rescue_branch,omitempty"`
+	FetchError   string   `json:"fetch_error,omitempty"`
+	MergeError   string   `json:"merge_error,omitempty"`
+	Busy         *busyRow `json:"busy,omitempty"`
+	Error        string   `json:"error,omitempty"`
+}
+
+// busyRow is the holder of a mirror this pass could not lock. An agent
+// reading --json needs the same answer a human gets from the text line: who
+// has it, so it can decide whether to wait or to go look.
+type busyRow struct {
+	Operation string    `json:"operation"`
+	PID       int       `json:"pid"`
+	Since     time.Time `json:"since"`
 }
 
 // syncJSON is the machine view of the same report, unknown ids included:
@@ -369,6 +413,13 @@ func syncJSON(outcomes []syncOutcome, unknown []string) map[string]any {
 			Blocked:      o.Blocked,
 			Repaired:     o.Repaired,
 			RescueBranch: o.RescueBranch,
+		}
+		if o.Busy != nil {
+			row.Busy = &busyRow{
+				Operation: o.Busy.Holder.Operation,
+				PID:       o.Busy.Holder.PID,
+				Since:     o.Busy.Holder.Since,
+			}
 		}
 		if o.Err != nil {
 			row.Error = o.Err.Error()

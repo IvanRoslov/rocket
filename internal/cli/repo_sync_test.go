@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/mirror"
+	"github.com/IvanRoslov/rocket/internal/mirrorlock"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -406,5 +407,98 @@ func TestSyncMirrorsRecordsRemainingBehind(t *testing.T) {
 
 	if len(got) != 1 || got[0].Behind != 3 {
 		t.Fatalf("outcomes = %+v, want one still 3 commits behind", got)
+	}
+}
+
+// A mirror somebody else is holding is an outcome, not a failure. The line
+// names the holder, because "занято" with no answer to "кем?" leaves the
+// reader nothing to do next.
+func TestSyncLineReportsABusyMirrorWithItsHolder(t *testing.T) {
+	got := syncLine(syncOutcome{RepoID: "rocket", Busy: &mirrorlock.ErrBusy{
+		RepoID: "rocket",
+		Holder: mirrorlock.Holder{PID: 4242, Operation: mirror.OpRepoSyncRepair, Since: time.Now().Add(-90 * time.Second)},
+	}})
+	want := "mirror rocket: занято другим процессом (держит repo-sync-repair, pid 4242, уже 1 мин)"
+	if got != want {
+		t.Fatalf("syncLine = %q, want %q", got, want)
+	}
+}
+
+// The busy line replaces the rest of the report rather than joining it: we
+// did not look at the mirror, so there is no advance, no behind count and no
+// block to speak of.
+func TestSyncMirrorReportsBusyWithoutTouchingTheMirror(t *testing.T) {
+	busy := &mirrorlock.ErrBusy{RepoID: "rocket", Holder: mirrorlock.Holder{PID: 7, Operation: mirror.OpSyncer}}
+	checked := false
+	ops := &syncOps{
+		head:  func(context.Context, string) (string, error) { return "abc", nil },
+		count: func(context.Context, string, string, string) (int, error) { return 0, nil },
+		sync: func(context.Context, store.Repo) (mirror.SyncResult, error) {
+			return mirror.SyncResult{}, busy
+		},
+		check: func(context.Context, store.Repo) (mirror.Freshness, error) {
+			checked = true
+			return mirror.Freshness{}, nil
+		},
+	}
+
+	out := syncMirror(context.Background(), repoRow{ID: "rocket", Path: "/m", DefaultBranch: "main"}, ops, false, time.Now())
+	if out.Busy != busy {
+		t.Fatalf("Busy = %v, want the ErrBusy the sync returned", out.Busy)
+	}
+	if out.Err != nil {
+		t.Errorf("Err = %v — a busy mirror is an outcome, not a failure of the pass", out.Err)
+	}
+	if checked {
+		t.Error("a mirror we never locked was inspected anyway")
+	}
+}
+
+// Every mirror busy still exits 0: the command reported the truth about all
+// of them, which is exactly what it was asked to do.
+func TestSyncExitErrorIgnoresBusyMirrors(t *testing.T) {
+	outcomes := []syncOutcome{{RepoID: "a", Busy: &mirrorlock.ErrBusy{}}}
+	if err := syncExitError(outcomes); err != nil {
+		t.Errorf("syncExitError = %v, want nil", err)
+	}
+}
+
+func TestSyncJSONCarriesTheBusyHolder(t *testing.T) {
+	rows := syncJSON([]syncOutcome{{RepoID: "rocket", Busy: &mirrorlock.ErrBusy{
+		Holder: mirrorlock.Holder{PID: 4242, Operation: mirror.OpSyncer},
+	}}}, nil)["mirrors"].([]syncRow)
+	if rows[0].Busy == nil {
+		t.Fatal("busy row has no busy field")
+	}
+	if rows[0].Busy.Operation != mirror.OpSyncer || rows[0].Busy.PID != 4242 {
+		t.Errorf("busy = %+v, want the holder", rows[0].Busy)
+	}
+}
+
+// One busy mirror must not cost the others their sync: the pass goes on.
+func TestSyncMirrorsContinuesPastABusyMirror(t *testing.T) {
+	synced := map[string]bool{}
+	ops := &syncOps{
+		head:  func(context.Context, string) (string, error) { return "abc", nil },
+		count: func(context.Context, string, string, string) (int, error) { return 0, nil },
+		sync: func(_ context.Context, repo store.Repo) (mirror.SyncResult, error) {
+			if repo.ID == "a" {
+				return mirror.SyncResult{}, &mirrorlock.ErrBusy{RepoID: "a"}
+			}
+			synced[repo.ID] = true
+			return mirror.SyncResult{}, nil
+		},
+		check: func(context.Context, store.Repo) (mirror.Freshness, error) { return mirror.Freshness{}, nil },
+	}
+
+	outcomes := syncMirrors(context.Background(),
+		[]repoRow{{ID: "a", Path: "/a", DefaultBranch: "main"}, {ID: "b", Path: "/b", DefaultBranch: "main"}},
+		ops, false, time.Now())
+
+	if outcomes[0].Busy == nil {
+		t.Error("mirror a should be reported busy")
+	}
+	if !synced["b"] {
+		t.Error("mirror b was not synced — a busy neighbour must not stop the pass")
 	}
 }

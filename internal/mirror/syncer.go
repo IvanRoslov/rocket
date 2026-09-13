@@ -110,7 +110,11 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 	}
 
 	reposDir := resolvePath(s.cfg.ReposDir)
-	stateDir := StateDir(s.cfg.ReposDir)
+	opts := LockOptions{
+		ReposDir:        s.cfg.ReposDir,
+		Timeout:         s.cfg.MirrorLockTimeoutBackground,
+		IndexLockMaxAge: s.cfg.MirrorIndexLockMaxAge,
+	}
 
 	for _, repo := range repos {
 		if ctx.Err() != nil {
@@ -121,7 +125,16 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 				"repo", repo.ID, "path", repo.Path, "repos_dir", s.cfg.ReposDir)
 			continue
 		}
-		if _, err := SyncAndRecord(ctx, repo, stateDir, OpSyncer); err != nil {
+		// A mirror somebody else is holding is skipped, not waited out.
+		// The sweep runs again in a few minutes, and queueing behind a
+		// two-minute `repo sync --repair` would cost every mirror after
+		// this one its tick as well.
+		if _, err := SyncLocked(ctx, repo, opts, OpSyncer); err != nil {
+			if busy, ok := LockBusy(err); ok {
+				slog.Info("mirror: skipping a mirror held by another process until the next tick",
+					"repo", repo.ID, "holder", busy.Holder.Operation, "holder_pid", busy.Holder.PID)
+				continue
+			}
 			slog.Warn("mirror: sync failed", "repo", repo.ID, "path", repo.Path, "error", err)
 		}
 	}
