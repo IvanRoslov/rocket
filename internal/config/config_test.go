@@ -406,3 +406,73 @@ func TestLoadSocketDeliveryOverride(t *testing.T) {
 		t.Error("expected socket_delivery: false to disable socket delivery")
 	}
 }
+
+// The four mirror-lock knobs. They are separate keys rather than one shared
+// timeout because the callers want very different things: the background
+// sweep would rather skip a mirror than hold up the tick, a human at a
+// terminal will happily wait out a running sweep, and a spawn sits in
+// between.
+func TestMirrorLockDefaults(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MirrorLockTimeoutSyncer != 5*time.Second {
+		t.Errorf("MirrorLockTimeoutSyncer = %v, want 5s", cfg.MirrorLockTimeoutSyncer)
+	}
+	if cfg.MirrorLockTimeoutCLI != 2*time.Minute {
+		t.Errorf("MirrorLockTimeoutCLI = %v, want 2m", cfg.MirrorLockTimeoutCLI)
+	}
+	if cfg.MirrorLockTimeoutClone != 60*time.Second {
+		t.Errorf("MirrorLockTimeoutClone = %v, want 60s", cfg.MirrorLockTimeoutClone)
+	}
+	if cfg.MirrorIndexLockMaxAge != 10*time.Minute {
+		t.Errorf("MirrorIndexLockMaxAge = %v, want 10m", cfg.MirrorIndexLockMaxAge)
+	}
+}
+
+func TestMirrorLockOverrides(t *testing.T) {
+	home := t.TempDir()
+	yaml := "mirror_lock_timeout_syncer: 1s\n" +
+		"mirror_lock_timeout_cli: 30s\n" +
+		"mirror_lock_timeout_clone: 15s\n" +
+		"mirror_index_lock_max_age: 1h\n"
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(yaml), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(home)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MirrorLockTimeoutSyncer != time.Second {
+		t.Errorf("MirrorLockTimeoutSyncer = %v, want 1s", cfg.MirrorLockTimeoutSyncer)
+	}
+	if cfg.MirrorLockTimeoutCLI != 30*time.Second {
+		t.Errorf("MirrorLockTimeoutCLI = %v, want 30s", cfg.MirrorLockTimeoutCLI)
+	}
+	if cfg.MirrorLockTimeoutClone != 15*time.Second {
+		t.Errorf("MirrorLockTimeoutClone = %v, want 15s", cfg.MirrorLockTimeoutClone)
+	}
+	if cfg.MirrorIndexLockMaxAge != time.Hour {
+		t.Errorf("MirrorIndexLockMaxAge = %v, want 1h", cfg.MirrorIndexLockMaxAge)
+	}
+}
+
+// Zeroing the reaper threshold must disable reaping, not turn it into a
+// reaper that removes every index.lock it sees — including one a running git
+// still owns.
+func TestMirrorIndexLockMaxAgeZeroDisablesReaping(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("mirror_index_lock_max_age: 0s\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(home)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MirrorIndexLockMaxAge != 0 {
+		t.Errorf("MirrorIndexLockMaxAge = %v, want 0", cfg.MirrorIndexLockMaxAge)
+	}
+}
