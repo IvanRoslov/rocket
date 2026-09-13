@@ -43,7 +43,7 @@ func TestRenderRepoStatusTable(t *testing.T) {
 	out := buf.String()
 
 	header := strings.Fields(strings.SplitN(out, "\n", 2)[0])
-	want := []string{"REPO", "HEAD", "ORIGIN", "BEHIND", "BRANCH", "DIRTY", "FETCHED"}
+	want := []string{"REPO", "HEAD", "ORIGIN", "BEHIND", "BRANCH", "DIRTY", "FETCHED", "SYNC"}
 	if strings.Join(header, " ") != strings.Join(want, " ") {
 		t.Fatalf("header = %v, want %v", header, want)
 	}
@@ -137,4 +137,121 @@ func TestRepoStatusJSONCarriesTheSameFields(t *testing.T) {
 	if _, ok := landing["behind"]; ok {
 		t.Fatalf("uncheckable mirror must not report a measured behind count: %v", landing)
 	}
+}
+
+// --- SYNC column --------------------------------------------------------
+
+// longMergeErr is longer than the column, so the table has to truncate it
+// while the block below keeps it whole.
+const longMergeErr = "mirror rocket: merge --ff-only origin/main: git merge: exit status 128 (fatal: Unable to create '/x/.git/index.lock': File exists.)"
+
+func syncStateFixture(now time.Time) []mirrorRow {
+	rows := statusFixture(now)
+	// "app" is the mirror that is behind: give it the merge failure that
+	// explains why, which is precisely what used to be invisible.
+	rows[1].Sync = mirror.SyncState{
+		RepoID: "app", At: now.Add(-3 * time.Minute), By: mirror.OpSyncer, MergeErr: longMergeErr,
+	}
+	rows[0].Sync = mirror.SyncState{RepoID: "rocket", At: now.Add(-2 * time.Minute), By: mirror.OpSyncer}
+	return rows
+}
+
+// The column exists so a failing sync cannot be scrolled past, and the block
+// below the table so the reason is readable in full.
+func TestRenderRepoStatusShowsSyncError(t *testing.T) {
+	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+
+	var buf bytes.Buffer
+	renderRepoStatus(syncStateFixture(now), &buf, now)
+	out := buf.String()
+
+	if !strings.Contains(out, "index.lock") {
+		t.Errorf("full sync error is not printed below the table:\n%s", out)
+	}
+	if !strings.Contains(out, "последняя синхронизация не удалась") {
+		t.Errorf("output does not say the last sync failed:\n%s", out)
+	}
+	if !strings.Contains(out, mirror.OpSyncer) {
+		t.Errorf("output does not name who synced:\n%s", out)
+	}
+	if !strings.Contains(out, "…") {
+		t.Errorf("the SYNC column does not truncate a long error:\n%s", out)
+	}
+	if strings.Contains(strings.SplitN(out, "\n\n", 2)[0], "File exists") {
+		t.Errorf("the table cell carries the untruncated error:\n%s", out)
+	}
+}
+
+// A clean sync reads "ok"; a mirror nobody has synced yet reads "—". The two
+// must not collapse into one cell: "nothing has tried" is not "fine".
+func TestSyncCell(t *testing.T) {
+	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name string
+		row  mirrorRow
+		want string
+	}{
+		{"never synced", mirrorRow{RepoID: "a"}, "—"},
+		{"clean sync", mirrorRow{RepoID: "a", Sync: mirror.SyncState{At: now, By: mirror.OpSyncer}}, "ok"},
+		{"blocked is not an error", mirrorRow{RepoID: "a", Sync: mirror.SyncState{
+			At: now, By: mirror.OpSyncer, Blocked: mirror.BlockedDirty}}, "ok"},
+		{"merge error", mirrorRow{RepoID: "a", Sync: mirror.SyncState{At: now, MergeErr: "boom"}}, "boom"},
+		{"fetch error", mirrorRow{RepoID: "a", Sync: mirror.SyncState{At: now, FetchErr: "no route"}}, "no route"},
+		{"unreadable sidecar", mirrorRow{RepoID: "a", SyncErr: errors.New("parse")}, "parse"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := syncCell(tt.row); got != tt.want {
+				t.Errorf("syncCell = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRepoStatusJSONCarriesTheSyncState(t *testing.T) {
+	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+
+	rows := repoStatusJSON(syncStateFixture(now))
+	byRepo := map[string]repoStatusRow{}
+	for _, r := range rows {
+		byRepo[r.Repo] = r
+	}
+
+	app := byRepo["app"]
+	if app.SyncError != longMergeErr {
+		t.Errorf("sync_error = %q, want the full merge error", app.SyncError)
+	}
+	if app.SyncBy != mirror.OpSyncer {
+		t.Errorf("sync_by = %q, want %q", app.SyncBy, mirror.OpSyncer)
+	}
+	if app.SyncAt == "" {
+		t.Error("sync_at is empty")
+	}
+	if got := byRepo["web"]; got.SyncAt != "" || got.SyncError != "" {
+		t.Errorf("a never-synced mirror carries sync fields: %+v", got)
+	}
+}
+
+// A mirror that could not be checked at all is exactly the one whose last
+// sync a reader needs, so its row keeps the sidecar fields.
+func TestRepoStatusJSONKeepsSyncStateOnUncheckableMirror(t *testing.T) {
+	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	rows := syncStateFixture(now)
+	rows[3].Sync = mirror.SyncState{RepoID: "landing", At: now, By: mirror.OpRepoSync, FetchErr: "no route to host"}
+
+	for _, r := range repoStatusJSON(rows) {
+		if r.Repo != "landing" {
+			continue
+		}
+		if r.Error == "" {
+			t.Error("the check error was dropped")
+		}
+		if r.SyncError != "no route to host" {
+			t.Errorf("sync_error = %q, want the recorded fetch error", r.SyncError)
+		}
+		return
+	}
+	t.Fatal("landing row missing")
 }

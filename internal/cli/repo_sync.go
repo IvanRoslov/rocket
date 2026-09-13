@@ -145,19 +145,29 @@ type syncOps struct {
 	repair func(ctx context.Context, repo store.Repo, now time.Time) (mirror.RepairResult, error)
 }
 
-// realSyncOps wires syncOps to git and to the mirror package.
-func realSyncOps() *syncOps {
+// realSyncOps wires syncOps to git and to the mirror package. stateDir is
+// where the last sync result is recorded for `rocket repo status`; empty
+// records nothing, which is what a host with no repos_dir gets.
+func realSyncOps(stateDir string) *syncOps {
 	return &syncOps{
 		head:  gitHead,
 		count: gitCountCommits,
-		sync:  mirror.Sync,
+		sync: func(ctx context.Context, repo store.Repo) (mirror.SyncResult, error) {
+			return mirror.SyncAndRecord(ctx, repo, stateDir, mirror.OpRepoSync)
+		},
 		check: func(ctx context.Context, repo store.Repo) (mirror.Freshness, error) {
 			// staleAfter and now only feed Freshness.Stale, which this
 			// command does not use: it reports what it just did, not how old
 			// the mirror looks.
 			return mirror.Check(ctx, repo, mirrorStaleFallback, time.Now())
 		},
-		repair: mirror.Repair,
+		repair: func(ctx context.Context, repo store.Repo, now time.Time) (mirror.RepairResult, error) {
+			res, err := mirror.Repair(ctx, repo, now)
+			// Repair ends with a Sync of its own, so its result — not the
+			// one from the pass before the repair — is the mirror's state.
+			mirror.RecordSync(repo.ID, stateDir, mirror.OpRepoSyncRepair, res.Sync)
+			return res, err
+		},
 	}
 }
 
@@ -315,7 +325,7 @@ func newRepoSyncCmd() *cobra.Command {
 			}
 
 			selected, unknown := selectMirrors(mirrorsOnly(repos, cfg.ReposDir), args)
-			outcomes := syncMirrors(cmd.Context(), selected, realSyncOps(), repair, time.Now())
+			outcomes := syncMirrors(cmd.Context(), selected, realSyncOps(mirror.StateDir(cfg.ReposDir)), repair, time.Now())
 
 			if flags.JSON {
 				if err := printJSON(cmd, syncJSON(outcomes, unknown)); err != nil {

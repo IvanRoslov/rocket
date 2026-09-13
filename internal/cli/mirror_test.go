@@ -284,3 +284,35 @@ func TestMirrorLineUnbornBranchStaysAnError(t *testing.T) {
 		t.Fatalf("mirrorLine = %q, want the raw error reported", got)
 	}
 }
+
+// loadSyncStates is what puts the daemon's recorded sync in front of a human
+// running `rocket repo status` in a different process.
+func TestLoadSyncStatesReadsTheSidecar(t *testing.T) {
+	reposDir := t.TempDir()
+	if err := mirror.WriteState(mirror.StateDir(reposDir), mirror.SyncState{
+		RepoID: "rocket", At: time.Now().UTC(), By: mirror.OpSyncer, MergeErr: "boom",
+	}); err != nil {
+		t.Fatalf("WriteState: %v", err)
+	}
+
+	rows := loadSyncStates([]mirrorRow{{RepoID: "rocket"}, {RepoID: "never-synced"}}, reposDir)
+
+	if rows[0].SyncErr != nil {
+		t.Fatalf("SyncErr: %v", rows[0].SyncErr)
+	}
+	if rows[0].Sync.MergeErr != "boom" {
+		t.Errorf("MergeErr = %q, want boom", rows[0].Sync.MergeErr)
+	}
+	if !rows[1].Sync.At.IsZero() {
+		t.Errorf("a mirror with no sidecar came back with a state: %+v", rows[1].Sync)
+	}
+}
+
+// With no repos_dir there is no sidecar directory to read, and every row
+// must come back untouched rather than carrying an error about it.
+func TestLoadSyncStatesWithoutReposDirIsANoop(t *testing.T) {
+	rows := loadSyncStates([]mirrorRow{{RepoID: "rocket"}}, "")
+	if rows[0].SyncErr != nil || !rows[0].Sync.At.IsZero() {
+		t.Errorf("row changed with no repos_dir: %+v", rows[0])
+	}
+}

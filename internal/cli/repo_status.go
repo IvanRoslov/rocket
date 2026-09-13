@@ -3,9 +3,11 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/IvanRoslov/rocket/internal/mirror"
 	"github.com/spf13/cobra"
 )
 
@@ -22,29 +24,78 @@ const shortSHALen = 7
 // quietly omits rows is worse than no table.
 func renderRepoStatus(rows []mirrorRow, w io.Writer, now time.Time) {
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	_, _ = tw.Write([]byte("REPO\tHEAD\tORIGIN\tBEHIND\tBRANCH\tDIRTY\tFETCHED\n"))
+	_, _ = tw.Write([]byte("REPO\tHEAD\tORIGIN\tBEHIND\tBRANCH\tDIRTY\tFETCHED\tSYNC\n"))
 	for _, row := range rows {
 		_, _ = tw.Write([]byte(repoStatusCells(row, now) + "\n"))
 	}
 	_ = tw.Flush()
 
 	var broken []mirrorRow
+	var failedSync []mirrorRow
 	for _, row := range rows {
 		if row.Err != nil {
 			broken = append(broken, row)
 		}
+		if syncErrorText(row) != "" {
+			failedSync = append(failedSync, row)
+		}
+	}
+	if len(broken) > 0 || len(failedSync) > 0 {
+		fmt.Fprintln(w)
 	}
 	if len(broken) > 0 {
-		fmt.Fprintln(w)
 		renderMirrors(broken, w, now)
 	}
+	// The table can only hold a truncated error, and the whole point of
+	// recording it was that the reason a mirror stopped advancing must be
+	// readable. So it is printed in full here, once per mirror.
+	for _, row := range failedSync {
+		fmt.Fprintf(w, "mirror %s: последняя синхронизация не удалась (%s): %s\n",
+			row.RepoID, syncByPhrase(row.Sync), syncErrorText(row))
+	}
+}
+
+// syncCellWidth is how much of a sync error the table shows. The full text
+// goes in the block below; the column exists to make the failing mirror
+// impossible to scroll past.
+const syncCellWidth = 40
+
+// syncCell renders the SYNC column: what the last recorded sync of this
+// mirror managed to do. An em dash means no recording caller has synced it
+// yet — deliberately distinct from "ok", which is a measurement.
+func syncCell(row mirrorRow) string {
+	if text := syncErrorText(row); text != "" {
+		return truncateCell(text, syncCellWidth)
+	}
+	if row.Sync.At.IsZero() {
+		return "—"
+	}
+	return "ok"
+}
+
+// truncateCell shortens s to at most n runes, marking that it did.
+func truncateCell(s string, n int) string {
+	r := []rune(strings.ReplaceAll(s, "\n", " "))
+	if len(r) <= n {
+		return string(r)
+	}
+	return string(r[:n-1]) + "…"
+}
+
+// syncByPhrase names the caller whose sync is being reported, so a human can
+// tell the background sweep from their own `rocket repo sync`.
+func syncByPhrase(st mirror.SyncState) string {
+	if st.By == "" {
+		return "неизвестно кем"
+	}
+	return st.By
 }
 
 // repoStatusCells renders one mirror as tab-separated cells.
 func repoStatusCells(row mirrorRow, now time.Time) string {
 	if row.Err != nil {
 		const unknown = "—"
-		return join(row.RepoID, unknown, unknown, unknown, unknown, unknown, unknown)
+		return join(row.RepoID, unknown, unknown, unknown, unknown, unknown, unknown, syncCell(row))
 	}
 	fr := row.Fresh
 	return join(
@@ -55,6 +106,7 @@ func repoStatusCells(row mirrorRow, now time.Time) string {
 		branchCell(fr.Branch),
 		yesNo(fr.Dirty),
 		fetchedCell(fr.LastFetch, now),
+		syncCell(row),
 	)
 }
 
@@ -120,6 +172,28 @@ type repoStatusRow struct {
 	Blocked   string `json:"blocked,omitempty"`
 	Stale     *bool  `json:"stale,omitempty"`
 	Error     string `json:"error,omitempty"`
+	// SyncAt, SyncBy and SyncError report the last recorded sync of this
+	// mirror. A script has to be able to tell "syncing is failing" from
+	// "behind, and nobody has tried yet".
+	SyncAt    string `json:"sync_at,omitempty"`
+	SyncBy    string `json:"sync_by,omitempty"`
+	SyncError string `json:"sync_error,omitempty"`
+	// SyncBlocked is the mirror package's own refusal to clobber as of the
+	// last sync. Not an error — see the mirror package's doc.
+	SyncBlocked string `json:"sync_blocked,omitempty"`
+}
+
+// withSyncState copies the sidecar fields onto a JSON row. It runs for every
+// row, broken ones included: a mirror we could not check is exactly the one
+// whose last sync a reader needs to see.
+func withSyncState(r repoStatusRow, row mirrorRow) repoStatusRow {
+	if !row.Sync.At.IsZero() {
+		r.SyncAt = row.Sync.At.Format(time.RFC3339)
+	}
+	r.SyncBy = row.Sync.By
+	r.SyncBlocked = row.Sync.Blocked
+	r.SyncError = syncErrorText(row)
+	return r
 }
 
 // repoStatusJSON is the machine view of the same table, in the same order.
@@ -127,7 +201,7 @@ func repoStatusJSON(rows []mirrorRow) []repoStatusRow {
 	out := make([]repoStatusRow, 0, len(rows))
 	for _, row := range rows {
 		if row.Err != nil {
-			out = append(out, repoStatusRow{Repo: row.RepoID, Error: row.Err.Error()})
+			out = append(out, withSyncState(repoStatusRow{Repo: row.RepoID, Error: row.Err.Error()}, row))
 			continue
 		}
 		fr := row.Fresh
@@ -144,7 +218,7 @@ func repoStatusJSON(rows []mirrorRow) []repoStatusRow {
 		if !fr.LastFetch.IsZero() {
 			r.LastFetch = fr.LastFetch.Format(time.RFC3339)
 		}
-		out = append(out, r)
+		out = append(out, withSyncState(r, row))
 	}
 	return out
 }
@@ -171,8 +245,8 @@ func newRepoStatusCmd() *cobra.Command {
 			}
 
 			now := time.Now()
-			rows := checkMirrorsWithTimeout(cmd.Context(),
-				mirrorsOnly(repos, cfg.ReposDir), mirrorSyncInterval(cfg), now)
+			rows := loadSyncStates(checkMirrorsWithTimeout(cmd.Context(),
+				mirrorsOnly(repos, cfg.ReposDir), mirrorSyncInterval(cfg), now), cfg.ReposDir)
 
 			if flags.JSON {
 				return printJSON(cmd, repoStatusJSON(rows))

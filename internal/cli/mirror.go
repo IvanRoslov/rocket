@@ -35,6 +35,49 @@ type mirrorRow struct {
 	RepoID string
 	Fresh  mirror.Freshness
 	Err    error
+	// Sync is the last recorded sync of this mirror, read from the sidecar
+	// the syncing callers leave under <repos_dir>/.state. Its zero value
+	// means no recording caller has synced this mirror yet — which is not
+	// the same as "synced fine", and is rendered differently.
+	Sync mirror.SyncState
+	// SyncErr is a sidecar we could not read at all. Reported rather than
+	// swallowed: the file exists precisely for the mirrors whose last sync
+	// went wrong.
+	SyncErr error
+}
+
+// loadSyncStates fills in each row's last recorded sync. It is separate from
+// the freshness sweep because the two answer different questions — Check
+// measures the mirror as it is now, the sidecar says what the last writer of
+// it managed to do — and only `rocket repo status` shows both.
+func loadSyncStates(rows []mirrorRow, reposDir string) []mirrorRow {
+	stateDir := mirror.StateDir(reposDir)
+	if stateDir == "" {
+		return rows
+	}
+	for i := range rows {
+		rows[i].Sync, rows[i].SyncErr = mirror.ReadState(stateDir, rows[i].RepoID)
+	}
+	return rows
+}
+
+// syncErrorText is the full sentence describing what the last sync could not
+// do, empty when it did everything it was asked. A failed merge leads: it is
+// the failure that used to be invisible, and a fetch that failed afterwards
+// does not explain a mirror that is still behind.
+func syncErrorText(row mirrorRow) string {
+	switch {
+	case row.SyncErr != nil:
+		return row.SyncErr.Error()
+	case row.Sync.MergeErr != "" && row.Sync.FetchErr != "":
+		return row.Sync.MergeErr + "; " + row.Sync.FetchErr
+	case row.Sync.MergeErr != "":
+		return row.Sync.MergeErr
+	case row.Sync.FetchErr != "":
+		return row.Sync.FetchErr
+	default:
+		return ""
+	}
 }
 
 // repoRow is the subset of a GET /v1/repos row needed to check a mirror.

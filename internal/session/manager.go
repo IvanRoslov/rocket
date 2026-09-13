@@ -118,12 +118,19 @@ type Manager struct {
 
 // NewManager builds a Manager wired to the given dependencies.
 func NewManager(st *store.Store, b *bus.Bus, rt runtime.Runtime, ws workspace.Workspace, cfg *config.Config) *Manager {
-	return &Manager{
+	m := &Manager{
 		st: st, bus: b, rt: rt, ws: ws, cfg: cfg,
-		syncMirror:             mirror.Sync,
 		quizSleepFn:            time.Sleep,
 		quizUnconfirmedTimeout: 60 * time.Second,
 	}
+	// The default records what it did: a workspace clone is one of the four
+	// writers of a mirror, and a spawn that quietly cloned from a mirror
+	// whose last sync failed is exactly the misread `rocket repo status`
+	// now exists to surface.
+	m.syncMirror = func(ctx context.Context, repo store.Repo) (mirror.SyncResult, error) {
+		return mirror.SyncAndRecord(ctx, repo, mirror.StateDir(m.cfg.ReposDir), mirror.OpWorkspaceClone)
+	}
+	return m
 }
 
 // SetMirrorSyncer overrides the function used to fast-forward a repo's
