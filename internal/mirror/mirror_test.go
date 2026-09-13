@@ -91,7 +91,7 @@ func TestSyncFastForwardsWorkingTree(t *testing.T) {
 	origin, repo := newMirror(t)
 	commitToOrigin(t, origin, "v2\n", "second")
 
-	if err := Sync(context.Background(), repo); err != nil {
+	if _, err := Sync(context.Background(), repo); err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
 
@@ -107,7 +107,7 @@ func TestSyncUpToDateIsNoop(t *testing.T) {
 	_, repo := newMirror(t)
 	before := headSHA(t, repo.Path)
 
-	if err := Sync(context.Background(), repo); err != nil {
+	if _, err := Sync(context.Background(), repo); err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
 	if after := headSHA(t, repo.Path); after != before {
@@ -123,7 +123,7 @@ func TestSyncSkipsDirtyMirror(t *testing.T) {
 	writeFile(t, dirty, "local edit\n")
 	before := headSHA(t, repo.Path)
 
-	if err := Sync(context.Background(), repo); err != nil {
+	if _, err := Sync(context.Background(), repo); err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
 
@@ -152,7 +152,7 @@ func TestSyncSkipsMirrorOnNonDefaultBranch(t *testing.T) {
 	git(t, repo.Path, "checkout", "-b", "side")
 	before := headSHA(t, repo.Path)
 
-	if err := Sync(context.Background(), repo); err != nil {
+	if _, err := Sync(context.Background(), repo); err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
 
@@ -181,7 +181,7 @@ func TestSyncSkipsDetachedHead(t *testing.T) {
 	git(t, repo.Path, "checkout", "--detach", "HEAD")
 	before := headSHA(t, repo.Path)
 
-	if err := Sync(context.Background(), repo); err != nil {
+	if _, err := Sync(context.Background(), repo); err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
 
@@ -209,7 +209,7 @@ func TestSyncSkipsDivergedMirror(t *testing.T) {
 	git(t, repo.Path, "commit", "-m", "local work")
 	before := headSHA(t, repo.Path)
 
-	if err := Sync(context.Background(), repo); err != nil {
+	if _, err := Sync(context.Background(), repo); err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
 
@@ -234,7 +234,7 @@ func TestSyncReturnsFetchErrorButLeavesMirrorIntact(t *testing.T) {
 	git(t, repo.Path, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "nope"))
 	before := headSHA(t, repo.Path)
 
-	err := Sync(context.Background(), repo)
+	_, err := Sync(context.Background(), repo)
 	if err == nil {
 		t.Fatal("Sync: want an error when fetch fails, got nil")
 	}
@@ -292,7 +292,7 @@ func TestCheckNeverFetchedHasZeroLastFetchAndIsStale(t *testing.T) {
 func TestCheckFreshlySyncedMirrorIsNotStale(t *testing.T) {
 	origin, repo := newMirror(t)
 	commitToOrigin(t, origin, "v2\n", "second")
-	if err := Sync(context.Background(), repo); err != nil {
+	if _, err := Sync(context.Background(), repo); err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
 
@@ -482,5 +482,31 @@ func TestCheckUnbornLocalBranchIsNotAnEmptyRemote(t *testing.T) {
 	}
 	if errors.Is(err, ErrEmptyRemote) {
 		t.Fatalf("Check error = %v, want it distinguishable from ErrEmptyRemote", err)
+	}
+}
+
+// --- SyncResult ---------------------------------------------------------
+
+// Regression test for the bug found in #3576: a failed `git merge --ff-only`
+// was logged and swallowed, so a mirror silently stayed behind while Sync
+// reported success. A fresh .git/index.lock is the cheapest way to make the
+// merge fail for a reason that is not one of Sync's own guards.
+func TestSyncReportsMergeError(t *testing.T) {
+	origin, repo := newMirror(t)
+	commitToOrigin(t, origin, "v2\n", "second")
+
+	lock := filepath.Join(repo.Path, ".git", "index.lock")
+	writeFile(t, lock, "")
+	defer func() { _ = os.Remove(lock) }()
+
+	res, err := Sync(context.Background(), repo)
+	if err == nil {
+		t.Fatal("Sync returned nil; the merge failure must reach the caller")
+	}
+	if res.MergeErr == nil {
+		t.Error("SyncResult.MergeErr is nil, want the failed merge --ff-only")
+	}
+	if res.Blocked != "" {
+		t.Errorf("Blocked = %q; a failing merge is an error, not a guard refusal", res.Blocked)
 	}
 }

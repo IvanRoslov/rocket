@@ -120,7 +120,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 				"repo", repo.ID, "path", repo.Path, "repos_dir", s.cfg.ReposDir)
 			continue
 		}
-		if err := Sync(ctx, repo); err != nil {
+		if _, err := Sync(ctx, repo); err != nil {
 			slog.Warn("mirror: sync failed", "repo", repo.ID, "path", repo.Path, "error", err)
 		}
 	}

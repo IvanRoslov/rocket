@@ -70,6 +70,11 @@ type syncOutcome struct {
 	// already on disk anyway, so this is reported alongside the outcome, not
 	// instead of it.
 	FetchErr error
+	// MergeErr is a failed `git merge --ff-only` — git refusing a
+	// fast-forward that none of the mirror package's guards objected to,
+	// most often because another process holds the index. It used to be a
+	// log line only (#3576), which is how mirrors stayed behind silently.
+	MergeErr error
 }
 
 // renderSync writes one line per mirror, then the ids that matched nothing.
@@ -122,6 +127,9 @@ func syncLine(o syncOutcome) string {
 	if o.FetchErr != nil {
 		line += fmt.Sprintf(" (fetch не удался: %v)", o.FetchErr)
 	}
+	if o.MergeErr != nil {
+		line += fmt.Sprintf(" (merge не удался: %v)", o.MergeErr)
+	}
 	return line
 }
 
@@ -132,7 +140,7 @@ func syncLine(o syncOutcome) string {
 type syncOps struct {
 	head   func(ctx context.Context, path string) (string, error)
 	count  func(ctx context.Context, path, from, to string) (int, error)
-	sync   func(ctx context.Context, repo store.Repo) error
+	sync   func(ctx context.Context, repo store.Repo) (mirror.SyncResult, error)
 	check  func(ctx context.Context, repo store.Repo) (mirror.Freshness, error)
 	repair func(ctx context.Context, repo store.Repo, now time.Time) (mirror.RepairResult, error)
 }
@@ -180,10 +188,11 @@ func syncMirror(ctx context.Context, m repoRow, ops *syncOps, repair bool, now t
 		return out
 	}
 
-	// Sync's own error is the fetch's: it still fast-forwards from the refs
-	// already on disk afterwards, so it is reported alongside the outcome
+	// Neither of Sync's errors stops the report: it fast-forwards from the
+	// refs already on disk after a failed fetch, and a failed merge leaves
+	// the mirror exactly as it was. Both are shown alongside the outcome
 	// rather than instead of it.
-	fetchErr := ops.sync(ctx, repo)
+	syncRes, _ := ops.sync(ctx, repo)
 
 	fr, err := ops.check(ctx, repo)
 	if err != nil {
@@ -216,7 +225,8 @@ func syncMirror(ctx context.Context, m repoRow, ops *syncOps, repair bool, now t
 		return out
 	}
 	out.Advanced = advanced
-	out.FetchErr = fetchErr
+	out.FetchErr = syncRes.FetchErr
+	out.MergeErr = syncRes.MergeErr
 
 	return out
 }
@@ -332,6 +342,7 @@ type syncRow struct {
 	Repaired     bool   `json:"repaired,omitempty"`
 	RescueBranch string `json:"rescue_branch,omitempty"`
 	FetchError   string `json:"fetch_error,omitempty"`
+	MergeError   string `json:"merge_error,omitempty"`
 	Error        string `json:"error,omitempty"`
 }
 
@@ -354,6 +365,9 @@ func syncJSON(outcomes []syncOutcome, unknown []string) map[string]any {
 		}
 		if o.FetchErr != nil {
 			row.FetchError = o.FetchErr.Error()
+		}
+		if o.MergeErr != nil {
+			row.MergeError = o.MergeErr.Error()
 		}
 		rows = append(rows, row)
 	}

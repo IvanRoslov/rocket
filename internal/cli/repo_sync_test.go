@@ -146,7 +146,7 @@ func fakeOps() *syncOps {
 	return &syncOps{
 		head:  func(context.Context, string) (string, error) { return "before", nil },
 		count: func(context.Context, string, string, string) (int, error) { return 0, nil },
-		sync:  func(context.Context, store.Repo) error { return nil },
+		sync:  func(context.Context, store.Repo) (mirror.SyncResult, error) { return mirror.SyncResult{}, nil },
 		check: func(context.Context, store.Repo) (mirror.Freshness, error) { return mirror.Freshness{}, nil },
 		repair: func(context.Context, store.Repo, time.Time) (mirror.RepairResult, error) {
 			return mirror.RepairResult{}, nil

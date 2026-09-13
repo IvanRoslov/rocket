@@ -42,6 +42,11 @@ type RepairResult struct {
 	// Blocked is why the mirror still cannot be advanced, empty when it
 	// can. It carries the same reasons Check reports.
 	Blocked string
+	// Sync is what the closing Sync observed. It carries the fetch and
+	// merge errors that used to exist only as a log line, so a repair that
+	// fixed the branch but could not fast-forward is not reported as a
+	// clean success.
+	Sync SyncResult
 }
 
 // Repair brings a mirror that Sync refuses to advance back into a syncable
@@ -123,7 +128,8 @@ func Repair(ctx context.Context, repo store.Repo, now time.Time) (res RepairResu
 		res.Repaired = true
 	}
 
-	syncErr := Sync(ctx, repo)
+	syncRes, syncErr := Sync(ctx, repo)
+	res.Sync = syncRes
 
 	headAfter, err := revParseHead(ctx, repo.Path)
 	if err != nil {

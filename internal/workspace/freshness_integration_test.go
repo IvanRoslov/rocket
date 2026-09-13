@@ -51,7 +51,7 @@ func TestWorkspaceSeesCommitPushedAfterClone(t *testing.T) {
 
 	// 4. Sync the mirror, then carve out a workspace — exactly what the
 	//    daemon does on spawn.
-	if err := mirror.Sync(ctx, repo); err != nil {
+	if _, err := mirror.Sync(ctx, repo); err != nil {
 		t.Fatalf("mirror.Sync: %v", err)
 	}
 	res, err := New(worktreesDir).Create(ctx, repo, "sess", "feature/x")
