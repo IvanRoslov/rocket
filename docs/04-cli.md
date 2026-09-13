@@ -14,8 +14,8 @@
 ```
 rocket task add "<title>" [--project <id> | --milestone] [--parent <id>] [--desc <md>|--desc-file <f>]
 rocket task ls [--status <s>] [--project <id>] [--milestones]   # канбан в терминале
-rocket task show <id>       # карточка: подзадачи, доки, журнал, attach-команда
-                            # --json отдаёт то же целиком: поля задачи + docs, log, questions
+rocket task show <id>       # карточка: подзадачи, доки, журнал, свежесть зеркал, attach-команда
+                            # --json отдаёт то же целиком: поля задачи + docs, log, questions, mirrors
 rocket task start <id> [--agent <name>]          # назначить оркестратора
 rocket task move <id> <status> [--force]         # --force: в review при живых воркерах/открытых подзадачах
 rocket task doc put <id> --kind spec|plan|report|doc --title "..." --file <f.md>
@@ -102,6 +102,33 @@ rocket status <feature-slug>
         mirror docs-source: свежесть неизвестна (<ошибка>)
 
     См. [05-state.md](05-state.md#свежесть-зеркал).
+
+rocket task show — блок Mirrors
+    Карточка задачи заканчивается секцией `## Mirrors` — теми же строками
+    свежести, что печатает `rocket status` (формат и приоритет причин см.
+    выше). Карточка — это то место, где агент решает, какие репозитории идти
+    читать, поэтому предупреждение стоит рядом с решением:
+
+        ## Mirrors
+        mirror docs-source: ПРОТУХЛО — рабочее дерево отстаёт на 37 коммитов, последний fetch 3 дня назад
+        mirror app: свежесть неизвестна (<ошибка>)
+
+    Печатаются только зеркала, которые нельзя читать как есть: протухшие и
+    те, свежесть которых посчитать не удалось. Свежие не печатаются вовсе —
+    блок, который появляется на каждой карточке, перестают читать. Если
+    таких зеркал нет, секции нет. Список не фильтруется по repo задачи —
+    ровно как в `rocket status`.
+
+    `--json` отдаёт под ключом `mirrors` **все** зарегистрированные зеркала,
+    а не только протухшие: машинный читатель фильтрует сам по `stale`.
+    Массив, никогда null,
+    в том же формате, что `mirror` в `rocket repo ls --json`, плюс `repo_id`:
+
+        {"repo_id": "docs-source", "behind_commits": 37, "last_fetch": "2026-09-10T08:00:00Z", "stale": true}
+
+    У зеркала, свежесть которого посчитать не удалось, остаётся только
+    `repo_id` и `error`: измеренных полей нет вовсе, чтобы машинный читатель
+    не принял их отсутствие за «проверено, всё в порядке».
 
 rocket verify-merge <subtask-id | worker-session-id>
     Контент-проверка мержа PR подзадачи: сравнивает origin/<default-branch>
