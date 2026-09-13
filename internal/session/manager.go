@@ -99,12 +99,13 @@ type Manager struct {
 	// SetQuizTiming.
 	quizUnconfirmedTimeout time.Duration
 
-	// syncMirror fast-forwards a repo's mirror; it defaults to mirror.Sync
-	// and is overridable via SetMirrorSyncer so tests do not shell out to
-	// git. See syncMirrorBeforeWorkspace for why it runs at all. The result
-	// is carried so a caller that wants to know how the sync went — and
-	// Task 3's locked form, which reports a busy mirror — has somewhere to
-	// put it.
+	// syncMirror fast-forwards a repo's mirror. It is the UNLOCKED sync on
+	// purpose: withMirrorHeld already holds that mirror's lock when this
+	// runs, and flock is per open file description, so a second Acquire
+	// from in here would block against our own — a 60-second stall in every
+	// spawn that would read as "rocket is slow", not as a bug.
+	//
+	// Overridable via SetMirrorSyncer so tests do not shell out to git.
 	syncMirror func(context.Context, store.Repo) (mirror.SyncResult, error)
 
 	// quizInFlight tracks session IDs with an in-progress quiz-answer
@@ -139,24 +140,60 @@ func (m *Manager) SetMirrorSyncer(f func(context.Context, store.Repo) (mirror.Sy
 	m.syncMirror = f
 }
 
-// syncMirrorBeforeWorkspace fast-forwards repo's mirror so the new worktree
-// branches off current origin rather than whatever commit the mirror was
-// cloned at. The background sweep (internal/mirror.Syncer) runs only every
-// few minutes, and a worktree cut in between inherits a branch point that
-// can be dozens of commits stale — which is exactly the class of wrong
-// conclusions the mirror package exists to prevent.
+// withMirrorHeld runs a workspace operation with repo's mirror locked, and
+// fast-forwards the mirror first so the new worktree branches off current
+// origin rather than whatever commit the mirror was cloned at. The
+// background sweep runs only every few minutes, and a worktree cut in
+// between inherits a branch point that can be dozens of commits stale —
+// exactly the class of wrong conclusions the mirror package exists to
+// prevent.
 //
-// It is deliberately best-effort and never fails the spawn: the sync runs
-// under cfg.MirrorSyncTimeout, and a timeout or error is logged while the
-// caller proceeds. A stale mirror makes a worse worktree; a blocked spawn
-// makes a stopped feature. Nothing here can clobber either — mirror.Sync is
-// strictly fetch plus `merge --ff-only`.
+// The lock spans the WHOLE pair, not just the sync: workspace.Create runs
+// `git fetch` and `git worktree add` inside the mirror itself, so releasing
+// after the fast-forward would leave the actual clone racing the daemon.
 //
-// Only the daemon's own clones under cfg.ReposDir are touched. A path
-// registered with `rocket repo add` is the user's working copy and rocket
-// promises to leave it exactly as it is (docs/05-state.md).
-func (m *Manager) syncMirrorBeforeWorkspace(ctx context.Context, repo store.Repo) {
-	if m.syncMirror == nil || !isMirrorPath(repo.Path, m.cfg.ReposDir) {
+// Two failures, deliberately treated differently:
+//
+//   - The mirror is held by another process. This FAILS the operation.
+//     Cloning a mirror mid-merge hands the workspace an arbitrary commit,
+//     and a workspace on the wrong branch point is a wrong answer nobody
+//     notices for hours. Failing loudly is cheaper.
+//   - The sync itself failed — an offline fetch, a mirror Sync refuses to
+//     clobber. Best-effort, exactly as before: a stale mirror makes a worse
+//     worktree, a blocked spawn makes a stopped feature. Making this fatal
+//     would stop every spawn the moment the network goes.
+//
+// Only the daemon's own clones under cfg.ReposDir are locked and synced. A
+// path registered with `rocket repo add` is the user's working copy and
+// rocket promises to leave it exactly as it is (docs/05-state.md).
+func (m *Manager) withMirrorHeld(ctx context.Context, repo store.Repo, work func(context.Context) error) error {
+	if !isMirrorPath(repo.Path, m.cfg.ReposDir) {
+		return work(ctx)
+	}
+
+	opts := mirror.LockOptions{
+		ReposDir:        m.cfg.ReposDir,
+		Timeout:         m.cfg.MirrorLockTimeoutClone,
+		IndexLockMaxAge: m.cfg.MirrorIndexLockMaxAge,
+	}
+	err := mirror.WithLock(ctx, repo, opts, mirror.OpWorkspaceClone, func(ctx context.Context) error {
+		m.syncMirrorUnderLock(ctx, repo)
+		return work(ctx)
+	})
+	if busy, ok := mirror.LockBusy(err); ok {
+		slog.Warn("session: mirror is held by another process, refusing to clone from it",
+			"repo", repo.ID, "holder", busy.Holder.Operation, "holder_pid", busy.Holder.PID)
+		return fmt.Errorf("mirror %s is busy: held by %s (pid %d) — retry once it finishes",
+			repo.ID, busy.Holder.Operation, busy.Holder.PID)
+	}
+	return err
+}
+
+// syncMirrorUnderLock fast-forwards the mirror we already hold. It never
+// returns a failure: see withMirrorHeld for why a sync error is best-effort
+// while a busy mirror is not.
+func (m *Manager) syncMirrorUnderLock(ctx context.Context, repo store.Repo) {
+	if m.syncMirror == nil {
 		return
 	}
 
@@ -354,9 +391,12 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 		break // success
 	}
 
-	m.syncMirrorBeforeWorkspace(ctx, repo)
-
-	wtRes, err := m.ws.Create(ctx, repo, id, branch)
+	var wtRes workspace.CreateResult
+	err = m.withMirrorHeld(ctx, repo, func(ctx context.Context) error {
+		var createErr error
+		wtRes, createErr = m.ws.Create(ctx, repo, id, branch)
+		return createErr
+	})
 	if err != nil {
 		m.markErrored(id, err)
 		return store.Session{}, err
@@ -528,9 +568,12 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 		break // success
 	}
 
-	m.syncMirrorBeforeWorkspace(ctx, repo)
-
-	wtRes, err := m.ws.Create(ctx, repo, id, sess.Branch)
+	var wtRes workspace.CreateResult
+	err = m.withMirrorHeld(ctx, repo, func(ctx context.Context) error {
+		var createErr error
+		wtRes, createErr = m.ws.Create(ctx, repo, id, sess.Branch)
+		return createErr
+	})
 	if err != nil {
 		m.markErrored(id, err)
 		return store.Session{}, err
@@ -801,9 +844,12 @@ func (m *Manager) Restore(ctx context.Context, id string) error {
 		return err
 	}
 
-	m.syncMirrorBeforeWorkspace(ctx, repo)
-
-	path, err := m.ws.Restore(ctx, repo, id, sess.Branch)
+	var path string
+	err = m.withMirrorHeld(ctx, repo, func(ctx context.Context) error {
+		var restoreErr error
+		path, restoreErr = m.ws.Restore(ctx, repo, id, sess.Branch)
+		return restoreErr
+	})
 	if err != nil {
 		return err
 	}

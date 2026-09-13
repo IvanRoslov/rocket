@@ -112,6 +112,11 @@ type fakeWorkspace struct {
 	createStarted chan struct{}
 	createBlock   chan struct{}
 
+	// onCreate, if non-nil, runs inside Create. It is how a test observes
+	// the state of the world at the moment the workspace is being cut —
+	// notably whether the mirror's lock is held.
+	onCreate func()
+
 	restorePath  string
 	restoreErr   error
 	restoreCalls int
@@ -129,6 +134,9 @@ type fakeWorkspace struct {
 
 func (f *fakeWorkspace) Create(ctx context.Context, repo store.Repo, sessionID, branch string) (workspace.CreateResult, error) {
 	f.createCalls = append(f.createCalls, workspaceCreateCall{repo.ID, sessionID, branch})
+	if f.onCreate != nil {
+		f.onCreate()
+	}
 	if f.createStarted != nil {
 		select {
 		case f.createStarted <- struct{}{}:

@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/mirror"
+	"github.com/IvanRoslov/rocket/internal/mirrorlock"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -243,5 +245,114 @@ func TestRestoreSyncsMirror(t *testing.T) {
 
 	if restoreCallsAtSync != 0 {
 		t.Errorf("mirror sync did not run before workspace.Restore (restoreCallsAtSync=%d)", restoreCallsAtSync)
+	}
+}
+
+// A mirror held by another process is the one sync failure that DOES fail
+// the spawn. Cloning a mirror mid-merge hands the workspace an arbitrary
+// commit, and a workspace built on the wrong branch point is a wrong
+// conclusion nobody notices for hours.
+func TestSpawnFailsWhenTheMirrorIsHeldByAnotherProcess(t *testing.T) {
+	m, st, _, _, ws, cfg := testManagerWithConfig(t)
+	cfg.ReposDir = t.TempDir()
+	seedMirrorRepo(t, st, cfg.ReposDir, "proj1", "repo1")
+
+	held, err := mirrorlock.Acquire(context.Background(), mirrorlock.LocksDir(cfg.ReposDir), "repo1",
+		mirror.OpRepoSyncRepair, time.Second)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	defer held.Release()
+	cfg.MirrorLockTimeoutClone = 50 * time.Millisecond
+
+	_, err = m.Spawn(context.Background(), SpawnReq{
+		Project: "proj1", Repo: "repo1", Task: "mytask", Feature: "myfeat", AgentName: "fake",
+	})
+	if err == nil {
+		t.Fatal("Spawn succeeded while another process held the mirror")
+	}
+	if !strings.Contains(err.Error(), mirror.OpRepoSyncRepair) {
+		t.Errorf("Spawn error = %v, want it to name the holder", err)
+	}
+	if len(ws.createCalls) != 0 {
+		t.Errorf("workspace.Create ran on a mirror we do not hold (%d calls)", len(ws.createCalls))
+	}
+}
+
+// The lock has to span the clone, not just the sync: workspace.Create runs
+// `git fetch` and `git worktree add` INSIDE the mirror, so a lock released
+// after the fast-forward would leave the actual clone racing the daemon.
+func TestSpawnHoldsTheMirrorLockAcrossWorkspaceCreate(t *testing.T) {
+	m, st, _, _, ws, cfg := testManagerWithConfig(t)
+	cfg.ReposDir = t.TempDir()
+	seedMirrorRepo(t, st, cfg.ReposDir, "proj1", "repo1")
+
+	lockedDuringCreate := false
+	ws.onCreate = func() {
+		probe, err := mirrorlock.Acquire(context.Background(), mirrorlock.LocksDir(cfg.ReposDir), "repo1",
+			"probe", 20*time.Millisecond)
+		if err != nil {
+			lockedDuringCreate = true
+			return
+		}
+		probe.Release()
+	}
+
+	if _, err := m.Spawn(context.Background(), SpawnReq{
+		Project: "proj1", Repo: "repo1", Task: "mytask", Feature: "myfeat", AgentName: "fake",
+	}); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if !lockedDuringCreate {
+		t.Error("the mirror was not locked while the workspace was created")
+	}
+}
+
+// The deadlock the lock invites: the clone holds the mirror lock, and flock
+// is per open file description, so anything inside that takes the lock again
+// would block against itself for the whole timeout. A spawn must not stall.
+func TestSpawnDoesNotDeadlockAgainstItsOwnMirrorLock(t *testing.T) {
+	m, st, _, _, _, cfg := testManagerWithConfig(t)
+	cfg.ReposDir = t.TempDir()
+	seedMirrorRepo(t, st, cfg.ReposDir, "proj1", "repo1")
+	cfg.MirrorLockTimeoutClone = 30 * time.Second
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := m.Spawn(context.Background(), SpawnReq{
+			Project: "proj1", Repo: "repo1", Task: "mytask", Feature: "myfeat", AgentName: "fake",
+		})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Spawn: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Spawn deadlocked against the mirror lock it holds itself")
+	}
+}
+
+// A plain sync failure — an offline fetch, a blocked mirror — stays
+// best-effort. Only a busy mirror is fatal; making every failure fatal would
+// stop every spawn the moment the network goes.
+func TestSpawnStillProceedsWhenTheMirrorSyncMerelyFails(t *testing.T) {
+	m, st, _, _, ws, cfg := testManagerWithConfig(t)
+	cfg.ReposDir = t.TempDir()
+	seedMirrorRepo(t, st, cfg.ReposDir, "proj1", "repo1")
+
+	m.SetMirrorSyncer(func(context.Context, store.Repo) (mirror.SyncResult, error) {
+		return mirror.SyncResult{}, errors.New("fetch origin: host unreachable")
+	})
+
+	if _, err := m.Spawn(context.Background(), SpawnReq{
+		Project: "proj1", Repo: "repo1", Task: "mytask", Feature: "myfeat", AgentName: "fake",
+	}); err != nil {
+		t.Fatalf("Spawn failed over a best-effort sync error: %v", err)
+	}
+	if len(ws.createCalls) != 1 {
+		t.Errorf("workspace.Create calls = %d, want 1", len(ws.createCalls))
 	}
 }
