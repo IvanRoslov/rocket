@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"path/filepath"
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/mirrorlock"
@@ -115,20 +114,19 @@ func withMirrorLock(ctx context.Context, repo store.Repo, opts LockOptions, oper
 		slog.Debug("mirror: waited for the mirror lock", "repo", repo.ID, "operation", operation, "waited", waited)
 	}
 
-	removed, err := mirrorlock.ReapIndexLock(gitDirOf(repo.Path), opts.IndexLockMaxAge, time.Now())
-	if err != nil {
-		// A lock we could not reap is not a reason to skip the sync: git
-		// will say so itself, and that error is the one worth reporting.
+	// Neither failure below is a reason to skip the work. An index.lock we
+	// could not reap simply stays, and git says so itself in a message far
+	// more useful than anything we could invent here.
+	removed := false
+	if gitDir, err := absoluteGitDir(ctx, repo.Path); err != nil {
+		slog.Warn("mirror: cannot resolve the git dir, skipping the index.lock check",
+			"repo", repo.ID, "error", err)
+	} else if removed, err = mirrorlock.ReapIndexLock(gitDir, opts.IndexLockMaxAge, time.Now()); err != nil {
 		slog.Warn("mirror: cannot reap a stale index.lock", "repo", repo.ID, "error", err)
 	}
 
 	return fn(ctx, lock, removed)
 }
-
-// gitDirOf is where a mirror's index.lock lives. Mirrors are ordinary clones
-// the daemon made, so .git is a directory inside the worktree; asking git
-// would mean shelling out for a path we already know.
-func gitDirOf(path string) string { return filepath.Join(path, ".git") }
 
 // LockBusy reports whether err is a mirror held by another process. Callers
 // render that very differently from a git failure — nothing was attempted,

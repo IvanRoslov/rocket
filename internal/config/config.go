@@ -134,11 +134,11 @@ type Config struct {
 	// separate keys because the callers want genuinely different things,
 	// and one shared timeout would have to be wrong for three of them.
 
-	// MirrorLockTimeoutSyncer bounds the background sweep's wait. It is
+	// MirrorLockTimeoutBackground bounds the unattended sweep's wait. It is
 	// short on purpose: a mirror somebody else is holding is one this tick
 	// skips and the next tick picks up, and a sweep that queued behind a
 	// two-minute `--repair` would stall every other mirror behind it.
-	MirrorLockTimeoutSyncer time.Duration `yaml:"mirror_lock_timeout_syncer"`
+	MirrorLockTimeoutBackground time.Duration `yaml:"mirror_lock_timeout_background"`
 	// MirrorLockTimeoutCLI bounds `rocket repo sync` and `--repair`. A human
 	// who just asked for a sync would rather wait out a running sweep than
 	// be told the mirror is busy, so this is the generous one.
@@ -191,36 +191,36 @@ func Load(home string) (*Config, error) {
 
 	// Set defaults
 	cfg := &Config{
-		Port:                      4477,
-		Host:                      "127.0.0.1",
-		TLSPort:                   4478,
-		HeartbeatInterval:         5 * time.Minute,
-		GithubPollInterval:        2 * time.Minute,
-		DefaultAgent:              "claude-code",
-		ReposDir:                  filepath.Join(home, "repos"),
-		WorktreesDir:              filepath.Join(home, "worktrees"),
-		AttachmentsDir:            filepath.Join(home, "attachments"),
-		ActivityPollInterval:      5 * time.Second,
-		ReadyToIdle:               5 * time.Minute,
-		QueueTimeout:              30 * time.Minute,
-		LargeMessageThreshold:     2048,
-		SocketDelivery:            true,
-		WorkerStallThreshold:      15 * time.Minute,
-		QuestionReminderThreshold: 30 * time.Minute,
-		InputStallThreshold:       DefaultInputStallThreshold,
-		QuestionStaleAfter:        DefaultQuestionStaleAfter,
-		MilestoneQuietAfter:       DefaultMilestoneQuietAfter,
-		ComposerBusyDeadline:      DefaultComposerBusyDeadline,
-		GithubAPIBase:             "https://api.github.com",
-		GithubCloneBase:           "",
-		MergeGrace:                5 * time.Minute,
-		AgentNotifyInterval:       5 * time.Minute,
-		MirrorSyncInterval:        5 * time.Minute,
-		MirrorLockTimeoutSyncer:   5 * time.Second,
-		MirrorLockTimeoutCLI:      2 * time.Minute,
-		MirrorLockTimeoutClone:    60 * time.Second,
-		MirrorIndexLockMaxAge:     10 * time.Minute,
-		Home:                      home,
+		Port:                        4477,
+		Host:                        "127.0.0.1",
+		TLSPort:                     4478,
+		HeartbeatInterval:           5 * time.Minute,
+		GithubPollInterval:          2 * time.Minute,
+		DefaultAgent:                "claude-code",
+		ReposDir:                    filepath.Join(home, "repos"),
+		WorktreesDir:                filepath.Join(home, "worktrees"),
+		AttachmentsDir:              filepath.Join(home, "attachments"),
+		ActivityPollInterval:        5 * time.Second,
+		ReadyToIdle:                 5 * time.Minute,
+		QueueTimeout:                30 * time.Minute,
+		LargeMessageThreshold:       2048,
+		SocketDelivery:              true,
+		WorkerStallThreshold:        15 * time.Minute,
+		QuestionReminderThreshold:   30 * time.Minute,
+		InputStallThreshold:         DefaultInputStallThreshold,
+		QuestionStaleAfter:          DefaultQuestionStaleAfter,
+		MilestoneQuietAfter:         DefaultMilestoneQuietAfter,
+		ComposerBusyDeadline:        DefaultComposerBusyDeadline,
+		GithubAPIBase:               "https://api.github.com",
+		GithubCloneBase:             "",
+		MergeGrace:                  5 * time.Minute,
+		AgentNotifyInterval:         5 * time.Minute,
+		MirrorSyncInterval:          5 * time.Minute,
+		MirrorLockTimeoutBackground: 5 * time.Second,
+		MirrorLockTimeoutCLI:        2 * time.Minute,
+		MirrorLockTimeoutClone:      60 * time.Second,
+		MirrorIndexLockMaxAge:       10 * time.Minute,
+		Home:                        home,
 	}
 
 	// Try to load config.yaml

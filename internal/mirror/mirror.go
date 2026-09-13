@@ -362,11 +362,11 @@ func currentBranch(ctx context.Context, path string) (string, error) {
 // lastFetchTime returns the mtime of the mirror's FETCH_HEAD, or the zero
 // time when the mirror has never been fetched.
 func lastFetchTime(ctx context.Context, path string) (time.Time, error) {
-	gitDir, err := runGit(ctx, path, "rev-parse", "--absolute-git-dir")
+	gitDir, err := absoluteGitDir(ctx, path)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("resolve git dir: %w", err)
+		return time.Time{}, err
 	}
-	info, err := os.Stat(filepath.Join(strings.TrimSpace(gitDir), "FETCH_HEAD"))
+	info, err := os.Stat(filepath.Join(gitDir, "FETCH_HEAD"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return time.Time{}, nil
@@ -374,6 +374,18 @@ func lastFetchTime(ctx context.Context, path string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("stat FETCH_HEAD: %w", err)
 	}
 	return info.ModTime(), nil
+}
+
+// absoluteGitDir asks git where a repository's git directory actually is.
+// It is never <path>/.git: in a linked worktree that path is a FILE pointing
+// at the real directory elsewhere, and anything looking for FETCH_HEAD or
+// index.lock in it would silently find nothing.
+func absoluteGitDir(ctx context.Context, path string) (string, error) {
+	out, err := runGit(ctx, path, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return "", fmt.Errorf("resolve git dir: %w", err)
+	}
+	return strings.TrimSpace(out), nil
 }
 
 // runGit runs `git -C path <args...>`, no shell involved. It returns the

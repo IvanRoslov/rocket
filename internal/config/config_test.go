@@ -417,8 +417,8 @@ func TestMirrorLockDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MirrorLockTimeoutSyncer != 5*time.Second {
-		t.Errorf("MirrorLockTimeoutSyncer = %v, want 5s", cfg.MirrorLockTimeoutSyncer)
+	if cfg.MirrorLockTimeoutBackground != 5*time.Second {
+		t.Errorf("MirrorLockTimeoutBackground = %v, want 5s", cfg.MirrorLockTimeoutBackground)
 	}
 	if cfg.MirrorLockTimeoutCLI != 2*time.Minute {
 		t.Errorf("MirrorLockTimeoutCLI = %v, want 2m", cfg.MirrorLockTimeoutCLI)
@@ -433,7 +433,7 @@ func TestMirrorLockDefaults(t *testing.T) {
 
 func TestMirrorLockOverrides(t *testing.T) {
 	home := t.TempDir()
-	yaml := "mirror_lock_timeout_syncer: 1s\n" +
+	yaml := "mirror_lock_timeout_background: 1s\n" +
 		"mirror_lock_timeout_cli: 30s\n" +
 		"mirror_lock_timeout_clone: 15s\n" +
 		"mirror_index_lock_max_age: 1h\n"
@@ -445,8 +445,8 @@ func TestMirrorLockOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MirrorLockTimeoutSyncer != time.Second {
-		t.Errorf("MirrorLockTimeoutSyncer = %v, want 1s", cfg.MirrorLockTimeoutSyncer)
+	if cfg.MirrorLockTimeoutBackground != time.Second {
+		t.Errorf("MirrorLockTimeoutBackground = %v, want 1s", cfg.MirrorLockTimeoutBackground)
 	}
 	if cfg.MirrorLockTimeoutCLI != 30*time.Second {
 		t.Errorf("MirrorLockTimeoutCLI = %v, want 30s", cfg.MirrorLockTimeoutCLI)

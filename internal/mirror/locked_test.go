@@ -316,3 +316,44 @@ func currentBranchOf(t *testing.T, path string) string {
 	t.Helper()
 	return git(t, path, "rev-parse", "--abbrev-ref", "HEAD")
 }
+
+// The git dir is asked of git, never assumed to be <path>/.git. A linked
+// worktree's .git is a FILE pointing elsewhere, and reaping the wrong
+// directory would leave the real abandoned lock in place — silently turning
+// the reaper into a no-op for exactly the repos that have one.
+func TestSyncLockedReapsTheRealGitDirOfALinkedWorktree(t *testing.T) {
+	origin, repo := newMirror(t)
+	commitToOrigin(t, origin, "v2\n", "second")
+	reposDir := reposDirFor(repo)
+
+	linked := filepath.Join(reposDir, "linked")
+	// The linked worktree is on its own branch: git refuses to check out
+	// main twice, and the reaper is what this test is about, not the
+	// fast-forward.
+	git(t, repo.Path, "worktree", "add", "-b", "side", linked)
+	side := store.Repo{ID: "linked", Path: linked, DefaultBranch: "side"}
+
+	gitDir := git(t, linked, "rev-parse", "--absolute-git-dir")
+	if gitDir == filepath.Join(linked, ".git") {
+		t.Fatalf("fixture is not a linked worktree: git dir is %s", gitDir)
+	}
+	lock := filepath.Join(gitDir, "index.lock")
+	if err := os.WriteFile(lock, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-30 * time.Minute)
+	if err := os.Chtimes(lock, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := SyncLocked(context.Background(), side, lockedOpts(reposDir), OpRepoSync)
+	if err != nil {
+		t.Fatalf("SyncLocked: %v", err)
+	}
+	if !res.IndexLockRemoved {
+		t.Error("IndexLockRemoved = false — the reaper looked in the wrong directory")
+	}
+	if _, err := os.Stat(lock); !os.IsNotExist(err) {
+		t.Error("the linked worktree's index.lock survived")
+	}
+}

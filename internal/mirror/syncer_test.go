@@ -199,9 +199,9 @@ func TestSyncOnceTakesTheMirrorLock(t *testing.T) {
 	defer held.Release()
 
 	s := NewSyncer(newStore(t, repo), &config.Config{
-		MirrorSyncInterval:      time.Minute,
-		ReposDir:                reposDir,
-		MirrorLockTimeoutSyncer: 50 * time.Millisecond,
+		MirrorSyncInterval:          time.Minute,
+		ReposDir:                    reposDir,
+		MirrorLockTimeoutBackground: 50 * time.Millisecond,
 	})
 	s.SyncOnce(context.Background())
 
@@ -226,9 +226,9 @@ func TestSyncOnceSkipsABusyMirrorAndSyncsTheRest(t *testing.T) {
 	defer held.Release()
 
 	s := NewSyncer(newStore(t, repoA, repoB), &config.Config{
-		MirrorSyncInterval:      time.Minute,
-		ReposDir:                reposDir,
-		MirrorLockTimeoutSyncer: 50 * time.Millisecond,
+		MirrorSyncInterval:          time.Minute,
+		ReposDir:                    reposDir,
+		MirrorLockTimeoutBackground: 50 * time.Millisecond,
 	})
 	s.SyncOnce(context.Background())
 

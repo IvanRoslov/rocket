@@ -112,7 +112,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 	reposDir := resolvePath(s.cfg.ReposDir)
 	opts := LockOptions{
 		ReposDir:        s.cfg.ReposDir,
-		Timeout:         s.cfg.MirrorLockTimeoutSyncer,
+		Timeout:         s.cfg.MirrorLockTimeoutBackground,
 		IndexLockMaxAge: s.cfg.MirrorIndexLockMaxAge,
 	}
 
