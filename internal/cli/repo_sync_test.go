@@ -2,12 +2,15 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/IvanRoslov/rocket/internal/mirror"
+	"github.com/IvanRoslov/rocket/internal/store"
 )
 
 // TestSelectMirrorsAll: with no ids given, every mirror is selected and
@@ -131,5 +134,160 @@ func TestRenderSyncReportsUnknownIDs(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("renderSync output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// fakeOps is a syncOps whose git is scripted, so the flow through sync,
+// blocked-detection and repair is testable without a git repository.
+func fakeOps() *syncOps {
+	return &syncOps{
+		head:    func(context.Context, string) (string, error) { return "before", nil },
+		count:   func(context.Context, string, string, string) (int, error) { return 0, nil },
+		sync:    func(context.Context, store.Repo) error { return nil },
+		blocked: func(context.Context, store.Repo) (string, error) { return "", nil },
+		repair: func(context.Context, store.Repo, time.Time) (mirror.RepairResult, error) {
+			return mirror.RepairResult{}, nil
+		},
+	}
+}
+
+var testNow = time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+
+// TestSyncMirrorsCountsTheAdvance: the number comes from HEAD before and
+// after, because Sync fetches and merges in one step and the pre-sync behind
+// count would miss whatever that fetch brought in.
+func TestSyncMirrorsCountsTheAdvance(t *testing.T) {
+	ops := fakeOps()
+	heads := []string{"aaa", "bbb"}
+	ops.head = func(context.Context, string) (string, error) {
+		h := heads[0]
+		if len(heads) > 1 {
+			heads = heads[1:]
+		}
+		return h, nil
+	}
+	ops.count = func(_ context.Context, _, from, to string) (int, error) {
+		if from != "aaa" || to != "bbb" {
+			t.Fatalf("counted %s..%s, want aaa..bbb", from, to)
+		}
+		return 7, nil
+	}
+
+	got := syncMirrors(context.Background(), []repoRow{{ID: "rocket"}}, ops, false, testNow)
+
+	if len(got) != 1 || got[0].Advanced != 7 {
+		t.Fatalf("outcomes = %+v, want one advanced by 7", got)
+	}
+}
+
+// TestSyncMirrorsReportsBlockedWithoutRepairing: without --repair a blocked
+// mirror is reported and left alone.
+func TestSyncMirrorsReportsBlockedWithoutRepairing(t *testing.T) {
+	ops := fakeOps()
+	ops.blocked = func(context.Context, store.Repo) (string, error) { return mirror.BlockedDirty, nil }
+	ops.repair = func(context.Context, store.Repo, time.Time) (mirror.RepairResult, error) {
+		t.Fatal("repair called without --repair")
+		return mirror.RepairResult{}, nil
+	}
+
+	got := syncMirrors(context.Background(), []repoRow{{ID: "app"}}, ops, false, testNow)
+
+	if len(got) != 1 || got[0].Blocked != mirror.BlockedDirty || got[0].Repaired {
+		t.Fatalf("outcomes = %+v, want one blocked and unrepaired", got)
+	}
+}
+
+// TestSyncMirrorsRepairsBlockedMirror: with --repair the rescue branch comes
+// back in the outcome, so the report can name where the work went.
+func TestSyncMirrorsRepairsBlockedMirror(t *testing.T) {
+	ops := fakeOps()
+	ops.blocked = func(context.Context, store.Repo) (string, error) { return mirror.BlockedDirty, nil }
+	ops.repair = func(context.Context, store.Repo, time.Time) (mirror.RepairResult, error) {
+		return mirror.RepairResult{RescueBranch: "rescue/2026-09-13-120000", Repaired: true}, nil
+	}
+
+	got := syncMirrors(context.Background(), []repoRow{{ID: "app"}}, ops, true, testNow)
+
+	if len(got) != 1 {
+		t.Fatalf("outcomes = %+v", got)
+	}
+	o := got[0]
+	if !o.Repaired || o.RescueBranch != "rescue/2026-09-13-120000" || o.Blocked != "" {
+		t.Fatalf("outcome = %+v, want repaired onto a named rescue branch and unblocked", o)
+	}
+}
+
+// TestSyncMirrorsKeepsBlockedAfterRepair: Repair deliberately refuses a
+// diverged default branch, and the report must keep saying so.
+func TestSyncMirrorsKeepsBlockedAfterRepair(t *testing.T) {
+	ops := fakeOps()
+	ops.blocked = func(context.Context, store.Repo) (string, error) { return mirror.BlockedNoFF, nil }
+	ops.repair = func(context.Context, store.Repo, time.Time) (mirror.RepairResult, error) {
+		return mirror.RepairResult{Blocked: mirror.BlockedNoFF}, nil
+	}
+
+	got := syncMirrors(context.Background(), []repoRow{{ID: "web"}}, ops, true, testNow)
+
+	if len(got) != 1 || got[0].Blocked != mirror.BlockedNoFF {
+		t.Fatalf("outcomes = %+v, want still blocked", got)
+	}
+}
+
+// TestSyncMirrorsCarriesPerMirrorErrors: one mirror we cannot even resolve
+// HEAD in must not stop the others.
+func TestSyncMirrorsCarriesPerMirrorErrors(t *testing.T) {
+	ops := fakeOps()
+	ops.head = func(_ context.Context, path string) (string, error) {
+		if path == "/broken" {
+			return "", errors.New("not a git repository")
+		}
+		return "aaa", nil
+	}
+
+	got := syncMirrors(context.Background(),
+		[]repoRow{{ID: "landing", Path: "/broken"}, {ID: "rocket"}}, ops, false, testNow)
+
+	if len(got) != 2 {
+		t.Fatalf("outcomes = %+v, want two", got)
+	}
+	if got[0].Err == nil {
+		t.Fatalf("broken mirror reported no error: %+v", got[0])
+	}
+	if got[1].Err != nil {
+		t.Fatalf("healthy mirror spoiled by its neighbour: %+v", got[1])
+	}
+}
+
+// TestSyncExitErrorOnlyWhenNothingCouldBeProcessed: an individual block is a
+// normal, reportable outcome, not a failure of the command.
+func TestSyncExitErrorOnlyWhenNothingCouldBeProcessed(t *testing.T) {
+	blocked := []syncOutcome{{RepoID: "app", Blocked: mirror.BlockedDirty}}
+	if err := syncExitError(blocked); err != nil {
+		t.Fatalf("blocked mirror must not fail the command, got %v", err)
+	}
+
+	mixed := []syncOutcome{{RepoID: "landing", Err: errors.New("boom")}, {RepoID: "rocket"}}
+	if err := syncExitError(mixed); err != nil {
+		t.Fatalf("one broken mirror out of two must not fail the command, got %v", err)
+	}
+
+	allBroken := []syncOutcome{{RepoID: "landing", Err: errors.New("boom")}}
+	if syncExitError(allBroken) == nil {
+		t.Fatal("no mirror could be processed, want a non-nil error")
+	}
+
+	if syncExitError(nil) == nil {
+		t.Fatal("no mirrors at all, want a non-nil error")
+	}
+}
+
+// TestSyncLineReportsFetchFailure: Sync fast-forwards from the refs already
+// on disk when fetch fails, so the mirror may well have advanced — but it
+// advanced to a stale origin, and the line has to say so.
+func TestSyncLineReportsFetchFailure(t *testing.T) {
+	got := syncLine(syncOutcome{RepoID: "rocket", Advanced: 2, FetchErr: errors.New("host unreachable")})
+	want := "mirror rocket: обновлено на 2 коммита (fetch не удался: host unreachable)"
+	if got != want {
+		t.Fatalf("syncLine = %q, want %q", got, want)
 	}
 }
