@@ -81,6 +81,12 @@ type Freshness struct {
 	Dirty bool
 }
 
+// ErrEmptyRemote marks a mirror whose remote has no branches at all — a
+// repository created and never pushed to. It is a correct state, not a
+// broken one, so callers can say so plainly instead of showing the raw
+// "origin/<branch> not found" git error it would otherwise produce.
+var ErrEmptyRemote = errors.New("remote has no branches")
+
 // Check computes a mirror's freshness. It makes no network calls and no
 // changes: it runs the same guards as Sync in read-only form. staleAfter is
 // the age of LastFetch beyond which the mirror counts as stale (callers pass
@@ -100,6 +106,15 @@ func Check(ctx context.Context, repo store.Repo, staleAfter time.Duration, now t
 	upstream := "origin/" + repo.DefaultBranch
 	upstreamSHA, err := runGit(ctx, repo.Path, "rev-parse", "--verify", "--quiet", upstream+"^{commit}")
 	if err != nil {
+		// A missing origin/<branch> has two very different causes, and
+		// they need different actions from the human. If the mirror has
+		// no remote-tracking refs at all, the remote itself is empty —
+		// correct, if useless. Anything else is a real defect. The
+		// distinction is drawn from local refs on purpose: asking the
+		// remote (git ls-remote) would make Check a network call.
+		if empty, emptyErr := hasNoRemoteRefs(ctx, repo.Path); emptyErr == nil && empty {
+			return Freshness{}, fmt.Errorf("mirror %s: %w", repo.ID, ErrEmptyRemote)
+		}
 		return Freshness{}, fmt.Errorf("mirror %s: %s not found: %w", repo.ID, upstream, err)
 	}
 	fr.Upstream = strings.TrimSpace(upstreamSHA)
@@ -316,4 +331,15 @@ func runGitEnv(ctx context.Context, path string, env []string, args ...string) (
 		return string(out), fmt.Errorf("git %s: %w (output: %s)", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
+}
+
+// hasNoRemoteRefs reports whether the mirror carries no remote-tracking refs
+// under refs/remotes/origin, i.e. the remote had nothing to offer the last
+// time we fetched it. Purely local: it reads the mirror's own ref store.
+func hasNoRemoteRefs(ctx context.Context, path string) (bool, error) {
+	out, err := runGit(ctx, path, "for-each-ref", "--count=1", "refs/remotes/origin")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) == "", nil
 }

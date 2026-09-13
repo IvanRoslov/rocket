@@ -2,6 +2,7 @@ package mirror
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -440,5 +441,46 @@ func TestCheckReportsUncommittedChangesAsDirty(t *testing.T) {
 	}
 	if !fr.Dirty {
 		t.Fatal("Dirty = false for a mirror with uncommitted changes")
+	}
+}
+
+// newEmptyRemoteMirror builds a clone of an origin that has no branches at
+// all — the state of a GitHub repository created and never pushed to.
+func newEmptyRemoteMirror(t *testing.T) store.Repo {
+	t.Helper()
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	mirror := filepath.Join(root, "mirror")
+
+	if err := os.MkdirAll(origin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, origin, "-c", "init.defaultBranch=main", "init")
+	git(t, root, "clone", origin, mirror)
+
+	return store.Repo{ID: "landing", Path: mirror, DefaultBranch: "main"}
+}
+
+func TestCheckEmptyRemoteIsReportedAsSuch(t *testing.T) {
+	repo := newEmptyRemoteMirror(t)
+
+	_, err := Check(context.Background(), repo, time.Hour, time.Now())
+	if !errors.Is(err, ErrEmptyRemote) {
+		t.Fatalf("Check error = %v, want one matching ErrEmptyRemote", err)
+	}
+}
+
+func TestCheckUnbornLocalBranchIsNotAnEmptyRemote(t *testing.T) {
+	_, repo := newMirror(t)
+	// The `app` case: origin/main exists, but the local branch has no
+	// commits. That is a real defect and must keep erroring on its own.
+	git(t, repo.Path, "update-ref", "-d", "refs/heads/main")
+
+	_, err := Check(context.Background(), repo, time.Hour, time.Now())
+	if err == nil {
+		t.Fatal("Check succeeded, want an error for an unborn local branch")
+	}
+	if errors.Is(err, ErrEmptyRemote) {
+		t.Fatalf("Check error = %v, want it distinguishable from ErrEmptyRemote", err)
 	}
 }
