@@ -44,7 +44,7 @@ func writeTestFile(t *testing.T, path, content string) {
 func TestSyncMirrorsAdvancesRealMirror(t *testing.T) {
 	m := newTestMirror(t)
 
-	got := syncMirrors(context.Background(), []repoRow{m}, realSyncOps(), false, time.Now())
+	got := syncMirrors(context.Background(), []repoRow{m}, realSyncOps(""), false, time.Now())
 
 	if len(got) != 1 {
 		t.Fatalf("outcomes = %+v", got)
@@ -66,7 +66,7 @@ func TestSyncMirrorsRepairsDirtyMirrorEndToEnd(t *testing.T) {
 	gitInTest(t, m.Path, "checkout", "-b", "feature/someones-work")
 	writeTestFile(t, filepath.Join(m.Path, "scratch.txt"), "uncommitted\n")
 
-	without := syncMirrors(context.Background(), []repoRow{m}, realSyncOps(), false, time.Now())
+	without := syncMirrors(context.Background(), []repoRow{m}, realSyncOps(""), false, time.Now())
 	if without[0].Blocked == "" {
 		t.Fatalf("dirty mirror reported as fine without --repair: %+v", without[0])
 	}
@@ -75,7 +75,7 @@ func TestSyncMirrorsRepairsDirtyMirrorEndToEnd(t *testing.T) {
 	}
 
 	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
-	with := syncMirrors(context.Background(), []repoRow{m}, realSyncOps(), true, now)
+	with := syncMirrors(context.Background(), []repoRow{m}, realSyncOps(""), true, now)
 	o := with[0]
 
 	if o.Err != nil {

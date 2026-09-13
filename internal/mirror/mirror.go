@@ -206,63 +206,127 @@ func blockedReason(ctx context.Context, repo store.Repo, upstream string) (strin
 	return st.Blocked, err
 }
 
+// SyncResult is everything one pass over a mirror observed. It exists
+// because the merge error used to be logged and dropped (#3576): a mirror
+// that could not fast-forward reported the same nil as one that did, and the
+// only trace was a warn line nobody was reading.
+//
+// Blocked and the errors are deliberately different things. Blocked is Sync
+// refusing to clobber — a correct, expected outcome with nothing to fix on
+// our side. FetchErr and MergeErr are git failing at something it was asked
+// to do, and they travel up as an error.
+type SyncResult struct {
+	// Advanced is how many commits the working tree moved forward by.
+	Advanced int
+	// Blocked is why the fast-forward was not attempted, verbatim from the
+	// reasons Check reports; empty when nothing was in the way.
+	Blocked string
+	// FetchErr is a failed `git fetch origin --prune`. Sync still tries to
+	// fast-forward from the refs already on disk afterwards.
+	FetchErr error
+	// MergeErr is a failed `git merge --ff-only` — the swallowed error this
+	// type exists for. It is set only when none of the guards fired, i.e.
+	// when the merge genuinely should have worked.
+	MergeErr error
+	// LockWaited is how long the caller waited for the mirror's lock. Filled
+	// by the locked entry points; zero here.
+	LockWaited time.Duration
+	// IndexLockRemoved records that an abandoned .git/index.lock was reaped
+	// before the sync. Filled by the locked entry points; false here.
+	IndexLockRemoved bool
+}
+
+// Err joins the failures the caller has to know about. A blocked mirror is
+// not among them: refusing to clobber is the design, not a fault.
+func (r SyncResult) Err() error {
+	return errors.Join(r.FetchErr, r.MergeErr)
+}
+
 // Sync brings a mirror up to date with origin: it fetches (the only network
 // call in this package) and then strictly fast-forwards the working tree to
 // origin/<default_branch>.
 //
 // A mirror that is dirty, off its default branch, or not fast-forwardable is
-// left untouched; Sync logs a warning and returns nil, because there is
-// nothing the caller can do about it and the reason is separately observable
-// through Check. A failing fetch is not fatal either: Sync warns, still
-// attempts the fast-forward with the refs already on disk (so an offline
-// mirror can at least catch up to its last fetch), and returns the fetch
-// error afterwards.
-func Sync(ctx context.Context, repo store.Repo) error {
+// left untouched: the reason lands in SyncResult.Blocked and the returned
+// error stays nil, because there is nothing the caller can do about it and
+// the state is separately observable through Check. A failing fetch is not
+// fatal either: Sync warns, still attempts the fast-forward with the refs
+// already on disk (so an offline mirror can at least catch up to its last
+// fetch), and reports the fetch error afterwards.
+//
+// A `merge --ff-only` that fails after every guard passed is a different
+// animal — git refusing a merge it should have been able to do, most often
+// because another process holds the index — and it is returned, not logged
+// and forgotten.
+func Sync(ctx context.Context, repo store.Repo) (SyncResult, error) {
+	var res SyncResult
+
 	if err := validate(repo); err != nil {
-		return err
+		return res, err
 	}
 
-	var fetchErr error
 	if out, err := runGit(ctx, repo.Path, "fetch", "origin", "--prune"); err != nil {
-		fetchErr = fmt.Errorf("mirror %s: fetch origin --prune: %w", repo.ID, err)
+		res.FetchErr = fmt.Errorf("mirror %s: fetch origin --prune: %w", repo.ID, err)
 		slog.Warn("mirror: fetch failed, continuing with local refs",
 			"repo", repo.ID, "path", repo.Path, "error", err, "output", strings.TrimSpace(out))
 	}
 
-	dirty, err := isDirty(ctx, repo.Path)
+	upstream := "origin/" + repo.DefaultBranch
+	st, err := inspect(ctx, repo, upstream)
 	if err != nil {
 		slog.Warn("mirror: cannot determine worktree state, leaving mirror untouched",
 			"repo", repo.ID, "path", repo.Path, "error", err)
-		return fetchErr
+		return res, res.Err()
 	}
-	if dirty {
+	if st.Blocked != "" {
+		res.Blocked = st.Blocked
 		slog.Warn("mirror: skipping fast-forward",
-			"repo", repo.ID, "path", repo.Path, "blocked", BlockedDirty)
-		return fetchErr
+			"repo", repo.ID, "path", repo.Path, "branch", st.Branch, "blocked", st.Blocked)
+		return res, res.Err()
 	}
 
-	branch, err := currentBranch(ctx, repo.Path)
+	// HEAD before the merge is the only way to say how far the mirror moved:
+	// the pre-sync behind count was taken before the fetch and misses exactly
+	// the commits the fetch brought in.
+	before, err := revParseHead(ctx, repo.Path)
 	if err != nil {
-		slog.Warn("mirror: cannot determine current branch, leaving mirror untouched",
+		slog.Warn("mirror: cannot resolve HEAD before fast-forward",
 			"repo", repo.ID, "path", repo.Path, "error", err)
-		return fetchErr
-	}
-	if branch != repo.DefaultBranch {
-		slog.Warn("mirror: skipping fast-forward",
-			"repo", repo.ID, "path", repo.Path, "branch", branch,
-			"blocked", BlockedNotOnDefault(repo.DefaultBranch))
-		return fetchErr
 	}
 
-	upstream := "origin/" + repo.DefaultBranch
 	if out, err := runGit(ctx, repo.Path, "merge", "--ff-only", upstream); err != nil {
-		slog.Warn("mirror: skipping fast-forward",
-			"repo", repo.ID, "path", repo.Path, "blocked", BlockedNoFF,
-			"error", err, "output", strings.TrimSpace(out))
-		return fetchErr
+		res.MergeErr = fmt.Errorf("mirror %s: merge --ff-only %s: %w", repo.ID, upstream, err)
+		slog.Warn("mirror: fast-forward failed",
+			"repo", repo.ID, "path", repo.Path, "error", err, "output", strings.TrimSpace(out))
+		return res, res.Err()
 	}
 
-	return fetchErr
+	res.Advanced = advanceFrom(ctx, repo.Path, before)
+
+	return res, res.Err()
+}
+
+// advanceFrom counts how far HEAD moved from before. It never fails the
+// sync: the fast-forward has already happened by the time it runs, and a
+// count we could not take is worth a log line, not an error.
+func advanceFrom(ctx context.Context, path, before string) int {
+	if before == "" {
+		return 0
+	}
+	after, err := revParseHead(ctx, path)
+	if err != nil || after == before {
+		return 0
+	}
+	out, err := runGit(ctx, path, "rev-list", "--count", before+".."+after)
+	if err != nil {
+		slog.Warn("mirror: cannot count the advance", "path", path, "error", err)
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func validate(repo store.Repo) error {

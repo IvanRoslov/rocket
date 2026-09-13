@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/IvanRoslov/rocket/internal/mirror"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -36,10 +37,10 @@ func TestSpawnSyncsMirrorBeforeWorkspace(t *testing.T) {
 
 	var syncedRepos []string
 	var createCallsAtSync int
-	m.SetMirrorSyncer(func(ctx context.Context, repo store.Repo) error {
+	m.SetMirrorSyncer(func(ctx context.Context, repo store.Repo) (mirror.SyncResult, error) {
 		syncedRepos = append(syncedRepos, repo.ID)
 		createCallsAtSync = len(ws.createCalls)
-		return nil
+		return mirror.SyncResult{}, nil
 	})
 
 	if _, err := m.Spawn(context.Background(), SpawnReq{
@@ -69,9 +70,9 @@ func TestSpawnSkipsMirrorSyncForUserWorkingCopy(t *testing.T) {
 	seedProjectRepo(t, st, "proj1", "repo1")
 
 	synced := 0
-	m.SetMirrorSyncer(func(ctx context.Context, repo store.Repo) error {
+	m.SetMirrorSyncer(func(ctx context.Context, repo store.Repo) (mirror.SyncResult, error) {
 		synced++
-		return nil
+		return mirror.SyncResult{}, nil
 	})
 
 	if _, err := m.Spawn(context.Background(), SpawnReq{
@@ -92,8 +93,8 @@ func TestSpawnProceedsWhenMirrorSyncFails(t *testing.T) {
 	cfg.ReposDir = t.TempDir()
 	seedMirrorRepo(t, st, cfg.ReposDir, "proj1", "repo1")
 
-	m.SetMirrorSyncer(func(ctx context.Context, repo store.Repo) error {
-		return errors.New("origin unreachable")
+	m.SetMirrorSyncer(func(ctx context.Context, repo store.Repo) (mirror.SyncResult, error) {
+		return mirror.SyncResult{}, errors.New("origin unreachable")
 	})
 
 	sess, err := m.Spawn(context.Background(), SpawnReq{
@@ -120,9 +121,9 @@ func TestSpawnMirrorSyncRunsUnderTimeout(t *testing.T) {
 
 	var deadline time.Time
 	var hasDeadline bool
-	m.SetMirrorSyncer(func(ctx context.Context, repo store.Repo) error {
+	m.SetMirrorSyncer(func(ctx context.Context, repo store.Repo) (mirror.SyncResult, error) {
 		deadline, hasDeadline = ctx.Deadline()
-		return nil
+		return mirror.SyncResult{}, nil
 	})
 
 	before := time.Now()
@@ -147,8 +148,8 @@ func TestSpawnProceedsWhenMirrorSyncIsCancelled(t *testing.T) {
 	cfg.ReposDir = t.TempDir()
 	seedMirrorRepo(t, st, cfg.ReposDir, "proj1", "repo1")
 
-	m.SetMirrorSyncer(func(ctx context.Context, repo store.Repo) error {
-		return context.DeadlineExceeded
+	m.SetMirrorSyncer(func(ctx context.Context, repo store.Repo) (mirror.SyncResult, error) {
+		return mirror.SyncResult{}, context.DeadlineExceeded
 	})
 
 	sess, err := m.Spawn(context.Background(), SpawnReq{
@@ -197,9 +198,9 @@ func TestSpawnOrchestratorSyncsMirror(t *testing.T) {
 	seedMirrorRepo(t, st, cfg.ReposDir, "proj1", "repo1")
 
 	var createCallsAtSync = -1
-	m.SetMirrorSyncer(func(ctx context.Context, repo store.Repo) error {
+	m.SetMirrorSyncer(func(ctx context.Context, repo store.Repo) (mirror.SyncResult, error) {
 		createCallsAtSync = len(ws.createCalls)
-		return nil
+		return mirror.SyncResult{}, nil
 	})
 
 	proj, err := st.GetProject("proj1")
@@ -231,9 +232,9 @@ func TestRestoreSyncsMirror(t *testing.T) {
 	}
 
 	restoreCallsAtSync := -1
-	m.SetMirrorSyncer(func(ctx context.Context, repo store.Repo) error {
+	m.SetMirrorSyncer(func(ctx context.Context, repo store.Repo) (mirror.SyncResult, error) {
 		restoreCallsAtSync = ws.restoreCalls
-		return nil
+		return mirror.SyncResult{}, nil
 	})
 
 	if err := m.Restore(context.Background(), "sess1"); err != nil {

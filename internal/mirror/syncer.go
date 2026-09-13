@@ -110,6 +110,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 	}
 
 	reposDir := resolvePath(s.cfg.ReposDir)
+	stateDir := StateDir(s.cfg.ReposDir)
 
 	for _, repo := range repos {
 		if ctx.Err() != nil {
@@ -120,7 +121,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 				"repo", repo.ID, "path", repo.Path, "repos_dir", s.cfg.ReposDir)
 			continue
 		}
-		if err := Sync(ctx, repo); err != nil {
+		if _, err := SyncAndRecord(ctx, repo, stateDir, OpSyncer); err != nil {
 			slog.Warn("mirror: sync failed", "repo", repo.ID, "path", repo.Path, "error", err)
 		}
 	}

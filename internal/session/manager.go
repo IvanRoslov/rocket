@@ -101,8 +101,11 @@ type Manager struct {
 
 	// syncMirror fast-forwards a repo's mirror; it defaults to mirror.Sync
 	// and is overridable via SetMirrorSyncer so tests do not shell out to
-	// git. See syncMirrorBeforeWorkspace for why it runs at all.
-	syncMirror func(context.Context, store.Repo) error
+	// git. See syncMirrorBeforeWorkspace for why it runs at all. The result
+	// is carried so a caller that wants to know how the sync went — and
+	// Task 3's locked form, which reports a busy mirror — has somewhere to
+	// put it.
+	syncMirror func(context.Context, store.Repo) (mirror.SyncResult, error)
 
 	// quizInFlight tracks session IDs with an in-progress quiz-answer
 	// injection (see AnswerQuiz's tryStartQuizInFlight/clearQuizInFlight in
@@ -115,17 +118,24 @@ type Manager struct {
 
 // NewManager builds a Manager wired to the given dependencies.
 func NewManager(st *store.Store, b *bus.Bus, rt runtime.Runtime, ws workspace.Workspace, cfg *config.Config) *Manager {
-	return &Manager{
+	m := &Manager{
 		st: st, bus: b, rt: rt, ws: ws, cfg: cfg,
-		syncMirror:             mirror.Sync,
 		quizSleepFn:            time.Sleep,
 		quizUnconfirmedTimeout: 60 * time.Second,
 	}
+	// The default records what it did: a workspace clone is one of the four
+	// writers of a mirror, and a spawn that quietly cloned from a mirror
+	// whose last sync failed is exactly the misread `rocket repo status`
+	// now exists to surface.
+	m.syncMirror = func(ctx context.Context, repo store.Repo) (mirror.SyncResult, error) {
+		return mirror.SyncAndRecord(ctx, repo, mirror.StateDir(m.cfg.ReposDir), mirror.OpWorkspaceClone)
+	}
+	return m
 }
 
 // SetMirrorSyncer overrides the function used to fast-forward a repo's
 // mirror before a workspace is created. Tests use it to avoid running git.
-func (m *Manager) SetMirrorSyncer(f func(context.Context, store.Repo) error) {
+func (m *Manager) SetMirrorSyncer(f func(context.Context, store.Repo) (mirror.SyncResult, error)) {
 	m.syncMirror = f
 }
 
@@ -153,7 +163,7 @@ func (m *Manager) syncMirrorBeforeWorkspace(ctx context.Context, repo store.Repo
 	ctx, cancel := context.WithTimeout(ctx, mirrorSyncTimeout)
 	defer cancel()
 
-	if err := m.syncMirror(ctx, repo); err != nil {
+	if _, err := m.syncMirror(ctx, repo); err != nil {
 		slog.Warn("session: mirror sync before workspace failed, continuing with the mirror as it is",
 			"repo", repo.ID, "path", repo.Path, "timeout", mirrorSyncTimeout, "error", err)
 	}

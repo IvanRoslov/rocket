@@ -70,6 +70,11 @@ type syncOutcome struct {
 	// already on disk anyway, so this is reported alongside the outcome, not
 	// instead of it.
 	FetchErr error
+	// MergeErr is a failed `git merge --ff-only` — git refusing a
+	// fast-forward that none of the mirror package's guards objected to,
+	// most often because another process holds the index. It used to be a
+	// log line only (#3576), which is how mirrors stayed behind silently.
+	MergeErr error
 }
 
 // renderSync writes one line per mirror, then the ids that matched nothing.
@@ -122,6 +127,9 @@ func syncLine(o syncOutcome) string {
 	if o.FetchErr != nil {
 		line += fmt.Sprintf(" (fetch не удался: %v)", o.FetchErr)
 	}
+	if o.MergeErr != nil {
+		line += fmt.Sprintf(" (merge не удался: %v)", o.MergeErr)
+	}
 	return line
 }
 
@@ -132,24 +140,34 @@ func syncLine(o syncOutcome) string {
 type syncOps struct {
 	head   func(ctx context.Context, path string) (string, error)
 	count  func(ctx context.Context, path, from, to string) (int, error)
-	sync   func(ctx context.Context, repo store.Repo) error
+	sync   func(ctx context.Context, repo store.Repo) (mirror.SyncResult, error)
 	check  func(ctx context.Context, repo store.Repo) (mirror.Freshness, error)
 	repair func(ctx context.Context, repo store.Repo, now time.Time) (mirror.RepairResult, error)
 }
 
-// realSyncOps wires syncOps to git and to the mirror package.
-func realSyncOps() *syncOps {
+// realSyncOps wires syncOps to git and to the mirror package. stateDir is
+// where the last sync result is recorded for `rocket repo status`; empty
+// records nothing, which is what a host with no repos_dir gets.
+func realSyncOps(stateDir string) *syncOps {
 	return &syncOps{
 		head:  gitHead,
 		count: gitCountCommits,
-		sync:  mirror.Sync,
+		sync: func(ctx context.Context, repo store.Repo) (mirror.SyncResult, error) {
+			return mirror.SyncAndRecord(ctx, repo, stateDir, mirror.OpRepoSync)
+		},
 		check: func(ctx context.Context, repo store.Repo) (mirror.Freshness, error) {
 			// staleAfter and now only feed Freshness.Stale, which this
 			// command does not use: it reports what it just did, not how old
 			// the mirror looks.
 			return mirror.Check(ctx, repo, mirrorStaleFallback, time.Now())
 		},
-		repair: mirror.Repair,
+		repair: func(ctx context.Context, repo store.Repo, now time.Time) (mirror.RepairResult, error) {
+			res, err := mirror.Repair(ctx, repo, now)
+			// Repair ends with a Sync of its own, so its result — not the
+			// one from the pass before the repair — is the mirror's state.
+			mirror.RecordSync(repo.ID, stateDir, mirror.OpRepoSyncRepair, res.Sync)
+			return res, err
+		},
 	}
 }
 
@@ -180,10 +198,11 @@ func syncMirror(ctx context.Context, m repoRow, ops *syncOps, repair bool, now t
 		return out
 	}
 
-	// Sync's own error is the fetch's: it still fast-forwards from the refs
-	// already on disk afterwards, so it is reported alongside the outcome
+	// Neither of Sync's errors stops the report: it fast-forwards from the
+	// refs already on disk after a failed fetch, and a failed merge leaves
+	// the mirror exactly as it was. Both are shown alongside the outcome
 	// rather than instead of it.
-	fetchErr := ops.sync(ctx, repo)
+	syncRes, _ := ops.sync(ctx, repo)
 
 	fr, err := ops.check(ctx, repo)
 	if err != nil {
@@ -216,7 +235,8 @@ func syncMirror(ctx context.Context, m repoRow, ops *syncOps, repair bool, now t
 		return out
 	}
 	out.Advanced = advanced
-	out.FetchErr = fetchErr
+	out.FetchErr = syncRes.FetchErr
+	out.MergeErr = syncRes.MergeErr
 
 	return out
 }
@@ -305,7 +325,7 @@ func newRepoSyncCmd() *cobra.Command {
 			}
 
 			selected, unknown := selectMirrors(mirrorsOnly(repos, cfg.ReposDir), args)
-			outcomes := syncMirrors(cmd.Context(), selected, realSyncOps(), repair, time.Now())
+			outcomes := syncMirrors(cmd.Context(), selected, realSyncOps(mirror.StateDir(cfg.ReposDir)), repair, time.Now())
 
 			if flags.JSON {
 				if err := printJSON(cmd, syncJSON(outcomes, unknown)); err != nil {
@@ -332,6 +352,7 @@ type syncRow struct {
 	Repaired     bool   `json:"repaired,omitempty"`
 	RescueBranch string `json:"rescue_branch,omitempty"`
 	FetchError   string `json:"fetch_error,omitempty"`
+	MergeError   string `json:"merge_error,omitempty"`
 	Error        string `json:"error,omitempty"`
 }
 
@@ -354,6 +375,9 @@ func syncJSON(outcomes []syncOutcome, unknown []string) map[string]any {
 		}
 		if o.FetchErr != nil {
 			row.FetchError = o.FetchErr.Error()
+		}
+		if o.MergeErr != nil {
+			row.MergeError = o.MergeErr.Error()
 		}
 		rows = append(rows, row)
 	}
