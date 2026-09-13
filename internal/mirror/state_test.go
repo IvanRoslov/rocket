@@ -3,6 +3,7 @@ package mirror
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -121,5 +122,43 @@ func TestSyncAndRecordWithoutStateDirStillSyncs(t *testing.T) {
 	}
 	if res.Advanced != 1 {
 		t.Errorf("Advanced = %d, want 1", res.Advanced)
+	}
+}
+
+// Two processes syncing the same mirror write its sidecar at the same time:
+// the daemon's Syncer and a `rocket repo sync` are separate processes, and
+// the mirror lock does not exist yet. A shared temp file would let one
+// writer rename the other's half-written record into place, and ReadState
+// would then report a perfectly healthy mirror as corrupt.
+func TestWriteStateConcurrent(t *testing.T) {
+	dir := StateDir(t.TempDir())
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := WriteState(dir, SyncState{RepoID: "rocket", By: OpSyncer, At: time.Now()}); err != nil {
+				t.Errorf("WriteState: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if _, err := ReadState(dir, "rocket"); err != nil {
+		t.Fatalf("ReadState after concurrent writes: %v", err)
+	}
+	// And nothing is left behind: a temp file per writer that never got
+	// renamed away would grow the state dir without bound.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("state dir holds %v, want only the final record", names)
 	}
 }

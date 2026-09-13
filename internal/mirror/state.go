@@ -89,9 +89,27 @@ func WriteState(stateDir string, st SyncState) error {
 	}
 	data = append(data, '\n')
 
+	// The temp file gets a unique name, not <repo>.json.tmp. A fixed name is
+	// shared by every writer of the same mirror, and writing truncates
+	// first: one process would rename another's half-written file over the
+	// final path, and ReadState would report the mirror as corrupt until the
+	// next sync. That is the very race this feature exists to remove, and it
+	// is reachable — the daemon's Syncer and a `rocket repo sync` are
+	// separate processes. The mirror lock (a later task) would also close it,
+	// but an atomic writer should be atomic on its own terms rather than on a
+	// caller remembering to hold something.
+	//
+	// CreateTemp puts the file in stateDir, i.e. the same filesystem as the
+	// final path, which is what keeps the rename atomic.
 	final := statePath(stateDir, st.RepoID)
-	tmp := final + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	f, err := os.CreateTemp(stateDir, st.RepoID+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("mirror: create sync state temp for %s: %w", st.RepoID, err)
+	}
+	tmp := f.Name()
+
+	if err := writeAndClose(f, data); err != nil {
+		_ = os.Remove(tmp)
 		return fmt.Errorf("mirror: write sync state for %s: %w", st.RepoID, err)
 	}
 	if err := os.Rename(tmp, final); err != nil {
@@ -99,6 +117,21 @@ func WriteState(stateDir string, st SyncState) error {
 		return fmt.Errorf("mirror: publish sync state for %s: %w", st.RepoID, err)
 	}
 	return nil
+}
+
+// writeAndClose writes the record and closes the file, leaving it readable:
+// CreateTemp makes the file 0o600, and the sidecar is meant to be readable
+// by whoever runs `rocket repo status`, not only by whoever last synced.
+func writeAndClose(f *os.File, data []byte) error {
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Chmod(0o644); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // ReadState returns the last recorded sync of one mirror. A mirror that has
