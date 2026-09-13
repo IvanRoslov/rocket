@@ -257,8 +257,18 @@ func lastFetchTime(ctx context.Context, path string) (time.Time, error) {
 // runGit runs `git -C path <args...>`, no shell involved. It returns the
 // combined output either way, so callers can log what git actually said.
 func runGit(ctx context.Context, path string, args ...string) (string, error) {
+	return runGitEnv(ctx, path, nil, args...)
+}
+
+// runGitEnv is runGit with extra environment variables appended to the
+// daemon's own, so a later duplicate wins.
+func runGitEnv(ctx context.Context, path string, env []string, args ...string) (string, error) {
 	fullArgs := append([]string{"-C", path}, args...)
-	out, err := exec.CommandContext(ctx, "git", fullArgs...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, "git", fullArgs...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("git %s: %w (output: %s)", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
