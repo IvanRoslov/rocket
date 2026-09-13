@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/config"
+	"github.com/IvanRoslov/rocket/internal/mirrorlock"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -182,4 +183,59 @@ func waitForContent(t *testing.T, path, want string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("%s = %q, want %q within timeout", path, got, want)
+}
+
+// The background sweep must not race the other three writers of a mirror. It
+// takes the lock like everyone else.
+func TestSyncOnceTakesTheMirrorLock(t *testing.T) {
+	reposDir := t.TempDir()
+	origin, repo := mirrorUnder(t, reposDir, "a")
+	commitToOrigin(t, origin, "a2\n", "second")
+
+	held, err := mirrorlock.Acquire(context.Background(), mirrorlock.LocksDir(reposDir), repo.ID, OpRepoSync, time.Second)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	defer held.Release()
+
+	s := NewSyncer(newStore(t, repo), &config.Config{
+		MirrorSyncInterval:      time.Minute,
+		ReposDir:                reposDir,
+		MirrorLockTimeoutSyncer: 50 * time.Millisecond,
+	})
+	s.SyncOnce(context.Background())
+
+	if got := readFile(t, filepath.Join(repo.Path, "file.txt")); got != "v1\n" {
+		t.Errorf("a locked mirror was synced anyway: working tree = %q, want %q", got, "v1\n")
+	}
+}
+
+// A mirror held by somebody else costs the sweep its timeout and nothing
+// else: the mirrors after it in the pass are still synced this tick.
+func TestSyncOnceSkipsABusyMirrorAndSyncsTheRest(t *testing.T) {
+	reposDir := t.TempDir()
+	originA, repoA := mirrorUnder(t, reposDir, "a")
+	originB, repoB := mirrorUnder(t, reposDir, "b")
+	commitToOrigin(t, originA, "a2\n", "second a")
+	commitToOrigin(t, originB, "b2\n", "second b")
+
+	held, err := mirrorlock.Acquire(context.Background(), mirrorlock.LocksDir(reposDir), repoA.ID, OpRepoSync, time.Second)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	defer held.Release()
+
+	s := NewSyncer(newStore(t, repoA, repoB), &config.Config{
+		MirrorSyncInterval:      time.Minute,
+		ReposDir:                reposDir,
+		MirrorLockTimeoutSyncer: 50 * time.Millisecond,
+	})
+	s.SyncOnce(context.Background())
+
+	if got := readFile(t, filepath.Join(repoA.Path, "file.txt")); got != "v1\n" {
+		t.Errorf("busy mirror a = %q, want it left alone", got)
+	}
+	if got := readFile(t, filepath.Join(repoB.Path, "file.txt")); got != "b2\n" {
+		t.Errorf("mirror b = %q, want %q — a busy neighbour must not cost it its tick", got, "b2\n")
+	}
 }

@@ -150,3 +150,37 @@ func waitForLockFile(t *testing.T, path string) {
 	}
 	t.Fatalf("helper never took the lock at %s", path)
 }
+
+// The timeout bounds how long Acquire WAITS, and a lock nobody holds needs
+// no waiting. A zero or negative timeout must therefore still take a free
+// lock — it means "do not queue", not "fail". Without this, a caller whose
+// timeout is unset silently never syncs anything.
+func TestAcquireTakesAFreeLockWithZeroTimeout(t *testing.T) {
+	l, err := Acquire(context.Background(), t.TempDir(), "demo", "test", 0)
+	if err != nil {
+		t.Fatalf("Acquire with a zero timeout on a free lock: %v", err)
+	}
+	if err := l.Release(); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+}
+
+// The other half of the same rule: with no time to wait, a held lock comes
+// back busy immediately rather than blocking.
+func TestAcquireZeroTimeoutDoesNotQueueForAHeldLock(t *testing.T) {
+	dir := t.TempDir()
+	held, err := Acquire(context.Background(), dir, "demo", "holder", time.Second)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	defer held.Release()
+
+	_, err = Acquire(context.Background(), dir, "demo", "test", 0)
+	var busy *ErrBusy
+	if !errors.As(err, &busy) {
+		t.Fatalf("err = %v, want *ErrBusy", err)
+	}
+	if busy.Holder.Operation != "holder" {
+		t.Errorf("holder operation = %q, want %q", busy.Holder.Operation, "holder")
+	}
+}
