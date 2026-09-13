@@ -12,8 +12,11 @@ import (
 
 func newRepoCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "repo",
-		Short: "Управление реестром репозиториев",
+		Use: "repo",
+		// "repos" because that is what the directory holding the mirrors is
+		// called; people type what they see.
+		Aliases: []string{"repos"},
+		Short:   "Управление реестром репозиториев",
 	}
 	cmd.AddCommand(newRepoAddCmd())
 	cmd.AddCommand(newRepoLsCmd())

@@ -156,3 +156,15 @@ func TestMirrorJSONOmitsStaleWhenUnknown(t *testing.T) {
 		t.Errorf("expected an explicit stale:false for a checked mirror, got: %s", b)
 	}
 }
+
+// TestRepoCmdHasReposAlias pins the plural spelling: the mirrors live in a
+// directory called repos and people type what they see.
+func TestRepoCmdHasReposAlias(t *testing.T) {
+	cmd := newRepoCmd()
+	for _, a := range cmd.Aliases {
+		if a == "repos" {
+			return
+		}
+	}
+	t.Fatalf("repo command aliases = %v, want to contain %q", cmd.Aliases, "repos")
+}
