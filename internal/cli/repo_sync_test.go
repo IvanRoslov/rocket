@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -141,10 +144,10 @@ func TestRenderSyncReportsUnknownIDs(t *testing.T) {
 // blocked-detection and repair is testable without a git repository.
 func fakeOps() *syncOps {
 	return &syncOps{
-		head:    func(context.Context, string) (string, error) { return "before", nil },
-		count:   func(context.Context, string, string, string) (int, error) { return 0, nil },
-		sync:    func(context.Context, store.Repo) error { return nil },
-		blocked: func(context.Context, store.Repo) (string, error) { return "", nil },
+		head:  func(context.Context, string) (string, error) { return "before", nil },
+		count: func(context.Context, string, string, string) (int, error) { return 0, nil },
+		sync:  func(context.Context, store.Repo) error { return nil },
+		check: func(context.Context, store.Repo) (mirror.Freshness, error) { return mirror.Freshness{}, nil },
 		repair: func(context.Context, store.Repo, time.Time) (mirror.RepairResult, error) {
 			return mirror.RepairResult{}, nil
 		},
@@ -184,7 +187,9 @@ func TestSyncMirrorsCountsTheAdvance(t *testing.T) {
 // mirror is reported and left alone.
 func TestSyncMirrorsReportsBlockedWithoutRepairing(t *testing.T) {
 	ops := fakeOps()
-	ops.blocked = func(context.Context, store.Repo) (string, error) { return mirror.BlockedDirty, nil }
+	ops.check = func(context.Context, store.Repo) (mirror.Freshness, error) {
+		return mirror.Freshness{Blocked: mirror.BlockedDirty}, nil
+	}
 	ops.repair = func(context.Context, store.Repo, time.Time) (mirror.RepairResult, error) {
 		t.Fatal("repair called without --repair")
 		return mirror.RepairResult{}, nil
@@ -201,7 +206,9 @@ func TestSyncMirrorsReportsBlockedWithoutRepairing(t *testing.T) {
 // back in the outcome, so the report can name where the work went.
 func TestSyncMirrorsRepairsBlockedMirror(t *testing.T) {
 	ops := fakeOps()
-	ops.blocked = func(context.Context, store.Repo) (string, error) { return mirror.BlockedDirty, nil }
+	ops.check = func(context.Context, store.Repo) (mirror.Freshness, error) {
+		return mirror.Freshness{Blocked: mirror.BlockedDirty}, nil
+	}
 	ops.repair = func(context.Context, store.Repo, time.Time) (mirror.RepairResult, error) {
 		return mirror.RepairResult{RescueBranch: "rescue/2026-09-13-120000", Repaired: true}, nil
 	}
@@ -221,7 +228,9 @@ func TestSyncMirrorsRepairsBlockedMirror(t *testing.T) {
 // diverged default branch, and the report must keep saying so.
 func TestSyncMirrorsKeepsBlockedAfterRepair(t *testing.T) {
 	ops := fakeOps()
-	ops.blocked = func(context.Context, store.Repo) (string, error) { return mirror.BlockedNoFF, nil }
+	ops.check = func(context.Context, store.Repo) (mirror.Freshness, error) {
+		return mirror.Freshness{Blocked: mirror.BlockedNoFF}, nil
+	}
 	ops.repair = func(context.Context, store.Repo, time.Time) (mirror.RepairResult, error) {
 		return mirror.RepairResult{Blocked: mirror.BlockedNoFF}, nil
 	}
@@ -289,5 +298,113 @@ func TestSyncLineReportsFetchFailure(t *testing.T) {
 	want := "mirror rocket: обновлено на 2 коммита (fetch не удался: host unreachable)"
 	if got != want {
 		t.Fatalf("syncLine = %q, want %q", got, want)
+	}
+}
+
+// TestRepoStatusWrongArgCountIsUsageError: status takes no arguments.
+func TestRepoStatusWrongArgCountIsUsageError(t *testing.T) {
+	cmd := newRepoStatusCmd()
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"extra"})
+	if err := cmd.Execute(); exitCode(err) != 3 {
+		t.Fatalf("exitCode = %d, want 3 (err=%v)", exitCode(err), err)
+	}
+}
+
+// TestRepoCmdHasStatusAndSync: both subcommands are reachable from the group.
+func TestRepoCmdHasStatusAndSync(t *testing.T) {
+	have := map[string]bool{}
+	for _, c := range newRepoCmd().Commands() {
+		have[c.Name()] = true
+	}
+	for _, want := range []string{"status", "sync"} {
+		if !have[want] {
+			t.Fatalf("repo group is missing the %q subcommand", want)
+		}
+	}
+}
+
+// TestRepoSyncHasRepairFlag: without --repair nothing is ever repaired, so
+// the flag is the whole opt-in.
+func TestRepoSyncHasRepairFlag(t *testing.T) {
+	if newRepoSyncCmd().Flags().Lookup("repair") == nil {
+		t.Fatal("repo sync has no --repair flag")
+	}
+}
+
+// TestGitHeadAndCountCommits exercises the two real git calls the advance
+// count rests on, against an actual repository.
+func TestGitHeadAndCountCommits(t *testing.T) {
+	dir := t.TempDir()
+	gitInTest(t, dir, "-c", "init.defaultBranch=main", "init")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitInTest(t, dir, "add", ".")
+	gitInTest(t, dir, "commit", "-m", "one")
+	first, err := gitHead(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("gitHead: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitInTest(t, dir, "commit", "-am", "two")
+	second, err := gitHead(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("gitHead: %v", err)
+	}
+
+	if first == second {
+		t.Fatal("HEAD did not move between commits")
+	}
+	n, err := gitCountCommits(context.Background(), dir, first, second)
+	if err != nil {
+		t.Fatalf("gitCountCommits: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("gitCountCommits = %d, want 1", n)
+	}
+}
+
+func gitInTest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// TestSyncLineStillBehindWithoutBlocking is the bug a live run turned up:
+// mirror.Sync reports only the fetch error, so a `merge --ff-only` that died
+// on a stale index.lock left nothing blocked and nothing advanced — and the
+// line read "уже актуально" about a mirror three commits behind. A mirror
+// that is still behind afterwards has to say so.
+func TestSyncLineStillBehindWithoutBlocking(t *testing.T) {
+	got := syncLine(syncOutcome{RepoID: "rocket", Behind: 3})
+	want := "mirror rocket: не обновлено, отстаёт на 3 коммита"
+	if got != want {
+		t.Fatalf("syncLine = %q, want %q", got, want)
+	}
+}
+
+// TestSyncMirrorsRecordsRemainingBehind carries the post-sync behind count
+// into the outcome, which is the only honest signal that the fast-forward
+// did not happen.
+func TestSyncMirrorsRecordsRemainingBehind(t *testing.T) {
+	ops := fakeOps()
+	ops.check = func(context.Context, store.Repo) (mirror.Freshness, error) {
+		return mirror.Freshness{BehindCommits: 3}, nil
+	}
+
+	got := syncMirrors(context.Background(), []repoRow{{ID: "rocket"}}, ops, false, testNow)
+
+	if len(got) != 1 || got[0].Behind != 3 {
+		t.Fatalf("outcomes = %+v, want one still 3 commits behind", got)
 	}
 }

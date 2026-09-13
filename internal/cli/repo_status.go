@@ -5,6 +5,8 @@ import (
 	"io"
 	"text/tabwriter"
 	"time"
+
+	"github.com/spf13/cobra"
 )
 
 // shortSHALen is how much of a commit id the table shows. Seven is what git
@@ -145,4 +147,39 @@ func repoStatusJSON(rows []mirrorRow) []repoStatusRow {
 		out = append(out, r)
 	}
 	return out
+}
+
+// newRepoStatusCmd is the whole-fleet view of the mirrors: one row each, no
+// network, and a visible row for every mirror that cannot be checked.
+func newRepoStatusCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Состояние зеркал под repos_dir",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 0 {
+				return &usageError{message: "usage: rocket repo status"}
+			}
+
+			c, cfg, err := connect(true)
+			if err != nil {
+				return err
+			}
+
+			var repos []repoRow
+			if err := c.Get("/v1/repos", nil, &repos); err != nil {
+				return err
+			}
+
+			now := time.Now()
+			rows := checkMirrorsWithTimeout(cmd.Context(),
+				mirrorsOnly(repos, cfg.ReposDir), mirrorSyncInterval(cfg), now)
+
+			if flags.JSON {
+				return printJSON(cmd, repoStatusJSON(rows))
+			}
+
+			renderRepoStatus(rows, cmd.OutOrStdout(), now)
+			return nil
+		},
+	}
 }

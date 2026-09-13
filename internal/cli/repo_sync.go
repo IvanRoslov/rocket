@@ -12,6 +12,7 @@ import (
 
 	"github.com/IvanRoslov/rocket/internal/mirror"
 	"github.com/IvanRoslov/rocket/internal/store"
+	"github.com/spf13/cobra"
 )
 
 // selectMirrors narrows the mirrors to the ids the user named, in the order
@@ -53,6 +54,11 @@ type syncOutcome struct {
 	// Blocked is why the mirror still could not be advanced, verbatim from
 	// the mirror package; empty when it could.
 	Blocked string
+	// Behind is how many commits the mirror is still behind origin after
+	// the pass. mirror.Sync reports only the fetch error and logs a failed
+	// `merge --ff-only`, so a mirror that is still behind with nothing
+	// blocked is the only signal that the fast-forward did not happen.
+	Behind int
 	// Repaired is true when --repair actually changed something.
 	Repaired bool
 	// RescueBranch names the branch the mirror's uncommitted changes were
@@ -105,6 +111,8 @@ func syncLine(o syncOutcome) string {
 		line = prefix + "заблокировано: " + o.Blocked
 	case o.Advanced > 0:
 		line = prefix + "обновлено на " + pluralCommits(o.Advanced)
+	case o.Behind > 0:
+		line = prefix + "не обновлено, отстаёт на " + pluralCommits(o.Behind)
 	default:
 		line = prefix + "уже актуально"
 	}
@@ -122,11 +130,11 @@ func syncLine(o syncOutcome) string {
 // tested without a git repository. The real implementations are in
 // realSyncOps.
 type syncOps struct {
-	head    func(ctx context.Context, path string) (string, error)
-	count   func(ctx context.Context, path, from, to string) (int, error)
-	sync    func(ctx context.Context, repo store.Repo) error
-	blocked func(ctx context.Context, repo store.Repo) (string, error)
-	repair  func(ctx context.Context, repo store.Repo, now time.Time) (mirror.RepairResult, error)
+	head   func(ctx context.Context, path string) (string, error)
+	count  func(ctx context.Context, path, from, to string) (int, error)
+	sync   func(ctx context.Context, repo store.Repo) error
+	check  func(ctx context.Context, repo store.Repo) (mirror.Freshness, error)
+	repair func(ctx context.Context, repo store.Repo, now time.Time) (mirror.RepairResult, error)
 }
 
 // realSyncOps wires syncOps to git and to the mirror package.
@@ -135,12 +143,11 @@ func realSyncOps() *syncOps {
 		head:  gitHead,
 		count: gitCountCommits,
 		sync:  mirror.Sync,
-		blocked: func(ctx context.Context, repo store.Repo) (string, error) {
+		check: func(ctx context.Context, repo store.Repo) (mirror.Freshness, error) {
 			// staleAfter and now only feed Freshness.Stale, which this
 			// command does not use: it reports what it just did, not how old
 			// the mirror looks.
-			fr, err := mirror.Check(ctx, repo, mirrorStaleFallback, time.Now())
-			return fr.Blocked, err
+			return mirror.Check(ctx, repo, mirrorStaleFallback, time.Now())
 		},
 		repair: mirror.Repair,
 	}
@@ -178,14 +185,14 @@ func syncMirror(ctx context.Context, m repoRow, ops *syncOps, repair bool, now t
 	// rather than instead of it.
 	fetchErr := ops.sync(ctx, repo)
 
-	blocked, err := ops.blocked(ctx, repo)
+	fr, err := ops.check(ctx, repo)
 	if err != nil {
 		out.Err = err
 		return out
 	}
-	out.Blocked = blocked
+	out.Blocked, out.Behind = fr.Blocked, fr.BehindCommits
 
-	if blocked != "" && repair {
+	if fr.Blocked != "" && repair {
 		res, err := ops.repair(ctx, repo, now)
 		if err != nil {
 			out.Err = err
@@ -194,6 +201,13 @@ func syncMirror(ctx context.Context, m repoRow, ops *syncOps, repair bool, now t
 		out.Repaired = res.Repaired
 		out.RescueBranch = res.RescueBranch
 		out.Blocked = res.Blocked
+
+		// Repair Syncs on its way out, so the behind count from before it
+		// ran is stale. Ask again rather than report a number we know is out
+		// of date.
+		if after, err := ops.check(ctx, repo); err == nil {
+			out.Behind = after.BehindCommits
+		}
 	}
 
 	advanced, err := countAdvance(ctx, ops, m.Path, before)
@@ -267,4 +281,85 @@ func runGitLocal(ctx context.Context, path string, args ...string) (string, erro
 		return "", fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// newRepoSyncCmd fast-forwards the mirrors and says what happened to each.
+//
+// Individual blocks are reported, not fatal: mirror.Sync refuses to clobber
+// by design, and a command that exited non-zero every time one mirror sat on
+// someone's feature branch would be a command nobody could put in a script.
+func newRepoSyncCmd() *cobra.Command {
+	var repair bool
+	cmd := &cobra.Command{
+		Use:   "sync [id...]",
+		Short: "Обновить зеркала (все или указанные)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, cfg, err := connect(true)
+			if err != nil {
+				return err
+			}
+
+			var repos []repoRow
+			if err := c.Get("/v1/repos", nil, &repos); err != nil {
+				return err
+			}
+
+			selected, unknown := selectMirrors(mirrorsOnly(repos, cfg.ReposDir), args)
+			outcomes := syncMirrors(cmd.Context(), selected, realSyncOps(), repair, time.Now())
+
+			if flags.JSON {
+				if err := printJSON(cmd, syncJSON(outcomes, unknown)); err != nil {
+					return err
+				}
+			} else {
+				renderSync(outcomes, unknown, cmd.OutOrStdout())
+			}
+
+			return syncExitError(outcomes)
+		},
+	}
+	cmd.Flags().BoolVar(&repair, "repair", false,
+		"чинить заблокированные зеркала: незакоммиченные изменения — в ветку rescue/<время>, HEAD — на ветку по умолчанию")
+	return cmd
+}
+
+// syncRow is one mirror's outcome in --json.
+type syncRow struct {
+	Repo         string `json:"repo"`
+	Advanced     int    `json:"advanced"`
+	Behind       int    `json:"behind"`
+	Blocked      string `json:"blocked,omitempty"`
+	Repaired     bool   `json:"repaired,omitempty"`
+	RescueBranch string `json:"rescue_branch,omitempty"`
+	FetchError   string `json:"fetch_error,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
+// syncJSON is the machine view of the same report, unknown ids included:
+// an agent parsing --json must not be the one reader left thinking it synced
+// a mirror that does not exist.
+func syncJSON(outcomes []syncOutcome, unknown []string) map[string]any {
+	rows := make([]syncRow, 0, len(outcomes))
+	for _, o := range outcomes {
+		row := syncRow{
+			Repo:         o.RepoID,
+			Advanced:     o.Advanced,
+			Behind:       o.Behind,
+			Blocked:      o.Blocked,
+			Repaired:     o.Repaired,
+			RescueBranch: o.RescueBranch,
+		}
+		if o.Err != nil {
+			row.Error = o.Err.Error()
+		}
+		if o.FetchErr != nil {
+			row.FetchError = o.FetchErr.Error()
+		}
+		rows = append(rows, row)
+	}
+	out := map[string]any{"mirrors": rows}
+	if len(unknown) > 0 {
+		out["unknown"] = unknown
+	}
+	return out
 }

@@ -21,6 +21,8 @@ func newRepoCmd() *cobra.Command {
 	cmd.AddCommand(newRepoAddCmd())
 	cmd.AddCommand(newRepoLsCmd())
 	cmd.AddCommand(newRepoRmCmd())
+	cmd.AddCommand(newRepoStatusCmd())
+	cmd.AddCommand(newRepoSyncCmd())
 	return cmd
 }
 
