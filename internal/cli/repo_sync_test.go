@@ -79,7 +79,7 @@ func TestSyncLineAlreadyCurrent(t *testing.T) {
 // blocked mirror is a normal, reportable outcome, not a failure.
 func TestSyncLineBlocked(t *testing.T) {
 	got := syncLine(syncOutcome{RepoID: "app", Blocked: mirror.BlockedDirty})
-	want := "mirror app: не обновлено — локальные изменения в зеркале"
+	want := "mirror app: заблокировано: локальные изменения в зеркале"
 	if got != want {
 		t.Fatalf("syncLine = %q, want %q", got, want)
 	}
@@ -103,7 +103,7 @@ func TestSyncLineRepairedButStillBlocked(t *testing.T) {
 	got := syncLine(syncOutcome{
 		RepoID: "web", Repaired: true, RescueBranch: "rescue/2026-09-13-120000", Blocked: mirror.BlockedNoFF,
 	})
-	want := "mirror web: починено (изменения сохранены в ветке rescue/2026-09-13-120000), но не обновлено — fast-forward невозможен"
+	want := "mirror web: починено (изменения сохранены в ветке rescue/2026-09-13-120000), но заблокировано: fast-forward невозможен"
 	if got != want {
 		t.Fatalf("syncLine = %q, want %q", got, want)
 	}

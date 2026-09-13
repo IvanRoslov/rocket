@@ -348,3 +348,97 @@ func TestBlockedNotOnDefaultNamesTheBranch(t *testing.T) {
 		t.Errorf("BlockedNotOnDefault(\"main\") = %q, want it to mention HEAD and main", got)
 	}
 }
+
+// --- Check: the fields the CLI's repo status table renders ---------------
+
+// TestCheckReportsHeadAndUpstream: `rocket repo status` shows both commit
+// ids side by side, which is how a human confirms at a glance that the
+// mirror really is the commit they think they are reading.
+func TestCheckReportsHeadAndUpstream(t *testing.T) {
+	origin, repo := newMirror(t)
+	commitToOrigin(t, origin, "v2\n", "second")
+	git(t, repo.Path, "fetch", "origin")
+
+	fr, err := Check(context.Background(), repo, time.Hour, time.Now())
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+
+	if want := headSHA(t, repo.Path); fr.Head != want {
+		t.Fatalf("Head = %q, want %q", fr.Head, want)
+	}
+	if want := git(t, repo.Path, "rev-parse", "origin/main"); fr.Upstream != want {
+		t.Fatalf("Upstream = %q, want %q", fr.Upstream, want)
+	}
+	if fr.Head == fr.Upstream {
+		t.Fatal("Head and Upstream are equal, fixture was supposed to be behind")
+	}
+}
+
+func TestCheckReportsCheckedOutBranch(t *testing.T) {
+	_, repo := newMirror(t)
+
+	fr, err := Check(context.Background(), repo, time.Hour, time.Now())
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if fr.Branch != "main" {
+		t.Fatalf("Branch = %q, want %q", fr.Branch, "main")
+	}
+}
+
+// TestCheckReportsForeignBranch: 22 of 77 measured mirrors sat on some
+// orchestrator's feature branch, and the branch name is what tells the human
+// whose it is.
+func TestCheckReportsForeignBranch(t *testing.T) {
+	_, repo := newMirror(t)
+	git(t, repo.Path, "checkout", "-b", "feature/whatever")
+
+	fr, err := Check(context.Background(), repo, time.Hour, time.Now())
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if fr.Branch != "feature/whatever" {
+		t.Fatalf("Branch = %q, want %q", fr.Branch, "feature/whatever")
+	}
+}
+
+// TestCheckDetachedHeadHasEmptyBranch: the package does not invent a name
+// for a detached HEAD; naming it is the CLI's job.
+func TestCheckDetachedHeadHasEmptyBranch(t *testing.T) {
+	_, repo := newMirror(t)
+	git(t, repo.Path, "checkout", "--detach", "HEAD")
+
+	fr, err := Check(context.Background(), repo, time.Hour, time.Now())
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if fr.Branch != "" {
+		t.Fatalf("Branch = %q, want %q for a detached HEAD", fr.Branch, "")
+	}
+}
+
+func TestCheckReportsCleanTreeAsNotDirty(t *testing.T) {
+	_, repo := newMirror(t)
+
+	fr, err := Check(context.Background(), repo, time.Hour, time.Now())
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if fr.Dirty {
+		t.Fatal("Dirty = true for a freshly cloned mirror")
+	}
+}
+
+func TestCheckReportsUncommittedChangesAsDirty(t *testing.T) {
+	_, repo := newMirror(t)
+	writeFile(t, filepath.Join(repo.Path, "file.txt"), "local edit\n")
+
+	fr, err := Check(context.Background(), repo, time.Hour, time.Now())
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if !fr.Dirty {
+		t.Fatal("Dirty = false for a mirror with uncommitted changes")
+	}
+}

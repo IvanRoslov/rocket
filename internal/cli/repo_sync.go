@@ -88,7 +88,7 @@ func syncLine(o syncOutcome) string {
 
 	switch {
 	case o.Blocked != "":
-		return prefix + "не обновлено — " + o.Blocked
+		return prefix + "заблокировано: " + o.Blocked
 	case o.Advanced > 0:
 		return prefix + "обновлено на " + pluralCommits(o.Advanced)
 	default:
