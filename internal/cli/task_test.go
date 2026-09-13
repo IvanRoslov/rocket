@@ -831,7 +831,7 @@ func TestRenderTaskCardBasic(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, w, now)
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, nil, w, now)
 
 	output := w.String()
 	if !strings.Contains(output, "#1 My Task (in_progress)") {
@@ -854,7 +854,7 @@ func TestRenderTaskCardWithDescription(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, w, now)
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, nil, w, now)
 
 	output := w.String()
 	if !strings.Contains(output, "Description") {
@@ -880,7 +880,7 @@ func TestRenderTaskCardWithSubtasks(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, w, now)
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, nil, w, now)
 
 	output := w.String()
 	if !strings.Contains(output, "Subtasks") {
@@ -909,7 +909,7 @@ func TestRenderTaskCardWithDocs(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, docs, []taskLogRow{}, nil, w, now)
+	renderTaskCard(task, docs, []taskLogRow{}, nil, nil, w, now)
 
 	output := w.String()
 	if !strings.Contains(output, "Docs") {
@@ -937,7 +937,7 @@ func TestRenderTaskCardWithLog(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, logs, nil, w, now)
+	renderTaskCard(task, []taskDocRow{}, logs, nil, nil, w, now)
 
 	output := w.String()
 	if !strings.Contains(output, "Log") {
@@ -959,7 +959,7 @@ func TestRenderTaskCardEmptyDocsAndLogs(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, w, now)
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, nil, w, now)
 
 	output := w.String()
 	if strings.Contains(output, "Docs") {
@@ -986,7 +986,7 @@ func TestRenderTaskCardWithSession(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, w, now)
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, nil, w, now)
 
 	output := w.String()
 	if !strings.Contains(output, "sess-123") {
@@ -1012,7 +1012,7 @@ func TestRenderTaskCardWithOpenQuestions(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, w, now)
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, nil, w, now)
 
 	output := w.String()
 	if !strings.Contains(output, "Open Questions") {
@@ -1051,7 +1051,7 @@ func TestRenderTaskCardWithQuestionsThread(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, questions, w, now)
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, questions, nil, w, now)
 
 	output := w.String()
 	if !strings.Contains(output, "## Questions") {
@@ -1089,7 +1089,7 @@ func TestRenderTaskCardLogTail(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, logs, nil, w, now)
+	renderTaskCard(task, []taskDocRow{}, logs, nil, nil, w, now)
 
 	output := w.String()
 	// Should show entry 5-14 (last 10), not entry 0-4 (first 5)
@@ -1246,7 +1246,7 @@ func TestRenderTaskCardSubtaskRepoID(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, w, now)
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, nil, w, now)
 
 	output := w.String()
 	// Should show repo-123 for first subtask
@@ -1294,7 +1294,7 @@ func TestRenderTaskCardSubtaskWithPRAndCI(t *testing.T) {
 	}
 
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, w, now)
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, nil, w, now)
 
 	output := w.String()
 
@@ -1497,6 +1497,7 @@ func TestTaskShowJSONCarriesEverythingTheCardShows(t *testing.T) {
 		Docs:          []taskDocRow{{ID: 1, Kind: "spec"}},
 		Log:           []taskLogRow{{ID: 2, Kind: "decision"}},
 		Questions:     []questionRow{{ID: 3, Ordinal: 1}},
+		Mirrors:       taskMirrorJSONRows([]mirrorRow{{RepoID: "rocket"}}),
 	}
 
 	raw, err := json.Marshal(v)
@@ -1508,7 +1509,7 @@ func TestTaskShowJSONCarriesEverythingTheCardShows(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	for _, key := range []string{"id", "title", "subtasks", "docs", "log", "questions"} {
+	for _, key := range []string{"id", "title", "subtasks", "docs", "log", "questions", "mirrors"} {
 		if _, ok := got[key]; !ok {
 			t.Errorf("task show --json is missing key %q; got keys %v", key, keysOf(got))
 		}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,6 +18,7 @@ import (
 	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
+	"github.com/IvanRoslov/rocket/internal/mirror"
 	"github.com/IvanRoslov/rocket/internal/prompts"
 	"github.com/IvanRoslov/rocket/internal/runtime"
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -97,6 +99,11 @@ type Manager struct {
 	// SetQuizTiming.
 	quizUnconfirmedTimeout time.Duration
 
+	// syncMirror fast-forwards a repo's mirror; it defaults to mirror.Sync
+	// and is overridable via SetMirrorSyncer so tests do not shell out to
+	// git. See syncMirrorBeforeWorkspace for why it runs at all.
+	syncMirror func(context.Context, store.Repo) error
+
 	// quizInFlight tracks session IDs with an in-progress quiz-answer
 	// injection (see AnswerQuiz's tryStartQuizInFlight/clearQuizInFlight in
 	// quiz.go), guarded by mu. A second POST /v1/sessions/{id}/quiz/answer
@@ -110,9 +117,99 @@ type Manager struct {
 func NewManager(st *store.Store, b *bus.Bus, rt runtime.Runtime, ws workspace.Workspace, cfg *config.Config) *Manager {
 	return &Manager{
 		st: st, bus: b, rt: rt, ws: ws, cfg: cfg,
+		syncMirror:             mirror.Sync,
 		quizSleepFn:            time.Sleep,
 		quizUnconfirmedTimeout: 60 * time.Second,
 	}
+}
+
+// SetMirrorSyncer overrides the function used to fast-forward a repo's
+// mirror before a workspace is created. Tests use it to avoid running git.
+func (m *Manager) SetMirrorSyncer(f func(context.Context, store.Repo) error) {
+	m.syncMirror = f
+}
+
+// syncMirrorBeforeWorkspace fast-forwards repo's mirror so the new worktree
+// branches off current origin rather than whatever commit the mirror was
+// cloned at. The background sweep (internal/mirror.Syncer) runs only every
+// few minutes, and a worktree cut in between inherits a branch point that
+// can be dozens of commits stale — which is exactly the class of wrong
+// conclusions the mirror package exists to prevent.
+//
+// It is deliberately best-effort and never fails the spawn: the sync runs
+// under cfg.MirrorSyncTimeout, and a timeout or error is logged while the
+// caller proceeds. A stale mirror makes a worse worktree; a blocked spawn
+// makes a stopped feature. Nothing here can clobber either — mirror.Sync is
+// strictly fetch plus `merge --ff-only`.
+//
+// Only the daemon's own clones under cfg.ReposDir are touched. A path
+// registered with `rocket repo add` is the user's working copy and rocket
+// promises to leave it exactly as it is (docs/05-state.md).
+func (m *Manager) syncMirrorBeforeWorkspace(ctx context.Context, repo store.Repo) {
+	if m.syncMirror == nil || !isMirrorPath(repo.Path, m.cfg.ReposDir) {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, mirrorSyncTimeout)
+	defer cancel()
+
+	if err := m.syncMirror(ctx, repo); err != nil {
+		slog.Warn("session: mirror sync before workspace failed, continuing with the mirror as it is",
+			"repo", repo.ID, "path", repo.Path, "timeout", mirrorSyncTimeout, "error", err)
+	}
+}
+
+// mirrorSyncTimeout bounds the pre-workspace mirror sync. A fetch that has
+// not finished inside a minute is not going to save this spawn, and waiting
+// longer only trades a stale branch point for a stopped feature.
+const mirrorSyncTimeout = 60 * time.Second
+
+// isMirrorPath reports whether path is one of the daemon's own clones under
+// reposDir. Only those are ours to fast-forward: `rocket repo add <path>`
+// registers the user's own working copy, and rocket promises to change
+// nothing inside it (docs/05-state.md) — a clean checkout sitting on main
+// would otherwise be silently advanced under its owner at every spawn.
+//
+// An empty reposDir matches nothing: with no mirror root configured there
+// is no repo we can claim as ours.
+//
+// Paths are resolved through symlinks before comparing: on macOS the same
+// directory is reachable as both /tmp/x and /private/tmp/x, and a mirror
+// must not be skipped over that.
+func isMirrorPath(path, reposDir string) bool {
+	if reposDir == "" || path == "" {
+		return false
+	}
+	// Both the plain and the symlink-resolved forms are tried: a mirror
+	// directory that does not exist yet resolves to nothing, while its
+	// repos_dir parent may resolve to a different prefix (on macOS /tmp is
+	// a symlink to /private/tmp), and comparing a resolved parent against
+	// an unresolved child would wrongly disown the mirror.
+	return pathContains(reposDir, path) ||
+		pathContains(resolveRealPath(reposDir), resolveRealPath(path))
+}
+
+// pathContains reports whether child lies strictly below parent.
+func pathContains(parent, child string) bool {
+	rel, err := filepath.Rel(filepath.Clean(parent), filepath.Clean(child))
+	if err != nil || rel == "." {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// resolveRealPath makes a path comparable: absolute, cleaned, and with
+// symlinks resolved where possible. A path that cannot be resolved (a repo
+// whose directory is gone) falls back to the cleaned absolute form.
+func resolveRealPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved
+	}
+	return abs
 }
 
 // SetTokenSource sets the function used to retrieve the GitHub token for
@@ -246,6 +343,8 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 		})
 		break // success
 	}
+
+	m.syncMirrorBeforeWorkspace(ctx, repo)
 
 	wtRes, err := m.ws.Create(ctx, repo, id, branch)
 	if err != nil {
@@ -418,6 +517,8 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 		})
 		break // success
 	}
+
+	m.syncMirrorBeforeWorkspace(ctx, repo)
 
 	wtRes, err := m.ws.Create(ctx, repo, id, sess.Branch)
 	if err != nil {
@@ -689,6 +790,8 @@ func (m *Manager) Restore(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+
+	m.syncMirrorBeforeWorkspace(ctx, repo)
 
 	path, err := m.ws.Restore(ctx, repo, id, sess.Branch)
 	if err != nil {

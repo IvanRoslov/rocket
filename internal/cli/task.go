@@ -462,6 +462,11 @@ type taskShowJSON struct {
 	Docs      []taskDocRow  `json:"docs"`
 	Log       []taskLogRow  `json:"log"`
 	Questions []questionRow `json:"questions"`
+	// Mirrors is the freshness of every registered mirror — the machine
+	// half of the card's Mirrors block. An agent parsing --json must not
+	// be the one reader left unaware that the repo it is about to read is
+	// weeks behind origin (task #795).
+	Mirrors []taskMirrorJSON `json:"mirrors"`
 }
 
 func newTaskShowCmd() *cobra.Command {
@@ -478,7 +483,7 @@ func newTaskShowCmd() *cobra.Command {
 				return &usageError{message: "invalid task id"}
 			}
 
-			c, _, err := connect(true)
+			c, cfg, err := connect(true)
 			if err != nil {
 				return err
 			}
@@ -525,16 +530,23 @@ func newTaskShowCmd() *cobra.Command {
 				questions = []questionRow{}
 			}
 
+			// Mirror freshness rides along in both outputs: a task card
+			// is where an agent decides what to go read, and reading a
+			// stale mirror is exactly how it reaches a wrong conclusion.
+			now := time.Now()
+			mirrors := mirrorFreshness(cmd.Context(), c, cfg, now)
+
 			if flags.JSON {
 				return printJSON(cmd, taskShowJSON{
 					taskDetailRow: task,
 					Docs:          docs,
 					Log:           logEntries,
 					Questions:     questions,
+					Mirrors:       taskMirrorJSONRows(mirrors),
 				})
 			}
 
-			renderTaskCard(task, docs, logEntries, questions, cmd.OutOrStdout(), time.Now())
+			renderTaskCard(task, docs, logEntries, questions, mirrors, cmd.OutOrStdout(), now)
 			return nil
 		},
 	}
@@ -1305,7 +1317,7 @@ func renderTaskBoard(board map[string][]taskRow, w io.Writer, statusFiltered boo
 }
 
 // renderTaskCard writes a detailed card view for a task to w.
-func renderTaskCard(task taskDetailRow, docs []taskDocRow, logs []taskLogRow, questions []questionRow, w io.Writer, now time.Time) {
+func renderTaskCard(task taskDetailRow, docs []taskDocRow, logs []taskLogRow, questions []questionRow, mirrors []mirrorRow, w io.Writer, now time.Time) {
 	// Header: #id title (status)
 	fmt.Fprintf(w, "# #%d %s (%s)\n\n", task.ID, task.Title, task.Status)
 
@@ -1401,6 +1413,21 @@ func renderTaskCard(task taskDetailRow, docs []taskDocRow, logs []taskLogRow, qu
 	if len(questions) > 0 {
 		fmt.Fprintf(w, "## Questions\n")
 		fmt.Fprint(w, renderQuestions(task.ID, questions))
+		fmt.Fprintf(w, "\n")
+	}
+
+	// Mirrors: only the ones that must not be read as they are. The card is
+	// where an agent decides which repos to go read, and a mirror weeks
+	// behind origin reads perfectly normal (task #795) — so the warning
+	// belongs next to the decision, in the wording `rocket status` already
+	// uses. Fresh mirrors print nothing: a block that appears on every card
+	// is a block nobody reads, and then it cannot do its one job.
+	//
+	// Unfiltered by this task's repo on purpose: the wrong conclusions came
+	// from agents reading repos their feature did not own.
+	if unfresh := unfreshMirrors(mirrors); len(unfresh) > 0 {
+		fmt.Fprintf(w, "## Mirrors\n")
+		renderMirrors(unfresh, w, now)
 	}
 }
 

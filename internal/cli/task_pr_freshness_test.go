@@ -13,7 +13,7 @@ func renderCardWithSubtask(now time.Time, sub taskRow) string {
 		Subtasks: []taskRow{sub},
 	}
 	w := &bytes.Buffer{}
-	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, w, now)
+	renderTaskCard(task, []taskDocRow{}, []taskLogRow{}, nil, nil, w, now)
 	return w.String()
 }
 
