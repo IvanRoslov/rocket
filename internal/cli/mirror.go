@@ -262,6 +262,13 @@ func mirrorLine(row mirrorRow, now time.Time) string {
 	if errors.Is(row.Err, errMirrorCheckTimeout) {
 		return fmt.Sprintf("mirror %s: свежесть неизвестна — %v", row.RepoID, errMirrorCheckTimeout)
 	}
+	// An empty remote is a correct state, not a failure: there is simply
+	// nothing to mirror yet. Naming it in words keeps a human from digging
+	// into a repository that is fine — but it stays out of the "свежее"
+	// branch, because the mirror is still no view of origin.
+	if errors.Is(row.Err, mirror.ErrEmptyRemote) {
+		return fmt.Sprintf("mirror %s: в remote нет веток", row.RepoID)
+	}
 	if row.Err != nil {
 		return fmt.Sprintf("mirror %s: свежесть неизвестна (%v)", row.RepoID, row.Err)
 	}

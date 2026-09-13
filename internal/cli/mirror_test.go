@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -249,5 +250,37 @@ func TestMirrorSyncIntervalFromConfig(t *testing.T) {
 	}
 	if got := mirrorStaleAfter(mirrorSyncInterval(&config.Config{MirrorSyncInterval: 0})); got != mirrorStaleFallback {
 		t.Errorf("staleAfter with syncing disabled = %s, want %s", got, mirrorStaleFallback)
+	}
+}
+
+// TestMirrorLineEmptyRemoteReadsAsAPlainStatement: a remote with no branches
+// at all is a correct state — a repository created and never pushed to — so
+// it is named in words instead of leaking the raw git error, and it is still
+// not "свежее", because the mirror is no view of origin either way.
+func TestMirrorLineEmptyRemoteReadsAsAPlainStatement(t *testing.T) {
+	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	row := mirrorRow{RepoID: "landing", Err: fmt.Errorf("mirror landing: %w", mirror.ErrEmptyRemote)}
+
+	got := mirrorLine(row, now)
+
+	if want := "mirror landing: в remote нет веток"; got != want {
+		t.Fatalf("mirrorLine = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "свежее") {
+		t.Fatalf("an empty remote must not read as fresh: %q", got)
+	}
+}
+
+// TestMirrorLineUnbornBranchStaysAnError: the app-style defect — origin/main
+// exists, the local branch has no commits — must stay distinguishable from
+// an empty remote, since the two need different actions from the human.
+func TestMirrorLineUnbornBranchStaysAnError(t *testing.T) {
+	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	row := mirrorRow{RepoID: "app", Err: errors.New("mirror app: resolve HEAD: exit status 128")}
+
+	got := mirrorLine(row, now)
+
+	if !strings.Contains(got, "свежесть неизвестна") || !strings.Contains(got, "resolve HEAD") {
+		t.Fatalf("mirrorLine = %q, want the raw error reported", got)
 	}
 }
