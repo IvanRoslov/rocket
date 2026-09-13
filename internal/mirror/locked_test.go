@@ -3,12 +3,15 @@ package mirror
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/mirrorlock"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
@@ -355,5 +358,117 @@ func TestSyncLockedReapsTheRealGitDirOfALinkedWorktree(t *testing.T) {
 	}
 	if _, err := os.Stat(lock); !os.IsNotExist(err) {
 		t.Error("the linked worktree's index.lock survived")
+	}
+}
+
+// The acceptance test for #3589, in the shape of the incident itself.
+//
+// What happened: `rocket repo sync --repair` ran against a live daemon. The
+// repair's `commit` to rescue/<ts> succeeded and its `checkout <default>`
+// lost the race for git's index.lock and failed — leaving 18 mirrors with
+// HEAD stranded on rescue/* (a mirror off its default branch is never
+// advanced again) and 26 abandoned index.lock files. The repair left the
+// mirrors worse than it found them.
+//
+// So: several dirty mirrors repaired concurrently with a looping background
+// sweep, and then the two assertions from the incident report — every mirror
+// back on its default branch, and not one index.lock left on disk.
+//
+// This test earns its keep only if it fails without the lock, and it was
+// checked: with the Acquire in withMirrorLock short-circuited, three runs
+// produced an abandoned index.lock and a fetch that could not lock
+// refs/remotes/origin/main — the incident, reproduced. Do not shrink the
+// mirror count, the sweep loop or the bulk of the working tree; with a
+// three-file repo the index-writing commands are over before anything can
+// collide with them and the test passes unlocked, proving nothing.
+func TestConcurrentRepairAndSweepStrandNoMirror(t *testing.T) {
+	reposDir := t.TempDir()
+	const mirrors = 6
+
+	repos := make([]store.Repo, 0, mirrors)
+	for i := range mirrors {
+		id := fmt.Sprintf("m%d", i)
+		origin, repo := mirrorUnder(t, reposDir, id)
+		// Each mirror is in exactly the state the incident found: work
+		// nobody committed, sitting on somebody's branch, behind origin.
+		commitToOrigin(t, origin, "v2\n", "second")
+		git(t, repo.Path, "checkout", "-b", "someones/work")
+		// A working tree with some bulk to it. `git status`, `commit` and
+		// `checkout` all write the index, and on a three-file repo they are
+		// over before anything can collide with them — the race window has
+		// to be wide enough for the test to be worth running.
+		fillWorktree(t, repo.Path, 400)
+		repos = append(repos, repo)
+	}
+
+	st := newStore(t, repos...)
+	sweeper := NewSyncer(st, &config.Config{
+		MirrorSyncInterval:          time.Minute,
+		ReposDir:                    reposDir,
+		MirrorLockTimeoutBackground: 5 * time.Second,
+		MirrorIndexLockMaxAge:       10 * time.Minute,
+	})
+
+	// The daemon's sweep, running the whole time the repairs do.
+	sweepCtx, stopSweep := context.WithCancel(context.Background())
+	sweepDone := make(chan struct{})
+	go func() {
+		defer close(sweepDone)
+		for sweepCtx.Err() == nil {
+			sweeper.SyncOnce(sweepCtx)
+		}
+	}()
+
+	opts := LockOptions{ReposDir: reposDir, Timeout: 60 * time.Second, IndexLockMaxAge: 10 * time.Minute}
+	var wg sync.WaitGroup
+	errs := make([]error, len(repos))
+	for i, repo := range repos {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = RepairLocked(context.Background(), repo, time.Now(), opts, OpRepoSyncRepair)
+		}()
+	}
+	wg.Wait()
+	stopSweep()
+	<-sweepDone
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("repair of %s: %v", repos[i].ID, err)
+		}
+	}
+
+	// The two numbers from the incident report, both of which must be zero.
+	stranded, leftoverLocks := 0, 0
+	for _, repo := range repos {
+		if branch := currentBranchOf(t, repo.Path); branch != repo.DefaultBranch {
+			stranded++
+			t.Errorf("mirror %s stranded on %q, want %q", repo.ID, branch, repo.DefaultBranch)
+		}
+		if _, err := os.Stat(filepath.Join(repo.Path, ".git", "index.lock")); err == nil {
+			leftoverLocks++
+			t.Errorf("mirror %s left an index.lock behind", repo.ID)
+		}
+		// The rescued work is still there — repair never discards it.
+		if out := git(t, repo.Path, "branch", "--list", "rescue/*"); out == "" {
+			t.Errorf("mirror %s has no rescue branch: the uncommitted work went nowhere", repo.ID)
+		}
+	}
+	if stranded != 0 || leftoverLocks != 0 {
+		t.Errorf("stranded mirrors = %d, abandoned index.lock files = %d, want 0 and 0", stranded, leftoverLocks)
+	}
+}
+
+// fillWorktree writes n untracked files, giving git's index-writing commands
+// enough to do that a concurrent one can actually collide with them.
+func fillWorktree(t *testing.T, path string, n int) {
+	t.Helper()
+	dir := filepath.Join(path, "bulk")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := range n {
+		writeFile(t, filepath.Join(dir, fmt.Sprintf("f%03d.txt", i)), strings.Repeat("x", 512)+"\n")
 	}
 }
