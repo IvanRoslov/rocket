@@ -39,7 +39,7 @@ func TestLaunchCommandMinimal(t *testing.T) {
 	}
 
 	cmd := c.LaunchCommand(spec)
-	want := []string{"codex", "--sandbox", "workspace-write", "--ask-for-approval", "never"}
+	want := []string{"codex", "--sandbox", "danger-full-access", "--ask-for-approval", "never"}
 	if len(cmd) != len(want) {
 		t.Fatalf("expected %d args, got %d: %v", len(want), len(cmd), cmd)
 	}
@@ -61,7 +61,7 @@ func TestLaunchCommandFull(t *testing.T) {
 
 	cmd := c.LaunchCommand(spec)
 	want := []string{
-		"codex", "--sandbox", "workspace-write", "--ask-for-approval", "never",
+		"codex", "--sandbox", "danger-full-access", "--ask-for-approval", "never",
 		"-m", "gpt-5-codex",
 		"--", "Help me write a function.",
 	}
@@ -86,7 +86,7 @@ func TestLaunchCommandFirstMessageStartingWithDashIsSeparated(t *testing.T) {
 
 	cmd := c.LaunchCommand(spec)
 	want := []string{
-		"codex", "--sandbox", "workspace-write", "--ask-for-approval", "never",
+		"codex", "--sandbox", "danger-full-access", "--ask-for-approval", "never",
 		"--", "-fix the login bug",
 	}
 	if len(cmd) != len(want) {
