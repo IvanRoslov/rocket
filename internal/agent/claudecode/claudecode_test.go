@@ -13,6 +13,28 @@ import (
 	"github.com/IvanRoslov/rocket/internal/agent"
 )
 
+// TestMain points HOME at a throwaway directory for the whole package.
+// SetupWorkspace writes trust entries into $HOME/.claude.json, so without
+// this every test run appended a dead t.TempDir() path to the developer's
+// real ~/.claude.json — thousands of them had accumulated there, bloating
+// the file Claude Code rewrites on every session.
+//
+// Tests that need to inspect the file still set up their own fake HOME via
+// t.Setenv; this only guarantees that no test can reach the real one.
+func TestMain(m *testing.M) {
+	home, err := os.MkdirTemp("", "rocket-claudecode-home-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "create temp HOME: %v\n", err)
+		os.Exit(1)
+	}
+	os.Setenv("HOME", home)
+
+	code := m.Run()
+
+	os.RemoveAll(home)
+	os.Exit(code)
+}
+
 func TestLaunchCommandMinimal(t *testing.T) {
 	cc := New()
 	spec := agent.LaunchSpec{
@@ -1024,4 +1046,121 @@ func TestSetupWorkspaceNoLeftoverTempFiles(t *testing.T) {
 			t.Errorf("leftover temp file in .claude: %s", entry.Name())
 		}
 	}
+}
+
+// TestSetupWorkspaceTrustsUnresolvedPathToo asserts that the raw worktree
+// path is trusted alongside its symlink-resolved form. Claude Code looks
+// the project up by the cwd string it observes, which is not always the
+// resolved one, and a missed variant means the trust dialog blocks the
+// launch.
+func TestSetupWorkspaceTrustsUnresolvedPathToo(t *testing.T) {
+	realDir := t.TempDir()
+	linkParent := t.TempDir()
+	linkDir := filepath.Join(linkParent, "worktree-link")
+	if err := os.Symlink(realDir, linkDir); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	cc := New()
+	if err := cc.SetupWorkspace(agent.LaunchSpec{WorktreePath: linkDir}); err != nil {
+		t.Fatalf("SetupWorkspace failed: %v", err)
+	}
+
+	resolved, err := filepath.EvalSymlinks(linkDir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	if resolved == linkDir {
+		t.Fatalf("test setup: %q did not resolve to a different path", linkDir)
+	}
+
+	projects := readTrustedProjects(t, filepath.Join(fakeHome, ".claude.json"))
+	for _, want := range []string{linkDir, resolved} {
+		if !projects[want] {
+			t.Errorf("path %q not trusted; trusted set: %v", want, projects)
+		}
+	}
+}
+
+// TestSetupWorkspacePrunesDeadTrustEntries asserts that trust entries for
+// worktrees that no longer exist are dropped, while entries carrying real
+// Claude Code state (or pointing at a live directory) survive. Without this
+// the projects map grows forever and every read-modify-write Claude Code
+// does on ~/.claude.json gets slower.
+func TestSetupWorkspacePrunesDeadTrustEntries(t *testing.T) {
+	liveDir := t.TempDir()
+	newDir := t.TempDir()
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	existing := fmt.Sprintf(`{
+  "projects": {
+    "/gone/worktree-a": {"hasTrustDialogAccepted": true},
+    "/gone/worktree-b": {"hasTrustDialogAccepted": true},
+    "/gone/but-used": {"hasTrustDialogAccepted": true, "lastCost": 1.5},
+    %q: {"hasTrustDialogAccepted": true}
+  }
+}`, liveDir)
+	claudeJSON := filepath.Join(fakeHome, ".claude.json")
+	if err := os.WriteFile(claudeJSON, []byte(existing), 0o644); err != nil {
+		t.Fatalf("seed ~/.claude.json: %v", err)
+	}
+
+	cc := New()
+	if err := cc.SetupWorkspace(agent.LaunchSpec{WorktreePath: newDir}); err != nil {
+		t.Fatalf("SetupWorkspace failed: %v", err)
+	}
+
+	data, err := os.ReadFile(claudeJSON)
+	if err != nil {
+		t.Fatalf("read ~/.claude.json: %v", err)
+	}
+	var doc struct {
+		Projects map[string]map[string]any `json:"projects"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("decode ~/.claude.json: %v", err)
+	}
+
+	for _, gone := range []string{"/gone/worktree-a", "/gone/worktree-b"} {
+		if _, ok := doc.Projects[gone]; ok {
+			t.Errorf("dead entry %q was not pruned", gone)
+		}
+	}
+	if _, ok := doc.Projects["/gone/but-used"]; !ok {
+		t.Error("entry with extra Claude Code state was pruned; only rocket-shaped entries may be removed")
+	}
+	if _, ok := doc.Projects[liveDir]; !ok {
+		t.Errorf("entry for live directory %q was pruned", liveDir)
+	}
+}
+
+// readTrustedProjects returns the set of project paths marked trusted in
+// the ~/.claude.json at path.
+func readTrustedProjects(t *testing.T, path string) map[string]bool {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var doc struct {
+		Projects map[string]struct {
+			HasTrustDialogAccepted bool `json:"hasTrustDialogAccepted"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("decode %s: %v", path, err)
+	}
+
+	trusted := map[string]bool{}
+	for p, entry := range doc.Projects {
+		if entry.HasTrustDialogAccepted {
+			trusted[p] = true
+		}
+	}
+	return trusted
 }

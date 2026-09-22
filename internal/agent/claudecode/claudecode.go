@@ -353,24 +353,119 @@ func upsertClaudeSettings(worktreePath string) error {
 // Claude Code has never seen, without this the agent hangs forever on the
 // dialog and never starts.
 //
+// Three hardening details, all learned from how Claude Code itself reads and
+// writes this file:
+//
+//   - Key variants. Claude Code looks the project up by the cwd string it
+//     observes, which is not always the symlink-resolved path. Anthropic's
+//     own sandbox runner writes both the raw and the realpath spelling
+//     rather than betting on one, so trustKeys does the same — a single
+//     missed variant means the dialog blocks the launch.
+//
+//   - Verify after write. ~/.claude.json is rewritten wholesale by every
+//     running Claude Code process from its own in-memory snapshot, so an
+//     instance that loaded the file before our write can clobber the entry
+//     moments later. We re-read and re-apply a few times, which closes the
+//     window in practice (rocket's flock only serializes rocket's own
+//     writers, never Claude Code's).
+//
+//   - Prune. Every spawned worktree adds an entry forever, and a
+//     multi-megabyte projects map makes each of Claude Code's own
+//     read-modify-write cycles slower and the clobber window wider.
+//     pruneDeadTrustEntries drops entries whose directory is gone AND that
+//     carry nothing but our own hasTrustDialogAccepted flag, so real
+//     project history (allowedTools, session stats, MCP config) is never
+//     touched.
+//
 // It preserves the rest of ~/.claude.json untouched, including any existing
 // entry for other projects or other fields already set for this path.
 func trustWorktree(worktreePath string) error {
+	const attempts = 3
+	var err error
+	for i := 0; i < attempts; i++ {
+		var trusted bool
+		trusted, err = trustWorktreeOnce(worktreePath)
+		if err != nil {
+			return err
+		}
+		if trusted {
+			return nil
+		}
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("trust for %s did not stick after %d attempts (another Claude Code process is rewriting ~/.claude.json)", worktreePath, attempts)
+}
+
+// trustKeys returns every ~/.claude.json projects key that could match
+// worktreePath: the path as given and its symlink-resolved form (on macOS
+// /tmp is a symlink to /private/tmp, and a worktrees_dir under a symlinked
+// home resolves elsewhere). Duplicates are collapsed, order is stable
+// (as-given first).
+//
+// Anthropic's own runner additionally writes the NFC-normalized spelling of
+// each path. rocket does not: every component of a worktree path is either
+// the configured worktrees_dir or an ASCII slug (repo id / session id), so
+// there is no non-ASCII spelling for NFC to change. If worktree paths ever
+// gain user-supplied Unicode, add the normalized variants here.
+func trustKeys(worktreePath string) []string {
+	candidates := []string{worktreePath}
+	if r, err := filepath.EvalSymlinks(worktreePath); err == nil {
+		candidates = append(candidates, r)
+	}
+
+	seen := map[string]bool{}
+	var keys []string
+	for _, k := range candidates {
+		if k == "" || seen[k] {
+			continue
+		}
+		seen[k] = true
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// pruneDeadTrustEntries removes project entries that rocket created for a
+// worktree that no longer exists. An entry only qualifies if its directory
+// is gone and its sole field is hasTrustDialogAccepted — the shape rocket
+// writes. Anything Claude Code has since added to an entry (allowedTools,
+// session stats, mcpServers, ...) means a human used that directory, so
+// the entry is left alone even if the path is gone. Returns the number of
+// entries removed.
+func pruneDeadTrustEntries(projects map[string]json.RawMessage) int {
+	removed := 0
+	for path, raw := range projects {
+		var entry map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			continue
+		}
+		if len(entry) != 1 {
+			continue
+		}
+		if _, ok := entry["hasTrustDialogAccepted"]; !ok {
+			continue
+		}
+		if _, err := os.Stat(path); err == nil || !os.IsNotExist(err) {
+			continue
+		}
+		delete(projects, path)
+		removed++
+	}
+	return removed
+}
+
+// trustWorktreeOnce performs one locked read-modify-write cycle and then
+// re-reads the file to confirm the entry survived. It reports whether every
+// trust key is present on that re-read.
+func trustWorktreeOnce(worktreePath string) (bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("resolve home dir: %w", err)
+		return false, fmt.Errorf("resolve home dir: %w", err)
 	}
 
-	// Claude Code keys ~/.claude.json's projects map by the fully resolved
-	// path (e.g. on macOS /tmp is a symlink to /private/tmp), so resolve
-	// symlinks before using the path as a key. Fall back to the given path
-	// if it can't be resolved (e.g. it doesn't exist yet in some edge case)
-	// rather than failing the whole setup over this best-effort step.
-	resolved := worktreePath
-	if r, err := filepath.EvalSymlinks(worktreePath); err == nil {
-		resolved = r
-	}
-
+	keys := trustKeys(worktreePath)
 	path := filepath.Join(home, ".claude.json")
 
 	// Guard the read-modify-write against concurrent trustWorktree calls
@@ -380,9 +475,8 @@ func trustWorktree(worktreePath string) error {
 	// goroutine's entry entirely.
 	unlock, err := lockClaudeJSON(path)
 	if err != nil {
-		return err
+		return false, err
 	}
-	defer unlock()
 
 	// Preserve the existing file's permission bits; default to 0644 for a
 	// brand-new file.
@@ -390,60 +484,88 @@ func trustWorktree(worktreePath string) error {
 	if info, err := os.Stat(path); err == nil {
 		perm = info.Mode().Perm()
 	} else if !os.IsNotExist(err) {
-		return err
+		unlock()
+		return false, err
 	}
 
 	doc := map[string]json.RawMessage{}
 	if data, err := os.ReadFile(path); err == nil {
 		if len(data) > 0 {
 			if err := json.Unmarshal(data, &doc); err != nil {
-				return fmt.Errorf("parse existing %s: %w", path, err)
+				unlock()
+				return false, fmt.Errorf("parse existing %s: %w", path, err)
 			}
 		}
 	} else if !os.IsNotExist(err) {
-		return err
+		unlock()
+		return false, err
 	}
 
 	projects := map[string]json.RawMessage{}
 	if raw, ok := doc["projects"]; ok {
 		if err := json.Unmarshal(raw, &projects); err != nil {
-			return fmt.Errorf("parse existing projects in %s: %w", path, err)
+			unlock()
+			return false, fmt.Errorf("parse existing projects in %s: %w", path, err)
 		}
 	}
 
-	entry := map[string]json.RawMessage{}
-	if raw, ok := projects[resolved]; ok {
-		if err := json.Unmarshal(raw, &entry); err != nil {
-			return fmt.Errorf("parse existing project entry for %s in %s: %w", resolved, path, err)
-		}
-	}
-	entry["hasTrustDialogAccepted"] = json.RawMessage("true")
+	pruneDeadTrustEntries(projects)
 
-	entryRaw, err := json.Marshal(entry)
-	if err != nil {
-		return err
+	for _, key := range keys {
+		entry := map[string]json.RawMessage{}
+		if raw, ok := projects[key]; ok {
+			if err := json.Unmarshal(raw, &entry); err != nil {
+				unlock()
+				return false, fmt.Errorf("parse existing project entry for %s in %s: %w", key, path, err)
+			}
+		}
+		entry["hasTrustDialogAccepted"] = json.RawMessage("true")
+
+		entryRaw, err := json.Marshal(entry)
+		if err != nil {
+			unlock()
+			return false, err
+		}
+		projects[key] = entryRaw
 	}
-	projects[resolved] = entryRaw
 
 	projectsRaw, err := json.Marshal(projects)
 	if err != nil {
-		return err
+		unlock()
+		return false, err
 	}
 	doc["projects"] = projectsRaw
 
 	out, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
-		return err
+		unlock()
+		return false, err
 	}
 	out = append(out, '\n')
 
-	// Write atomically: create temp file in same directory, then rename.
-	f, err := os.CreateTemp(home, ".claude-*.json")
+	if err := writeClaudeJSON(home, path, out, perm); err != nil {
+		unlock()
+		return false, err
+	}
+
+	// Release the lock before verifying: the clobber we are checking for
+	// comes from Claude Code processes, which never take rocket's lock, so
+	// holding it here would only block rocket's other spawns for nothing.
+	unlock()
+
+	return trustPersisted(path, keys)
+}
+
+// writeClaudeJSON writes data to path via create-temp-in-dir-then-rename,
+// preserving perm, so an interrupted write can never leave a truncated
+// ~/.claude.json behind.
+func writeClaudeJSON(dir, path string, data []byte, perm os.FileMode) error {
+	f, err := os.CreateTemp(dir, ".claude-*.json")
 	if err != nil {
 		return fmt.Errorf("create temp claude.json file: %w", err)
 	}
 	tempPath := f.Name()
-	if _, err := f.Write(out); err != nil {
+	if _, err := f.Write(data); err != nil {
 		f.Close()
 		os.Remove(tempPath)
 		return fmt.Errorf("write temp claude.json file: %w", err)
@@ -456,7 +578,37 @@ func trustWorktree(worktreePath string) error {
 		os.Remove(tempPath)
 		return fmt.Errorf("chmod temp claude.json file: %w", err)
 	}
-	return os.Rename(tempPath, path)
+	if err := os.Rename(tempPath, path); err != nil {
+		os.Remove(tempPath)
+		return err
+	}
+	return nil
+}
+
+// trustPersisted re-reads path and reports whether every key is still
+// marked trusted. A file that has become unreadable or unparseable counts
+// as "not persisted" rather than an error, so the caller simply retries.
+func trustPersisted(path string, keys []string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, nil
+	}
+
+	var doc struct {
+		Projects map[string]struct {
+			HasTrustDialogAccepted bool `json:"hasTrustDialogAccepted"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return false, nil
+	}
+
+	for _, key := range keys {
+		if !doc.Projects[key].HasTrustDialogAccepted {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // lockClaudeJSON acquires an exclusive flock on a sidecar lock file next to
