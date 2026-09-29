@@ -2,6 +2,15 @@ import { describe, expect, it } from 'vitest'
 import { classifyUserEntry, fromEntryParts, systemEntryTitle } from './classifyUserEntry'
 
 describe('classifyUserEntry', () => {
+  it('classifies thread frames (task and role refs) as system', () => {
+    expect(classifyUserEntry('[#1023/Q2 reply from cto] go')).toBe('system')
+    expect(classifyUserEntry('[cto/Q1 answer from human] yes')).toBe('system')
+  })
+
+  it('keeps a human message that merely starts with a bracket as user', () => {
+    expect(classifyUserEntry('[draft] my notes')).toBe('user')
+  })
+
   it('classifies task-notification hook injects as system', () => {
     expect(classifyUserEntry('<task-notification>done</task-notification>')).toBe('system')
   })
