@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/agent"
+	"github.com/IvanRoslov/rocket/internal/socketmsg"
 )
 
 // chatDigestMaxRunes bounds the length (in runes) of a tool_use digest
@@ -96,7 +97,8 @@ func digestInput(input json.RawMessage) string {
 
 // extractUserText extracts the chat text for a "user" record's message
 // content: the content string as-is when content is a plain string
-// (including our own "[from ...]" injected prefixes — nothing is stripped),
+// (including our own "[from ...]" injected prefixes — nothing is stripped
+// here; the socket envelope is unwrapped by parseChatLine),
 // or the concatenation of any content[].text blocks when content is an
 // array. Returns ok=false when content is an array with no text blocks at
 // all (e.g. a tool_result-only user record), since there is nothing
@@ -268,6 +270,13 @@ func parseChatLine(line string, quizIDs map[string]bool) ([]agent.ChatEntry, boo
 				return []agent.ChatEntry{e}, true
 			}
 			return nil, false
+		}
+		// Доставка через сокет Claude Code кладёт тело в конверт с преамбулой
+		// (docs/design/cc-socket-protocol.md §5). Клиентам нужен текст ровно в
+		// том виде, в каком его отправили: по нему они подтверждают свои
+		// отправки и распознают инжекты.
+		if body, isEnvelope := socketmsg.Unwrap(text); isEnvelope {
+			text = body
 		}
 		return []agent.ChatEntry{{Role: "user", Text: text, TS: ts}}, true
 	case "assistant":

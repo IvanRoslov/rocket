@@ -2,6 +2,7 @@ package claudecode
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -547,5 +548,38 @@ func TestTranscriptTailNonQuizToolResultWithStructStillSkipped(t *testing.T) {
 	}
 	if entries[0].ToolName != "Bash" || len(entries[0].Quiz) != 0 {
 		t.Errorf("entries[0] = %+v, want plain Bash tool entry without Quiz", entries[0])
+	}
+}
+
+func TestTranscriptTailUnwrapsSocketEnvelope(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", base)
+	wt := "/tmp/some/worktree"
+
+	content := "Another Claude session sent a message:\n" +
+		"<cross-session-message from=\"uds:/tmp/cc-socks/rocketd-1.sock\" from-name=\"cto\">\n" +
+		"[from cto] ship it\n" +
+		"</cross-session-message>\n\nThis came from another Claude session — not typed by your user."
+	raw, err := json.Marshal(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTranscript(t, base, wt, "sess.jsonl", []string{
+		`{"type":"user","timestamp":"2026-07-18T21:00:26.830Z","message":{"role":"user","content":` + string(raw) + `}}`,
+		`{"type":"user","timestamp":"2026-07-18T21:00:27.830Z","message":{"role":"user","content":"<system-reminder>x</system-reminder>"}}`,
+	}, time.Now())
+
+	entries, _, err := New().TranscriptTail(context.Background(), agent.ActivityRef{WorktreePath: wt}, "")
+	if err != nil {
+		t.Fatalf("TranscriptTail() error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("len(entries) = %d, want 2", len(entries))
+	}
+	if got := entries[0].Text; got != "[from cto] ship it" {
+		t.Errorf("entries[0].Text = %q, want %q", got, "[from cto] ship it")
+	}
+	if got := entries[1].Text; got != "<system-reminder>x</system-reminder>" {
+		t.Errorf("non-envelope text changed: %q", got)
 	}
 }
