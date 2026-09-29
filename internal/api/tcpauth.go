@@ -55,7 +55,7 @@ func requireAuth(d Deps, next http.Handler) http.Handler {
 			writeErr(w, http.StatusUnauthorized, "unauthorized", "device token required")
 			return
 		}
-		if viaCookie && needsOriginCheck(r) && !originAllowed(r, d.Cfg.PublicHost()) {
+		if viaCookie && needsOriginCheck(r) && !originAllowed(r, d.Cfg.PublicURL) {
 			writeErr(w, http.StatusForbidden, "bad_origin", "origin not allowed")
 			return
 		}
@@ -81,8 +81,8 @@ func requireAuth(d Deps, next http.Handler) http.Handler {
 }
 
 func requestToken(r *http.Request) (token string, viaCookie bool) {
-	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
-		return strings.TrimSpace(strings.TrimPrefix(h, "Bearer ")), false
+	if h := r.Header.Get("Authorization"); len(h) > 7 && strings.EqualFold(h[:7], "Bearer ") {
+		return strings.TrimSpace(h[7:]), false
 	}
 	if c, err := r.Cookie(authCookie); err == nil && c.Value != "" {
 		return c.Value, true
@@ -123,16 +123,50 @@ func hostAllowed(host, publicHost string) bool {
 	return publicHost != "" && strings.EqualFold(h, stripPort(publicHost))
 }
 
-func originAllowed(r *http.Request, publicHost string) bool {
+// originKey normalizes scheme+host+port (default ports filled in) so two
+// origins compare exactly; SameSite=Strict ignores ports, so we must not.
+func originKey(scheme, host string) string {
+	scheme = strings.ToLower(scheme)
+	port := ""
+	h := host
+	if hh, pp, err := net.SplitHostPort(host); err == nil {
+		h, port = hh, pp
+	}
+	h = strings.ToLower(strings.Trim(h, "[]"))
+	if port == "" {
+		switch scheme {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		}
+	}
+	return scheme + "://" + net.JoinHostPort(h, port)
+}
+
+// originAllowed: Origin must equal the request's own origin or the origin of
+// public_url (scheme, host and port all compared).
+func originAllowed(r *http.Request, publicURL string) bool {
 	o := r.Header.Get("Origin")
 	if o == "" {
 		return false
 	}
 	u, err := url.Parse(o)
-	if err != nil || u.Host == "" {
+	if err != nil || u.Host == "" || u.Scheme == "" {
 		return false
 	}
-	return strings.EqualFold(u.Host, r.Host) ||
-		strings.EqualFold(stripPort(u.Host), stripPort(r.Host)) ||
-		(publicHost != "" && strings.EqualFold(stripPort(u.Host), stripPort(publicHost)))
+	got := originKey(u.Scheme, u.Host)
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	if got == originKey(scheme, r.Host) {
+		return true
+	}
+	if publicURL != "" {
+		if pu, err := url.Parse(publicURL); err == nil && pu.Host != "" {
+			return got == originKey(pu.Scheme, pu.Host)
+		}
+	}
+	return false
 }

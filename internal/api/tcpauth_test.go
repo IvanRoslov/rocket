@@ -107,8 +107,12 @@ func TestTCPHostAllowlist(t *testing.T) {
 	} {
 		req := httptest.NewRequest("GET", "/v1/auth/status", nil)
 		req.Host = host
-		if rec := serve(h, req); rec.Code != want {
+		rec := serve(h, req)
+		if rec.Code != want {
 			t.Errorf("Host %s: %d, want %d", host, rec.Code, want)
+		}
+		if want == 421 && !strings.Contains(rec.Body.String(), "bad_host") {
+			t.Errorf("Host %s: body %s lacks bad_host", host, rec.Body)
 		}
 	}
 }
@@ -131,10 +135,10 @@ func TestTCPCookieOriginCheck(t *testing.T) {
 		}
 		return req
 	}
-	if rec := serve(h, mk("POST", "https://evil.example.com", false)); rec.Code != 403 {
+	if rec := serve(h, mk("POST", "https://evil.example.com", false)); rec.Code != 403 || !strings.Contains(rec.Body.String(), "bad_origin") {
 		t.Fatalf("cookie+foreign origin: %d", rec.Code)
 	}
-	if rec := serve(h, mk("POST", "", false)); rec.Code != 403 {
+	if rec := serve(h, mk("POST", "", false)); rec.Code != 403 || !strings.Contains(rec.Body.String(), "bad_origin") {
 		t.Fatalf("cookie+no origin: %d", rec.Code)
 	}
 	if rec := serve(h, mk("POST", "https://mac.tail1.ts.net", false)); rec.Code != 200 {
@@ -148,7 +152,7 @@ func TestTCPCookieOriginCheck(t *testing.T) {
 	}
 	ws := mk("GET", "https://evil.example.com", false)
 	ws.Header.Set("Upgrade", "websocket")
-	if rec := serve(h, ws); rec.Code != 403 {
+	if rec := serve(h, ws); rec.Code != 403 || !strings.Contains(rec.Body.String(), "bad_origin") {
 		t.Fatalf("ws upgrade foreign origin: %d", rec.Code)
 	}
 }
@@ -187,5 +191,42 @@ func TestTCPRevokeClosesSSE(t *testing.T) {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("SSE stream still open after revoke")
+	}
+}
+
+func TestTCPOriginComparesSchemeHostPort(t *testing.T) {
+	_, raw, h := tcpHarness(t)
+	tok, _ := pairedToken(t, raw)
+	do := func(host, origin string, tls bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/v1/auth/pairing-codes", nil)
+		req.Host = host
+		if tls {
+			req.Header.Set("X-Forwarded-Proto", "https")
+		}
+		req.AddCookie(&http.Cookie{Name: authCookie, Value: tok})
+		req.Header.Set("Origin", origin)
+		return serve(h, req)
+	}
+	if rec := do("127.0.0.1:4477", "http://127.0.0.1:3000", false); rec.Code != 403 || !strings.Contains(rec.Body.String(), "bad_origin") {
+		t.Fatalf("other port: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do("127.0.0.1:4477", "http://127.0.0.1:4477", false); rec.Code != 200 {
+		t.Fatalf("same origin: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do("127.0.0.1:4477", "https://mac.tail1.ts.net", false); rec.Code != 200 {
+		t.Fatalf("public_url origin via rewritten Host: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do("mac.tail1.ts.net", "http://mac.tail1.ts.net", true); rec.Code != 403 || !strings.Contains(rec.Body.String(), "bad_origin") {
+		t.Fatalf("downgraded scheme behind https proxy: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestTCPBearerSchemeCaseInsensitive(t *testing.T) {
+	_, raw, h := tcpHarness(t)
+	tok, _ := pairedToken(t, raw)
+	req := httptest.NewRequest("GET", "http://127.0.0.1:4477/v1/health", nil)
+	req.Header.Set("Authorization", "bearer "+tok)
+	if rec := serve(h, req); rec.Code != 200 {
+		t.Fatalf("lowercase bearer: %d", rec.Code)
 	}
 }
