@@ -1,5 +1,5 @@
 import type { ChatEntry } from '../api/types'
-import { buildChatRows, type OutgoingMsg } from './chatRows'
+import { buildChatRows, isNoise, type OutgoingMsg } from './chatRows'
 
 const T0 = 1_784_640_000
 const user = (text: string, ts = T0): ChatEntry => ({ role: 'user', text, ts })
@@ -56,5 +56,10 @@ describe('buildChatRows', () => {
       showNoise: false,
     })
     expect(rows[0]).toMatchObject({ kind: 'outgoing', status: 'failed', reason: 'recipient busy' })
+  })
+
+  it('thread frames are not noise, rocket injects are', () => {
+    expect(isNoise({ role: 'user', text: '[#1/Q1 reply from cto] ok', ts: 1 })).toBe(false)
+    expect(isNoise({ role: 'user', text: '[rocket heartbeat] idle', ts: 1 })).toBe(true)
   })
 })
