@@ -103,6 +103,43 @@ describe('buildChatRows v2', () => {
     ])
   })
 
+  it('a pending short send does not steal the pointer of a later large send', () => {
+    const big = 'x'.repeat(3000)
+    const rows = buildChatRows({
+      entries: [u('[large message] Full text written to /x.md', 130)],
+      outgoing: [
+        { msgId: 1, body: 'hi', sentAt: 120 },
+        { msgId: 2, body: big, sentAt: 125 },
+      ],
+      showNoise: false,
+    })
+    expect(rows.map((r) => (r.kind === 'entry' ? r.entry.text : r.kind === 'outgoing' ? `outgoing:${r.body}` : r.kind))).toEqual([big, 'outgoing:hi'])
+  })
+
+  it('a stale [large message] pointer is not claimed', () => {
+    const big = 'x'.repeat(3000)
+    const rows = buildChatRows({
+      entries: [u('[large message] Full text written to /old.md', 100)],
+      outgoing: [{ msgId: 1, body: big, sentAt: 200 }],
+      showNoise: false,
+    })
+    expect(rows.map((r) => r.kind)).toEqual(['outgoing'])
+  })
+
+  it('two large sends and two pointers each show their own text, in order', () => {
+    const a = 'a'.repeat(3000)
+    const b = 'b'.repeat(3000)
+    const rows = buildChatRows({
+      entries: [u('[large message] one', 130), u('[large message] two', 140)],
+      outgoing: [
+        { msgId: 1, body: a, sentAt: 120 },
+        { msgId: 2, body: b, sentAt: 125 },
+      ],
+      showNoise: false,
+    })
+    expect(rows.map((r) => (r.kind === 'entry' ? r.entry.text : r.kind))).toEqual([a, b])
+  })
+
   it('drops the AskUserQuestion ask half when its answer follows', () => {
     const rows = buildChatRows({
       entries: [

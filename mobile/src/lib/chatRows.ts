@@ -58,17 +58,34 @@ export function buildChatRows(params: {
   const replaced = new Map<number, string>()
   const pendingOut: OutgoingMsg[] = []
 
+  const freshFor = (o: OutgoingMsg) => (e: ChatEntry, i: number) =>
+    !claimed.has(i) && e.role === 'user' && (e.ts === 0 || e.ts >= o.sentAt - SKEW)
+  // Pass 1: exact-text matches for every send, so a pending short send
+  // can never take a pointer that belongs to a later large one.
+  const unmatched: OutgoingMsg[] = []
   for (const o of outgoing) {
-    const fresh = (e: ChatEntry, i: number) =>
-      !claimed.has(i) && e.role === 'user' && (e.ts === 0 || e.ts >= o.sentAt - SKEW)
-    let idx = entries.findIndex((e, i) => fresh(e, i) && e.text === o.body)
-    if (idx === -1) {
-      idx = entries.findIndex((e, i) => fresh(e, i) && e.text.startsWith('[large message]'))
-      if (idx !== -1) replaced.set(idx, o.body)
-    }
+    const fresh = freshFor(o)
+    const idx = entries.findIndex((e, i) => fresh(e, i) && e.text === o.body)
     if (idx !== -1) claimed.add(idx)
-    else pendingOut.push(o)
+    else unmatched.push(o)
   }
+  // Pass 2: pointers land in send order, so when there are more unmatched
+  // sends than pointers the earlier ones are the ones still in flight. Walk
+  // the sends newest-first, each taking the latest fresh pointer left.
+  const owner = new Map<OutgoingMsg, number>()
+  for (const o of [...unmatched].reverse()) {
+    const fresh = freshFor(o)
+    let idx = -1
+    entries.forEach((e, i) => {
+      if (fresh(e, i) && e.text.startsWith('[large message]')) idx = i
+    })
+    if (idx !== -1) {
+      claimed.add(idx)
+      replaced.set(idx, o.body)
+      owner.set(o, idx)
+    }
+  }
+  for (const o of unmatched) if (!owner.has(o)) pendingOut.push(o)
 
   const rows: ChatRow[] = []
   let toolRun: { i: number; e: ChatEntry }[] = []
