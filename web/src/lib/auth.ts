@@ -41,7 +41,11 @@ export function onUnauthorized(): void {
 
 export async function fetchAuthStatus(): Promise<{ authenticated: boolean; device?: Device }> {
   const res = await fetch('/v1/auth/status')
-  if (!res.ok) return { authenticated: false }
+  // Only an explicit 401 (or authenticated:false) means "not signed in".
+  // 502/503 while the daemon restarts behind `tailscale serve` must throw so
+  // callers don't bounce a signed-in user to /login.
+  if (res.status === 401) return { authenticated: false }
+  if (!res.ok) throw new Error(`auth status: HTTP ${res.status}`)
   return res.json()
 }
 
@@ -84,5 +88,7 @@ export async function pairWeb(code: string): Promise<void> {
 
 /** Only same-site paths are valid redirect targets after login. */
 export function safeNext(next: string | null): string {
-  return next && next.startsWith('/') && !next.startsWith('//') ? next : '/'
+  if (!next || !next.startsWith('/') || next.startsWith('//') || next.includes('\\')) return '/'
+  if (next.startsWith('/login')) return '/'
+  return next
 }

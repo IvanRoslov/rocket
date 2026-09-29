@@ -11,6 +11,7 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query'
 import { api } from './api'
+import type { Device, PairingCode } from './auth'
 import type {
   Agent,
   AgentDelivery,
@@ -85,6 +86,13 @@ export function useSessions(filter?: SessionFilter): UseQueryResult<Session[]> {
   return useQuery({
     queryKey: ['sessions', filter ?? {}],
     queryFn: () => api.get<Session[]>(`/v1/sessions${sessionsQueryString(filter)}`),
+  })
+}
+
+export function useDevices(): UseQueryResult<Device[]> {
+  return useQuery({
+    queryKey: ['devices'],
+    queryFn: () => api.get<Device[]>('/v1/auth/devices'),
   })
 }
 
@@ -1119,4 +1127,31 @@ export function wireInvalidation(queryClient: QueryClient) {
 export function useQueryClientInvalidation(): (event: RocketEvent) => void {
   const queryClient = useQueryClient()
   return wireInvalidation(queryClient)
+}
+
+export function useRevokeDevice(): UseMutationResult<void, Error, number> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.del<void>(`/v1/auth/devices/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['devices'] })
+    },
+  })
+}
+
+export function useCreatePairingCode(): UseMutationResult<PairingCode, Error, void> {
+  return useMutation({
+    mutationFn: () => api.post<PairingCode>('/v1/auth/pairing-codes'),
+  })
+}
+
+export function useLogout(): UseMutationResult<void, Error, void> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.post<void>('/v1/auth/logout'),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['devices'] })
+      window.location.assign('/login')
+    },
+  })
 }

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { browserLabel } from './auth'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { browserLabel, fetchAuthStatus, safeNext } from './auth'
 
 describe('browserLabel', () => {
   it('names browser and OS', () => {
@@ -10,5 +10,36 @@ describe('browserLabel', () => {
       'Safari · iOS',
     )
     expect(browserLabel('weird')).toBe('Браузер')
+  })
+})
+
+describe('fetchAuthStatus', () => {
+  afterEach(() => vi.unstubAllGlobals())
+  const stub = (res: Response) => vi.stubGlobal('fetch', vi.fn().mockResolvedValue(res))
+
+  it('401 means unauthenticated', async () => {
+    stub(new Response('{}', { status: 401 }))
+    await expect(fetchAuthStatus()).resolves.toEqual({ authenticated: false })
+  })
+  it('200 with authenticated:false means unauthenticated', async () => {
+    stub(new Response(JSON.stringify({ authenticated: false }), { status: 200 }))
+    await expect(fetchAuthStatus()).resolves.toEqual({ authenticated: false })
+  })
+  it('200 with authenticated:true passes through', async () => {
+    stub(new Response(JSON.stringify({ authenticated: true }), { status: 200 }))
+    await expect(fetchAuthStatus()).resolves.toEqual({ authenticated: true })
+  })
+  it('503 (daemon restarting) rejects instead of reporting unauthenticated', async () => {
+    stub(new Response('', { status: 503 }))
+    await expect(fetchAuthStatus()).rejects.toThrow()
+  })
+})
+
+describe('safeNext', () => {
+  it('accepts same-site paths', () => {
+    expect(safeNext('/p/7')).toBe('/p/7')
+  })
+  it.each(['//evil', '/\\evil', 'https://x', '/login?next=/x', '/login', null])('rejects %s', (v) => {
+    expect(safeNext(v)).toBe('/')
   })
 })

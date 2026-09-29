@@ -1,5 +1,6 @@
 import { renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { resetUnauthorizedLatch } from './auth'
 import { EVENT_TYPES, useEventStream } from './sse'
 import type { RocketEvent } from './types'
 
@@ -98,5 +99,38 @@ describe('useEventStream', () => {
     expect(es.closed).toBe(true)
     vi.advanceTimersByTime(5000)
     expect(MockEventSource.instances).toHaveLength(1)
+  })
+
+  describe('error probe', () => {
+    const original = window.location
+    const assign = vi.fn()
+    beforeEach(() => {
+      assign.mockClear()
+      resetUnauthorizedLatch()
+      Object.defineProperty(window, 'location', { configurable: true, value: { ...original, pathname: '/', search: '', assign } })
+    })
+    afterEach(() => {
+      Object.defineProperty(window, 'location', { configurable: true, value: original })
+      resetUnauthorizedLatch()
+    })
+    const flush = async () => {
+      for (let i = 0; i < 10; i++) await Promise.resolve()
+    }
+
+    it('redirects to /login when the status probe says 401 after a stream error', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 401 })))
+      renderHook(() => useEventStream(vi.fn()))
+      MockEventSource.instances[0].onerror?.({})
+      await flush()
+      expect(assign).toHaveBeenCalledWith('/login?next=%2F')
+    })
+
+    it('does not redirect when the probe gets a 503', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 503 })))
+      renderHook(() => useEventStream(vi.fn()))
+      MockEventSource.instances[0].onerror?.({})
+      await flush()
+      expect(assign).not.toHaveBeenCalled()
+    })
   })
 })
