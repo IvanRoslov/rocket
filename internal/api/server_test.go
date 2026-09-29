@@ -194,14 +194,14 @@ func TestServeUnixSocket(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 
-	// Also verify TCP listener works.
+	// The TCP listener is auth-gated: same route, no device token -> 401.
 	tcpResp, err := http.Get("http://127.0.0.1:" + strconv.Itoa(cfg.Port) + "/v1/health")
 	if err != nil {
 		t.Fatalf("GET over tcp: %v", err)
 	}
 	defer tcpResp.Body.Close()
-	if tcpResp.StatusCode != http.StatusOK {
-		t.Fatalf("tcp status = %d, want 200", tcpResp.StatusCode)
+	if tcpResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("tcp status = %d, want 401", tcpResp.StatusCode)
 	}
 
 	cancel()

@@ -110,6 +110,7 @@ func registerAuthRoutes(mux *http.ServeMux, d Deps) {
 	})
 
 	mux.HandleFunc("POST /v1/auth/pair", func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
 		var in struct{ Code, Name, Kind string }
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			writeErr(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
@@ -123,8 +124,8 @@ func registerAuthRoutes(mux *http.ServeMux, d Deps) {
 		if in.Name == "" {
 			in.Name = in.Kind
 		}
-		if len(in.Name) > 64 {
-			in.Name = in.Name[:64]
+		if rs := []rune(in.Name); len(rs) > 64 {
+			in.Name = string(rs[:64])
 		}
 		if !rt.Limiter.Allow() {
 			writeErr(w, http.StatusTooManyRequests, "rate_limited", "too many failed pairing attempts, retry in a minute")

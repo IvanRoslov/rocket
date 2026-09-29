@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -186,5 +187,31 @@ func TestStatusDevicesRevokeLogout(t *testing.T) {
 	list, _ := d.Store.ListDevices()
 	if len(list) != 0 {
 		t.Fatalf("device survived logout: %+v", list)
+	}
+}
+
+func TestPairOversizedBodyRejected(t *testing.T) {
+	d := authTestDeps(t)
+	h := NewHandler(d)
+	code := newCode(t, h)
+	big := map[string]string{"code": code, "name": strings.Repeat("a", 8<<10), "kind": "mobile"}
+	if rec := doJSON(t, h, "POST", "/v1/auth/pair", big); rec.Code != 400 || !strings.Contains(rec.Body.String(), "invalid_request") {
+		t.Fatalf("oversized: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestPairNameTruncatedByRunes(t *testing.T) {
+	d := authTestDeps(t)
+	h := NewHandler(d)
+	code := newCode(t, h)
+	name := strings.Repeat("Ж", 70)
+	rec := doJSON(t, h, "POST", "/v1/auth/pair", map[string]string{"code": code, "name": name, "kind": "mobile"})
+	if rec.Code != 200 {
+		t.Fatalf("pair: %d %s", rec.Code, rec.Body)
+	}
+	var out struct{ Device struct{ Name string } }
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if !utf8.ValidString(out.Device.Name) || utf8.RuneCountInString(out.Device.Name) != 64 {
+		t.Fatalf("name: valid=%v runes=%d", utf8.ValidString(out.Device.Name), utf8.RuneCountInString(out.Device.Name))
 	}
 }

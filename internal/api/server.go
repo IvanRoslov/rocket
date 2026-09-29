@@ -114,7 +114,8 @@ func NewHandler(d Deps) http.Handler {
 // Serve listens on both d.Cfg.SocketPath() (a unix socket, mode 0600) and
 // <d.Cfg.Host>:<d.Cfg.Port> (127.0.0.1 by default; set host in config.yaml
 // to expose the API on the LAN, e.g. for the mobile app), serving the same
-// handler on both. It blocks until
+// handler on both. The TCP listeners (plain and TLS) require a device token
+// (see requireAuth); the unix socket is trusted. It blocks until
 // ctx is cancelled, at which point it gracefully shuts down both servers,
 // unlinks the socket file it created, and returns nil. If either listener
 // fails to start, or either server exits with a fatal error before ctx is
@@ -147,9 +148,18 @@ func Serve(ctx context.Context, d Deps) error {
 		return fmt.Errorf("listen tcp %s: %w", tcpAddr, err)
 	}
 
+	if d.Auth == nil {
+		d.Auth = NewAuthRuntime()
+	}
+	if !isLoopbackHost(d.Cfg.Host) {
+		slog.Warn("tcp listener is not loopback-only; every request still needs a device token, but prefer host: 127.0.0.1 + tailscale serve",
+			"host", d.Cfg.Host)
+	}
+
 	handler := NewHandler(d)
+	tcpHandler := requireAuth(d, handler)
 	unixSrv := &http.Server{Handler: handler}
-	tcpSrv := &http.Server{Handler: handler}
+	tcpSrv := &http.Server{Handler: tcpHandler}
 	var tlsSrv *http.Server
 
 	errCh := make(chan error, 3)
@@ -179,7 +189,7 @@ func Serve(ctx context.Context, d Deps) error {
 			if err != nil {
 				slog.Error("tls: listen failed, https listener disabled", "addr", tlsAddr, "error", err)
 			} else {
-				tlsSrv = &http.Server{Handler: handler}
+				tlsSrv = &http.Server{Handler: tcpHandler}
 				if created {
 					slog.Info("tls: generated self-signed certificate; trust it once to silence the browser warning (or replace with an mkcert pair)",
 						"cert", certFile)
