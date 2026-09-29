@@ -9,6 +9,8 @@ export interface SseHandlers {
   onOpen: () => void
   onEvent: (type: string, data: string) => void
   onError: () => void
+  /** The server answered 401; the stream is closed and will not reconnect. */
+  onUnauthorized?: () => void
 }
 
 export interface SseConnection {
@@ -45,7 +47,12 @@ export function parseSseFrames(
  * Opens `url` as an SSE stream and keeps reconnecting (delay
  * `reconnectMs`) until `close()` is called.
  */
-export function connectSse(url: string, handlers: SseHandlers, reconnectMs = 4000): SseConnection {
+export function connectSse(
+  url: string,
+  handlers: SseHandlers,
+  reconnectMs = 4000,
+  headers: Record<string, string> = {},
+): SseConnection {
   let xhr: XMLHttpRequest | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
   let closed = false
@@ -74,12 +81,18 @@ export function connectSse(url: string, handlers: SseHandlers, reconnectMs = 400
     xhr = new XMLHttpRequest()
     xhr.open('GET', url)
     xhr.setRequestHeader('Accept', 'text/event-stream')
+    for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v)
     xhr.onreadystatechange = () => {
       if (!xhr || closed) return
       if (xhr.readyState >= 2 && !opened) {
         if (xhr.status === 200) {
           opened = true
           handlers.onOpen()
+        } else if (xhr.status === 401) {
+          closed = true
+          xhr.abort()
+          handlers.onUnauthorized?.()
+          return
         } else if (xhr.status > 0) {
           xhr.abort()
           scheduleReconnect()

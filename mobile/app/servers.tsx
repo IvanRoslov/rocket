@@ -23,7 +23,7 @@ import { colors, mono, radius } from '../src/theme'
 
 function ServerCard({ server }: { server: ServerEntry }) {
   const { activeId, setActive, removeServer } = useServers()
-  const health = useHealth(`http://${server.host}:${server.port}`)
+  const health = useHealth(server.baseUrl)
   const online = health.isSuccess
   const isActive = activeId === server.id
   const [menu, setMenu] = useState(false)
@@ -56,7 +56,7 @@ function ServerCard({ server }: { server: ServerEntry }) {
           </Pressable>
         </View>
         <MonoText style={{ color: colors.textDim, marginBottom: 6 }}>
-          {server.host}:{server.port}
+          {server.baseUrl}
         </MonoText>
         <Text style={{ fontSize: 12, color: colors.textFaint }}>
           {online
@@ -68,7 +68,7 @@ function ServerCard({ server }: { server: ServerEntry }) {
       </Card>
       <ActionSheet
         visible={menu}
-        title={`${server.name} · ${server.host}:${server.port}`}
+        title={`${server.name} · ${server.baseUrl}`}
         onClose={() => setMenu(false)}
         actions={[
           {
@@ -89,9 +89,10 @@ function ServerCard({ server }: { server: ServerEntry }) {
 function AddServerForm({ onDone }: { onDone: () => void }) {
   const { addServer } = useServers()
   const [name, setName] = useState('')
-  const [host, setHost] = useState('')
-  const [port, setPort] = useState('4477')
-  const valid = host.trim().length > 0 && /^\d+$/.test(port.trim())
+  const [url, setUrl] = useState('')
+  const [token, setToken] = useState('')
+  // Interim form: Task 8 replaces it with URL + pairing code / QR.
+  const valid = url.trim().length > 0 && token.trim().length > 0
 
   return (
     <Card style={{ padding: 16 }}>
@@ -103,40 +104,38 @@ function AddServerForm({ onDone }: { onDone: () => void }) {
         value={name}
         onChangeText={setName}
       />
-      <View style={{ flexDirection: 'row', gap: 10 }}>
-        <View style={{ flex: 2 }}>
-          <Text style={styles.formLabel}>Host / IP</Text>
-          <TextInput
-            style={[styles.input, { fontFamily: mono }]}
-            placeholder="192.168.1.10"
-            placeholderTextColor={colors.textFaint}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="numbers-and-punctuation"
-            value={host}
-            onChangeText={setHost}
-          />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.formLabel}>Port</Text>
-          <TextInput
-            style={[styles.input, { fontFamily: mono }]}
-            keyboardType="number-pad"
-            value={port}
-            onChangeText={setPort}
-          />
-        </View>
-      </View>
+      <Text style={styles.formLabel}>Server URL</Text>
+      <TextInput
+        style={[styles.input, { fontFamily: mono }]}
+        placeholder="https://mac.tailnet.ts.net"
+        placeholderTextColor={colors.textFaint}
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="url"
+        value={url}
+        onChangeText={setUrl}
+      />
+      <Text style={styles.formLabel}>Device token</Text>
+      <TextInput
+        style={[styles.input, { fontFamily: mono }]}
+        placeholder="rkt_…"
+        placeholderTextColor={colors.textFaint}
+        autoCapitalize="none"
+        autoCorrect={false}
+        secureTextEntry
+        value={token}
+        onChangeText={setToken}
+      />
       <View style={{ flexDirection: 'row', gap: 9, marginTop: 6 }}>
         <GhostButton label="Cancel" onPress={onDone} style={{ flex: 1 }} />
         <PrimaryButton
           label="Add server"
           disabled={!valid}
-          onPress={() => {
-            addServer({
-              name: name.trim() || host.trim(),
-              host: host.trim(),
-              port: parseInt(port, 10),
+          onPress={async () => {
+            await addServer({
+              name: name.trim() || url.trim(),
+              baseUrl: url,
+              token: token.trim(),
             })
             onDone()
             router.replace('/(tabs)')
@@ -145,7 +144,7 @@ function AddServerForm({ onDone }: { onDone: () => void }) {
         />
       </View>
       <Text style={styles.hint}>
-        The daemon must listen on your LAN: set `host: 0.0.0.0` in ~/.rocket/config.yaml and restart rocketd.
+        Remote access goes through your tailnet URL (https://your-mac.your-tailnet.ts.net). Pairing by QR code is coming next.
       </Text>
     </Card>
   )

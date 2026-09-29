@@ -1,6 +1,7 @@
 import { Text, View } from 'react-native'
 import { useConnection } from '../api/events'
 import { useServers } from '../servers/ServerContext'
+import { AuthLostBanner } from './AuthLostBanner'
 import { colors } from '../theme'
 
 /**
@@ -9,7 +10,8 @@ import { colors } from '../theme'
  */
 export function ConnectionBanner() {
   const { sse } = useConnection()
-  const { active } = useServers()
+  const { active, authLost } = useServers()
+  if (active && authLost) return <AuthLostBanner />
   if (sse || !active) return null
   return (
     <View

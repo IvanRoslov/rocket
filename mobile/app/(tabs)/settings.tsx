@@ -137,7 +137,7 @@ function ServerSection() {
       <Text style={styles.lede}>The rocketd instance this app is talking to.</Text>
       <Card style={{ gap: 9, marginBottom: 14 }}>
         <Row k="name" v={active?.name ?? '—'} />
-        <Row k="address" v={active ? `${active.host}:${active.port}` : '—'} />
+        <Row k="address" v={active ? active.baseUrl : '—'} />
         <Row k="saved servers" v={String(servers.length)} />
       </Card>
       <PrimaryButton label="Switch server" onPress={() => router.navigate('/servers')} />

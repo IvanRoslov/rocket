@@ -37,7 +37,7 @@ async function setup<T>(useHook: () => T) {
     { wrapper },
   )
   await waitFor(() => expect(result.current.servers.loaded).toBe(true))
-  await act(async () => result.current.servers.addServer({ name: 'A', host: '192.168.1.10', port: 4477 }))
+  await act(async () => result.current.servers.addServer({ name: 'A', baseUrl: 'http://192.168.1.10:4477', token: 'rkt_t' }))
   return result
 }
 
