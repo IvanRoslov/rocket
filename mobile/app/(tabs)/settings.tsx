@@ -181,6 +181,10 @@ export default function SettingsScreen() {
         />
       </View>
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24 }}>
+        <Pressable onPress={() => router.navigate('/system')} style={styles.linkRow}>
+          <Text style={{ fontSize: 14.5, fontWeight: '600', color: colors.text, flex: 1 }}>System</Text>
+          <Text style={{ fontSize: 13, color: colors.textFaint }}>sessions, worktrees, cleanup ›</Text>
+        </Pressable>
         {section === 'server' ? <ServerSection /> : null}
         {section === 'github' ? <GithubSection /> : null}
         {section === 'repos' ? <ReposSection /> : null}
@@ -190,6 +194,16 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.xl,
+    padding: 14,
+    marginBottom: 18,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

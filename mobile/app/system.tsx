@@ -1,11 +1,12 @@
+import { router } from 'expo-router'
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useSessions, useSystem, useSystemCleanup } from '../../src/api/queries'
-import { ConnectionBanner } from '../../src/components/ConnectionBanner'
-import { Badge, Card, Dot, EmptyState, MonoText, SectionTitle } from '../../src/components/ui'
-import { bytes, sessionBadge, sessionDot, uptime } from '../../src/lib/format'
-import { useServers } from '../../src/servers/ServerContext'
-import { colors, mono, radius } from '../../src/theme'
+import { useSessions, useSystem, useSystemCleanup } from '../src/api/queries'
+import { ConnectionBanner } from '../src/components/ConnectionBanner'
+import { BackButton, Badge, Card, Dot, EmptyState, MonoText, SectionTitle } from '../src/components/ui'
+import { bytes, sessionBadge, sessionDot, uptime } from '../src/lib/format'
+import { useServers } from '../src/servers/ServerContext'
+import { colors, mono, radius } from '../src/theme'
 
 export default function SystemScreen() {
   const { active } = useServers()
@@ -51,8 +52,9 @@ export default function SystemScreen() {
   ]
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.page }} edges={['top']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.page }} edges={['top', 'bottom']}>
       <View style={styles.header}>
+        <BackButton onPress={() => router.back()} />
         <View style={styles.logo}>
           <Text style={{ color: '#fff', fontFamily: mono, fontSize: 13, fontWeight: '700' }}>R</Text>
         </View>
