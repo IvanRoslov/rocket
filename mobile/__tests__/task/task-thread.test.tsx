@@ -206,6 +206,19 @@ describe('task Q&A thread', () => {
     expect(screen.getByText('Q1')).toBeTruthy()
   })
 
+  it('shows the question title and renders the body as markdown', async () => {
+    mockApi({
+      '/v1/tasks/12/questions': { questions: [{ ...THREAD, title: 'Which repo?', body: 'Pick **one**:\n- a\n- b' }] },
+    })
+    renderWithProviders(<TaskScreen />)
+    // openQuestions() waits for the default body, which this thread replaces.
+    await waitFor(() => expect(screen.getByText('Questions')).toBeTruthy())
+    fireEvent.press(screen.getByText('Questions'))
+    await waitFor(() => expect(screen.getByText('Which repo?')).toBeTruthy())
+    expect(screen.getByText('one')).toBeTruthy()
+    expect(screen.queryByText(/\*\*one\*\*/)).toBeNull()
+  })
+
   it('badges a stale thread', async () => {
     mockApi({ '/v1/tasks/12/questions': { questions: [{ ...THREAD, stale: true }] } })
     renderWithProviders(<TaskScreen />)

@@ -34,6 +34,7 @@ import {
 import { ActionSheet } from '../../src/components/ActionSheet'
 import { BottomSheet } from '../../src/components/BottomSheet'
 import { Markdown } from '../../src/components/Markdown'
+import { QuestionText } from '../../src/components/QuestionText'
 import { useToast } from '../../src/components/Toast'
 import type { Question, Session, TaskLogKind, TaskStatus } from '../../src/api/types'
 import { BackButton, Badge, Card, ChipTabs, Dot, EmptyState, GhostButton, MonoText, PrimaryButton } from '../../src/components/ui'
@@ -140,7 +141,7 @@ function QuestionCard({ q }: { q: Question }) {
         <MonoText style={{ fontSize: 11, color: '#a1621a' }}>{participantLabel(q.asked_by)} asked</MonoText>
       </View>
       <View style={{ padding: 16 }}>
-        <Text style={styles.qText}>{q.body}</Text>
+        <QuestionText q={q} />
         {(q.participants ?? []).length > 0 ? (
           <>
             <Text style={styles.discussLabel}>PARTICIPANTS</Text>
@@ -844,7 +845,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#fde68a',
   },
-  qText: { fontSize: 17, lineHeight: 24, fontWeight: '700', letterSpacing: -0.2, marginBottom: 14 },
   optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
   optionBtn: {
     paddingVertical: 9,
