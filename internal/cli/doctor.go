@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -9,7 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"strings"
+	"time"
 
 	"github.com/IvanRoslov/rocket/internal/agent"
 	_ "github.com/IvanRoslov/rocket/internal/agent/claudecode" // registers "claude-code" in agent.Registry()
@@ -250,7 +251,11 @@ func checkRemote(cfg *config.Config, lookPath func(string) (string, error), serv
 		return out
 	}
 	st, err := serveStatus()
-	if err != nil || !strings.Contains(st, fmt.Sprintf(":%d", cfg.Port)) {
+	if err != nil {
+		out = append(out, checkResult{statusWarn, "tailscale", fmt.Sprintf("tailscale serve status: %v", err)})
+		return out
+	}
+	if !regexp.MustCompile(fmt.Sprintf(`:%d(\D|$)`, cfg.Port)).MatchString(st) {
 		out = append(out, checkResult{statusWarn, "tailscale", fmt.Sprintf("serve не проксирует на порт %d — выполни `tailscale serve --bg %d`", cfg.Port, cfg.Port)})
 		return out
 	}
@@ -264,6 +269,8 @@ func isLoopbackBind(host string) bool {
 }
 
 func tailscaleServeStatus() (string, error) {
-	out, err := exec.Command("tailscale", "serve", "status").CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "tailscale", "serve", "status").CombinedOutput()
 	return string(out), err
 }

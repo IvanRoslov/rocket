@@ -52,10 +52,25 @@ func TestCheckRemote(t *testing.T) {
 		func() (string, error) {
 			return "https://m.ts.net (tailnet only)\n|-- / proxy http://127.0.0.1:4477\n", nil
 		})
+	if len(res) != 3 {
+		t.Errorf("healthy setup: want 3 results, got %d:\n%s", len(res), resultsText(res))
+	}
 	for _, r := range res {
 		if r.Status != statusOK {
 			t.Errorf("healthy setup produced %v", r)
 		}
+	}
+
+	res = checkRemote(&config.Config{Host: "127.0.0.1", Port: 4477, PublicURL: "https://m.ts.net"}, hasTS,
+		func() (string, error) { return "|-- / proxy http://127.0.0.1:44770\n", nil })
+	if last := res[len(res)-1]; last.Status != statusWarn {
+		t.Errorf("port 44770 must not match 4477: %v", last)
+	}
+
+	res = checkRemote(&config.Config{Host: "127.0.0.1", Port: 4477, PublicURL: "https://m.ts.net"}, hasTS,
+		func() (string, error) { return "", errors.New("context deadline exceeded") })
+	if last := res[len(res)-1]; last.Status != statusWarn || !strings.Contains(last.Detail, "context deadline exceeded") {
+		t.Errorf("serve error must be reported: %v", last)
 	}
 
 	res = checkRemote(&config.Config{Host: "127.0.0.1", Port: 4477, PublicURL: "https://m.ts.net"}, hasTS,

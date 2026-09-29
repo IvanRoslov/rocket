@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import PairScreen from '../../app/pair'
 import ServersScreen from '../../app/servers'
@@ -7,6 +7,7 @@ import ServersScreen from '../../app/servers'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 const mockAddServer = jest.fn()
+const mockScan: { current: ((e: { data: string }) => void) | null } = { current: null }
 const mockParams: { current: Record<string, string> } = { current: {} }
 
 jest.mock('expo-router', () => ({
@@ -18,8 +19,20 @@ jest.mock('../../src/servers/ServerContext', () => ({
   useServers: () => ({ servers: [], activeId: null, addServer: mockAddServer, setActive: jest.fn(), removeServer: jest.fn() }),
 }))
 
+jest.mock('expo-camera', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { View } = require('react-native')
+  return {
+    useCameraPermissions: () => [{ granted: true }, jest.fn()],
+    CameraView: (props: { onBarcodeScanned: (e: { data: string }) => void }) => {
+      mockScan.current = props.onBarcodeScanned
+      return <View testID="camera" />
+    },
+  }
+})
+
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { router } = require('expo-router') as { router: { replace: jest.Mock } }
+const { router } = require('expo-router') as { router: { replace: jest.Mock; push: jest.Mock } }
 
 function mockPairFetch(status = 200, body: unknown = { token: 'rkt_x', device: { id: 1 } }) {
   const fn = jest.fn(async () => new Response(JSON.stringify(body), { status }))
@@ -109,6 +122,23 @@ describe('servers screen pairing form', () => {
     await renderScreen(<ServersScreen />)
     expect(await screen.findByText('Ввести вручную')).toBeTruthy()
     expect(screen.queryByText('Сканировать QR')).toBeNull()
+  })
+
+  it('routes a scanned QR to the confirm screen without pairing', async () => {
+    const fetchMock = mockPairFetch()
+    mockParams.current = { pair: '1' }
+    await renderScreen(<ServersScreen />)
+    await screen.findByText('Ввести вручную')
+    await act(async () => {
+      mockScan.current?.({ data: 'rocketmobile://pair?url=https%3A%2F%2Fm.ts.net&code=AB12-CD34' })
+    })
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: '/pair',
+      params: { url: 'https://m.ts.net', code: 'AB12-CD34' },
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(mockAddServer).not.toHaveBeenCalled()
+    expect(router.replace).not.toHaveBeenCalled()
   })
 })
 

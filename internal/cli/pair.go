@@ -47,22 +47,23 @@ func newPairCmd() *cobra.Command {
 			if flags.JSON {
 				return printJSON(cmd, pc)
 			}
+			out := cmd.OutOrStdout()
 			ttl := time.Until(time.Unix(pc.ExpiresAt, 0)).Round(time.Minute)
 			if web {
 				base := pc.URL
 				if base == "" {
 					base = fmt.Sprintf("http://localhost:%d", cfg.Port)
 				}
-				cmd.Printf("Открой в браузере (одноразовая ссылка, %s):\n\n  %s\n", ttl, webLoginURL(base, pc.Code))
+				fmt.Fprintf(out, "Открой в браузере (одноразовая ссылка, %s):\n\n  %s\n", ttl, webLoginURL(base, pc.Code))
 				return nil
 			}
 			if pc.URL == "" {
-				cmd.Println("⚠ public_url не задан в ~/.rocket/config.yaml — QR не содержит адреса; введи адрес и код в приложении вручную.")
+				fmt.Fprintln(out, "⚠ public_url не задан в ~/.rocket/config.yaml — QR не содержит адреса; введи адрес и код в приложении вручную.")
 			} else {
-				qrterminal.GenerateHalfBlock(pairURL(pc.URL, pc.Code), qrterminal.L, cmd.OutOrStdout())
-				cmd.Printf("\nАдрес: %s\n", pc.URL)
+				qrterminal.GenerateHalfBlock(pairURL(pc.URL, pc.Code), qrterminal.L, out)
+				fmt.Fprintf(out, "\nАдрес: %s\n", pc.URL)
 			}
-			cmd.Printf("Код:   %s  (действует %s, одноразовый)\n", pc.Code, ttl)
+			fmt.Fprintf(out, "Код:   %s  (действует %s, одноразовый)\n", pc.Code, ttl)
 			return nil
 		},
 	}
@@ -134,7 +135,7 @@ func newDevicesRevokeCmd() *cobra.Command {
 			if err := c.Delete("/v1/auth/devices/"+args[0], nil, nil); err != nil {
 				return err
 			}
-			cmd.Printf("Устройство %s отозвано\n", args[0])
+			fmt.Fprintf(cmd.OutOrStdout(), "Устройство %s отозвано\n", args[0])
 			return nil
 		},
 	}

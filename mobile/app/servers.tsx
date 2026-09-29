@@ -127,17 +127,15 @@ function AddServerForm({ onDone, startScanning }: { onDone: () => void; startSca
     }
   }
 
+  // A scanned QR never pairs on its own: hand it to the confirm screen (same as a deep link).
   const onScan = (data: string) => {
     if (scanned.current) return
     const link = parsePairLink(data)
     if (!link) return
     scanned.current = true
-    setUrl(link.baseUrl)
-    setCode(link.code)
     setScanning(false)
-    submit(link.baseUrl, link.code).finally(() => {
-      scanned.current = false
-    })
+    router.push({ pathname: '/pair', params: { url: link.baseUrl, code: link.code } })
+    scanned.current = false
   }
 
   return (
