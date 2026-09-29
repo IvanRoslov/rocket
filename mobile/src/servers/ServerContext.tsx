@@ -11,7 +11,7 @@ interface ServerContextValue {
   servers: ServerEntry[]
   activeId: string | null
   active: ServerEntry | null
-  /** Base URL of the active server, e.g. "https://mac.tailnet.ts.net". */
+  /** Base URL of the active server, e.g. "https://rocket.example.com". */
   baseUrl: string | null
   loaded: boolean
   /** The active server has no device token, or the daemon answered 401. */

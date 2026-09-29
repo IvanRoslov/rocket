@@ -53,6 +53,26 @@ describe('pairWithServer', () => {
     globalThis.fetch = jest.fn(async () => {
       throw new TypeError('Network request failed')
     }) as unknown as typeof fetch
-    await expect(pairWithServer('https://m.ts.net', 'X', 'iPhone')).rejects.toThrow('Сервер недоступен')
+    await expect(pairWithServer('https://m.ts.net', 'X', 'iPhone')).rejects.toThrow(
+      'Нет связи с https://m.ts.net (Network request failed)',
+    )
+  })
+  it('says the server did not answer in time on abort', async () => {
+    globalThis.fetch = jest.fn(async () => {
+      const e = new Error('Aborted')
+      e.name = 'AbortError'
+      throw e
+    }) as unknown as typeof fetch
+    await expect(pairWithServer('https://m.ts.net', 'X', 'iPhone')).rejects.toThrow('https://m.ts.net не ответил')
+  })
+  it('shows the HTTP status for any other server answer', async () => {
+    globalThis.fetch = jest.fn(async () => new Response('<html>blocked</html>', { status: 403 })) as unknown as typeof fetch
+    await expect(pairWithServer('https://m.ts.net', 'X', 'iPhone')).rejects.toThrow('Сервер ответил ошибкой: HTTP 403')
+  })
+  it('never mentions Tailscale', async () => {
+    globalThis.fetch = jest.fn(async () => {
+      throw new TypeError('Network request failed')
+    }) as unknown as typeof fetch
+    await expect(pairWithServer('https://m.ts.net', 'X', 'iPhone')).rejects.not.toThrow(/Tailscale/)
   })
 })
