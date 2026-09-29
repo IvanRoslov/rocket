@@ -1,6 +1,6 @@
 # API демона
 
-HTTP+JSON, префикс `/v1`. Листенеры: Unix-сокет `~/.rocket/rocket.sock`, `http://127.0.0.1:<port>` (по умолчанию 4477) и `https://127.0.0.1:<tls_port>` (по умолчанию 4478, `tls_port: 0` выключает) — все три отдают один и тот же API. Ошибки: `{"error": {"code": "<machine_code>", "message": "..."}}`, HTTP-коды стандартные.
+HTTP+JSON, префикс `/v1`. Листенеры: Unix-сокет `~/.rocket/rocket.sock`, `http://127.0.0.1:<port>` (по умолчанию 4477) и `https://127.0.0.1:<tls_port>` (по умолчанию 4478, `tls_port: 0` выключает) — все три отдают один и тот же набор маршрутов, но TCP-листенеры требуют аутентификации (см. [«Аутентификация»](#аутентификация)). Ошибки: `{"error": {"code": "<machine_code>", "message": "..."}}`, HTTP-коды стандартные.
 
 **https-листенер существует ради HTTP/2**: браузеры ограничивают cleartext HTTP/1.1 ~6 соединениями на хост суммарно на весь браузер — долгоживущие SSE-стримы дашборда исчерпывают пул, и загрузки страниц зависают в очереди; HTTP/2 (браузеры говорят его только поверх TLS) мультиплексирует всё в одно соединение. Дашборд и мобильное приложение должны предпочитать `https://…:<tls_port>`. Сертификат — `~/.rocket/tls/{cert,key}.pem`: при первом старте генерируется self-signed (браузер предупредит, пока сертификат не доверен в системе); чтобы предупреждения не было — положить туда пару от mkcert (`mkcert -cert-file cert.pem -key-file key.pem localhost 127.0.0.1 ::1`) и перезапустить демон.
 
@@ -10,6 +10,66 @@ HTTP+JSON, префикс `/v1`. Листенеры: Unix-сокет `~/.rocket/
 |---|---|---|
 | GET | `/v1/health` | `{status, version, uptime}` |
 | POST | `/v1/shutdown` | Штатная остановка демона (сессии не трогает) |
+
+## Аутентификация
+
+Каналы доступа:
+
+- **Unix-сокет** (`~/.rocket/rocket.sock`, права 0600) — доверенный, аутентификации нет, поведение не менялось. Только по нему принимаются `X-Rocket-Session` (идентичность агента) и `/v1/internal/*`.
+- **TCP** (`port` и `tls_port`) — аутентификация всегда, даже с 127.0.0.1. Любой `/v1/*` требует токен устройства: `Authorization: Bearer <token>` (мобилка/CLI) или cookie `rocket_auth` (браузер).
+
+Без токена по TCP открыты только `POST /v1/auth/pair`, `GET /v1/auth/status` и все пути вне `/v1/` (статика SPA).
+
+Проверки на TCP выполняются в таком порядке:
+
+1. Заголовок `Host` должен быть loopback (`localhost`, `127.0.0.0/8`, `::1`), IP-литералом или хостом из `public_url` — иначе `421 bad_host`.
+2. `X-Rocket-Session` по TCP — `401 agent_header_forbidden`.
+3. `/v1/internal/*` по TCP — `404 not_found`.
+4. Нет валидного токена на закрытом маршруте — `401 unauthorized`.
+5. Запрос авторизован cookie и небезопасный (не GET/HEAD/OPTIONS) либо WebSocket-upgrade: `Origin` обязан совпасть с origin самого запроса (схема+хост+порт) или с origin из `public_url` — иначе `403 bad_origin`. Bearer-запросы проверке Origin не подлежат.
+
+Отзыв устройства мгновенно обрывает его живые SSE/WebSocket-соединения.
+
+### Токены и коды
+
+- Токен устройства: `rkt_` + base64url без padding от 32 байт `crypto/rand`. Демон хранит только hex SHA-256; сам токен выдаётся один раз при сопряжении.
+- Код сопряжения: 8 символов алфавита Crockford base32 (`0123456789ABCDEFGHJKMNPQRSTVWXYZ`), показывается как `XXXX-XXXX`, живёт 10 минут, одноразовый. При вводе нормализуется: верхний регистр, `-` и пробелы отбрасываются, `O→0`, `I→1`, `L→1`. Хранится только хеш.
+- Cookie `rocket_auth`: `HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000`; `Secure` — всегда, кроме обычного http на loopback-хост (иначе браузер её не сохранит).
+- `last_seen_at` устройства обновляется не чаще раза в минуту.
+- Конфиг: `public_url` (необязателен; абсолютный http/https URL с хостом, хвостовой `/` обрезается) — внешний адрес демона, например `https://mac.tail1.ts.net` за `tailscale serve`. Он попадает в allowlist `Host`/`Origin` и в QR сопряжения.
+
+### Маршруты
+
+| Метод | Путь | Описание |
+|---|---|---|
+| POST | `/v1/auth/pairing-codes` | Выпустить код сопряжения (обычно вызывает `rocket pair` по сокету) → `{"code":"AB12-CD34","expires_at":<unix>,"url":"<public_url или "">"}` |
+| POST | `/v1/auth/pair` | Обменять код на токен. Открыт без токена. Тело `{"code","name","kind"}`, `kind` — `mobile` или `web`; `name` обрезается до 64 символов, пустое = `kind`; тело не больше 4 КиБ |
+| GET | `/v1/auth/status` | Открыт без токена. `{"authenticated":false}` или `{"authenticated":true,"device":{...}}` |
+| POST | `/v1/auth/logout` | Отозвать текущее устройство, сбросить cookie → `204`. По сокету (нет устройства) — `400 no_device` |
+| GET | `/v1/auth/devices` | `[{"id","name","kind","created_at","last_seen_at","current"}]`; `last_seen_at` — unix или `null`; `current` — это устройство вызывающего |
+| DELETE | `/v1/auth/devices/{id}` | Отозвать устройство → `204`; нет такого — `404 not_found`; нечисловой id — `400 invalid_request` |
+
+`POST /v1/auth/pair` отвечает по-разному в зависимости от `kind`:
+
+- `mobile` → `200 {"device":{...},"token":"rkt_..."}`; приложение хранит токен и шлёт его как Bearer.
+- `web` → `200 {"device":{...}}` и `Set-Cookie: rocket_auth=<token>`; токен в теле не возвращается.
+
+Ограничение перебора: после 5 неудачных попыток (глобально) за последние 60 секунд `pair` отвечает `429 rate_limited`.
+
+### Коды ошибок
+
+| HTTP | code | Когда |
+|---|---|---|
+| 401 | `unauthorized` | нет/неверный/отозванный токен на закрытом маршруте по TCP |
+| 401 | `agent_header_forbidden` | `X-Rocket-Session` по TCP |
+| 404 | `not_found` | `/v1/internal/*` по TCP; `DELETE /v1/auth/devices/{id}` с неизвестным id |
+| 421 | `bad_host` | `Host` вне allowlist |
+| 403 | `bad_origin` | cookie-запрос (небезопасный метод или WebSocket) с чужим `Origin` |
+| 400 | `invalid_code` | код неизвестен, просрочен или уже использован (случаи неразличимы) |
+| 429 | `rate_limited` | слишком много неудачных попыток `pair` |
+| 400 | `invalid_request` | битый JSON, неверный `kind`, нечисловой id |
+
+CLI: `rocket pair [--web]`, `rocket devices ls|revoke <id>` — см. [04-cli.md](04-cli.md). `rocket doctor` проверяет loopback-привязку, `public_url` и `tailscale serve`.
 
 ## Настройки и GitHub
 

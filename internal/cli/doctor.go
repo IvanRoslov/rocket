@@ -3,16 +3,19 @@ package cli
 import (
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/IvanRoslov/rocket/internal/agent"
 	_ "github.com/IvanRoslov/rocket/internal/agent/claudecode" // registers "claude-code" in agent.Registry()
 	_ "github.com/IvanRoslov/rocket/internal/agent/codex"      // registers "codex" in agent.Registry()
 	"github.com/IvanRoslov/rocket/internal/client"
+	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -109,6 +112,10 @@ func runDoctorChecks() []checkResult {
 			// Only check GitHub token if daemon is running
 			results = append(results, checkGitHub(c))
 		}
+	}
+
+	if cfg, err := loadConfig(); err == nil {
+		results = append(results, checkRemote(cfg, exec.LookPath, tailscaleServeStatus)...)
 	}
 
 	results = append(results, checkAgents()...)
@@ -222,4 +229,41 @@ func trimTrailingNewline(s string) string {
 		s = s[:len(s)-1]
 	}
 	return s
+}
+
+// checkRemote reports on remote-access hygiene: loopback bind, public_url
+// and whether `tailscale serve` proxies to the daemon port.
+func checkRemote(cfg *config.Config, lookPath func(string) (string, error), serveStatus func() (string, error)) []checkResult {
+	var out []checkResult
+	if !isLoopbackBind(cfg.Host) {
+		out = append(out, checkResult{statusWarn, "listen", fmt.Sprintf("host: %s — демон виден в сети; рекомендовано host: 127.0.0.1 + tailscale serve", cfg.Host)})
+	} else {
+		out = append(out, checkResult{statusOK, "listen", cfg.Host})
+	}
+	if cfg.PublicURL == "" {
+		out = append(out, checkResult{statusWarn, "public_url", "не задан — QR сопряжения не будет содержать адреса"})
+	} else {
+		out = append(out, checkResult{statusOK, "public_url", cfg.PublicURL})
+	}
+	if _, err := lookPath("tailscale"); err != nil {
+		out = append(out, checkResult{statusWarn, "tailscale", "не найден в PATH — удалённый доступ не настроен"})
+		return out
+	}
+	st, err := serveStatus()
+	if err != nil || !strings.Contains(st, fmt.Sprintf(":%d", cfg.Port)) {
+		out = append(out, checkResult{statusWarn, "tailscale", fmt.Sprintf("serve не проксирует на порт %d — выполни `tailscale serve --bg %d`", cfg.Port, cfg.Port)})
+		return out
+	}
+	out = append(out, checkResult{statusOK, "tailscale", "serve → :" + strconv.Itoa(cfg.Port)})
+	return out
+}
+
+func isLoopbackBind(host string) bool {
+	ip := net.ParseIP(host)
+	return host == "localhost" || (ip != nil && ip.IsLoopback())
+}
+
+func tailscaleServeStatus() (string, error) {
+	out, err := exec.Command("tailscale", "serve", "status").CombinedOutput()
+	return string(out), err
 }
