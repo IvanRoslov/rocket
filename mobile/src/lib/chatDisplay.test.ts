@@ -1,6 +1,11 @@
 import { classifyUserEntry } from './chatDisplay'
 
 describe('classifyUserEntry', () => {
+  it('subagent hand-back is a system row labeled agent message', () => {
+    const text = 'Another Claude session sent a message:\n<agent-message from="w1">done</agent-message>'
+    expect(classifyUserEntry(text)).toEqual({ kind: 'system', label: 'agent message', body: text })
+  })
+
   it('plain human text stays human', () => {
     expect(classifyUserEntry('давай без миграции, просто фикс кода')).toEqual({ kind: 'human' })
   })

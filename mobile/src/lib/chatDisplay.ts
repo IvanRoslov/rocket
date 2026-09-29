@@ -43,6 +43,11 @@ export function classifyUserEntry(text: string): UserDisplay {
   const tag = t.match(/^<([a-z][a-z0-9_-]*)[\s>]/i)
   if (tag) return { kind: 'system', label: tag[1], body: t }
 
+  // Subagent hand-back: not a cross-session-message envelope, so the daemon leaves it.
+  if (t.startsWith('Another Claude session sent a message:')) {
+    return { kind: 'system', label: 'agent message', body: t }
+  }
+
   if (t.startsWith('Caveat:')) return { kind: 'system', label: 'caveat', body: t }
 
   return { kind: 'human' }

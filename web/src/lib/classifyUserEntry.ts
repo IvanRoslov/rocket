@@ -23,6 +23,7 @@ export function classifyUserEntry(text: string): UserEntryKind {
     value.startsWith('[large message]') ||
     value.startsWith('[task #') ||
     value.startsWith('[rocket') ||
+    value.startsWith('Another Claude session sent a message:') ||
     THREAD_FRAME_RE.test(value)
   ) {
     return 'system'

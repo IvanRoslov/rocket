@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { classifyUserEntry, fromEntryParts, systemEntryTitle } from './classifyUserEntry'
 
 describe('classifyUserEntry', () => {
+  it('classifies subagent hand-backs (Another Claude session sent a message) as system', () => {
+    expect(
+      classifyUserEntry('Another Claude session sent a message:\n<agent-message from="w1">done</agent-message>'),
+    ).toBe('system')
+  })
+
   it('classifies thread frames (task and role refs) as system', () => {
     expect(classifyUserEntry('[#1023/Q2 reply from cto] go')).toBe('system')
     expect(classifyUserEntry('[cto/Q1 answer from human] yes')).toBe('system')
