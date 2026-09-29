@@ -15,3 +15,11 @@ jest.mock('expo-secure-store', () => {
     __reset: () => store.clear(),
   }
 })
+
+jest.mock('expo-camera', () => {
+  const { View } = require('react-native')
+  return {
+    CameraView: View,
+    useCameraPermissions: () => [{ granted: true }, jest.fn()],
+  }
+})

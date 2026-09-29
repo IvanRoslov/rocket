@@ -26,6 +26,12 @@
       "expo-router",
       "expo-status-bar",
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Камера нужна, чтобы отсканировать QR сопряжения с rocket"
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "android": {

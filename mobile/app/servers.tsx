@@ -1,5 +1,6 @@
-import { router } from 'expo-router'
-import { useState } from 'react'
+import { useCameraPermissions, CameraView } from 'expo-camera'
+import { router, useLocalSearchParams } from 'expo-router'
+import { useEffect, useRef, useState } from 'react'
 import {
   Alert,
   KeyboardAvoidingView,
@@ -19,6 +20,7 @@ import { ActionSheet } from '../src/components/ActionSheet'
 import { Card, Dot, GhostButton, MonoText, PrimaryButton } from '../src/components/ui'
 import { uptime } from '../src/lib/format'
 import { useServers, type ServerEntry } from '../src/servers/ServerContext'
+import { DEFAULT_DEVICE_NAME, parsePairLink, usePairing } from '../src/servers/pairing'
 import { colors, mono, radius } from '../src/theme'
 
 function ServerCard({ server }: { server: ServerEntry }) {
@@ -86,65 +88,118 @@ function ServerCard({ server }: { server: ServerEntry }) {
   )
 }
 
-function AddServerForm({ onDone }: { onDone: () => void }) {
-  const { addServer } = useServers()
-  const [name, setName] = useState('')
+function Scanner({ onScan, onClose }: { onScan: (data: string) => void; onClose: () => void }) {
+  const [perm, requestPerm] = useCameraPermissions()
+  useEffect(() => {
+    if (perm && !perm.granted) requestPerm()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perm?.granted])
+
+  return (
+    <View style={{ gap: 10 }}>
+      {perm?.granted ? (
+        <CameraView
+          style={styles.camera}
+          facing="back"
+          barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+          onBarcodeScanned={({ data }) => onScan(data)}
+        />
+      ) : (
+        <Text style={styles.hint}>Разреши доступ к камере, чтобы отсканировать QR, или введи адрес и код вручную.</Text>
+      )}
+      <GhostButton label="Ввести вручную" onPress={onClose} />
+    </View>
+  )
+}
+
+function AddServerForm({ onDone, startScanning }: { onDone: () => void; startScanning: boolean }) {
+  const { pair, busy, error, setError } = usePairing()
+  const [name, setName] = useState(DEFAULT_DEVICE_NAME)
   const [url, setUrl] = useState('')
-  const [token, setToken] = useState('')
-  // Interim form: Task 8 replaces it with URL + pairing code / QR.
-  const valid = url.trim().length > 0 && token.trim().length > 0
+  const [code, setCode] = useState('')
+  const [scanning, setScanning] = useState(startScanning)
+  const scanned = useRef(false)
+
+  const submit = async (u: string, c: string) => {
+    if (await pair({ url: u, code: c, name })) {
+      onDone()
+      router.replace('/(tabs)')
+    }
+  }
+
+  const onScan = (data: string) => {
+    if (scanned.current) return
+    const link = parsePairLink(data)
+    if (!link) return
+    scanned.current = true
+    setUrl(link.baseUrl)
+    setCode(link.code)
+    setScanning(false)
+    submit(link.baseUrl, link.code).finally(() => {
+      scanned.current = false
+    })
+  }
 
   return (
     <Card style={{ padding: 16 }}>
-      <Text style={styles.formLabel}>Name</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Home desktop"
-        placeholderTextColor={colors.textFaint}
-        value={name}
-        onChangeText={setName}
-      />
-      <Text style={styles.formLabel}>Server URL</Text>
-      <TextInput
-        style={[styles.input, { fontFamily: mono }]}
-        placeholder="https://mac.tailnet.ts.net"
-        placeholderTextColor={colors.textFaint}
-        autoCapitalize="none"
-        autoCorrect={false}
-        keyboardType="url"
-        value={url}
-        onChangeText={setUrl}
-      />
-      <Text style={styles.formLabel}>Device token</Text>
-      <TextInput
-        style={[styles.input, { fontFamily: mono }]}
-        placeholder="rkt_…"
-        placeholderTextColor={colors.textFaint}
-        autoCapitalize="none"
-        autoCorrect={false}
-        secureTextEntry
-        value={token}
-        onChangeText={setToken}
-      />
-      <View style={{ flexDirection: 'row', gap: 9, marginTop: 6 }}>
-        <GhostButton label="Cancel" onPress={onDone} style={{ flex: 1 }} />
-        <PrimaryButton
-          label="Add server"
-          disabled={!valid}
-          onPress={async () => {
-            await addServer({
-              name: name.trim() || url.trim(),
-              baseUrl: url,
-              token: token.trim(),
-            })
-            onDone()
-            router.replace('/(tabs)')
-          }}
-          style={{ flex: 1 }}
-        />
-      </View>
+      {scanning ? (
+        <Scanner onScan={onScan} onClose={() => setScanning(false)} />
+      ) : (
+        <>
+          <PrimaryButton
+            label="Сканировать QR"
+            onPress={() => {
+              setError(null)
+              setScanning(true)
+            }}
+            style={{ marginBottom: 14 }}
+          />
+          <Text style={styles.formLabel}>Имя устройства</Text>
+          <TextInput
+            style={styles.input}
+            accessibilityLabel="Имя"
+            placeholder={DEFAULT_DEVICE_NAME}
+            placeholderTextColor={colors.textFaint}
+            value={name}
+            onChangeText={setName}
+          />
+          <Text style={styles.formLabel}>Адрес</Text>
+          <TextInput
+            style={[styles.input, { fontFamily: mono }]}
+            accessibilityLabel="Адрес"
+            placeholder="https://mac.tailnet.ts.net"
+            placeholderTextColor={colors.textFaint}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            value={url}
+            onChangeText={setUrl}
+          />
+          <Text style={styles.formLabel}>Код</Text>
+          <TextInput
+            style={[styles.input, { fontFamily: mono }]}
+            accessibilityLabel="Код"
+            placeholder="XXXX-XXXX"
+            placeholderTextColor={colors.textFaint}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            value={code}
+            onChangeText={setCode}
+          />
+          <View style={{ flexDirection: 'row', gap: 9, marginTop: 6 }}>
+            <GhostButton label="Отмена" onPress={onDone} style={{ flex: 1 }} />
+            <PrimaryButton
+              label={busy ? 'Подключаю…' : 'Подключить'}
+              disabled={busy}
+              onPress={() => submit(url, code)}
+              style={{ flex: 1 }}
+            />
+          </View>
+        </>
+      )}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
       <Text style={styles.hint}>
-        Remote access goes through your tailnet URL (https://your-mac.your-tailnet.ts.net). Pairing by QR code is coming next.
+        На компьютере выполни `rocket pair` — он покажет QR и одноразовый код. Телефон должен быть в твоём Tailscale.
       </Text>
     </Card>
   )
@@ -152,7 +207,8 @@ function AddServerForm({ onDone }: { onDone: () => void }) {
 
 export default function ServersScreen() {
   const { servers } = useServers()
-  const [adding, setAdding] = useState(false)
+  const { pair: pairParam } = useLocalSearchParams<{ pair?: string }>()
+  const [adding, setAdding] = useState(pairParam === '1')
   const qc = useQueryClient()
 
   return (
@@ -180,7 +236,7 @@ export default function ServersScreen() {
             <ServerCard key={s.id} server={s} />
           ))}
           {adding ? (
-            <AddServerForm onDone={() => setAdding(false)} />
+            <AddServerForm onDone={() => setAdding(false)} startScanning={pairParam === '1'} />
           ) : (
             <Pressable style={styles.addBtn} onPress={() => setAdding(true)}>
               <Text style={{ fontSize: 20, color: colors.textDim }}>＋</Text>
@@ -234,6 +290,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     backgroundColor: colors.card,
   },
+  camera: { height: 280, borderRadius: 12, overflow: 'hidden' },
+  error: { marginTop: 10, fontSize: 12.5, color: colors.redFg },
   hint: { marginTop: 12, fontSize: 12, lineHeight: 17, color: colors.textFaint },
   addBtn: {
     height: 56,

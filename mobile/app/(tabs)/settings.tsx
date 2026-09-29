@@ -142,8 +142,8 @@ function ServerSection() {
       </Card>
       <PrimaryButton label="Switch server" onPress={() => router.navigate('/servers')} />
       <Text style={styles.hint}>
-        To reach the daemon from your phone, rocketd must listen on the LAN: `host: 0.0.0.0` in
-        ~/.rocket/config.yaml.
+        Удалённый доступ — через Tailscale: `tailscale serve --bg 4477`, `public_url` в ~/.rocket/config.yaml и
+        `rocket pair` на компьютере (docs/testing/remote-access.md).
       </Text>
     </View>
   )
