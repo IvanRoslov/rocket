@@ -4,6 +4,7 @@
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native'
+import { AppState, type AppStateStatus } from 'react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { ToastProvider } from '../../src/components/Toast'
 import { ServerProvider } from '../../src/servers/ServerContext'
@@ -203,5 +204,25 @@ describe('Questions tab', () => {
     await fireEvent.press(screen.getByText('Yes'))
     await elapse(5000)
     await waitFor(() => expect(posts).toEqual([{ path: '/v1/agent-questions/9/answer', body: { choose: 1 } }]))
+  })
+
+  it('keeps the undo window on iOS inactive and commits on background', async () => {
+    let onChange: ((s: AppStateStatus) => void) | undefined
+    jest.spyOn(AppState, 'addEventListener').mockImplementation((_type, handler) => {
+      onChange = handler as (s: AppStateStatus) => void
+      return { remove: jest.fn() } as unknown as ReturnType<typeof AppState.addEventListener>
+    })
+    mockApi()
+    await renderScreen()
+    await waitFor(() => expect(screen.getByText('Postgres')).toBeTruthy())
+    await fireEvent.press(screen.getByText('Postgres'))
+    expect(onChange).toBeDefined()
+
+    await act(async () => onChange!('inactive'))
+    expect(posts).toEqual([])
+    expect(screen.getByText('Undo')).toBeTruthy()
+
+    await act(async () => onChange!('background'))
+    await waitFor(() => expect(posts).toEqual([{ path: '/v1/questions/7/answer', body: { choose: 1 } }]))
   })
 })

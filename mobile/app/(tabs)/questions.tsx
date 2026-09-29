@@ -25,10 +25,11 @@ export default function QuestionsScreen() {
   const [undo, setUndo] = useState<{ id: number; label: string } | null>(null)
   const queue = useRef(createDeferredQueue(UNDO_MS)).current
 
-  // Leaving is not an Undo: unmount and backgrounding commit the pending answer.
+  // Leaving is not an Undo: unmount and going to background commit the pending answer.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => {
-      if (s !== 'active') queue.flush()
+      // iOS reports 'inactive' for Control Center and the app switcher: not leaving yet.
+      if (s === 'background') queue.flush()
     })
     return () => {
       sub.remove()
