@@ -14,9 +14,11 @@ import ChatScreen from '../../app/chat/[id]'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
+// Route params: agent=1 by default; the orchestrator-mode test clears it.
+let mockAgentParam: string | undefined = '1'
 jest.mock('expo-router', () => ({
   router: { navigate: jest.fn(), push: jest.fn(), back: jest.fn() },
-  useLocalSearchParams: () => ({ id: 'librarian', agent: '1' }),
+  useLocalSearchParams: () => ({ id: 'librarian', agent: mockAgentParam }),
 }))
 
 /** The daemon has no session row for an agent that was never started, so its
@@ -63,6 +65,9 @@ function renderChat() {
 }
 
 describe('ChatScreen in agent mode', () => {
+  beforeEach(() => {
+    mockAgentParam = '1'
+  })
   afterEach(() => jest.restoreAllMocks())
 
   it('keeps the composer open with the session down and says where the message goes', async () => {
@@ -129,29 +134,49 @@ describe('ChatScreen in agent mode', () => {
     expect(screen.queryByText(/\{"command"/)).toBeNull()
   })
 
-  it('confirms a send against the stored body, leaving one bubble', async () => {
+  // Screen posts to POST /v1/messages in both modes. Only the session path
+  // (internal/api/messages.go) echoes the stored body; the agent path
+  // (agentDeliveryResult) returns {id,to,status,live} with no body.
+  async function sendAndConfirm(kind: 'orchestrator' | 'agent', postResponse: unknown, placeholder: RegExp, expectedBody: string) {
     const api = mockApi(
-      { session: { id: 'librarian', kind: 'agent', state: 'running' }, entries: [] },
-      { id: 5, body: 'hello (1 attachment)', to: 'x', status: 'queued', attempts: 0, created_at: 1 },
+      { session: { id: 'librarian', kind, state: 'running' }, entries: [] },
+      postResponse,
     )
     renderChat()
 
-    await waitFor(() => expect(screen.getByText('Send')).toBeTruthy())
-    const input = screen.getByPlaceholderText(/straight into its session/)
+    await waitFor(() => expect(screen.getByPlaceholderText(placeholder)).toBeTruthy())
+    const input = screen.getByPlaceholderText(placeholder)
     fireEvent.changeText(input, 'hello')
     await waitFor(() => expect(input.props.value).toBe('hello'))
     fireEvent.press(screen.getByText('Send'))
 
-    await waitFor(() => expect(screen.getByText('hello (1 attachment)')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(expectedBody)).toBeTruthy())
     expect(screen.getByText('⏳ sending…')).toBeTruthy()
 
     api.bodies['/v1/sessions/librarian/chat?limit=300'] = {
-      session: { id: 'librarian', kind: 'agent', state: 'running' },
-      entries: [
-        { role: 'user', text: 'hello (1 attachment)', ts: Math.floor(Date.now() / 1000) },
-      ],
+      session: { id: 'librarian', kind, state: 'running' },
+      entries: [{ role: 'user', text: expectedBody, ts: Math.floor(Date.now() / 1000) }],
     }
     await waitFor(() => expect(screen.queryByText('⏳ sending…')).toBeNull(), { timeout: 6000 })
-    expect(screen.getAllByText('hello (1 attachment)')).toHaveLength(1)
+    expect(screen.getAllByText(expectedBody)).toHaveLength(1)
+  }
+
+  it('orchestrator mode: confirms a send against the stored body echoed by POST /v1/messages', async () => {
+    mockAgentParam = undefined
+    await sendAndConfirm(
+      'orchestrator',
+      { id: 5, status: 'queued', body: 'hello (1 attachment)' },
+      /Message the orchestrator/,
+      'hello (1 attachment)',
+    )
+  }, 15000)
+
+  it('agent mode: response has no body, so the typed text is confirmed', async () => {
+    await sendAndConfirm(
+      'agent',
+      { id: 5, to: 'librarian', status: 'queued', live: true },
+      /straight into its session/,
+      'hello',
+    )
   }, 15000)
 })

@@ -452,7 +452,7 @@ export default function AgentScreen() {
             <View style={styles.sessionRow}>
               {a.session_alive ? (
                 <GhostButton
-                  label="Open terminal"
+                  label="Open chat"
                   onPress={() => router.navigate(`/chat/${a.id}?agent=1`)}
                   style={{ flex: 1 }}
                 />
