@@ -17,6 +17,7 @@
 // even without the HTTP/2 (tls_port) listener.
 
 import { useEffect, useRef } from 'react'
+import { fetchAuthStatus, onUnauthorized } from './auth'
 import type { RocketEvent } from './types'
 
 export const EVENT_TYPES = [
@@ -99,6 +100,13 @@ function connectShared(): void {
   source.onerror = () => {
     source.close()
     sharedSource = null
+    // EventSource can't see the HTTP status, so probe whether the cookie is
+    // still valid (a revoked device gets 401 on the stream).
+    fetchAuthStatus()
+      .then((s) => {
+        if (!s.authenticated) onUnauthorized()
+      })
+      .catch(() => {})
     // Reconnect only while someone is still listening; the last
     // unsubscribe cancels the timer.
     if (subscribers.size > 0 && reconnectTimer === null) {

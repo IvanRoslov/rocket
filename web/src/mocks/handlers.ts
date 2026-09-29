@@ -6,6 +6,7 @@
 // internal/api/tasks.go / questions.go.
 
 import { http, HttpResponse } from 'msw'
+import type { Device, PairingCode } from '../lib/auth'
 import { isHuman } from '../lib/participants'
 import { slugify } from '../lib/slug'
 import type {
@@ -211,7 +212,35 @@ function applyTurn(question: Question, author: string, to?: string[]) {
   question.whose_turn = question.your_turn ? 'user' : 'orchestrator'
 }
 
+const devicesFixture = (): Device[] => [
+  { id: 1, name: 'Chrome · macOS', kind: 'web', current: true, created_at: 1759000000, last_seen_at: null },
+  { id: 2, name: 'iPhone', kind: 'mobile', current: false, created_at: 1759000100, last_seen_at: 1759000200 },
+]
+let devicesState: Device[] = devicesFixture()
+
+export function resetDevices(): void {
+  devicesState = devicesFixture()
+}
+
 export const handlers = [
+  http.get('/v1/auth/status', () =>
+    HttpResponse.json({ authenticated: true, device: devicesState.find((d) => d.current) ?? devicesFixture()[0] }),
+  ),
+  http.get('/v1/auth/devices', () => HttpResponse.json(devicesState)),
+  http.delete('/v1/auth/devices/:id', ({ params }) => {
+    devicesState = devicesState.filter((d) => d.id !== Number(params.id))
+    return new HttpResponse(null, { status: 204 })
+  }),
+  http.post('/v1/auth/pairing-codes', () => {
+    const code: PairingCode = {
+      code: 'AB12-CD34',
+      expires_at: Math.floor(Date.now() / 1000) + 600,
+      url: 'https://mac.tail1.ts.net',
+    }
+    return HttpResponse.json(code)
+  }),
+  http.post('/v1/auth/logout', () => new HttpResponse(null, { status: 204 })),
+
   http.get('/v1/projects', () => HttpResponse.json(projectsState)),
 
   // Mirrors internal/api/sessions.go handleListSessions + store.ListSessions:
