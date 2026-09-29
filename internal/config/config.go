@@ -2,8 +2,10 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -41,7 +43,11 @@ type Config struct {
 	// over one connection. 0 disables the listener. The certificate lives
 	// in <home>/tls/ (auto-generated self-signed; replace with an
 	// mkcert-issued pair to avoid the browser trust warning).
-	TLSPort              int           `yaml:"tls_port"`
+	TLSPort int `yaml:"tls_port"`
+	// PublicURL is how remote clients reach this daemon (typically the
+	// `tailscale serve` https://<mac>.<tailnet>.ts.net address). Used in
+	// pairing QR codes/links and in the TCP Host/Origin allowlist.
+	PublicURL            string        `yaml:"public_url"`
 	HeartbeatInterval    time.Duration `yaml:"heartbeat_interval"`
 	GithubPollInterval   time.Duration `yaml:"github_poll_interval"`
 	DefaultAgent         string        `yaml:"default_agent"`
@@ -265,6 +271,14 @@ func Load(home string) (*Config, error) {
 		cfg.Host = "127.0.0.1"
 	}
 
+	if cfg.PublicURL != "" {
+		u, err := url.Parse(cfg.PublicURL)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			return nil, fmt.Errorf("config: public_url must be an absolute http(s) URL, got %q", cfg.PublicURL)
+		}
+		cfg.PublicURL = strings.TrimRight(cfg.PublicURL, "/")
+	}
+
 	// Restore home since YAML unmarshaling doesn't set it
 	cfg.Home = home
 
@@ -311,3 +325,15 @@ func expandTilde(path, home string) string {
 
 // UnmarshalYAML implements yaml.Unmarshaler for duration fields.
 // This is handled by yaml.v3 directly for time.Duration fields.
+
+// PublicHost returns the host[:port] of PublicURL, or "" when unset.
+func (c *Config) PublicHost() string {
+	if c.PublicURL == "" {
+		return ""
+	}
+	u, err := url.Parse(c.PublicURL)
+	if err != nil {
+		return ""
+	}
+	return u.Host
+}

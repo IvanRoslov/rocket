@@ -43,10 +43,18 @@ type Deps struct {
 	// effect without a daemon restart). It returns github.ErrNoToken if no
 	// token is configured.
 	GH func() (*github.Client, error)
+
+	// Auth is the in-memory device-auth state (limiter, live-connection
+	// registry). NewHandler fills a fresh one when nil; Serve shares one
+	// between the routes and the TCP middleware.
+	Auth *AuthRuntime
 }
 
 // NewHandler builds the routed http.Handler for rocket's API.
 func NewHandler(d Deps) http.Handler {
+	if d.Auth == nil {
+		d.Auth = NewAuthRuntime()
+	}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +94,7 @@ func NewHandler(d Deps) http.Handler {
 	registerAgentRoutes(mux, d)
 	registerAttachmentRoutes(mux, d)
 	registerSettingsRoutes(mux, d)
+	registerAuthRoutes(mux, d)
 
 	// Any /v1 path not matched by a more specific route above is a 404,
 	// rendered in the standard error JSON shape. This is a prefix pattern,

@@ -476,3 +476,24 @@ func TestMirrorIndexLockMaxAgeZeroDisablesReaping(t *testing.T) {
 		t.Errorf("MirrorIndexLockMaxAge = %v, want 0", cfg.MirrorIndexLockMaxAge)
 	}
 }
+
+func TestPublicURL(t *testing.T) {
+	home := t.TempDir()
+	write := func(s string) {
+		if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("public_url: https://mac.tail1.ts.net/\n")
+	cfg, err := Load(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PublicURL != "https://mac.tail1.ts.net" || cfg.PublicHost() != "mac.tail1.ts.net" {
+		t.Fatalf("PublicURL=%q PublicHost=%q", cfg.PublicURL, cfg.PublicHost())
+	}
+	write("public_url: mac.tail1.ts.net\n")
+	if _, err := Load(home); err == nil {
+		t.Fatal("scheme-less public_url must be rejected")
+	}
+}
