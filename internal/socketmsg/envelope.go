@@ -63,7 +63,8 @@ const (
 
 var (
 	envelopeOpen    = regexp.MustCompile(`\A<` + EnvelopeTag + `(?: [^>\n]*)?>\n`)
-	escapedCloseTag = regexp.MustCompile(`(?i)<\\/(` + EnvelopeTag + `)`)
+	fromNameAttr    = regexp.MustCompile(` from-name="([\p{L}\p{N}._-]+)"`)
+	escapedCloseTag =regexp.MustCompile(`(?i)<\\/(` + EnvelopeTag + `)`)
 )
 
 // Unwrap — обратная к Envelope операция над текстом user-записи транскрипта:
@@ -89,5 +90,11 @@ func Unwrap(s string) (string, bool) {
 	if tail != "" && !strings.HasPrefix(tail, transcriptTrailer) {
 		return "", false
 	}
-	return escapedCloseTag.ReplaceAllString(rest[:end], "</$1"), true
+	body := escapedCloseTag.ReplaceAllString(rest[:end], "</$1")
+	// Peer, не являющийся rocket, мог написать прямо в сокет без префикса
+	// `[from X]` в теле; имя есть только в атрибуте, восстанавливаем его.
+	if m := fromNameAttr.FindStringSubmatch(s[:loc[1]]); m != nil && m[1] != "rocket" && !strings.HasPrefix(body, "[from ") {
+		body = "[from " + m[1] + "] " + body
+	}
+	return body, true
 }

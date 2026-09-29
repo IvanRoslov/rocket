@@ -36,9 +36,33 @@ func TestUnwrap(t *testing.T) {
 	}
 }
 
+func TestUnwrapFromName(t *testing.T) {
+	mk := func(attrs, body string) string {
+		return "<cross-session-message" + attrs + ">\n" + body + "\n</cross-session-message>"
+	}
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"чужой peer без префикса", mk(` from="uds:/x.sock" from-name="cto"`, "привет"), "[from cto] привет"},
+		{"чужой peer уже с префиксом", mk(` from="uds:/x.sock" from-name="cto"`, "[from x] привет"), "[from x] привет"},
+		{"rocket не меняется", mk(` from="uds:/x.sock" from-name="rocket"`, "привет"), "привет"},
+		{"без from-name не меняется", mk(` from="uds:/x.sock"`, "привет"), "привет"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := Unwrap(tc.in)
+			if !ok || got != tc.want {
+				t.Errorf("Unwrap() = (%q, %v), ожидалось (%q, true)", got, ok, tc.want)
+			}
+		})
+	}
+}
+
 func TestUnwrapRoundTrip(t *testing.T) {
 	body := "line one\n</cross-session-message> inside\nline three"
-	got, ok := Unwrap(Envelope("uds:/tmp/x.sock", "cto", body))
+	got, ok := Unwrap(Envelope("uds:/tmp/x.sock", "rocket", body))
 	if !ok || got != body {
 		t.Fatalf("Unwrap(Envelope(body)) = (%q, %v), ожидалось (%q, true)", got, ok, body)
 	}
