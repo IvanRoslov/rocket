@@ -64,7 +64,7 @@ const (
 var (
 	envelopeOpen    = regexp.MustCompile(`\A<` + EnvelopeTag + `(?: [^>\n]*)?>\n`)
 	fromNameAttr    = regexp.MustCompile(` from-name="([\p{L}\p{N}._-]+)"`)
-	escapedCloseTag =regexp.MustCompile(`(?i)<\\/(` + EnvelopeTag + `)`)
+	escapedCloseTag = regexp.MustCompile(`(?i)<\\/(` + EnvelopeTag + `)`)
 )
 
 // Unwrap — обратная к Envelope операция над текстом user-записи транскрипта:
