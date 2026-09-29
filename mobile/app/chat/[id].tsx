@@ -207,6 +207,13 @@ export default function ChatScreen() {
           {rows.slice(-windowSize).map((item) =>
             item.kind === 'entry' ? (
               <EntryBubble key={item.key} entry={item.entry} />
+            ) : item.kind === 'tools' ? (
+              // Interim: a proper grouped row arrives with the chat-screen task.
+              <View key={item.key}>
+                {item.entries.map((e, i) => (
+                  <EntryBubble key={`${item.key}-${i}`} entry={e} />
+                ))}
+              </View>
             ) : (
               <View key={item.key} style={{ alignItems: 'flex-end', marginVertical: 3 }}>
                 <View style={[styles.bubble, { backgroundColor: colors.indigoBg, borderColor: colors.indigoBorder }]}>
