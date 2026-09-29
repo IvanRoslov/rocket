@@ -28,14 +28,16 @@ const OTHER = {
 let posts: { path: string; body: unknown }[] = []
 
 /** Serves the inbox and records POSTs; `postStatus` lets a test make them fail. */
-function mockApi(opts: { threads?: unknown[]; postStatus?: number; postBody?: unknown } = {}) {
+function mockApi(
+  opts: { threads?: unknown[]; postStatus?: number; postBody?: unknown; failPath?: string } = {},
+) {
   posts = []
   const threads = opts.threads ?? [MINE, OTHER]
   globalThis.fetch = jest.fn(async (url: string, init?: RequestInit) => {
     const path = String(url).replace(/^https?:\/\/[^/]+/, '')
     if (init?.method === 'POST') {
       posts.push({ path, body: JSON.parse(String(init.body)) })
-      const status = opts.postStatus ?? 200
+      const status = opts.failPath && opts.failPath !== path ? 200 : (opts.postStatus ?? 200)
       return { ok: status < 300, status, json: async () => opts.postBody ?? {} }
     }
     if (path === '/v1/threads') return { ok: true, status: 200, json: async () => ({ threads }) }
@@ -138,6 +140,50 @@ describe('Questions tab', () => {
     await elapse(5000)
     await waitFor(() => expect(screen.getByText('already resolved')).toBeTruthy())
     expect(screen.getByText('Which DB?')).toBeTruthy()
+  })
+
+  it('reports a failed answer even when later answers were started before it settled', async () => {
+    const t = (id: number, title: string, opt: string) => ({ ...MINE, id, title, options: [opt] })
+    mockApi({
+      threads: [t(7, 'Q-A', 'A1'), t(11, 'Q-B', 'B1'), t(12, 'Q-C', 'C1')],
+      postStatus: 409,
+      postBody: { error: { code: 'question_resolved', message: 'already resolved' } },
+      failPath: '/v1/questions/7/answer',
+    })
+    await renderScreen()
+    await waitFor(() => expect(screen.getByText('A1')).toBeTruthy())
+    await fireEvent.press(screen.getByText('A1'))
+    await fireEvent.press(screen.getByText('B1'))
+    // Pressing B and C committed A; its 409 arrives while C is still pending.
+    await fireEvent.press(screen.getByText('C1'))
+    await waitFor(() => expect(screen.getByText('already resolved')).toBeTruthy())
+    expect(screen.getByText('Q-A')).toBeTruthy()
+  })
+
+  it('keeps typed text when a failed answer brings the card back', async () => {
+    mockApi({
+      postStatus: 409,
+      postBody: { error: { code: 'question_resolved', message: 'already resolved' } },
+    })
+    await renderScreen()
+    await waitFor(() => expect(screen.getByPlaceholderText('Your answer…')).toBeTruthy())
+    await fireEvent.changeText(screen.getByPlaceholderText('Your answer…'), 'use sqlite')
+    await fireEvent.press(screen.getByText('Send'))
+    await elapse(5000)
+    await waitFor(() => expect(screen.getByText('already resolved')).toBeTruthy())
+    expect(screen.getByDisplayValue('use sqlite')).toBeTruthy()
+  })
+
+  it('shows a thread again when the daemon reopens it after a successful answer', async () => {
+    // The refetch after the answer still returns the same id, open and on you.
+    mockApi()
+    await renderScreen()
+    await waitFor(() => expect(screen.getByText('Postgres')).toBeTruthy())
+    await fireEvent.press(screen.getByText('Postgres'))
+    expect(screen.queryByText('Which DB?')).toBeNull()
+    await elapse(5000)
+    await waitFor(() => expect(posts.length).toBe(1))
+    await waitFor(() => expect(screen.getByText('Which DB?')).toBeTruthy())
   })
 
   it('commits a pending answer when the screen unmounts', async () => {

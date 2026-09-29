@@ -36,40 +36,40 @@ export default function QuestionsScreen() {
     }
   }, [queue])
 
+  const unhide = (id: number) =>
+    setHidden((prev) => {
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
+
   const onAnswer = (thread: ThreadInboxEntry, a: ThreadAnswer, label: string) => {
     setHidden((prev) => new Set(prev).add(thread.id))
     setUndo({ id: thread.id, label })
     queue.schedule(() => {
       setUndo((u) => (u?.id === thread.id ? null : u))
-      answer.mutate(
-        { thread, answer: a },
-        {
-          onError: (e) => {
-            setHidden((prev) => {
-              const next = new Set(prev)
-              next.delete(thread.id)
-              return next
-            })
-            toast.show((e as Error).message)
-          },
-        },
-      )
+      // mutateAsync, not mutate(…, {onError}): per-call callbacks of a shared
+      // mutation are dropped when another answer starts or the screen unmounts.
+      answer
+        .mutateAsync({ thread, answer: a })
+        // Unhide only once the refetch has landed: no flash of the answered
+        // card, and a thread reopened later (same id) is not hidden forever.
+        .then(() => threads.refetch())
+        .catch((e) => toast.show((e as Error).message))
+        .finally(() => unhide(thread.id))
     })
   }
 
   const onUndo = () => {
     if (!undo) return
     queue.cancel()
-    setHidden((prev) => {
-      const next = new Set(prev)
-      next.delete(undo.id)
-      return next
-    })
+    unhide(undo.id)
     setUndo(null)
   }
 
   const all = threads.data ?? []
-  const mine = useMemo(() => waitingOnYou(all).filter((t) => !hidden.has(t.id)), [all, hidden])
+  const mine = useMemo(() => waitingOnYou(all), [all])
+  const visible = mine.filter((t) => !hidden.has(t.id)).length
   const others = useMemo(() => otherOpen(all), [all])
 
   return (
@@ -80,11 +80,14 @@ export default function QuestionsScreen() {
         refreshControl={<RefreshControl refreshing={threads.isRefetching} onRefresh={() => threads.refetch()} />}
       >
         <Text style={styles.h1}>Questions</Text>
-        <SectionTitle>{`Waiting on you (${mine.length})`}</SectionTitle>
+        <SectionTitle>{`Waiting on you (${visible})`}</SectionTitle>
+        {/* Answered cards stay mounted (display none) so typed text survives a failed send. */}
         {mine.map((t) => (
-          <ThreadCard key={t.id} thread={t} onAnswer={onAnswer} />
+          <View key={t.id} style={hidden.has(t.id) ? { display: 'none' } : undefined}>
+            <ThreadCard thread={t} onAnswer={onAnswer} />
+          </View>
         ))}
-        {threads.isSuccess && mine.length === 0 ? <EmptyState text="No questions waiting on you." /> : null}
+        {threads.isSuccess && visible === 0 ? <EmptyState text="No questions waiting on you." /> : null}
         {others.length > 0 ? (
           <Pressable onPress={() => setShowOthers((v) => !v)} style={{ paddingVertical: 10 }}>
             <Text style={styles.othersToggle}>

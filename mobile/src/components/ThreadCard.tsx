@@ -45,7 +45,7 @@ export function ThreadCard({
           {options.length > 0 ? (
             <View style={styles.optionRow}>
               {options.map((label, i) => (
-                <Pressable key={label} style={styles.optionBtn} onPress={() => onAnswer(thread, { choose: i + 1 }, label)}>
+                <Pressable key={i} style={styles.optionBtn} onPress={() => onAnswer(thread, { choose: i + 1 }, label)}>
                   <Text style={styles.optionText}>{label}</Text>
                 </Pressable>
               ))}
