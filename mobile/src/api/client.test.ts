@@ -1,4 +1,4 @@
-import { api, ApiError } from './client'
+import { api, ApiError, onUnauthorized, setAuthToken } from './client'
 
 const BASE = 'http://10.0.0.5:4477'
 
@@ -48,5 +48,30 @@ describe('api client', () => {
     const [, init] = (fetch as jest.Mock).mock.calls[0]
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body)).toEqual({ to: 'orch', body: 'hi' })
+  })
+
+  it('sends Bearer for a registered baseUrl only', async () => {
+    const calls: RequestInit[] = []
+    globalThis.fetch = jest.fn(async (_url: string, init: RequestInit) => {
+      calls.push(init)
+      return new Response('{}', { status: 200 })
+    }) as unknown as typeof fetch
+    setAuthToken(BASE, 'rkt_abc')
+    await api.get(BASE, '/v1/health')
+    await api.get('http://other:1', '/v1/health')
+    expect((calls[0].headers as Record<string, string>).Authorization).toBe('Bearer rkt_abc')
+    expect((calls[1].headers as Record<string, string>).Authorization).toBeUndefined()
+    setAuthToken(BASE, null)
+  })
+
+  it('fires onUnauthorized on 401 and still throws ApiError', async () => {
+    globalThis.fetch = jest.fn(async () =>
+      new Response(JSON.stringify({ error: { code: 'unauthorized', message: 'x' } }), { status: 401 }),
+    ) as unknown as typeof fetch
+    const seen: string[] = []
+    const off = onUnauthorized((b) => seen.push(b))
+    await expect(api.get(BASE, '/v1/projects')).rejects.toMatchObject({ status: 401, code: 'unauthorized' })
+    expect(seen).toEqual([BASE])
+    off()
   })
 })

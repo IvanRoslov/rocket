@@ -163,19 +163,19 @@ POST /v1/sessions/{id}/quiz/answer
 Первый (хвостовой) запрос:
 
 ```bash
-curl -s "http://127.0.0.1:4477/v1/sessions/billing-v2-orch/chat?limit=50"
+curl -s --unix-socket ~/.rocket/rocket.sock "http://rocket/v1/sessions/billing-v2-orch/chat?limit=50"
 ```
 
 Инкрементальный запрос по курсору из предыдущего ответа:
 
 ```bash
-curl -s "http://127.0.0.1:4477/v1/sessions/billing-v2-orch/chat?cursor=%2FUsers%2Fivan%2F.claude%2Fprojects%2F-Users-ivan-rocket-wt-billing%2Fsess.jsonl%3A48213"
+curl -s --unix-socket ~/.rocket/rocket.sock "http://rocket/v1/sessions/billing-v2-orch/chat?cursor=%2FUsers%2Fivan%2F.claude%2Fprojects%2F-Users-ivan-rocket-wt-billing%2Fsess.jsonl%3A48213"
 ```
 
 Отправка сообщения оркестратору:
 
 ```bash
-curl -s -X POST http://127.0.0.1:4477/v1/messages \
+curl -s --unix-socket ~/.rocket/rocket.sock -X POST http://rocket/v1/messages \
   -H 'Content-Type: application/json' \
   -d '{"to":"billing-v2-orch","body":"давай без миграции, просто фикс кода"}'
 ```

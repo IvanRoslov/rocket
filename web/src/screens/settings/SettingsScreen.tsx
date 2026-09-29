@@ -4,18 +4,20 @@
 
 import { useState } from 'react'
 import { DaemonSection } from './DaemonSection'
+import { DevicesSection } from './DevicesSection'
 import { GithubSection } from './GithubSection'
 import { ProjectSection } from './ProjectSection'
 import { ReposSection } from './ReposSection'
 import './settings.css'
 
-type SettingsSection = 'github' | 'repos' | 'project' | 'daemon'
+type SettingsSection = 'github' | 'repos' | 'project' | 'daemon' | 'devices'
 
 const NAV_ITEMS: { key: SettingsSection; label: string }[] = [
   { key: 'github', label: 'GitHub' },
   { key: 'repos', label: 'Repositories' },
   { key: 'project', label: 'Project' },
   { key: 'daemon', label: 'Daemon' },
+  { key: 'devices', label: 'Устройства' },
 ]
 
 export function SettingsScreen() {
@@ -41,6 +43,7 @@ export function SettingsScreen() {
         {section === 'repos' && <ReposSection />}
         {section === 'project' && <ProjectSection />}
         {section === 'daemon' && <DaemonSection />}
+        {section === 'devices' && <DevicesSection />}
       </div>
     </main>
   )

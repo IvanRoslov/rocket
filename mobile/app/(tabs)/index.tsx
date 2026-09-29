@@ -115,7 +115,7 @@ export default function ProjectsScreen() {
               Server unreachable
             </Text>
             <Text style={{ color: colors.redFg, fontSize: 12.5, marginBottom: 10 }}>
-              {active ? `${active.host}:${active.port} is not answering.` : 'No server selected.'}
+              {active ? `${active.baseUrl} is not answering.` : 'No server selected.'}
             </Text>
             <Pressable onPress={() => router.navigate('/servers')}>
               <Text style={{ color: colors.accent, fontSize: 13, fontWeight: '600' }}>Switch server →</Text>

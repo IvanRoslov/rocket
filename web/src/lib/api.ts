@@ -2,6 +2,8 @@
 // `{"error":{"code":"...","message":"..."}}`; we surface those as
 // ApiError so callers can branch on `code` without parsing text.
 
+import { onUnauthorized } from './auth'
+
 export class ApiError extends Error {
   status: number
   code: string
@@ -25,6 +27,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   if (!res.ok) {
+    if (res.status === 401) onUnauthorized()
     const payload = (await res.json().catch(() => null)) as ErrorEnvelope | null
     throw new ApiError(
       res.status,
@@ -44,6 +47,7 @@ async function upload(file: Blob): Promise<{ id: number; url: string }> {
     body: file,
   })
   if (!res.ok) {
+    if (res.status === 401) onUnauthorized()
     const payload = (await res.json().catch(() => null)) as ErrorEnvelope | null
     throw new ApiError(
       res.status,

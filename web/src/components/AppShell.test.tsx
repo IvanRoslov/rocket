@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { setupServer } from 'msw/node'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { resetUnauthorizedLatch } from '../lib/auth'
 import { LAST_PROJECT_STORAGE_KEY } from '../lib/lastProject'
 import { handlers } from '../mocks/handlers'
 import { AppShell } from './AppShell'
@@ -124,4 +125,45 @@ test('the Questions tab counts the threads whose turn is yours', async () => {
   const questions = await screen.findByRole('link', { name: /Questions/ })
   // Two task threads plus the role thread — three, not two.
   await waitFor(() => expect(questions).toHaveTextContent('3'))
+})
+
+test('an unauthenticated status redirects to /login with next', async () => {
+  const assign = vi.fn()
+  const original = window.location
+  Object.defineProperty(window, 'location', {
+    configurable: true,
+    value: { ...original, pathname: '/p/billing', search: '?x=1', assign },
+  })
+  resetUnauthorizedLatch()
+  try {
+    server.use(http.get('/v1/auth/status', () => HttpResponse.json({ authenticated: false })))
+    renderShell('/p/billing')
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/login?next=' + encodeURIComponent('/p/billing?x=1')))
+  } finally {
+    Object.defineProperty(window, 'location', { configurable: true, value: original })
+    resetUnauthorizedLatch()
+  }
+})
+
+test('a 503 from the status probe does not redirect', async () => {
+  const assign = vi.fn()
+  const original = window.location
+  Object.defineProperty(window, 'location', { configurable: true, value: { ...original, assign } })
+  resetUnauthorizedLatch()
+  try {
+    let probed = false
+    server.use(
+      http.get('/v1/auth/status', () => {
+        probed = true
+        return new HttpResponse(null, { status: 503 })
+      }),
+    )
+    renderShell('/')
+    await waitFor(() => expect(probed).toBe(true))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(assign).not.toHaveBeenCalled()
+  } finally {
+    Object.defineProperty(window, 'location', { configurable: true, value: original })
+    resetUnauthorizedLatch()
+  }
 })

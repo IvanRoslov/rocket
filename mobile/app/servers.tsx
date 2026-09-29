@@ -1,5 +1,6 @@
-import { router } from 'expo-router'
-import { useState } from 'react'
+import { useCameraPermissions, CameraView } from 'expo-camera'
+import { router, useLocalSearchParams } from 'expo-router'
+import { useEffect, useRef, useState } from 'react'
 import {
   Alert,
   KeyboardAvoidingView,
@@ -19,11 +20,12 @@ import { ActionSheet } from '../src/components/ActionSheet'
 import { Card, Dot, GhostButton, MonoText, PrimaryButton } from '../src/components/ui'
 import { uptime } from '../src/lib/format'
 import { useServers, type ServerEntry } from '../src/servers/ServerContext'
+import { DEFAULT_DEVICE_NAME, parsePairLink, usePairing } from '../src/servers/pairing'
 import { colors, mono, radius } from '../src/theme'
 
 function ServerCard({ server }: { server: ServerEntry }) {
   const { activeId, setActive, removeServer } = useServers()
-  const health = useHealth(`http://${server.host}:${server.port}`)
+  const health = useHealth(server.baseUrl)
   const online = health.isSuccess
   const isActive = activeId === server.id
   const [menu, setMenu] = useState(false)
@@ -56,7 +58,7 @@ function ServerCard({ server }: { server: ServerEntry }) {
           </Pressable>
         </View>
         <MonoText style={{ color: colors.textDim, marginBottom: 6 }}>
-          {server.host}:{server.port}
+          {server.baseUrl}
         </MonoText>
         <Text style={{ fontSize: 12, color: colors.textFaint }}>
           {online
@@ -68,7 +70,7 @@ function ServerCard({ server }: { server: ServerEntry }) {
       </Card>
       <ActionSheet
         visible={menu}
-        title={`${server.name} · ${server.host}:${server.port}`}
+        title={`${server.name} · ${server.baseUrl}`}
         onClose={() => setMenu(false)}
         actions={[
           {
@@ -86,66 +88,116 @@ function ServerCard({ server }: { server: ServerEntry }) {
   )
 }
 
-function AddServerForm({ onDone }: { onDone: () => void }) {
-  const { addServer } = useServers()
-  const [name, setName] = useState('')
-  const [host, setHost] = useState('')
-  const [port, setPort] = useState('4477')
-  const valid = host.trim().length > 0 && /^\d+$/.test(port.trim())
+function Scanner({ onScan, onClose }: { onScan: (data: string) => void; onClose: () => void }) {
+  const [perm, requestPerm] = useCameraPermissions()
+  useEffect(() => {
+    if (perm && !perm.granted) requestPerm()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perm?.granted])
+
+  return (
+    <View style={{ gap: 10 }}>
+      {perm?.granted ? (
+        <CameraView
+          style={styles.camera}
+          facing="back"
+          barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+          onBarcodeScanned={({ data }) => onScan(data)}
+        />
+      ) : (
+        <Text style={styles.hint}>Разреши доступ к камере, чтобы отсканировать QR, или введи адрес и код вручную.</Text>
+      )}
+      <GhostButton label="Ввести вручную" onPress={onClose} />
+    </View>
+  )
+}
+
+function AddServerForm({ onDone, startScanning }: { onDone: () => void; startScanning: boolean }) {
+  const { pair, busy, error, setError } = usePairing()
+  const [name, setName] = useState(DEFAULT_DEVICE_NAME)
+  const [url, setUrl] = useState('')
+  const [code, setCode] = useState('')
+  const [scanning, setScanning] = useState(startScanning)
+  const scanned = useRef(false)
+
+  const submit = async (u: string, c: string) => {
+    if (await pair({ url: u, code: c, name })) {
+      onDone()
+      router.replace('/(tabs)')
+    }
+  }
+
+  // A scanned QR never pairs on its own: hand it to the confirm screen (same as a deep link).
+  const onScan = (data: string) => {
+    if (scanned.current) return
+    const link = parsePairLink(data)
+    if (!link) return
+    scanned.current = true
+    setScanning(false)
+    router.push({ pathname: '/pair', params: { url: link.baseUrl, code: link.code } })
+    scanned.current = false
+  }
 
   return (
     <Card style={{ padding: 16 }}>
-      <Text style={styles.formLabel}>Name</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Home desktop"
-        placeholderTextColor={colors.textFaint}
-        value={name}
-        onChangeText={setName}
-      />
-      <View style={{ flexDirection: 'row', gap: 10 }}>
-        <View style={{ flex: 2 }}>
-          <Text style={styles.formLabel}>Host / IP</Text>
+      {scanning ? (
+        <Scanner onScan={onScan} onClose={() => setScanning(false)} />
+      ) : (
+        <>
+          <PrimaryButton
+            label="Сканировать QR"
+            onPress={() => {
+              setError(null)
+              setScanning(true)
+            }}
+            style={{ marginBottom: 14 }}
+          />
+          <Text style={styles.formLabel}>Имя устройства</Text>
+          <TextInput
+            style={styles.input}
+            accessibilityLabel="Имя"
+            placeholder={DEFAULT_DEVICE_NAME}
+            placeholderTextColor={colors.textFaint}
+            value={name}
+            onChangeText={setName}
+          />
+          <Text style={styles.formLabel}>Адрес</Text>
           <TextInput
             style={[styles.input, { fontFamily: mono }]}
-            placeholder="192.168.1.10"
+            accessibilityLabel="Адрес"
+            placeholder="https://mac.tailnet.ts.net"
             placeholderTextColor={colors.textFaint}
             autoCapitalize="none"
             autoCorrect={false}
-            keyboardType="numbers-and-punctuation"
-            value={host}
-            onChangeText={setHost}
+            keyboardType="url"
+            value={url}
+            onChangeText={setUrl}
           />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.formLabel}>Port</Text>
+          <Text style={styles.formLabel}>Код</Text>
           <TextInput
             style={[styles.input, { fontFamily: mono }]}
-            keyboardType="number-pad"
-            value={port}
-            onChangeText={setPort}
+            accessibilityLabel="Код"
+            placeholder="XXXX-XXXX"
+            placeholderTextColor={colors.textFaint}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            value={code}
+            onChangeText={setCode}
           />
-        </View>
-      </View>
-      <View style={{ flexDirection: 'row', gap: 9, marginTop: 6 }}>
-        <GhostButton label="Cancel" onPress={onDone} style={{ flex: 1 }} />
-        <PrimaryButton
-          label="Add server"
-          disabled={!valid}
-          onPress={() => {
-            addServer({
-              name: name.trim() || host.trim(),
-              host: host.trim(),
-              port: parseInt(port, 10),
-            })
-            onDone()
-            router.replace('/(tabs)')
-          }}
-          style={{ flex: 1 }}
-        />
-      </View>
+          <View style={{ flexDirection: 'row', gap: 9, marginTop: 6 }}>
+            <GhostButton label="Отмена" onPress={onDone} style={{ flex: 1 }} />
+            <PrimaryButton
+              label={busy ? 'Подключаю…' : 'Подключить'}
+              disabled={busy}
+              onPress={() => submit(url, code)}
+              style={{ flex: 1 }}
+            />
+          </View>
+        </>
+      )}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
       <Text style={styles.hint}>
-        The daemon must listen on your LAN: set `host: 0.0.0.0` in ~/.rocket/config.yaml and restart rocketd.
+        На компьютере выполни `rocket pair` — он покажет QR и одноразовый код. Телефон должен быть в твоём Tailscale.
       </Text>
     </Card>
   )
@@ -153,7 +205,8 @@ function AddServerForm({ onDone }: { onDone: () => void }) {
 
 export default function ServersScreen() {
   const { servers } = useServers()
-  const [adding, setAdding] = useState(false)
+  const { pair: pairParam } = useLocalSearchParams<{ pair?: string }>()
+  const [adding, setAdding] = useState(pairParam === '1')
   const qc = useQueryClient()
 
   return (
@@ -181,7 +234,7 @@ export default function ServersScreen() {
             <ServerCard key={s.id} server={s} />
           ))}
           {adding ? (
-            <AddServerForm onDone={() => setAdding(false)} />
+            <AddServerForm onDone={() => setAdding(false)} startScanning={pairParam === '1'} />
           ) : (
             <Pressable style={styles.addBtn} onPress={() => setAdding(true)}>
               <Text style={{ fontSize: 20, color: colors.textDim }}>＋</Text>
@@ -235,6 +288,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     backgroundColor: colors.card,
   },
+  camera: { height: 280, borderRadius: 12, overflow: 'hidden' },
+  error: { marginTop: 10, fontSize: 12.5, color: colors.redFg },
   hint: { marginTop: 12, fontSize: 12, lineHeight: 17, color: colors.textFaint },
   addBtn: {
     height: 56,

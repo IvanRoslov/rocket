@@ -63,6 +63,8 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newGithubCmd())
 	root.AddCommand(newAgentCmd())
 	root.AddCommand(newInboxCmd())
+	root.AddCommand(newPairCmd())
+	root.AddCommand(newDevicesCmd())
 	return root
 }
 

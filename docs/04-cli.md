@@ -217,8 +217,17 @@ rocket project rm <id>
 rocket events [--follow] [--session <id>]
 rocket logs [--follow]                  # логи самого демона
 rocket daemon start|stop|status|run     # run — foreground (для отладки/launchd)
-rocket doctor                           # проверка окружения: tmux, git, gh, агенты
+rocket doctor                           # проверка окружения: tmux, git, gh, агенты, удалённый доступ
+
+rocket pair [--web]                     # подключить устройство: QR для мобилки + одноразовый код на 10 минут
+                                        #   --web: вместо QR — одноразовая ссылка входа <public_url>/login?code=..
+rocket devices ls                       # подключённые устройства: ID, NAME, KIND, CREATED, LAST SEEN
+rocket devices revoke <id>              # отозвать устройство; его открытые SSE/WS рвутся сразу
 ```
+
+`pair` и `devices` ходят в демон по Unix-сокету (доверенный канал), токен им не нужен. QR несёт `rocketmobile://pair?url=<public_url>&code=<code>`; если `public_url` не задан в `~/.rocket/config.yaml`, QR не рисуется — печатается предупреждение и код (адрес вводится в приложении вручную). Модель доступа — [03-daemon-api.md](03-daemon-api.md#аутентификация).
+
+`rocket doctor` дополнительно печатает строки удалённого доступа: `listen` (предупреждение, если `host` не loopback), `public_url` (предупреждение, если не задан) и `tailscale` (нет в PATH или `tailscale serve` не проксирует на порт демона — подсказка `tailscale serve --bg <port>`).
 
 ### Постоянные агенты
 

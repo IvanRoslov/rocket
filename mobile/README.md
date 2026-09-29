@@ -1,16 +1,10 @@
 # Rocket Mobile
 
-Мобильный клиент rocket-демона (Expo / React Native). Смотрит и управляет проектами, задачами и агентскими сессиями с телефона в локальной сети; поддерживает несколько серверов (несколько компьютеров с rocketd).
+Мобильный клиент rocket-демона (Expo / React Native). Смотрит и управляет проектами, задачами и агентскими сессиями с телефона по Tailscale; поддерживает несколько серверов (несколько компьютеров с rocketd).
 
 ## Запуск
 
-1. На компьютере с демоном разреши доступ по LAN — в `~/.rocket/config.yaml`:
-
-   ```yaml
-   host: 0.0.0.0   # по умолчанию 127.0.0.1 (только localhost)
-   ```
-
-   и перезапусти rocketd (бинарник должен включать коммит `1d8b8c0` или новее).
+1. На компьютере с демоном настрой доступ через Tailscale (полностью — `docs/testing/remote-access.md`): поставь Tailscale на Mac и телефон, выполни `tailscale serve --bg 4477`, в `~/.rocket/config.yaml` укажи `host: 127.0.0.1` и `public_url: https://<mac>.<tailnet>.ts.net`, перезапусти rocketd (`make restart`). Демон по TCP всегда требует токен устройства.
 
 2. Запусти dev-сервер и открой в Expo Go (телефон в той же сети):
 
@@ -20,7 +14,7 @@
    npx expo start
    ```
 
-3. На стартовом экране добавь сервер: имя, IP компьютера (`ipconfig getifaddr en0`), порт (по умолчанию 4477). Серверов может быть несколько — переключение по чипу в хедере Projects или в Settings → Server.
+3. На компьютере выполни `rocket pair` — он покажет QR и одноразовый код. В приложении на экране серверов нажми «Сканировать QR» (или введи адрес и код вручную); ссылка `rocketmobile://pair?...` тоже открывает подтверждение. Токен устройства хранится в SecureStore. Серверов может быть несколько — переключение по чипу в хедере Projects или в Settings → Server. Если доступ отозван (`rocket devices revoke`), появится баннер «подключи заново».
 
 ## Скрипты
 
@@ -34,7 +28,8 @@
 
 ```
 app/                    # expo-router
-  servers.tsx           # стартовый экран выбора/добавления сервера
+  servers.tsx           # выбор сервера + сопряжение (QR / адрес и код)
+  pair.tsx              # deep link rocketmobile://pair?url&code — подтверждение
   (tabs)/               # Projects / Kanban / System / Settings
   task/[id].tsx         # задача: Questions/Overview/Docs/Journal/Messages + шторка сессий
   chat/[id].tsx         # чат с сессией: транскрипт агента + композер (docs/13-chat.md)
@@ -45,7 +40,8 @@ src/
   api/queries.ts        # все хуки запросов/мутаций (TanStack Query)
   api/events.ts         # SSE /v1/events/stream → инвалидация кэша; статус соединения
   api/types.ts          # типы API демона (порт web/src/lib/types.ts)
-  servers/ServerContext.tsx  # список серверов + активный (AsyncStorage)
+  servers/ServerContext.tsx  # список серверов + активный (AsyncStorage); токены устройств — servers/tokens.ts (SecureStore)
+  servers/pairing.ts    # parsePairLink, pairWithServer (POST /v1/auth/pair), usePairing
   api/chat.ts           # лента чата: хвост + инкрементальный курсор, дедупликация
   components/           # ui-kit по токенам дизайна (theme.ts)
 ```

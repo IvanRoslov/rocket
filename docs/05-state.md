@@ -84,6 +84,7 @@ github_poll_interval: 2m
 default_agent: claude-code
 repos_dir: ~/.rocket/repos          # куда клонировать репо из GitHub
 worktrees_dir: ~/.rocket/worktrees  # где создавать worktree сессий
+public_url: https://mac.tailnet.ts.net  # опционально: абсолютный https-URL `tailscale serve`; попадает в QR/ссылки сопряжения и allowlist Host/Origin
 mirror_sync_interval: 5m  # как часто демон синхронизирует зеркала в repos_dir (0 — выключить)
 mirror_lock_timeout_background: 5s  # сколько фоновый синк ждёт лок зеркала, дальше пропускает до следующего тика
 mirror_lock_timeout_cli: 2m         # сколько ждут `repo sync` и `repo sync --repair`

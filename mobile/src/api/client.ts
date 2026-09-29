@@ -8,6 +8,30 @@ export class ApiError extends Error {
   }
 }
 
+const tokens = new Map<string, string>()
+const unauthorizedListeners = new Set<(baseUrl: string) => void>()
+
+export function setAuthToken(baseUrl: string, token: string | null): void {
+  if (token) tokens.set(baseUrl, token)
+  else tokens.delete(baseUrl)
+}
+
+export function authHeaders(baseUrl: string): Record<string, string> {
+  const t = tokens.get(baseUrl)
+  return t ? { Authorization: `Bearer ${t}` } : {}
+}
+
+export function onUnauthorized(cb: (baseUrl: string) => void): () => void {
+  unauthorizedListeners.add(cb)
+  return () => {
+    unauthorizedListeners.delete(cb)
+  }
+}
+
+export function notifyUnauthorized(baseUrl: string): void {
+  unauthorizedListeners.forEach((cb) => cb(baseUrl))
+}
+
 async function request<T>(baseUrl: string, path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 8000)
@@ -16,12 +40,13 @@ async function request<T>(baseUrl: string, path: string, init?: RequestInit): Pr
     res = await fetch(`${baseUrl}${path}`, {
       ...init,
       signal: controller.signal,
-      headers: { 'Content-Type': 'application/json', ...init?.headers },
+      headers: { 'Content-Type': 'application/json', ...authHeaders(baseUrl), ...init?.headers },
     })
   } finally {
     clearTimeout(timer)
   }
   if (!res.ok) {
+    if (res.status === 401) notifyUnauthorized(baseUrl)
     let code = 'http_error'
     let message = `HTTP ${res.status}`
     try {

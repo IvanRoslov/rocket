@@ -1,5 +1,6 @@
-import type { CSSProperties } from 'react'
+import { useEffect, type CSSProperties } from 'react'
 import { Link, NavLink, Outlet, useParams, useLocation } from 'react-router-dom'
+import { fetchAuthStatus, onUnauthorized } from '../lib/auth'
 import { useLastProjectId } from '../lib/lastProject'
 import { useThreads } from '../lib/queries'
 import { ProjectSwitcher } from './ProjectSwitcher'
@@ -14,6 +15,15 @@ const navLinkStyle = ({ isActive }: { isActive: boolean }): CSSProperties => ({
 
 export function AppShell() {
   const { projectId } = useParams()
+  // Auth gate: unauthenticated browsers go to /login. Content renders
+  // meanwhile; its API calls would 401 into the same redirect anyway.
+  useEffect(() => {
+    fetchAuthStatus()
+      .then((s) => {
+        if (!s.authenticated) onUnauthorized()
+      })
+      .catch(() => {})
+  }, [])
   const location = useLocation()
   const navProjectId = useLastProjectId(projectId)
   const { data: threads } = useThreads()

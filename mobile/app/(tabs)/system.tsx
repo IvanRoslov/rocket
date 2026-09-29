@@ -145,7 +145,7 @@ export default function SystemScreen() {
           <Card style={{ gap: 9, marginBottom: 20 }}>
             <Row k="status" v="● running" vColor={colors.greenFg} />
             <Row k="version" v={`rocketd ${s?.daemon.version ?? '…'}`} />
-            <Row k="address" v={active ? `${active.host}:${active.port}` : ''} />
+            <Row k="address" v={active ? active.baseUrl : ''} />
             <Row k="uptime" v={s ? uptime(s.daemon.uptime_s) : '…'} />
           </Card>
 

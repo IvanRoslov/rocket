@@ -4,6 +4,7 @@ import { AgentsScreen } from './screens/agents/AgentsScreen'
 import { GlobalAgentsScreen } from './screens/agents/GlobalAgentsScreen'
 import { AppShell } from './components/AppShell'
 import { ChatScreen } from './screens/chat/ChatScreen'
+import { LoginScreen } from './screens/login/LoginScreen'
 import { KanbanScreen } from './screens/kanban/KanbanScreen'
 import { MilestonesScreen } from './screens/milestones/MilestonesScreen'
 import { ProjectsScreen } from './screens/projects/ProjectsScreen'
@@ -18,6 +19,8 @@ export const router = createBrowserRouter([
   // Dedicated full-window terminal page — deliberately OUTSIDE AppShell
   // (no sidebar/topbar chrome): it's opened in its own tab from the
   // «▣ term» buttons and the terminal fills the whole viewport.
+  // Login is outside AppShell too: no chrome, and no auth gate on itself.
+  { path: '/login', element: <LoginScreen /> },
   { path: '/term/:sessionId', element: <TermScreen /> },
   // Dedicated full-window chat page — same "own tab, outside AppShell"
   // convention as /term, opened from the «💬 chat» buttons.

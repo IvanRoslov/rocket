@@ -43,10 +43,18 @@ type Deps struct {
 	// effect without a daemon restart). It returns github.ErrNoToken if no
 	// token is configured.
 	GH func() (*github.Client, error)
+
+	// Auth is the in-memory device-auth state (limiter, live-connection
+	// registry). NewHandler fills a fresh one when nil; Serve shares one
+	// between the routes and the TCP middleware.
+	Auth *AuthRuntime
 }
 
 // NewHandler builds the routed http.Handler for rocket's API.
 func NewHandler(d Deps) http.Handler {
+	if d.Auth == nil {
+		d.Auth = NewAuthRuntime()
+	}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +94,7 @@ func NewHandler(d Deps) http.Handler {
 	registerAgentRoutes(mux, d)
 	registerAttachmentRoutes(mux, d)
 	registerSettingsRoutes(mux, d)
+	registerAuthRoutes(mux, d)
 
 	// Any /v1 path not matched by a more specific route above is a 404,
 	// rendered in the standard error JSON shape. This is a prefix pattern,
@@ -105,7 +114,8 @@ func NewHandler(d Deps) http.Handler {
 // Serve listens on both d.Cfg.SocketPath() (a unix socket, mode 0600) and
 // <d.Cfg.Host>:<d.Cfg.Port> (127.0.0.1 by default; set host in config.yaml
 // to expose the API on the LAN, e.g. for the mobile app), serving the same
-// handler on both. It blocks until
+// handler on both. The TCP listeners (plain and TLS) require a device token
+// (see requireAuth); the unix socket is trusted. It blocks until
 // ctx is cancelled, at which point it gracefully shuts down both servers,
 // unlinks the socket file it created, and returns nil. If either listener
 // fails to start, or either server exits with a fatal error before ctx is
@@ -138,9 +148,18 @@ func Serve(ctx context.Context, d Deps) error {
 		return fmt.Errorf("listen tcp %s: %w", tcpAddr, err)
 	}
 
+	if d.Auth == nil {
+		d.Auth = NewAuthRuntime()
+	}
+	if !isLoopbackHost(d.Cfg.Host) {
+		slog.Warn("tcp listener is not loopback-only; every request still needs a device token, but prefer host: 127.0.0.1 + tailscale serve",
+			"host", d.Cfg.Host)
+	}
+
 	handler := NewHandler(d)
+	tcpHandler := requireAuth(d, handler)
 	unixSrv := &http.Server{Handler: handler}
-	tcpSrv := &http.Server{Handler: handler}
+	tcpSrv := &http.Server{Handler: tcpHandler}
 	var tlsSrv *http.Server
 
 	errCh := make(chan error, 3)
@@ -170,7 +189,7 @@ func Serve(ctx context.Context, d Deps) error {
 			if err != nil {
 				slog.Error("tls: listen failed, https listener disabled", "addr", tlsAddr, "error", err)
 			} else {
-				tlsSrv = &http.Server{Handler: handler}
+				tlsSrv = &http.Server{Handler: tcpHandler}
 				if created {
 					slog.Info("tls: generated self-signed certificate; trust it once to silence the browser warning (or replace with an mkcert pair)",
 						"cert", certFile)

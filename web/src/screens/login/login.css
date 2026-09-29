@@ -1,0 +1,72 @@
+.login {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.login__card {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  font: 400 14px var(--font-ui);
+}
+
+.login__card h1 {
+  margin: 0;
+  font: 600 20px var(--font-ui);
+}
+
+.login__card p {
+  margin: 0;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.login__card label {
+  font: 500 13px var(--font-ui);
+  color: var(--text-2);
+}
+
+.login__card input {
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  background: var(--surface);
+  color: var(--text);
+  font: 500 15px var(--font-mono, monospace);
+  letter-spacing: 0.06em;
+}
+
+.login__card input:focus {
+  outline: 2px solid var(--accent-selected-border);
+  border-color: var(--accent);
+}
+
+.login__card button {
+  padding: 9px 12px;
+  border: 0;
+  border-radius: var(--radius-btn);
+  background: var(--accent);
+  color: #fff;
+  font: 500 14px var(--font-ui);
+  cursor: pointer;
+}
+
+.login__card button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.login__card .login__error {
+  color: var(--err-text);
+}

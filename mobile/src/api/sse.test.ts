@@ -1,4 +1,4 @@
-import { parseSseFrames } from './sse'
+import { connectSse, parseSseFrames } from './sse'
 
 describe('parseSseFrames', () => {
   it('parses named events in the daemon wire format', () => {
@@ -36,5 +36,67 @@ describe('parseSseFrames', () => {
   it('ignores comment/heartbeat frames without data or type', () => {
     const { events } = parseSseFrames(': ping\n\n', 0)
     expect(events).toEqual([])
+  })
+})
+
+describe('connectSse auth', () => {
+  class FakeXhr {
+    static last: FakeXhr | null = null
+    static count = 0
+    headers: Record<string, string> = {}
+    readyState = 0
+    status = 0
+    responseText = ''
+    aborted = false
+    onreadystatechange: (() => void) | null = null
+    onerror: (() => void) | null = null
+    ontimeout: (() => void) | null = null
+    constructor() {
+      FakeXhr.last = this
+      FakeXhr.count++
+    }
+    open() {}
+    setRequestHeader(k: string, v: string) {
+      this.headers[k] = v
+    }
+    send() {}
+    abort() {
+      this.aborted = true
+    }
+  }
+  const realXhr = globalThis.XMLHttpRequest
+  beforeEach(() => {
+    jest.useFakeTimers()
+    FakeXhr.last = null
+    FakeXhr.count = 0
+    globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest
+  })
+  afterEach(() => {
+    jest.useRealTimers()
+    globalThis.XMLHttpRequest = realXhr
+  })
+
+  it('sets the supplied headers on the request', () => {
+    const conn = connectSse('http://x/v1/events/stream', { onOpen() {}, onEvent() {}, onError() {} }, 4000, {
+      Authorization: 'Bearer t',
+    })
+    expect(FakeXhr.last!.headers.Authorization).toBe('Bearer t')
+    expect(FakeXhr.last!.headers.Accept).toBe('text/event-stream')
+    conn.close()
+  })
+
+  it('calls onUnauthorized on 401 and does not reconnect', () => {
+    const onUnauthorized = jest.fn()
+    const onError = jest.fn()
+    connectSse('http://x/v1/events/stream', { onOpen() {}, onEvent() {}, onError, onUnauthorized })
+    const x = FakeXhr.last!
+    x.readyState = 2
+    x.status = 401
+    x.onreadystatechange!()
+    expect(onUnauthorized).toHaveBeenCalledTimes(1)
+    expect(x.aborted).toBe(true)
+    jest.advanceTimersByTime(20000)
+    expect(FakeXhr.count).toBe(1)
+    expect(onError).not.toHaveBeenCalled()
   })
 })
