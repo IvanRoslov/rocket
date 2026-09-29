@@ -21,7 +21,7 @@ jest.mock('expo-router', () => ({
 
 /** The daemon has no session row for an agent that was never started, so its
  *  chat feed 404s — the screen must still let you write. */
-function mockApi(chat?: unknown) {
+function mockApi(chat?: unknown, postResponse: unknown = { id: 1, to: 'librarian' }) {
   const bodies: Record<string, unknown> = {
     '/v1/messages?session=librarian&limit=50': { messages: [] },
     ...(chat ? { '/v1/sessions/librarian/chat?limit=300': chat } : {}),
@@ -31,14 +31,14 @@ function mockApi(chat?: unknown) {
     const path = String(url).replace(/^https?:\/\/[^/]+/, '')
     if (init?.method === 'POST') {
       posted.push({ path, body: JSON.parse(String(init.body)) })
-      return { ok: true, status: 202, json: async () => ({ id: 1, to: 'librarian' }) }
+      return { ok: true, status: 202, json: async () => postResponse }
     }
     if (!(path in bodies)) {
       return { ok: false, status: 404, json: async () => ({ error: { code: 'not_found' } }) }
     }
     return { ok: true, status: 200, json: async () => bodies[path] }
   }) as unknown as typeof fetch
-  return posted
+  return Object.assign(posted, { bodies })
 }
 
 function renderChat() {
@@ -102,4 +102,56 @@ describe('ChatScreen in agent mode', () => {
     await waitFor(() => expect(screen.getByText('on it')).toBeTruthy())
     expect(screen.getByPlaceholderText(/straight into its session/)).toBeTruthy()
   })
+
+  it('renders Q&A thread rows, markdown in the human bubble and readable tool lines', async () => {
+    mockApi({
+      session: { id: 'librarian', kind: 'agent', state: 'running' },
+      entries: [
+        { role: 'user', text: '[#12/Q1 answer from human] go', ts: 1785622879 },
+        { role: 'user', text: '**bold** from human', ts: 1785622880 },
+        {
+          role: 'tool',
+          tool_name: 'Bash',
+          text: '{"command":"git status","description":"list changes"}',
+          ts: 1785622881,
+        },
+      ],
+    })
+    renderChat()
+
+    await waitFor(() => expect(screen.getByText('go')).toBeTruthy())
+    expect(screen.getByText(/#12\/Q1/)).toBeTruthy()
+    expect(screen.getByText('bold')).toBeTruthy()
+    expect(screen.queryByText('**bold** from human')).toBeNull()
+
+    fireEvent.press(screen.getByText('⚙ 1'))
+    await waitFor(() => expect(screen.getByText(/git status — list changes/)).toBeTruthy())
+    expect(screen.queryByText(/\{"command"/)).toBeNull()
+  })
+
+  it('confirms a send against the stored body, leaving one bubble', async () => {
+    const api = mockApi(
+      { session: { id: 'librarian', kind: 'agent', state: 'running' }, entries: [] },
+      { id: 5, body: 'hello (1 attachment)', to: 'x', status: 'queued', attempts: 0, created_at: 1 },
+    )
+    renderChat()
+
+    await waitFor(() => expect(screen.getByText('Send')).toBeTruthy())
+    const input = screen.getByPlaceholderText(/straight into its session/)
+    fireEvent.changeText(input, 'hello')
+    await waitFor(() => expect(input.props.value).toBe('hello'))
+    fireEvent.press(screen.getByText('Send'))
+
+    await waitFor(() => expect(screen.getByText('hello (1 attachment)')).toBeTruthy())
+    expect(screen.getByText('⏳ sending…')).toBeTruthy()
+
+    api.bodies['/v1/sessions/librarian/chat?limit=300'] = {
+      session: { id: 'librarian', kind: 'agent', state: 'running' },
+      entries: [
+        { role: 'user', text: 'hello (1 attachment)', ts: Math.floor(Date.now() / 1000) },
+      ],
+    }
+    await waitFor(() => expect(screen.queryByText('⏳ sending…')).toBeNull(), { timeout: 6000 })
+    expect(screen.getAllByText('hello (1 attachment)')).toHaveLength(1)
+  }, 15000)
 })

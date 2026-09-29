@@ -21,6 +21,7 @@ import { BackButton, Badge, Dot, MonoText, PrimaryButton } from '../../src/compo
 import { classifyUserEntry } from '../../src/lib/chatDisplay'
 import { buildChatRows, isNoise, type ChatRow, type OutgoingMsg } from '../../src/lib/chatRows'
 import { ago, sessionBadge, sessionDot } from '../../src/lib/format'
+import { summarizeToolEntry, toolLine } from '../../src/lib/toolDigest'
 import { colors, mono, radius } from '../../src/theme'
 
 type Row = ChatRow
@@ -40,6 +41,25 @@ function SystemRow({ label, body }: { label: string; body: string }) {
   )
 }
 
+function ToolGroupRow({ entries }: { entries: ChatEntry[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Pressable style={styles.toolRow} onPress={() => setOpen((v) => !v)}>
+      <Text style={[styles.toolText, { color: colors.textMid, fontWeight: '600' }]}>
+        {open ? '▾' : '▸'} {entries.length} tool calls
+      </Text>
+      {open
+        ? entries.map((e, i) => (
+            <Text key={i} style={styles.toolText} numberOfLines={1}>
+              <Text style={{ color: colors.textMid, fontWeight: '600' }}>{e.tool_name ?? 'tool'} </Text>
+              {toolLine(summarizeToolEntry(e.tool_name ?? '', e.text))}
+            </Text>
+          ))
+        : null}
+    </Pressable>
+  )
+}
+
 function EntryBubble({ entry }: { entry: ChatEntry }) {
   if (entry.role === 'quiz_answer') {
     return <ClosedQuizCard echo={entry.quiz as ClosedQuizEcho | undefined} fallback={entry.text} />
@@ -49,7 +69,7 @@ function EntryBubble({ entry }: { entry: ChatEntry }) {
       <View style={styles.toolRow}>
         <Text style={styles.toolText} numberOfLines={1}>
           <Text style={{ color: colors.textMid, fontWeight: '600' }}>▸ {entry.tool_name ?? 'tool'} </Text>
-          {entry.text}
+          {toolLine(summarizeToolEntry(entry.tool_name ?? '', entry.text))}
         </Text>
       </View>
     )
@@ -57,6 +77,19 @@ function EntryBubble({ entry }: { entry: ChatEntry }) {
   if (entry.role === 'user') {
     const d = classifyUserEntry(entry.text)
     if (d.kind === 'system') return <SystemRow label={d.label} body={d.body} />
+    if (d.kind === 'thread') {
+      return (
+        <View style={{ alignItems: 'flex-start', marginVertical: 3 }}>
+          <View style={[styles.bubble, { backgroundColor: colors.cardAlt, borderColor: colors.border }]}>
+            <MonoText style={{ fontSize: 11, fontWeight: '600', color: colors.textDim, marginBottom: 3 }}>
+              Q&A {d.ref} · {d.label}
+            </MonoText>
+            <Markdown>{d.body}</Markdown>
+            {entry.ts > 0 ? <Text style={styles.bubbleMeta}>{ago(entry.ts)}</Text> : null}
+          </View>
+        </View>
+      )
+    }
     if (d.kind === 'agent') {
       return (
         <View style={{ alignItems: 'flex-start', marginVertical: 3 }}>
@@ -73,7 +106,7 @@ function EntryBubble({ entry }: { entry: ChatEntry }) {
     return (
       <View style={{ alignItems: 'flex-end', marginVertical: 3 }}>
         <View style={[styles.bubble, { backgroundColor: colors.indigoBg, borderColor: colors.indigoBorder }]}>
-          <Text style={styles.bubbleText}>{entry.text}</Text>
+          <Markdown>{entry.text}</Markdown>
           {entry.ts > 0 ? <Text style={styles.bubbleMeta}>{ago(entry.ts)}</Text> : null}
         </View>
       </View>
@@ -146,7 +179,9 @@ export default function ChatScreen() {
       { to: id, body },
       {
         onSuccess: (m) => {
-          setOutgoing((prev) => [...prev, { msgId: m.id, body, sentAt: Math.floor(Date.now() / 1000) }])
+          // `m.body` is the stored body (attachment links rewritten); the
+          // transcript contains exactly that, so confirm against it.
+          setOutgoing((prev) => [...prev, { msgId: m.id, body: m.body ?? body, sentAt: Math.floor(Date.now() / 1000) }])
           setText('')
         },
         onError: (e) => toast.show((e as Error).message),
@@ -208,12 +243,7 @@ export default function ChatScreen() {
             item.kind === 'entry' ? (
               <EntryBubble key={item.key} entry={item.entry} />
             ) : item.kind === 'tools' ? (
-              // Interim: a proper grouped row arrives with the chat-screen task.
-              <View key={item.key}>
-                {item.entries.map((e, i) => (
-                  <EntryBubble key={`${item.key}-${i}`} entry={e} />
-                ))}
-              </View>
+              <ToolGroupRow key={item.key} entries={item.entries} />
             ) : (
               <View key={item.key} style={{ alignItems: 'flex-end', marginVertical: 3 }}>
                 <View style={[styles.bubble, { backgroundColor: colors.indigoBg, borderColor: colors.indigoBorder }]}>
