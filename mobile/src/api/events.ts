@@ -17,7 +17,7 @@ export function parseEventType(type: string): string[] {
     case 'session':
       return ['sessions', 'system', 'task', 'projects']
     case 'task':
-      return ['tasks', 'task', 'projects']
+      return ['tasks', 'task', 'projects', 'threads']
     case 'message':
       return ['messages', 'system']
     case 'pr':
@@ -25,7 +25,7 @@ export function parseEventType(type: string): string[] {
     case 'orchestrator':
       return ['sessions']
     case 'agent':
-      return ['agents', 'agent']
+      return ['agents', 'agent', 'threads']
     case 'repo':
       return ['repos', 'system']
     case 'workspace':

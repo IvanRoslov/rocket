@@ -6,7 +6,7 @@ describe('parseEventType', () => {
     expect(parseEventType('session.spawned')).toContain('sessions')
   })
   it('task events touch tasks and task detail', () => {
-    expect(parseEventType('task.question_asked')).toEqual(['tasks', 'task', 'projects'])
+    expect(parseEventType('task.question_asked')).toEqual(['tasks', 'task', 'projects', 'threads'])
   })
   it('message events touch messages and system', () => {
     expect(parseEventType('message.delivered')).toEqual(['messages', 'system'])
@@ -18,8 +18,12 @@ describe('parseEventType', () => {
     expect(parseEventType('session.chat_updated')).toEqual([])
   })
   it('agent events touch the agents list and agent detail', () => {
-    expect(parseEventType('agent.question_asked')).toEqual(['agents', 'agent'])
-    expect(parseEventType('agent.session_started')).toEqual(['agents', 'agent'])
+    expect(parseEventType('agent.question_asked')).toEqual(['agents', 'agent', 'threads'])
+    expect(parseEventType('agent.session_started')).toEqual(['agents', 'agent', 'threads'])
+  })
+  it('question events refresh the threads inbox', () => {
+    expect(parseEventType('task.question_asked')).toContain('threads')
+    expect(parseEventType('agent.question_resolved')).toContain('threads')
   })
   it('unknown events map to nothing', () => {
     expect(parseEventType('weird.thing')).toEqual([])
