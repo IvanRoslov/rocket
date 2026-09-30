@@ -316,7 +316,7 @@ describe('AgentScreen', () => {
   it('drops Start for a live session and offers the terminal instead', async () => {
     mockApi({ '/v1/agents/sre': { ...AGENT, session_alive: true } })
     renderWithProviders(<AgentScreen />)
-    await waitFor(() => expect(screen.getByText('Open terminal')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Open chat')).toBeTruthy())
     expect(screen.queryByText('Start')).toBeNull()
   })
 

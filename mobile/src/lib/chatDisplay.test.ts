@@ -1,6 +1,11 @@
 import { classifyUserEntry } from './chatDisplay'
 
 describe('classifyUserEntry', () => {
+  it('subagent hand-back is a system row labeled agent message', () => {
+    const text = 'Another Claude session sent a message:\n<agent-message from="w1">done</agent-message>'
+    expect(classifyUserEntry(text)).toEqual({ kind: 'system', label: 'agent message', body: text })
+  })
+
   it('plain human text stays human', () => {
     expect(classifyUserEntry('давай без миграции, просто фикс кода')).toEqual({ kind: 'human' })
   })
@@ -36,5 +41,37 @@ describe('classifyUserEntry', () => {
 
   it('a human message merely mentioning a < later is not system', () => {
     expect(classifyUserEntry('use a < b in the check')).toEqual({ kind: 'human' })
+  })
+
+  it('rocket injects are system rows labeled by their tag', () => {
+    expect(classifyUserEntry('[rocket heartbeat] worker idle 6m')).toEqual({
+      kind: 'system',
+      label: 'rocket heartbeat',
+      body: 'worker idle 6m',
+    })
+    expect(classifyUserEntry('[rocket] delivery FAILED to w1').kind).toBe('system')
+  })
+
+  it('SYSTEM NOTIFICATION markers are system wherever they appear', () => {
+    expect(classifyUserEntry('pre [SYSTEM NOTIFICATION - NOT USER INPUT] body').kind).toBe('system')
+  })
+
+  it('thread frames become visible thread rows', () => {
+    expect(classifyUserEntry('[#4543/Q2 answer from human] go')).toEqual({
+      kind: 'thread',
+      ref: '#4543/Q2',
+      label: 'answer from human',
+      body: 'go',
+    })
+    expect(classifyUserEntry('[cto/Q1 reply from w1] **done**\nPR #3')).toEqual({
+      kind: 'thread',
+      ref: 'cto/Q1',
+      label: 'reply from w1',
+      body: '**done**\nPR #3',
+    })
+  })
+
+  it('a human message starting with an unrelated bracket stays human', () => {
+    expect(classifyUserEntry('[draft] my notes')).toEqual({ kind: 'human' })
   })
 })

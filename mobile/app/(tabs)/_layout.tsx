@@ -1,7 +1,8 @@
 import { Tabs } from 'expo-router'
 import { View } from 'react-native'
-import { useAgents } from '../../src/api/queries'
+import { useAgents, useThreads } from '../../src/api/queries'
 import { awaitingUser } from '../../src/lib/agents'
+import { countYourTurn } from '../../src/lib/threads'
 import { colors } from '../../src/theme'
 
 // Tab icons rebuilt from the mockup SVGs with plain Views (no svg dep).
@@ -26,21 +27,12 @@ function KanbanIcon({ color }: { color: import("react-native").ColorValue }) {
   )
 }
 
-function SystemIcon({ color }: { color: import("react-native").ColorValue }) {
+/** A question: a speech bubble with a tail. */
+function QuestionsIcon({ color }: { color: import('react-native').ColorValue }) {
   return (
-    <View
-      style={{
-        width: 19,
-        height: 19,
-        borderRadius: 10,
-        borderWidth: 1.6,
-        borderColor: color,
-        opacity: 0.9,
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />
+    <View style={{ width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ width: 17, height: 13, borderRadius: 4, borderWidth: 1.7, borderColor: color }} />
+      <View style={{ width: 5, height: 5, marginTop: -2, marginLeft: -8, borderLeftWidth: 1.7, borderBottomWidth: 1.7, borderColor: color, transform: [{ skewY: '-30deg' }] }} />
     </View>
   )
 }
@@ -114,6 +106,8 @@ export default function TabsLayout() {
   // user is the one thing worth a badge — same rule as task questions.
   const agents = useAgents()
   const awaiting = awaitingUser(agents.data ?? [])
+  const threads = useThreads()
+  const yourTurn = countYourTurn(threads.data ?? [])
 
   return (
     <Tabs
@@ -150,8 +144,12 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="system"
-        options={{ title: 'System', tabBarIcon: ({ color }) => <SystemIcon color={color} /> }}
+        name="questions"
+        options={{
+          title: 'Questions',
+          tabBarIcon: ({ color }) => <QuestionsIcon color={color} />,
+          ...(yourTurn > 0 ? { tabBarBadge: yourTurn } : {}),
+        }}
       />
       <Tabs.Screen
         name="settings"

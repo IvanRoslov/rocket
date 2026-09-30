@@ -30,7 +30,8 @@
 app/                    # expo-router
   servers.tsx           # выбор сервера + сопряжение (QR / адрес и код)
   pair.tsx              # deep link rocketmobile://pair?url&code — подтверждение
-  (tabs)/               # Projects / Kanban / System / Settings
+  (tabs)/               # Projects / Kanban / Milestones / Agents / Questions / Settings
+  system.tsx            # System (наблюдаемость) — из строки «System» в Settings
   task/[id].tsx         # задача: Questions/Overview/Docs/Journal/Messages + шторка сессий
   chat/[id].tsx         # чат с сессией: транскрипт агента + композер (docs/13-chat.md)
   project/new.tsx       # мастер создания проекта

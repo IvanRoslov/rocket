@@ -11,12 +11,16 @@ export interface OutgoingMsg {
 
 export type ChatRow =
   | { kind: 'entry'; key: string; entry: ChatEntry }
+  /** Two or more adjacent tool calls, collapsed into one expandable row. */
+  | { kind: 'tools'; key: string; entries: ChatEntry[] }
   | { kind: 'outgoing'; key: string; body: string; status: string; reason?: string }
 
 /** Tool calls and harness-injected user entries are hidden by default. */
 export function isNoise(e: ChatEntry): boolean {
   return e.role === 'tool' || (e.role === 'user' && classifyUserEntry(e.text).kind === 'system')
 }
+
+const isQuizAsk = (e: ChatEntry) => e.role === 'tool' && e.tool_name === 'AskUserQuestion' && e.quiz !== undefined
 
 /**
  * Builds the chat list: transcript entries plus optimistic bubbles for
@@ -27,6 +31,17 @@ export function isNoise(e: ChatEntry): boolean {
  * the transcript" check would hide the second one forever. Only entries at
  * or after the send time can match, so an identical message from earlier in
  * the conversation doesn't swallow a fresh one.
+ *
+ * A large send never reaches the transcript as its text but as a
+ * `[large message]` pointer (docs/13-chat.md). When no entry matches the
+ * body, the first unclaimed pointer at or after the send time claims the
+ * send and is rendered in its place with the text we sent.
+ *
+ * An AskUserQuestion round is two entries (the tool ask, then the
+ * `quiz_answer`); when the answer follows, only the answer is shown.
+ *
+ * Adjacent tool entries (visible only with `showNoise`) collapse into one
+ * `tools` row; a lone tool call stays an ordinary `entry` row.
  */
 export function buildChatRows(params: {
   entries: ChatEntry[]
@@ -36,34 +51,67 @@ export function buildChatRows(params: {
 }): ChatRow[] {
   const { entries, outgoing, queueMessages, showNoise } = params
 
-  const rows: ChatRow[] = entries
-    .map((entry, i) => ({ entry, i }))
-    .filter(({ entry }) => showNoise || !isNoise(entry))
-    .map(({ entry, i }) => ({ kind: 'entry' as const, key: `e${i}`, entry }))
-
   // Transcript timestamps come from the agent's log and can lag a second
   // behind our own clock, so allow a small window when matching.
   const SKEW = 5
-  const unclaimed = entries.filter((e) => e.role === 'user')
   const claimed = new Set<number>()
+  const replaced = new Map<number, string>()
+  const pendingOut: OutgoingMsg[] = []
 
+  const freshFor = (o: OutgoingMsg) => (e: ChatEntry, i: number) =>
+    !claimed.has(i) && e.role === 'user' && (e.ts === 0 || e.ts >= o.sentAt - SKEW)
+  // Pass 1: exact-text matches for every send, so a pending short send
+  // can never take a pointer that belongs to a later large one.
+  const unmatched: OutgoingMsg[] = []
   for (const o of outgoing) {
-    const idx = unclaimed.findIndex(
-      (e, i) => !claimed.has(i) && e.text === o.body && (e.ts === 0 || e.ts >= o.sentAt - SKEW),
-    )
+    const fresh = freshFor(o)
+    const idx = entries.findIndex((e, i) => fresh(e, i) && e.text === o.body)
+    if (idx !== -1) claimed.add(idx)
+    else unmatched.push(o)
+  }
+  // Pass 2: pointers land in send order, so when there are more unmatched
+  // sends than pointers the earlier ones are the ones still in flight. Walk
+  // the sends newest-first, each taking the latest fresh pointer left.
+  const owner = new Map<OutgoingMsg, number>()
+  for (const o of [...unmatched].reverse()) {
+    const fresh = freshFor(o)
+    let idx = -1
+    entries.forEach((e, i) => {
+      if (fresh(e, i) && e.text.startsWith('[large message]')) idx = i
+    })
     if (idx !== -1) {
       claimed.add(idx)
-      continue // landed in the transcript — the real entry is already rendered
+      replaced.set(idx, o.body)
+      owner.set(o, idx)
     }
-    const m = queueMessages?.find((qm) => qm.id === o.msgId)
-    rows.push({
-      kind: 'outgoing',
-      key: `o${o.msgId}`,
-      body: o.body,
-      status: m?.status ?? 'queued',
-      reason: m?.reason,
-    })
+  }
+  for (const o of unmatched) if (!owner.has(o)) pendingOut.push(o)
+
+  const rows: ChatRow[] = []
+  let toolRun: { i: number; e: ChatEntry }[] = []
+  const flushTools = () => {
+    if (toolRun.length === 1) rows.push({ kind: 'entry', key: `e${toolRun[0].i}`, entry: toolRun[0].e })
+    else if (toolRun.length > 1) rows.push({ kind: 'tools', key: `t${toolRun[0].i}`, entries: toolRun.map((x) => x.e) })
+    toolRun = []
   }
 
+  entries.forEach((e, i) => {
+    if (isQuizAsk(e) && entries[i + 1]?.role === 'quiz_answer') return
+    const text = replaced.get(i)
+    const entry = text !== undefined ? { ...e, text } : e
+    if (text === undefined && !showNoise && isNoise(entry)) return
+    if (entry.role === 'tool') {
+      toolRun.push({ i, e: entry })
+      return
+    }
+    flushTools()
+    rows.push({ kind: 'entry', key: `e${i}`, entry })
+  })
+  flushTools()
+
+  for (const o of pendingOut) {
+    const m = queueMessages?.find((qm) => qm.id === o.msgId)
+    rows.push({ kind: 'outgoing', key: `o${o.msgId}`, body: o.body, status: m?.status ?? 'queued', reason: m?.reason })
+  }
   return rows
 }

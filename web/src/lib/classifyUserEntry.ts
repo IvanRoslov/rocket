@@ -11,6 +11,9 @@ export type UserEntryKind = 'system' | 'from' | 'user'
 /** Detects a queue inject prefix like `[from some-session]`, requiring a closing `]`. */
 const FROM_PREFIX_RE = /^\[from ([^\]]+)\]\s*/
 
+/** A Q&A thread frame from internal/api/threads.go threadPrefix: `[#1023/Q2 reply from cto]`, `[cto/Q1 answer from human]`. */
+const THREAD_FRAME_RE = /^\[#?[\w.-]+\/Q\d+ [a-z-]+ from [^\]]+\]/
+
 export function classifyUserEntry(text: string): UserEntryKind {
   const value = text ?? ''
   if (
@@ -19,7 +22,9 @@ export function classifyUserEntry(text: string): UserEntryKind {
     value.startsWith('<system-') ||
     value.startsWith('[large message]') ||
     value.startsWith('[task #') ||
-    value.startsWith('[rocket')
+    value.startsWith('[rocket') ||
+    value.startsWith('Another Claude session sent a message:') ||
+    THREAD_FRAME_RE.test(value)
   ) {
     return 'system'
   }

@@ -23,6 +23,7 @@ import type {
   TaskDoc,
   TaskLogEntry,
   TaskStatus,
+  ThreadInboxEntry,
 } from './types'
 
 /** Base URL of the active server; components behind the servers screen can assume it exists. */
@@ -311,7 +312,10 @@ export function useQuestionReply() {
   return useMutation({
     mutationFn: (p: { id: number; body: string; to?: string[] }) =>
       api.post(baseUrl, `/v1/questions/${p.id}/reply`, { body: p.body, ...addresseePayload(p.to ?? []) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'task'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'task'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'threads'] })
+    },
   })
 }
 
@@ -330,7 +334,10 @@ export function useQuestionAnswer() {
           ? { choose: p.choose }
           : { body: p.body, ...addresseePayload(p.to ?? []) },
       ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'task'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'task'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'threads'] })
+    },
   })
 }
 
@@ -413,7 +420,10 @@ export function useQuestionDismiss() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => api.post(baseUrl, `/v1/questions/${id}/answer`, { dismiss: true }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'task'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'task'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'threads'] })
+    },
   })
 }
 
@@ -574,7 +584,10 @@ export function useAgentQuestionReply() {
   return useMutation({
     mutationFn: (p: { id: number; body: string; to?: string[] }) =>
       api.post(baseUrl, `/v1/agent-questions/${p.id}/reply`, { body: p.body, ...addresseePayload(p.to ?? []) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'threads'] })
+    },
   })
 }
 
@@ -591,7 +604,10 @@ export function useAgentQuestionAnswer() {
           ? { choose: p.choose }
           : { body: p.body, ...addresseePayload(p.to ?? []) },
       ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'threads'] })
+    },
   })
 }
 
@@ -600,6 +616,41 @@ export function useAgentQuestionDismiss() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => api.post(baseUrl, `/v1/agent-questions/${id}/answer`, { dismiss: true }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'threads'] })
+    },
+  })
+}
+
+export function useThreads() {
+  const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(10000)
+  return useQuery({
+    queryKey: [baseUrl, 'threads'],
+    queryFn: async () => (await api.get<{ threads: ThreadInboxEntry[] }>(baseUrl, '/v1/threads')).threads ?? [],
+    refetchInterval,
+  })
+}
+
+export type ThreadAnswer = { choose: number } | { body: string } | { dismiss: true }
+
+/** Answers any inbox thread; the endpoint depends on whether it is a task or an agent thread. */
+export function useThreadAnswer() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { thread: Pick<ThreadInboxEntry, 'id' | 'kind'>; answer: ThreadAnswer }) =>
+      api.post(
+        baseUrl,
+        p.thread.kind === 'role' ? `/v1/agent-questions/${p.thread.id}/answer` : `/v1/questions/${p.thread.id}/answer`,
+        p.answer,
+      ),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'threads'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'task'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'agent'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'agents'] })
+    },
   })
 }

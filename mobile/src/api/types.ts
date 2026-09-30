@@ -201,6 +201,8 @@ export interface Question {
   task_id: number
   ordinal: number
   asked_by: string
+  /** One-line heading; absent on a daemon older than task #1264. */
+  title?: string
   body: string
   context?: string
   status: QuestionStatus
@@ -275,6 +277,8 @@ export interface AgentQuestion {
   role_id: string
   ordinal: number
   asked_by: string
+  /** One-line heading; absent on a daemon older than task #1264. */
+  title?: string
   body: string
   context?: string
   status: QuestionStatus
@@ -304,6 +308,52 @@ export interface AgentQuestion {
   asked_at: number
   resolved_at?: number
   messages: QuestionMessage[]
+}
+
+/**
+ * One row of `GET /v1/threads` — `threadInboxEntry` in
+ * internal/api/thread_inbox.go. The unified inbox of task AND role threads:
+ * what is open and on whom, in one listing, without walking every task.
+ *
+ * It deliberately carries the question body only, never the conversation: a
+ * row that is expanded fetches the full thread from its per-subject endpoint.
+ */
+export interface ThreadInboxEntry {
+  /** "1023/Q2" or "cto/Q1" — the id a human types back. */
+  local_ref: string
+  kind: 'task' | 'role'
+  /** Set for `kind: 'task'`. */
+  task_id?: number
+  /** Set for `kind: 'role'`. */
+  role_id?: string
+  /** Human-readable subject: `task #1023 "Ship it"` or `role cto`. Never parsed. */
+  subject: string
+  /** The global numeric id — what the per-thread write endpoints address. */
+  id: number
+  ordinal: number
+  asked_by: string
+  /** One-line heading; absent on a daemon older than task #1264. */
+  title?: string
+  body: string
+  status: QuestionStatus
+  resolution?: 'answered' | 'dismissed' | 'fyi'
+  type: 'decision' | 'fyi'
+  options?: string[]
+  participants: string[]
+  /** The stored "whose turn" set; `waiting_on` is the same array, older name. */
+  attention: string[]
+  waiting_on: string[]
+  /** Caller-relative: true when the app user is in `attention`. */
+  your_turn: boolean
+  asked_at: number
+  /** Last movement — the last entry, or the question itself when nobody replied. */
+  updated_at: number
+  resolved_at?: number
+  /** Open decision thread idle longer than `question_stale_after` — daemon-derived. */
+  stale?: boolean
+  /** Task threads only: the context a row needs to link and label itself. */
+  project_id?: string
+  task_title?: string
 }
 
 export interface GithubRepo {
