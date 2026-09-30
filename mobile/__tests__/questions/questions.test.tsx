@@ -3,8 +3,8 @@
  * and that an answer waits out the 5 s Undo window before it is POSTed.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native'
-import { AppState, type AppStateStatus } from 'react-native'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native'
+import { AppState, ScrollView, type AppStateStatus } from 'react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { ToastProvider } from '../../src/components/Toast'
 import { ServerProvider } from '../../src/servers/ServerContext'
@@ -84,6 +84,48 @@ describe('Questions tab', () => {
     expect(screen.queryByText('Other')).toBeNull()
     await fireEvent.press(screen.getByText(/Other open \(1\)/))
     expect(screen.getByText('Other')).toBeTruthy()
+  })
+
+  describe('keyboard', () => {
+    const layout = (y: number, height: number) => ({ nativeEvent: { layout: { x: 0, y, width: 390, height } } })
+
+    it('lifts the list and the undo bar above the keyboard and keeps taps working', async () => {
+      mockApi()
+      await renderScreen()
+      await waitFor(() => expect(screen.getByText('Which DB?')).toBeTruthy())
+      // behavior="padding": KAV renders its host with a bottom padding (0 while no keyboard).
+      const kav = screen.getByTestId('questions-keyboard')
+      expect(kav).toHaveStyle({ paddingBottom: 0 })
+      const list = screen.getByTestId('questions-list')
+      expect(within(kav).getByTestId('questions-list')).toBe(list)
+      expect(list.props.keyboardShouldPersistTaps).toBe('handled')
+      await fireEvent.press(screen.getByText('Postgres'))
+      expect(within(kav).getByText('Undo')).toBeTruthy()
+    })
+
+    it('scrolls a focused answer input and its Send button into view', async () => {
+      mockApi()
+      await renderScreen()
+      await waitFor(() => expect(screen.getByPlaceholderText('Your answer…')).toBeTruthy())
+      const scrollTo = ScrollView.prototype.scrollTo as jest.Mock
+      scrollTo.mockClear()
+      await fireEvent(screen.getByTestId('thread-7'), 'layout', layout(500, 250))
+      // The keyboard opens: KAV shrinks the list to 300 px, the card is below it.
+      await fireEvent(screen.getByTestId('questions-list'), 'layout', layout(0, 300))
+      expect(scrollTo).not.toHaveBeenCalled()
+      await fireEvent(screen.getByPlaceholderText('Your answer…'), 'focus')
+      // 500 + 250 + 12 margin - 300 visible
+      expect(scrollTo).toHaveBeenLastCalledWith({ y: 462, animated: true })
+      // Re-layout after the keyboard animation settles reveals it again.
+      scrollTo.mockClear()
+      await fireEvent(screen.getByTestId('questions-list'), 'layout', layout(0, 280))
+      expect(scrollTo).toHaveBeenLastCalledWith({ y: 482, animated: true })
+      // Once the input is left, layout changes no longer move the list.
+      await fireEvent(screen.getByPlaceholderText('Your answer…'), 'blur')
+      scrollTo.mockClear()
+      await fireEvent(screen.getByTestId('questions-list'), 'layout', layout(0, 200))
+      expect(scrollTo).not.toHaveBeenCalled()
+    })
   })
 
   describe('brief', () => {

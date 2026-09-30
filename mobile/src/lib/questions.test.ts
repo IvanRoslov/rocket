@@ -1,5 +1,5 @@
 import type { ThreadInboxEntry } from '../api/types'
-import { otherOpen, questionPreview, questionTitle, threadSource, waitingOnYou } from './questions'
+import { otherOpen, questionPreview, questionTitle, revealOffset, threadSource, waitingOnYou } from './questions'
 
 const t = (p: Partial<ThreadInboxEntry>): ThreadInboxEntry => ({
   local_ref: '1/Q1', kind: 'task', task_id: 1, subject: 'task #1', id: 1, ordinal: 1, asked_by: 'orch',
@@ -53,5 +53,22 @@ describe('questionTitle', () => {
     expect(questionTitle({ title: ' Pick a DB ', body: 'x' })).toBe('Pick a DB')
     expect(questionTitle({ body: '\n\nfirst line\nsecond' })).toBe('first line')
     expect(questionTitle({ body: 'word '.repeat(30) }).endsWith('…')).toBe(true)
+  })
+})
+
+describe('revealOffset', () => {
+  const view = { offset: 100, height: 400 }
+
+  it('leaves the list alone when the card bottom is already on screen', () => {
+    expect(revealOffset({ y: 150, height: 200 }, view)).toBeNull()
+  })
+
+  it('scrolls just enough to lift the card bottom above the viewport edge', () => {
+    // bottom 650 + 12 margin - 400 viewport = 262
+    expect(revealOffset({ y: 450, height: 200 }, view)).toBe(262)
+  })
+
+  it('keeps the bottom (input and Send) in view for a card taller than the viewport', () => {
+    expect(revealOffset({ y: 120, height: 900 }, view)).toBe(632)
   })
 })

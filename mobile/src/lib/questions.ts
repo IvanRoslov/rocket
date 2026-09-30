@@ -55,3 +55,20 @@ export function questionPreview(q: { brief?: string; body: string }): string {
     .replace(/\s+/g, ' ')
     .trim()
 }
+
+/** Breathing room kept under a revealed card, above the keyboard. */
+const REVEAL_MARGIN = 12
+
+/**
+ * Scroll offset that brings a focused card's bottom — its answer input and
+ * Send — into the visible part of the list, or `null` when it already is.
+ * `card` is in content coordinates; `view` is the current offset and the
+ * list's visible height (already shrunk by the keyboard).
+ */
+export function revealOffset(
+  card: { y: number; height: number },
+  view: { offset: number; height: number },
+): number | null {
+  const bottom = card.y + card.height + REVEAL_MARGIN
+  return bottom > view.offset + view.height ? bottom - view.height : null
+}
