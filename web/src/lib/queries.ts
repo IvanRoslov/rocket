@@ -16,6 +16,7 @@ import type {
   Agent,
   AgentDelivery,
   AgentInboxMessage,
+  AgentKinds,
   AgentQuestion,
   GithubIssue,
   GithubRepo,
@@ -516,6 +517,16 @@ export function useCancelTask(): UseMutationResult<Task, Error, number> {
       queryClient.invalidateQueries({ queryKey: ['task'] })
       queryClient.invalidateQueries({ queryKey: ['sessions'] })
     },
+  })
+}
+
+/** `GET /v1/agent-kinds` -> the agent implementations the daemon can launch,
+ * for the orchestrator picker on Start ▸. */
+export function useAgentKinds(): UseQueryResult<AgentKinds> {
+  return useQuery({
+    queryKey: ['agent-kinds'],
+    queryFn: () => api.get<AgentKinds>('/v1/agent-kinds'),
+    retry: false,
   })
 }
 

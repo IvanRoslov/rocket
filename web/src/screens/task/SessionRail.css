@@ -249,3 +249,12 @@
   color: var(--accent-text);
   cursor: pointer;
 }
+
+/* Which agent runs this session (claude-code, codex, ...) — workers can be
+   spawned on a different agent than their orchestrator. */
+.session-rail__agent {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--fg-muted, #8b8b8b);
+  white-space: nowrap;
+}

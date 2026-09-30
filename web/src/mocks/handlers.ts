@@ -1281,4 +1281,16 @@ export const handlers = [
       whose_turn: undefined,
     }),
   ),
+
+  // Agent kinds — the orchestrator picker in StartModal. codex is registered
+  // but has no binary on the fixture machine, so it shows up disabled.
+  http.get('/v1/agent-kinds', () =>
+    HttpResponse.json({
+      default: 'claude-code',
+      kinds: [
+        { name: 'claude-code', available: true },
+        { name: 'codex', available: false, error: 'codex not found in PATH' },
+      ],
+    }),
+  ),
 ]
