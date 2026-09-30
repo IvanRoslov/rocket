@@ -110,6 +110,9 @@ export function SessionRail({ orchestrator, workers }: SessionRailProps) {
           </div>
           <div className="session-rail__orch-meta">
             <span className="session-rail__orch-label">Orchestrator</span>
+            <span className="session-rail__agent" title={`agent: ${orchestrator.agent}`}>
+              {orchestrator.agent}
+            </span>
             <div className="session-rail__spacer" />
             {orchestrator.pending_quiz && <Badge tone="indigo">quiz</Badge>}
             <Badge tone={badgeTone(orchestrator)}>{orchestrator.activity ?? orchestrator.state}</Badge>
@@ -162,6 +165,9 @@ export function SessionRail({ orchestrator, workers }: SessionRailProps) {
                 {w.repo_id}
               </div>
               <div className="session-rail__worker-status">
+                <span className="session-rail__agent" title={`agent: ${w.agent}`}>
+                  {w.agent}
+                </span>
                 {w.pending_quiz && <Badge tone="indigo">quiz</Badge>}
                 <Badge tone={badgeTone(w)}>{w.activity ?? w.state}</Badge>
                 <span className={`session-rail__pr ${pr.tone}`}>{pr.text}</span>

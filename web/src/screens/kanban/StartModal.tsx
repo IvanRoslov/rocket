@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Button } from '../../components/Button'
 import { Modal } from '../../components/Modal'
-import { useStartTask } from '../../lib/queries'
+import { useAgentKinds, useStartTask } from '../../lib/queries'
 import './kanban.css'
 
 export interface StartModalProps {
@@ -9,15 +9,23 @@ export interface StartModalProps {
   onClose: () => void
 }
 
-/** Start ▸ on a Backlog card: pick an agent (empty = daemon default) -> `POST /v1/tasks/{id}/start`. */
+/** Start ▸ on a Backlog card: pick which agent runs the orchestrator (empty =
+ * daemon default) -> `POST /v1/tasks/{id}/start`. The choice is a select over
+ * `GET /v1/agent-kinds`; agents whose executable is missing on the daemon's
+ * machine are listed but disabled, with the reason as the option title.
+ * Workers are NOT picked here — the orchestrator chooses per subtask with
+ * `rocket spawn --agent <name>` (see internal/prompts/templates/orchestrator.md). */
 export function StartModal({ taskId, onClose }: StartModalProps) {
   const [agent, setAgent] = useState('')
+  const kinds = useAgentKinds()
   const startTask = useStartTask()
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    startTask.mutate({ id: taskId, agent: agent.trim() || undefined }, { onSuccess: onClose })
+    startTask.mutate({ id: taskId, agent: agent || undefined }, { onSuccess: onClose })
   }
+
+  const defaultLabel = kinds.data?.default ? `Default (${kinds.data.default})` : 'Default agent'
 
   return (
     <Modal title={`Start task #${taskId}`} onClose={onClose}>
@@ -25,15 +33,23 @@ export function StartModal({ taskId, onClose }: StartModalProps) {
         <label className="kanban-modal-form__label" htmlFor="start-task-agent">
           Agent
         </label>
-        <input
+        <select
           id="start-task-agent"
           className="kanban-modal-form__input"
           value={agent}
           onChange={(e) => setAgent(e.target.value)}
-          placeholder="Default agent"
           autoFocus
-        />
-        <p className="kanban-modal-form__hint">Leave empty to use the daemon's default agent.</p>
+        >
+          <option value="">{defaultLabel}</option>
+          {(kinds.data?.kinds ?? []).map((k) => (
+            <option key={k.name} value={k.name} disabled={!k.available} title={k.error}>
+              {k.available ? k.name : `${k.name} — unavailable`}
+            </option>
+          ))}
+        </select>
+        <p className="kanban-modal-form__hint">
+          Runs the orchestrator. Workers are picked by the orchestrator per subtask.
+        </p>
 
         {startTask.isError && <p className="kanban-modal-form__error">{startTask.error.message}</p>}
 

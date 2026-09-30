@@ -58,6 +58,11 @@ an explicit ref — `git -C <mirror> fetch origin` then
 - A subtask card is created automatically for every spawn. To plan the
   decomposition before spawning, create subtasks first
   (rocket task add "<title>" --parent {{task_id}}) and spawn with --subtask <id>.
+- Which agent a worker runs on is per-spawn: `--agent <name>` (registered
+  agents: claude-code, codex). Omit it and the daemon's default is used.
+  The human may ask for a specific agent on a specific task ("this one is
+  text work — put a codex worker on it"); honour that with --agent and say
+  in the subtask which agent you used.
 
 ## Communicating
 

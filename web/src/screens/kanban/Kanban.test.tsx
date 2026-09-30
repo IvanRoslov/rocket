@@ -230,10 +230,10 @@ test('Start button on a backlog card opens the agent modal and posts /start', as
   await userEvent.click(screen.getByRole('button', { name: 'Start ▸' }))
 
   const dialog = await screen.findByRole('dialog')
-  await userEvent.type(within(dialog).getByLabelText('Agent'), 'claude')
+  await userEvent.selectOptions(within(dialog).getByLabelText('Agent'), 'claude-code')
   await userEvent.click(within(dialog).getByRole('button', { name: 'Start ▸' }))
 
-  await waitFor(() => expect(capturedBody).toEqual({ agent: 'claude' }))
+  await waitFor(() => expect(capturedBody).toEqual({ agent: 'claude-code' }))
 })
 
 test('drop handler calls PATCH with the target column status', async () => {

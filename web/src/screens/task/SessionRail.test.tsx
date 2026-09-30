@@ -115,3 +115,30 @@ describe('SessionRail quiz badge', () => {
     expect(within(meta as HTMLElement).queryByText('quiz')).not.toBeInTheDocument()
   })
 })
+
+// Which agent runs which session: workers can be spawned on a different
+// agent than their orchestrator (`rocket spawn --agent codex`), so the rail
+// names the agent on every card.
+describe('SessionRail agent badges', () => {
+  it('names the agent of the orchestrator and of every worker', () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const orchestrator = { ...sessions.find((s) => s.kind === 'orchestrator')!, agent: 'claude-code' }
+    const workers = sessions
+      .filter((s) => s.kind === 'worker')
+      .map((w, i) => ({ ...w, agent: i === 0 ? 'codex' : 'claude-code' }))
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionRail orchestrator={orchestrator} workers={workers} />
+      </QueryClientProvider>,
+    )
+
+    const orchCard = screen.getByText(orchestrator.tmux_name).closest<HTMLElement>('.session-rail__orch')!
+    expect(within(orchCard).getByText('claude-code')).toBeInTheDocument()
+
+    const codexCard = screen.getByText(workers[0].tmux_name).closest<HTMLElement>('.session-rail__worker')!
+    expect(within(codexCard).getByText('codex')).toBeInTheDocument()
+
+    const claudeCard = screen.getByText(workers[1].tmux_name).closest<HTMLElement>('.session-rail__worker')!
+    expect(within(claudeCard).getByText('claude-code')).toBeInTheDocument()
+  })
+})

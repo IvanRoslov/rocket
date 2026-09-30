@@ -181,6 +181,7 @@ tmux рендерит окно ровно в **одном** размере; пр
 
 | Метод | Путь | Описание |
 |---|---|---|
+| GET | `/v1/agent-kinds` | Реализации агентов, которыми демон умеет запускать сессии: `{kinds:[{name, available, error?}], default}`. `available` — доступен ли исполняемый файл на машине демона; `default` — `default_agent` из конфига. Питает выбор оркестратора в UI (Start ▸) |
 | GET | `/v1/agents` | Список агентов; фильтр `?project=`; у элемента `session_alive` (жива ли tmux-сессия `<id>`), `unread` (непрочитанных в инбоксе), `open_questions` и `awaiting_user` (открытые треды и из них ждущие человека) |
 | POST | `/v1/agents` | `{id, description?, project?, dir?, command?}` → 201. `id` — `^[a-z0-9-]+$`, он же имя tmux-сессии; `project` проверяется, только если непустой |
 | GET | `/v1/agents/{id}` | Карточка агента; `milestones` — майлстоны, которые он держит (`{id, title, status}`, старые первыми), см. [12-tasks.md](12-tasks.md) |

@@ -637,3 +637,21 @@ export interface AgentQuestion {
   messages: QuestionMessage[]
 }
 
+
+// Agent kinds — internal/api/agent_kinds.go
+
+/** One registered agent implementation (claude-code, codex, ...). `available`
+ * says whether its executable is usable on the daemon's machine right now;
+ * `error` carries the reason when it is not. */
+export interface AgentKind {
+  name: string
+  available: boolean
+  error?: string
+}
+
+/** `GET /v1/agent-kinds` — the registry plus the daemon's default agent, so a
+ * picker can label its "keep the default" choice. */
+export interface AgentKinds {
+  kinds: AgentKind[]
+  default: string
+}
