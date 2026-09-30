@@ -165,7 +165,7 @@ function AddServerForm({ onDone, startScanning }: { onDone: () => void; startSca
           <TextInput
             style={[styles.input, { fontFamily: mono }]}
             accessibilityLabel="Адрес"
-            placeholder="https://mac.tailnet.ts.net"
+            placeholder="https://rocket.example.com"
             placeholderTextColor={colors.textFaint}
             autoCapitalize="none"
             autoCorrect={false}
@@ -197,7 +197,7 @@ function AddServerForm({ onDone, startScanning }: { onDone: () => void; startSca
       )}
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Text style={styles.hint}>
-        На компьютере выполни `rocket pair` — он покажет QR и одноразовый код. Телефон должен быть в твоём Tailscale.
+        На компьютере выполни `rocket pair` — он покажет QR и одноразовый код.
       </Text>
     </Card>
   )

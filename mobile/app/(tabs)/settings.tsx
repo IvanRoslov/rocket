@@ -142,7 +142,7 @@ function ServerSection() {
       </Card>
       <PrimaryButton label="Switch server" onPress={() => router.navigate('/servers')} />
       <Text style={styles.hint}>
-        Удалённый доступ — через Tailscale: `tailscale serve --bg 4477`, `public_url` в ~/.rocket/config.yaml и
+        Удалённый доступ — публичный https-адрес демона (`public_url` в ~/.rocket/config.yaml, например Cloudflare-туннель) и
         `rocket pair` на компьютере (docs/testing/remote-access.md).
       </Text>
     </View>
