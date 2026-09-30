@@ -59,6 +59,7 @@ export function QuestionThread({ taskId, question, orchestratorName }: QuestionT
       localRef={question.local_ref}
       title={question.title}
       body={question.body}
+      brief={question.brief}
       messages={question.messages}
       turnLabel={whoseTurnLabel(question, orchestratorName)}
       turnWarn={!!question.your_turn}

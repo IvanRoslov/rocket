@@ -8,6 +8,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Markdown } from '../../components/Markdown'
+import { QuestionContent } from '../../components/QuestionContent'
 import { timeAgo } from '../../lib/format'
 import { isHuman, threadParticipantLabel } from '../../lib/participants'
 import { questionTitle, splitReplies } from '../../lib/thread'
@@ -89,33 +90,32 @@ export function ThreadCard(props: ThreadCardProps) {
       )}
 
       <h2 className="q__question">{questionTitle(entry)}</h2>
-      <div className="q__body">
-        <Markdown>{entry.body}</Markdown>
-      </div>
-      <div className="q__asked-by">
-        <Avatar id={entry.asked_by} />
-        <span>asked by {label(entry.asked_by)}</span>
-      </div>
+      <QuestionContent brief={entry.brief} body={entry.body} bodyClassName="q__body">
+        <div className="q__asked-by">
+          <Avatar id={entry.asked_by} />
+          <span>asked by {label(entry.asked_by)}</span>
+        </div>
 
-      {!closed && options.length > 0 && (
-        <>
-          <div className="q__options-label">One tap closes this thread</div>
-          <div className="q__options">
-            {options.map((option, i) => (
-              <button
-                key={option}
-                type="button"
-                className="q__option"
-                onClick={() => props.onChoose(i)}
-              >
-                <span className="q__option-num">{i + 1}</span>
-                <span className="q__option-label">{option}</span>
-                <span className="q__option-note">closes thread</span>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+        {!closed && options.length > 0 && (
+          <>
+            <div className="q__options-label">One tap closes this thread</div>
+            <div className="q__options">
+              {options.map((option, i) => (
+                <button
+                  key={option}
+                  type="button"
+                  className="q__option"
+                  onClick={() => props.onChoose(i)}
+                >
+                  <span className="q__option-num">{i + 1}</span>
+                  <span className="q__option-label">{option}</span>
+                  <span className="q__option-note">closes thread</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </QuestionContent>
 
       {detail.messages.length > 0 && (
         <div className="q__conversation">

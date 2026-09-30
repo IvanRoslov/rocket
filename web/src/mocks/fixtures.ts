@@ -560,6 +560,15 @@ export const questions: Question[] = [
       'Should we support prorated refunds for mid-cycle downgrades?\n\n---\n\n' +
       'Current plan only prorates upgrades. Downgrades take effect at the ' +
       'next billing cycle. Finance wants to know if v2 should change that.',
+    // The brief showcase: the plain-language version leads, the body above
+    // folds under "Details". Every other fixture carries no brief and must
+    // render exactly as before.
+    brief:
+      '**Проблема:** когда клиент переходит на тариф дешевле посреди месяца, ' +
+      'деньги за остаток сейчас не возвращаются — скидка начнётся только со следующего счёта.\n\n' +
+      '**Варианты:** вернуть разницу сразу (клиенту честнее, но нужна новая таблица возвратов) ' +
+      'или оставить как есть (ничего не меняем, но клиент переплачивает до конца месяца).\n\n' +
+      '**Рекомендация:** возвращать сразу — финансы уже согласны.',
     status: 'open',
     // The new-model showcase (task #1023): a local ref, answer options that
     // close the thread in one click, and a thread that has gone stale.

@@ -6,6 +6,7 @@
 
 import { useState } from 'react'
 import { Markdown } from './Markdown'
+import { QuestionContent } from './QuestionContent'
 import { timeAgo } from '../lib/format'
 import { isHuman, threadParticipantLabel } from '../lib/participants'
 import { questionTitle, splitReplies } from '../lib/thread'
@@ -37,6 +38,8 @@ export interface QuestionThreadViewProps {
   /** One-line heading; derived from the body when the daemon sent none. */
   title?: string
   body: string
+  /** Plain-language summary; when set it leads and the body folds under Details. */
+  brief?: string
   messages: ThreadEntry[]
   /** Empty when nobody is waiting (a resolved thread). */
   turnLabel: string
@@ -79,6 +82,7 @@ export function QuestionThreadView({
   localRef,
   title,
   body: question,
+  brief,
   messages,
   turnLabel,
   turnWarn,
@@ -151,9 +155,11 @@ export function QuestionThreadView({
       )}
       <div className="question-thread__body">
         <h2 className="question-thread__title">{questionTitle({ title, body: question })}</h2>
-        <div className="question-thread__question">
-          <Markdown>{question}</Markdown>
-        </div>
+        <QuestionContent
+          brief={brief}
+          body={question}
+          bodyClassName="question-thread__question"
+        />
 
         <div className="question-thread__discussion-label">
           Discussion · {messages.length} replies

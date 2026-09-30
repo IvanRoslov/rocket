@@ -33,8 +33,10 @@ Start now:
    (task doc put --kind spec / --kind plan). Store the spec in the task, then
    ask for confirmation THROUGH THE TASK:
    `rocket task ask {{task_id}} --title "Confirm spec v<N>: ok to start
-   implementation?" --file <summary.md> --option "go" --option "needs changes"`
-   (the summary of what they are confirming is the body — markdown, via
+   implementation?" --brief "<plain-language summary>" --file <summary.md>
+   --option "go" --option "needs changes"`
+   (the brief says in plain words what gets built and what is left out; the
+   full summary of what they are confirming is the body — markdown, via
    `--file`).
    A chat "yes" about the design is NOT spec confirmation.
    Do not spawn workers until that question is answered. ANY later edit to the

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -45,13 +46,14 @@ type agentQuestionRow struct {
 // inside a role instance it escalates to the human.
 func newAgentAskCmd() *cobra.Command {
 	var title string
+	var brief string
 	var context string
 	var to []string
 	var file string
 	var options []string
 	var fyi bool
 
-	const usage = "usage: rocket agent ask <role> \"<вопрос>\" | --file <path> [--title <строка>] [--context <md>] [--to <id,...>] [--option <текст>]... [--fyi]"
+	const usage = "usage: rocket agent ask <role> \"<вопрос>\" | --file <path> [--title <строка>] [--brief <md>] [--context <md>] [--to <id,...>] [--option <текст>]... [--fyi]"
 
 	cmd := &cobra.Command{
 		Use:   "ask <role> [\"<вопрос>\"]",
@@ -62,6 +64,11 @@ func newAgentAskCmd() *cobra.Command {
 			}
 
 			if err := validateAskFlags(options, fyi, usage); err != nil {
+				return err
+			}
+			// Run inside a role instance this escalates to the human, so the
+			// brief is required; run by the human it asks the role and is not.
+			if err := validateBrief(brief, fyi, os.Getenv("ROCKET_SESSION_ID") != "", "rocket agent ask "+args[0]); err != nil {
 				return err
 			}
 
@@ -76,6 +83,7 @@ func newAgentAskCmd() *cobra.Command {
 			}
 
 			reqBody := askRequestBody(title, body, context, parseTo(to), options, fyi)
+			setBrief(reqBody, brief)
 
 			var resp agentQuestionRow
 			if err := c.Post(apiPath("v1", "agents", args[0], "questions"), reqBody, &resp); err != nil {
@@ -91,6 +99,7 @@ func newAgentAskCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&title, "title", "", "заголовок вопроса (одна строка); без него сервер выведет его из тела")
+	cmd.Flags().StringVar(&brief, "brief", "", briefFlagUsage)
 	cmd.Flags().StringVar(&context, "context", "", "deprecated: содержимое дописывается к телу вопроса")
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
 	cmd.Flags().StringVar(&file, "file", "", "файл с вопросом ('-' — stdin)")

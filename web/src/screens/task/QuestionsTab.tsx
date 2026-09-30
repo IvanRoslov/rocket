@@ -4,6 +4,7 @@
 
 import { useState } from 'react'
 import { Markdown } from '../../components/Markdown'
+import { QuestionContent } from '../../components/QuestionContent'
 import { QuestionThread, authorLabel } from '../../components/QuestionThread'
 import { isHuman } from '../../lib/participants'
 import { timeAgo } from '../../lib/format'
@@ -135,9 +136,11 @@ function ResolvedThreadRow({ question, orchestratorName }: ResolvedThreadRowProp
 
       {open && (
         <div className="questions-tab__resolved-detail">
-          <div className="questions-tab__resolved-question">
-            <Markdown>{question.body}</Markdown>
-          </div>
+          <QuestionContent
+            brief={question.brief}
+            body={question.body}
+            bodyClassName="questions-tab__resolved-question"
+          />
 
           {question.messages.length > 0 && (
             <div className="question-thread__messages">

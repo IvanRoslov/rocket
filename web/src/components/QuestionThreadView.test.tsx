@@ -260,6 +260,24 @@ describe('QuestionThreadView, rebuilt card', () => {
     expect(screen.getByText('reply 1')).toBeInTheDocument()
   })
 
+  it('leads with the brief and folds the body under Details', async () => {
+    render(<QuestionThreadView {...base} title="Deploy" brief="**Проблема:** plain words." />)
+
+    expect(screen.getByText('plain words.', { exact: false })).toBeInTheDocument()
+    expect(screen.queryByText('Ship it?')).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /Details/ }))
+
+    expect(screen.getByText('Ship it?')).toBeInTheDocument()
+  })
+
+  it('shows the body with no Details control when there is no brief', () => {
+    render(<QuestionThreadView {...base} title="Deploy" brief="" />)
+
+    expect(screen.getByText('Ship it?')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Details/ })).not.toBeInTheDocument()
+  })
+
   it('has no context control', () => {
     render(<QuestionThreadView {...base} />)
 

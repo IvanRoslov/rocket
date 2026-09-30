@@ -160,3 +160,38 @@ describe('the task screen and the global card', () => {
     expect(inView).toBe(inCard)
   })
 })
+
+// The brief — the plain-language version the agent writes — is what the human
+// reads first; the full body is one click away under "Details".
+describe('ThreadCard with a brief', () => {
+  const withBrief = { ...entry, brief: '**Проблема:** refunds are late.' }
+
+  it('leads with the brief and folds the body under Details', async () => {
+    const { container } = renderCard({ entry: withBrief })
+
+    expect(container.querySelector('.question-brief strong')).toHaveTextContent('Проблема:')
+    expect(screen.queryByText(/Finance wants/)).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /Details/ }))
+
+    expect(container.querySelector('.q__body strong')).toHaveTextContent('prorated')
+  })
+
+  it('renders the options between the brief and Details', () => {
+    const { container } = renderCard({ entry: { ...withBrief, options: ['Yes', 'No'] } })
+
+    const brief = container.querySelector('.question-brief')!
+    const options = container.querySelector('.q__options')!
+    const details = container.querySelector('.question-details')!
+    expect(brief.compareDocumentPosition(options) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(options.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('renders exactly as before when the brief is empty', () => {
+    const { container } = renderCard({ entry: { ...entry, brief: '' } })
+
+    expect(container.querySelector('.q__body strong')).toHaveTextContent('prorated')
+    expect(container.querySelector('.question-brief')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Details/ })).not.toBeInTheDocument()
+  })
+})

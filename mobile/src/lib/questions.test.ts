@@ -1,5 +1,5 @@
 import type { ThreadInboxEntry } from '../api/types'
-import { otherOpen, questionTitle, threadSource, waitingOnYou } from './questions'
+import { otherOpen, questionPreview, questionTitle, threadSource, waitingOnYou } from './questions'
 
 const t = (p: Partial<ThreadInboxEntry>): ThreadInboxEntry => ({
   local_ref: '1/Q1', kind: 'task', task_id: 1, subject: 'task #1', id: 1, ordinal: 1, asked_by: 'orch',
@@ -33,6 +33,18 @@ describe('threadSource', () => {
   })
   it('labels a role thread with the agent and links to the agent', () => {
     expect(threadSource(t({ kind: 'role', task_id: undefined, role_id: 'cto' }))).toEqual({ label: 'agent cto', href: '/agent/cto' })
+  })
+})
+
+describe('questionPreview', () => {
+  it('prefers the brief, flattened to one plain-text line', () => {
+    const brief = '**Проблема:** база тормозит.\n\n**Варианты:**\n- `pg`\n- sqlite\n\n**Рекомендация:** pg'
+    expect(questionPreview({ brief, body: 'long wall' })).toBe('Проблема: база тормозит. Варианты: pg sqlite Рекомендация: pg')
+  })
+  it('falls back to the body unchanged when the brief is empty, blank or absent', () => {
+    expect(questionPreview({ brief: '', body: 'raw **body**' })).toBe('raw **body**')
+    expect(questionPreview({ brief: '  \n', body: 'raw' })).toBe('raw')
+    expect(questionPreview({ body: 'raw' })).toBe('raw')
   })
 })
 

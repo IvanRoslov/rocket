@@ -198,14 +198,14 @@ describe('TaskScreen', () => {
     renderTask()
     await userEvent.click(await screen.findByText('? awaiting you'))
 
-    expect(await screen.findByText((_, el) => el?.className === 'question-thread__question')).toBeInTheDocument()
+    expect(await screen.findByText((_, el) => el?.className === 'question-thread__title')).toBeInTheDocument()
   })
 
   it('"Answer & close" posts to /v1/questions/{id}/answer and removes the thread from the open list', async () => {
     renderTask()
     await userEvent.click(await screen.findByText('? awaiting you'))
 
-    const question = await screen.findByText((_, el) => el?.className === 'question-thread__question')
+    const question = await screen.findByText((_, el) => el?.className === 'question-thread__title')
     const card = question.closest('.question-thread') as HTMLElement
     await userEvent.type(within(card).getByRole('textbox'), 'Yes, credit immediately.')
     await userEvent.click(within(card).getByRole('button', { name: 'Answer & close' }))

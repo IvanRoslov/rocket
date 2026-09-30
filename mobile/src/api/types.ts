@@ -203,6 +203,12 @@ export interface Question {
   asked_by: string
   /** One-line heading; absent on a daemon older than task #1264. */
   title?: string
+  /**
+   * Plain-language markdown summary (problem → options → recommendation)
+   * the agent writes alongside the body. `""` on old and human-opened
+   * threads; absent on a daemon that predates it.
+   */
+  brief?: string
   body: string
   context?: string
   status: QuestionStatus
@@ -279,6 +285,12 @@ export interface AgentQuestion {
   asked_by: string
   /** One-line heading; absent on a daemon older than task #1264. */
   title?: string
+  /**
+   * Plain-language markdown summary (problem → options → recommendation)
+   * the agent writes alongside the body. `""` on old and human-opened
+   * threads; absent on a daemon that predates it.
+   */
+  brief?: string
   body: string
   context?: string
   status: QuestionStatus
@@ -334,6 +346,12 @@ export interface ThreadInboxEntry {
   asked_by: string
   /** One-line heading; absent on a daemon older than task #1264. */
   title?: string
+  /**
+   * Plain-language markdown summary (problem → options → recommendation)
+   * the agent writes alongside the body. `""` on old and human-opened
+   * threads; absent on a daemon that predates it.
+   */
+  brief?: string
   body: string
   status: QuestionStatus
   resolution?: 'answered' | 'dismissed' | 'fyi'

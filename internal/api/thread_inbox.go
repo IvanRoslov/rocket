@@ -32,6 +32,7 @@ type threadInboxEntry struct {
 	// Title is the thread's one-line heading — what a listing renders instead
 	// of a truncated body.
 	Title        string   `json:"title"`
+	Brief        string   `json:"brief"`
 	Body         string   `json:"body"`
 	Status       string   `json:"status"`
 	Resolution   string   `json:"resolution,omitempty"`
@@ -154,6 +155,7 @@ func handleGetThreads(w http.ResponseWriter, r *http.Request, d Deps) {
 			Ordinal:    ordinals[q.ID],
 			AskedBy:    wireParticipant(q.AskedBy),
 			Title:      q.Title,
+			Brief:      q.Brief,
 			Body:       q.Body,
 			Status:     q.Status,
 			Resolution: q.Resolution,
