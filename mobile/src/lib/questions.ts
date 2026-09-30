@@ -36,3 +36,22 @@ export function questionTitle(q: { title?: string; body: string }): string {
   const space = cut.lastIndexOf(' ')
   return `${(space > 0 ? cut.slice(0, space) : cut).trimEnd()}…`
 }
+
+/** The agent's plain-language brief, trimmed; `''` when there is none (old daemon, old or human-opened thread). */
+export function questionBrief(q: { brief?: string }): string {
+  return q.brief?.trim() ?? ''
+}
+
+/**
+ * One-line list preview: the brief flattened to plain text when there is one
+ * — it is the part written to be read first — else the body, as before.
+ */
+export function questionPreview(q: { brief?: string; body: string }): string {
+  const brief = questionBrief(q)
+  if (!brief) return q.body
+  return brief
+    .replace(/^\s{0,3}(#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)/gm, '')
+    .replace(/\*\*|__|`/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}

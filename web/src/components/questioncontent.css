@@ -1,0 +1,31 @@
+/* The brief is what the human reads: full-strength text, a quiet accent rule
+   on the left so it reads as the answer-to-read, not as another reply. */
+.question-brief {
+  margin: 0 0 14px;
+  padding: 2px 0 2px 14px;
+  border-left: 2px solid var(--accent);
+  font: 15px/1.65 var(--font-ui);
+  color: var(--text);
+  text-wrap: pretty;
+}
+
+.question-details {
+  margin: 0 0 14px;
+}
+
+.question-details__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 8px;
+  padding: 0;
+  background: none;
+  border: none;
+  font: 12.5px var(--font-ui);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.question-details__toggle:hover {
+  color: var(--accent-hover);
+}

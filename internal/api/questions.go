@@ -55,7 +55,10 @@ type questionResponse struct {
 	Ordinal int    `json:"ordinal"`
 	AskedBy string `json:"asked_by"`
 	// Title is the thread's one-line heading; Body is the markdown question.
+	// Brief is the plain-language version a client shows before Body; empty
+	// on threads that have none.
 	Title string `json:"title"`
+	Brief string `json:"brief"`
 	Body  string `json:"body"`
 	// Context is what the pre-#1264 API carried alongside the body. It is
 	// always empty now — a context sent on creation is appended to the body —
@@ -131,6 +134,7 @@ func buildQuestionResponse(d Deps, caller *store.Session, q store.Question) (que
 		Ordinal:      ordinal,
 		AskedBy:      wireParticipant(q.AskedBy),
 		Title:        q.Title,
+		Brief:        q.Brief,
 		Body:         q.Body,
 		Status:       q.Status,
 		Resolution:   q.Resolution,
@@ -318,7 +322,10 @@ func withContext(body, context string) string {
 
 type postQuestionRequest struct {
 	// Title is the thread's heading. Left out, it is derived from Body.
+	// Brief is the plain-language version of the question (see
+	// store.Question.Brief); the CLI requires it from agents.
 	Title string `json:"title"`
+	Brief string `json:"brief"`
 	Body  string `json:"body"`
 	// Context is deprecated: whatever comes in here is appended to Body with
 	// store.ContextSeparator, so a thread is one piece of markdown.
@@ -388,6 +395,7 @@ func handlePostTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 		TaskID:  id,
 		AskedBy: callerAuthor(caller),
 		Title:   req.Title,
+		Brief:   req.Brief,
 		Body:    withContext(req.Body, req.Context),
 		// --to seeds the attention set of the new thread.
 		AddressedTo: req.To,

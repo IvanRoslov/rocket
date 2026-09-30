@@ -783,13 +783,14 @@ func newTaskLogCmd() *cobra.Command {
 // rejects any other caller.
 func newTaskAskCmd() *cobra.Command {
 	var title string
+	var brief string
 	var context string
 	var to []string
 	var file string
 	var options []string
 	var fyi bool
 
-	const usage = "usage: rocket task ask <task-id> \"<вопрос>\" | --file <path> [--title <строка>] [--context <md>] [--to <id,...>] [--option <текст>]... [--fyi]"
+	const usage = "usage: rocket task ask <task-id> \"<вопрос>\" | --file <path> [--title <строка>] [--brief <md>] [--context <md>] [--to <id,...>] [--option <текст>]... [--fyi]"
 
 	cmd := &cobra.Command{
 		Use:   "ask <task-id> [\"<вопрос>\"]",
@@ -813,6 +814,9 @@ func newTaskAskCmd() *cobra.Command {
 			if os.Getenv("ROCKET_SESSION_ID") == "" {
 				return errors.New("rocket task ask is for orchestrators asking the human; to ask the orchestrator a question use: rocket task ask-orch")
 			}
+			if err := validateBrief(brief, fyi, true, "rocket task ask "+args[0]); err != nil {
+				return err
+			}
 
 			c, _, err := connect(true)
 			if err != nil {
@@ -820,6 +824,7 @@ func newTaskAskCmd() *cobra.Command {
 			}
 
 			reqBody := askRequestBody(title, body, context, parseTo(to), options, fyi)
+			setBrief(reqBody, brief)
 
 			path := apiPath("v1", "tasks", args[0], "questions")
 			var resp questionRow
@@ -836,6 +841,7 @@ func newTaskAskCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&title, "title", "", "заголовок вопроса (одна строка); без него сервер выведет его из тела")
+	cmd.Flags().StringVar(&brief, "brief", "", briefFlagUsage)
 	cmd.Flags().StringVar(&context, "context", "", "deprecated: содержимое дописывается к телу вопроса")
 	cmd.Flags().StringSliceVar(&to, "to", nil, toFlagUsage)
 	cmd.Flags().StringVar(&file, "file", "", "файл с вопросом ('-' — stdin)")

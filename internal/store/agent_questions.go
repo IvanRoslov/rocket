@@ -17,7 +17,9 @@ type AgentQuestion struct {
 	AskedBy string // session id of the asking role instance; "" = human
 	// Title mirrors Question.Title: a one-line plain-text heading, derived
 	// from Body when left empty.
-	Title      string
+	Title string
+	// Brief mirrors Question.Brief.
+	Brief      string
 	Body       string
 	Status     string // open|resolved
 	Resolution string // answered|dismissed (set once resolved)
@@ -47,13 +49,13 @@ type AgentQuestionMessage struct {
 // what makes a thread a role thread is a non-NULL role_id. The functions below
 // are a thin facade over that shared storage, kept so internal/api's role
 // handlers keep their existing shape.
-const agentQuestionColumns = `id, role_id, asked_by, title, body, status, resolution, addressed_to, type, options, asked_at, resolved_at`
+const agentQuestionColumns = `id, role_id, asked_by, title, brief, body, status, resolution, addressed_to, type, options, asked_at, resolved_at`
 
 // toQuestion / toAgentQuestion convert between the facade's type and the
 // unified one, so the facade owns no SQL of its own where it can avoid it.
 func (q AgentQuestion) toQuestion() Question {
 	return Question{
-		ID: q.ID, RoleID: q.RoleID, AskedBy: q.AskedBy, Title: q.Title, Body: q.Body,
+		ID: q.ID, RoleID: q.RoleID, AskedBy: q.AskedBy, Title: q.Title, Brief: q.Brief, Body: q.Body,
 		Status: q.Status, Resolution: q.Resolution, AddressedTo: q.AddressedTo,
 		Type: q.Type, Options: q.Options,
 		AskedAt: q.AskedAt, ResolvedAt: q.ResolvedAt,
@@ -220,7 +222,7 @@ func scanAgentQuestion(row interface{ Scan(...any) error }) (AgentQuestion, erro
 	var resolvedAt sql.NullInt64
 
 	err := row.Scan(
-		&q.ID, &q.RoleID, &q.AskedBy, &q.Title, &q.Body, &q.Status, &resolution,
+		&q.ID, &q.RoleID, &q.AskedBy, &q.Title, &q.Brief, &q.Body, &q.Status, &resolution,
 		&addressedTo, &qType, &options, &q.AskedAt, &resolvedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {

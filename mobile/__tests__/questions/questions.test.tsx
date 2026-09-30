@@ -86,6 +86,64 @@ describe('Questions tab', () => {
     expect(screen.getByText('Other')).toBeTruthy()
   })
 
+  describe('brief', () => {
+    const BRIEF = '**Проблема:** база тормозит.\n\n**Рекомендация:** берите Postgres.'
+    const withBrief = { ...MINE, brief: BRIEF, body: 'A long wall of **detail** about indexes' }
+
+    /** Text of every rendered node in tree order — to check what comes first. */
+    const order = (...texts: string[]) => {
+      const out: string[] = []
+      const walk = (n: unknown): void => {
+        if (typeof n === 'string') out.push(n)
+        else if (Array.isArray(n)) n.forEach(walk)
+        else if (n && typeof n === 'object') walk((n as { children?: unknown }).children ?? [])
+      }
+      walk(screen.toJSON())
+      const flat = out.join('\n')
+      return texts.map((t) => flat.indexOf(t))
+    }
+
+    it('shows the brief first, then the options, with the body collapsed', async () => {
+      mockApi({ threads: [withBrief] })
+      await renderScreen()
+      await waitFor(() => expect(screen.getByText('Which DB?')).toBeTruthy())
+      expect(screen.getByText(/база тормозит/)).toBeTruthy()
+      expect(screen.getByText(/берите Postgres/)).toBeTruthy()
+      // Rendered as markdown: the bold label is its own node, no asterisks.
+      expect(screen.getByText('Проблема:')).toBeTruthy()
+      expect(screen.queryByText(/\*\*/)).toBeNull()
+      expect(screen.getByText(/Подробности/)).toBeTruthy()
+      expect(screen.queryByText(/A long wall of/)).toBeNull()
+      const [title, brief, option] = order('Which DB?', 'база тормозит', 'SQLite')
+      expect(title).toBeGreaterThanOrEqual(0)
+      expect(title).toBeLessThan(brief)
+      expect(brief).toBeLessThan(option)
+    })
+
+    it('the Подробности toggle reveals the full body and hides it again', async () => {
+      mockApi({ threads: [withBrief] })
+      await renderScreen()
+      await waitFor(() => expect(screen.getByText(/Подробности/)).toBeTruthy())
+      await fireEvent.press(screen.getByText(/Подробности/))
+      expect(screen.getByText(/A long wall of/)).toBeTruthy()
+      expect(screen.getByText('detail')).toBeTruthy()
+      await fireEvent.press(screen.getByText(/Подробности/))
+      expect(screen.queryByText(/A long wall of/)).toBeNull()
+    })
+
+    it('renders exactly as before when the brief is empty or missing', async () => {
+      for (const thread of [{ ...MINE, brief: '' }, MINE]) {
+        mockApi({ threads: [thread] })
+        const view = await renderScreen()
+        await waitFor(() => expect(screen.getByText('Which DB?')).toBeTruthy())
+        // The body is shown in full, straight away, with no toggle.
+        expect(screen.getByText('one')).toBeTruthy()
+        expect(screen.queryByText(/Подробности/)).toBeNull()
+        await view.unmount()
+      }
+    })
+  })
+
   it('sends a tapped option only after the undo window', async () => {
     mockApi()
     await renderScreen()

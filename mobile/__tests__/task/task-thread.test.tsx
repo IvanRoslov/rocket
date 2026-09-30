@@ -219,6 +219,39 @@ describe('task Q&A thread', () => {
     expect(screen.queryByText(/\*\*one\*\*/)).toBeNull()
   })
 
+  it('leads with the brief and keeps the body behind Подробности', async () => {
+    mockApi({
+      '/v1/tasks/12/questions': {
+        questions: [{ ...THREAD, title: 'Which repo?', brief: '**Проблема:** два репо.', body: 'full details here' }],
+      },
+    })
+    renderWithProviders(<TaskScreen />)
+    await waitFor(() => expect(screen.getByText('Questions')).toBeTruthy())
+    fireEvent.press(screen.getByText('Questions'))
+    await waitFor(() => expect(screen.getByText('Which repo?')).toBeTruthy())
+    expect(screen.getByText(/два репо/)).toBeTruthy()
+    expect(screen.queryByText('full details here')).toBeNull()
+    fireEvent.press(screen.getByText(/Подробности/))
+    await waitFor(() => expect(screen.getByText('full details here')).toBeTruthy())
+  })
+
+  it('previews a resolved thread by its brief, falling back to the body', async () => {
+    mockApi({
+      '/v1/tasks/12/questions': {
+        questions: [
+          { ...THREAD, id: 2, ordinal: 2, status: 'resolved', your_turn: false, brief: '**Проблема:** старое.', body: 'old wall' },
+          { ...THREAD, id: 3, ordinal: 3, status: 'resolved', your_turn: false, brief: '', body: 'no brief body' },
+        ],
+      },
+    })
+    renderWithProviders(<TaskScreen />)
+    await waitFor(() => expect(screen.getByText('Questions')).toBeTruthy())
+    fireEvent.press(screen.getByText('Questions'))
+    await waitFor(() => expect(screen.getByText('Проблема: старое.')).toBeTruthy())
+    expect(screen.queryByText('old wall')).toBeNull()
+    expect(screen.getByText('no brief body')).toBeTruthy()
+  })
+
   it('badges a stale thread', async () => {
     mockApi({ '/v1/tasks/12/questions': { questions: [{ ...THREAD, stale: true }] } })
     renderWithProviders(<TaskScreen />)

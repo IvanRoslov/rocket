@@ -31,7 +31,12 @@ type Question struct {
 	AskedBy string // session id of the asker; "" = the human
 	// Title is a one-line plain-text heading. It is what listings show; an
 	// empty one on input is filled from Body by DeriveTitle.
-	Title      string
+	Title string
+	// Brief is the plain-language version of the question for a reader who
+	// has not followed the asker's session: the problem, how the options
+	// differ, the recommendation. Body keeps the details. "" on threads asked
+	// before briefs existed and on those the human opened.
+	Brief      string
 	Body       string
 	Status     string // open|resolved
 	Resolution string // answered|dismissed (set once resolved)
@@ -77,7 +82,7 @@ type QuestionMessage struct {
 
 // questionColumns is the column list every Question scan relies on; it must
 // stay in sync with scanQuestion.
-const questionColumns = `id, task_id, role_id, asked_by, title, body, status, resolution, addressed_to, type, options, asked_at, resolved_at`
+const questionColumns = `id, task_id, role_id, asked_by, title, brief, body, status, resolution, addressed_to, type, options, asked_at, resolved_at`
 
 // encodeOptions renders answer choices as the JSON stored in
 // questions.options. An empty list stores as "" rather than "[]", so a thread
@@ -154,9 +159,9 @@ func (s *Store) AddQuestion(q Question) (int64, error) {
 	}
 
 	res, err := s.db.Exec(
-		`INSERT INTO questions (task_id, role_id, asked_by, title, body, status, resolution, addressed_to, type, options, asked_at, resolved_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		nullIfZero(q.TaskID), nullIfEmpty(q.RoleID), q.AskedBy, q.Title, q.Body,
+		`INSERT INTO questions (task_id, role_id, asked_by, title, brief, body, status, resolution, addressed_to, type, options, asked_at, resolved_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		nullIfZero(q.TaskID), nullIfEmpty(q.RoleID), q.AskedBy, q.Title, q.Brief, q.Body,
 		q.Status, nullIfEmpty(q.Resolution), encodeAddressedTo(q.AddressedTo),
 		q.Type, encodeOptions(q.Options),
 		q.AskedAt, nullIfZero(q.ResolvedAt),
@@ -336,7 +341,7 @@ func scanQuestion(row interface{ Scan(...any) error }) (Question, error) {
 	var taskID, resolvedAt sql.NullInt64
 
 	err := row.Scan(
-		&q.ID, &taskID, &roleID, &q.AskedBy, &q.Title, &q.Body, &q.Status, &resolution,
+		&q.ID, &taskID, &roleID, &q.AskedBy, &q.Title, &q.Brief, &q.Body, &q.Status, &resolution,
 		&addressedTo, &qType, &options, &q.AskedAt, &resolvedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {

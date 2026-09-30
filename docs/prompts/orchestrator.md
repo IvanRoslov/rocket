@@ -155,13 +155,21 @@ an explicit ref — `git -C <mirror> fetch origin` then
   listing show. Without it the daemon derives a heading from the body, and
   what it derives is usually worse than what you would have written. `ask`
   and `reply` print the heading the thread ended up with — read it.
-- The body is full markdown and its length is not limited: subheadings, bullet
-  or numbered lists instead of inline "(1) … (2) …" enumerations, code blocks
-  for commands and file excerpts, a blank line between logical blocks. Put the
-  whole context in it — the dashboard renders it. Never send a single
-  wall-of-text paragraph.
+- ALWAYS give a decision question a `--brief`: the plain-language version the
+  human would otherwise have to come and ask you for — "explain it simpler:
+  the problem first, then how the options differ, then what you recommend".
+  Written for someone who has not read your session: no file names, no code,
+  no terms you coined; three short parts (**Problem**, **Options**,
+  **Recommendation**), up to 800 characters, in the human's language. The
+  dashboard shows it first and folds the body away. `ask` refuses a question
+  without one and prints the full template — follow it.
+- The body is for the details and its length is not limited: full markdown,
+  subheadings, bullet or numbered lists instead of inline "(1) … (2) …"
+  enumerations, code blocks for commands and file excerpts, a blank line
+  between logical blocks. Never send a single wall-of-text paragraph.
       rocket task ask {{task_id}} --title "Which CIDR for staging?" \
-        --file /tmp/q.md --option "10.0.0.0/16" --option "leave as is"
+        --brief "$(cat /tmp/brief.md)" --file /tmp/q.md \
+        --option "10.0.0.0/16" --option "leave as is"
 - While waiting, keep making progress on everything not blocked by the question.
   Do not spam: one question per actual decision, batch related ones.
 - Replying into a RESOLVED thread is free: an "принял, делаю" is recorded in

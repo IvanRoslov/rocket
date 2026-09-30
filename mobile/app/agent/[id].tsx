@@ -43,6 +43,7 @@ import {
 } from '../../src/components/ui'
 import { inboxStatusBadge } from '../../src/lib/agents'
 import { ago } from '../../src/lib/format'
+import { questionPreview } from '../../src/lib/questions'
 import {
   addresseeLabel,
   answerableBy,
@@ -504,7 +505,7 @@ export default function AgentScreen() {
               <Pressable style={styles.awaitBanner} onPress={() => setTab('questions')}>
                 <Badge label="? awaiting" fg={colors.amberDeep} bg={colors.amberBg} />
                 <Text style={styles.awaitText} numberOfLines={2}>
-                  {awaiting[0].body}
+                  {questionPreview(awaiting[0])}
                 </Text>
                 <Text style={{ color: colors.amberDeep, fontSize: 16 }}>→</Text>
               </Pressable>
@@ -533,7 +534,7 @@ export default function AgentScreen() {
                       <Badge key={b.label} label={b.label} fg={colors.textDim} bg={colors.cardAlt} />
                     ))}
                     <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, color: colors.textMid }}>
-                      {q.body}
+                      {questionPreview(q)}
                     </Text>
                     <Text style={{ fontSize: 11, color: colors.textFaint }}>{ago(q.resolved_at)}</Text>
                   </Card>

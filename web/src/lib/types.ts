@@ -388,6 +388,13 @@ export interface Question {
   title?: string
   body: string
   /**
+   * Plain-language version of the question the agent writes alongside it —
+   * the problem in simple words, how the options differ, the recommendation
+   * (short markdown). `""` on older threads and on threads the human opened;
+   * absent on a daemon that predates it. Render through `QuestionContent`.
+   */
+  brief?: string
+  /**
    * @deprecated Task #1264 folded the context into the body. The API still
    * sends the field for older clients, but it is always empty.
    */
@@ -464,6 +471,13 @@ export interface ThreadInboxEntry {
   /** One-line heading; absent on a daemon older than task #1264. */
   title?: string
   body: string
+  /**
+   * Plain-language version of the question the agent writes alongside it —
+   * the problem in simple words, how the options differ, the recommendation
+   * (short markdown). `""` on older threads and on threads the human opened;
+   * absent on a daemon that predates it. Render through `QuestionContent`.
+   */
+  brief?: string
   status: QuestionStatus
   resolution?: QuestionResolution
   type: ThreadType
@@ -608,6 +622,13 @@ export interface AgentQuestion {
   /** One-line heading; absent on a daemon older than task #1264. */
   title?: string
   body: string
+  /**
+   * Plain-language version of the question the agent writes alongside it —
+   * the problem in simple words, how the options differ, the recommendation
+   * (short markdown). `""` on older threads and on threads the human opened;
+   * absent on a daemon that predates it. Render through `QuestionContent`.
+   */
+  brief?: string
   /**
    * @deprecated Task #1264 folded the context into the body; always empty.
    */

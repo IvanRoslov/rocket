@@ -39,6 +39,7 @@ import { useToast } from '../../src/components/Toast'
 import type { Question, Session, TaskLogKind, TaskStatus } from '../../src/api/types'
 import { BackButton, Badge, Card, ChipTabs, Dot, EmptyState, GhostButton, MonoText, PrimaryButton } from '../../src/components/ui'
 import { ago, sessionBadge, sessionDot } from '../../src/lib/format'
+import { questionPreview } from '../../src/lib/questions'
 import {
   addresseeLabel,
   answerableBy,
@@ -613,7 +614,7 @@ export default function TaskScreen() {
               <Pressable style={styles.awaitBanner} onPress={() => setTab('questions')}>
                 <Badge label="? awaiting" fg={colors.amberDeep} bg={colors.amberBg} />
                 <Text style={styles.awaitText} numberOfLines={2}>
-                  {awaiting[0].body}
+                  {questionPreview(awaiting[0])}
                 </Text>
                 <Text style={{ color: colors.amberDeep, fontSize: 16 }}>→</Text>
               </Pressable>
@@ -644,7 +645,7 @@ export default function TaskScreen() {
                       <Badge key={b.label} label={b.label} fg={colors.textDim} bg={colors.cardAlt} />
                     ))}
                     <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, color: colors.textMid }}>
-                      {q.body}
+                      {questionPreview(q)}
                     </Text>
                     <Text style={{ fontSize: 11, color: colors.textFaint }}>{ago(q.resolved_at)}</Text>
                   </Card>

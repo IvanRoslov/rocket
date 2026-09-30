@@ -22,6 +22,7 @@ type agentQuestionResponse struct {
 	// Title and Context mirror questionResponse: a one-line heading, and the
 	// pre-#1264 context field kept empty for old clients.
 	Title      string `json:"title"`
+	Brief      string `json:"brief"`
 	Body       string `json:"body"`
 	Context    string `json:"context"`
 	Status     string `json:"status"`
@@ -101,6 +102,7 @@ func buildAgentQuestionResponse(d Deps, caller *store.Session, q store.AgentQues
 		Ordinal:      ordinal,
 		AskedBy:      wireParticipant(q.AskedBy),
 		Title:        q.Title,
+		Brief:        q.Brief,
 		Body:         q.Body,
 		Status:       q.Status,
 		Resolution:   q.Resolution,
@@ -225,6 +227,7 @@ type postAgentQuestionRequest struct {
 	// Title is derived from Body when absent; Context is deprecated and is
 	// appended to Body (see postQuestionRequest).
 	Title   string   `json:"title"`
+	Brief   string   `json:"brief"`
 	Body    string   `json:"body"`
 	Context string   `json:"context"`
 	To      []string `json:"to"`
@@ -275,6 +278,7 @@ func handlePostAgentQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 		RoleID:      a.ID,
 		AskedBy:     callerAuthor(caller),
 		Title:       req.Title,
+		Brief:       req.Brief,
 		Body:        withContext(req.Body, req.Context),
 		AddressedTo: req.To,
 		Type:        threadType,
