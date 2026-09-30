@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AppState, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native'
+import {
+  AppState,
+  KeyboardAvoidingView,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type LayoutChangeEvent,
+} from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useThreadAnswer, useThreads, type ThreadAnswer } from '../../src/api/queries'
 import type { ThreadInboxEntry } from '../../src/api/types'
@@ -8,7 +18,7 @@ import { ThreadCard } from '../../src/components/ThreadCard'
 import { useToast } from '../../src/components/Toast'
 import { EmptyState, SectionTitle } from '../../src/components/ui'
 import { createDeferredQueue } from '../../src/lib/deferred'
-import { otherOpen, waitingOnYou } from '../../src/lib/questions'
+import { otherOpen, revealOffset, waitingOnYou } from '../../src/lib/questions'
 import { colors } from '../../src/theme'
 
 /** How long a tap can be taken back before the answer goes to the daemon (it has no undo). */
@@ -24,6 +34,23 @@ export default function QuestionsScreen() {
   const [hidden, setHidden] = useState<Set<number>>(new Set())
   const [undo, setUndo] = useState<{ id: number; label: string } | null>(null)
   const queue = useRef(createDeferredQueue(UNDO_MS)).current
+
+  // Keeping the focused answer above the keyboard: KAV shrinks the list, but
+  // nothing scrolls the card back into the smaller window on its own.
+  const listRef = useRef<ScrollView>(null)
+  const view = useRef({ offset: 0, height: 0 })
+  const cards = useRef(new Map<number, { y: number; height: number }>())
+  const focused = useRef<number | null>(null)
+  const reveal = () => {
+    const card = focused.current === null ? undefined : cards.current.get(focused.current)
+    const y = card && revealOffset(card, view.current)
+    if (y != null) listRef.current?.scrollTo({ y, animated: true })
+  }
+  const onCardLayout = (id: number) => (e: LayoutChangeEvent) => {
+    const { y, height } = e.nativeEvent.layout
+    cards.current.set(id, { y, height })
+    if (focused.current === id) reveal()
+  }
 
   // Leaving is not an Undo: unmount and going to background commit the pending answer.
   useEffect(() => {
@@ -76,36 +103,69 @@ export default function QuestionsScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.page }} edges={['top']}>
       <ConnectionBanner />
-      <ScrollView
-        contentContainerStyle={{ padding: 14, paddingBottom: 90 }}
-        refreshControl={<RefreshControl refreshing={threads.isRefetching} onRefresh={() => threads.refetch()} />}
-      >
-        <Text style={styles.h1}>Questions</Text>
-        <SectionTitle>{`Waiting on you (${visible})`}</SectionTitle>
-        {/* Answered cards stay mounted (display none) so typed text survives a failed send. */}
-        {mine.map((t) => (
-          <View key={t.id} style={hidden.has(t.id) ? { display: 'none' } : undefined}>
-            <ThreadCard thread={t} onAnswer={onAnswer} />
-          </View>
-        ))}
-        {threads.isSuccess && visible === 0 ? <EmptyState text="No questions waiting on you." /> : null}
-        {others.length > 0 ? (
-          <Pressable onPress={() => setShowOthers((v) => !v)} style={{ paddingVertical: 10 }}>
-            <Text style={styles.othersToggle}>
-              {showOthers ? '▾' : '▸'} Other open ({others.length})
-            </Text>
-          </Pressable>
-        ) : null}
-        {showOthers ? others.map((t) => <ThreadCard key={t.id} thread={t} onAnswer={onAnswer} />) : null}
-      </ScrollView>
-      {undo ? (
-        <View style={styles.undoBar}>
-          <Text style={styles.undoText} numberOfLines={1}>Answered: {undo.label}</Text>
-          <Pressable onPress={onUndo} hitSlop={8}>
-            <Text style={styles.undoBtn}>Undo</Text>
-          </Pressable>
+      {/* No keyboardVerticalOffset: this scene already ends at the tab bar,
+          so KAV pads only by the part of the keyboard that overlaps it. The
+          inner View shrinks with it, lifting the absolute undo bar too. */}
+      <KeyboardAvoidingView testID="questions-keyboard" style={{ flex: 1 }} behavior="padding">
+        <View style={{ flex: 1 }}>
+          <ScrollView
+            ref={listRef}
+            testID="questions-list"
+            keyboardShouldPersistTaps="handled"
+            onLayout={(e) => {
+              view.current.height = e.nativeEvent.layout.height
+              reveal()
+            }}
+            onScroll={(e) => {
+              view.current.offset = e.nativeEvent.contentOffset.y
+            }}
+            scrollEventThrottle={16}
+            contentContainerStyle={{ padding: 14, paddingBottom: 90 }}
+            refreshControl={<RefreshControl refreshing={threads.isRefetching} onRefresh={() => threads.refetch()} />}
+          >
+            <Text style={styles.h1}>Questions</Text>
+            <SectionTitle>{`Waiting on you (${visible})`}</SectionTitle>
+            {/* Answered cards stay mounted (display none) so typed text survives a failed send. */}
+            {mine.map((t) => (
+              <View
+                key={t.id}
+                testID={`thread-${t.id}`}
+                onLayout={onCardLayout(t.id)}
+                style={hidden.has(t.id) ? { display: 'none' } : undefined}
+              >
+                <ThreadCard
+                  thread={t}
+                  onAnswer={onAnswer}
+                  onInputFocus={() => {
+                    focused.current = t.id
+                    reveal()
+                  }}
+                  onInputBlur={() => {
+                    if (focused.current === t.id) focused.current = null
+                  }}
+                />
+              </View>
+            ))}
+            {threads.isSuccess && visible === 0 ? <EmptyState text="No questions waiting on you." /> : null}
+            {others.length > 0 ? (
+              <Pressable onPress={() => setShowOthers((v) => !v)} style={{ paddingVertical: 10 }}>
+                <Text style={styles.othersToggle}>
+                  {showOthers ? '▾' : '▸'} Other open ({others.length})
+                </Text>
+              </Pressable>
+            ) : null}
+            {showOthers ? others.map((t) => <ThreadCard key={t.id} thread={t} onAnswer={onAnswer} />) : null}
+          </ScrollView>
+          {undo ? (
+            <View style={styles.undoBar}>
+              <Text style={styles.undoText} numberOfLines={1}>Answered: {undo.label}</Text>
+              <Pressable onPress={onUndo} hitSlop={8}>
+                <Text style={styles.undoBtn}>Undo</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
-      ) : null}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   )
 }

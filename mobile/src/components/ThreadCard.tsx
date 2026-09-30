@@ -17,9 +17,14 @@ import { Badge, Card, MonoText } from './ui'
 export function ThreadCard({
   thread,
   onAnswer,
+  onInputFocus,
+  onInputBlur,
 }: {
   thread: ThreadInboxEntry
   onAnswer: (thread: ThreadInboxEntry, answer: ThreadAnswer, label: string) => void
+  /** The answer input gained / lost focus — lets the screen keep it above the keyboard. */
+  onInputFocus?: () => void
+  onInputBlur?: () => void
 }) {
   const [text, setText] = useState('')
   const source = threadSource(thread)
@@ -54,6 +59,8 @@ export function ThreadCard({
           <TextInput
             value={text}
             onChangeText={setText}
+            onFocus={onInputFocus}
+            onBlur={onInputBlur}
             placeholder="Your answer…"
             placeholderTextColor={colors.textFaint}
             multiline
