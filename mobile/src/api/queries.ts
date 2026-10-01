@@ -141,12 +141,14 @@ export function useTaskDetail(id: number) {
   })
 }
 
-export function useTaskDocs(id: number, enabled: boolean) {
+/** Latest version of each doc; `history` returns every version instead. */
+export function useTaskDocs(id: number, enabled: boolean, history = false) {
   const baseUrl = useBaseUrl()
   const refetchInterval = usePoll(10000, 60000)
+  const qs = history ? '?history=true' : ''
   return useQuery({
-    queryKey: [baseUrl, 'task', id, 'docs'],
-    queryFn: async () => (await api.get<{ docs: TaskDoc[] }>(baseUrl, `/v1/tasks/${id}/docs`)).docs ?? [],
+    queryKey: [baseUrl, 'task', id, 'docs', history ? 'history' : 'latest'],
+    queryFn: async () => (await api.get<{ docs: TaskDoc[] }>(baseUrl, `/v1/tasks/${id}/docs${qs}`)).docs ?? [],
     enabled,
     refetchInterval,
   })

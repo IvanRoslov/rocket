@@ -25,17 +25,20 @@ import {
   useSessions,
   useTaskDetail,
   useTaskDocs,
+  useTaskGates,
   useTaskLog,
   useTaskQuestions,
 } from '../../src/api/queries'
 import { ActionSheet } from '../../src/components/ActionSheet'
 import { BottomSheet } from '../../src/components/BottomSheet'
+import { BrainstormTab } from '../../src/components/BrainstormTab'
 import { Markdown } from '../../src/components/Markdown'
 import { QuestionCard } from '../../src/components/QuestionCard'
 import { useToast } from '../../src/components/Toast'
 import type { Session, TaskLogKind, TaskStatus } from '../../src/api/types'
 import { BackButton, Badge, Card, ChipTabs, Dot, EmptyState, GhostButton, MonoText, PrimaryButton } from '../../src/components/ui'
 import { ago, sessionBadge, sessionDot } from '../../src/lib/format'
+import { showBrainstormTab } from '../../src/lib/brainstorm'
 import { questionPreview } from '../../src/lib/questions'
 import { threadBadges, threadRefLabel } from '../../src/lib/threads'
 import { colors, mono, radius } from '../../src/theme'
@@ -273,7 +276,10 @@ export default function TaskScreen() {
   const taskId = Number(id)
   const detail = useTaskDetail(taskId)
   const questions = useTaskQuestions(taskId)
-  const [tab, setTab] = useState('overview')
+  const gates = useTaskGates(taskId)
+  // null until the user picks a tab: the default follows the task's status.
+  const [picked, setTab] = useState<string | null>(null)
+  const tab = picked ?? (detail.data?.status === 'brainstorm' ? 'brainstorm' : 'overview')
   const docs = useTaskDocs(taskId, tab === 'docs')
   const log = useTaskLog(taskId, tab === 'journal')
   const { data: allSessions } = useSessions(detail.data?.project_id)
@@ -314,6 +320,9 @@ export default function TaskScreen() {
       ...(open.length > 0 ? { count: open.length } : {}),
       warn: awaiting.length > 0,
     },
+    ...(showBrainstormTab(t, questions.data ?? [], gates.data ?? [])
+      ? [{ key: 'brainstorm', label: 'Brainstorm' }]
+      : []),
     { key: 'overview', label: 'Overview' },
     { key: 'docs', label: 'Docs' },
     { key: 'journal', label: 'Journal' },
@@ -367,6 +376,7 @@ export default function TaskScreen() {
               onRefresh={() => {
                 detail.refetch()
                 questions.refetch()
+                gates.refetch()
               }}
             />
           }
@@ -419,6 +429,15 @@ export default function TaskScreen() {
                   </Card>
                 ))}
               </View>
+            ) : null}
+
+            {tab === 'brainstorm' ? (
+              <BrainstormTab
+                taskId={t.id}
+                questions={questions.data ?? []}
+                gates={gates.data ?? []}
+                gatesError={gates.isError ? (gates.error as Error).message : undefined}
+              />
             ) : null}
 
             {tab === 'overview' ? (
