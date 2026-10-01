@@ -16,7 +16,7 @@ import { Badge, MonoText } from './ui'
 /**
  * A Claude Code permission dialog waiting in the agent's terminal
  * (pending_quiz with source="permission", docs/13-chat.md). One tap answers:
- * the daemon presses that option's digit — or Escape for the fallback
+ * the daemon presses that option's digit — or Escape for the trailing «Esc»
  * button — so there is no confirm step and no free-text row.
  *
  * After 202 the buttons stay locked until the daemon clears pending_quiz and
@@ -49,16 +49,21 @@ export function PendingPermissionCard({ sessionId, quiz }: { sessionId: string; 
     )
   }
 
-  const button = (label: string, index: number) => (
+  const button = (label: string, index: number, secondary = false) => (
     <Pressable
       key={index}
       accessibilityRole="button"
       accessibilityLabel={label}
       disabled={locked}
       onPress={() => press(index)}
-      style={({ pressed }) => [styles.option, pressed && styles.optionPressed, locked && styles.optionLocked]}
+      style={({ pressed }) => [
+        styles.option,
+        secondary && styles.optionSecondary,
+        pressed && styles.optionPressed,
+        locked && styles.optionLocked,
+      ]}
     >
-      <Text style={styles.optionLabel}>{label}</Text>
+      <Text style={[styles.optionLabel, secondary && styles.optionLabelSecondary]}>{label}</Text>
     </Pressable>
   )
 
@@ -76,20 +81,21 @@ export function PendingPermissionCard({ sessionId, quiz }: { sessionId: string; 
         </View>
       ) : null}
 
-      {options.length > 0 ? (
-        <View style={{ gap: 8 }}>{options.map((o, i) => button(o.label, i))}</View>
-      ) : (
-        <>
-          {quiz.raw ? (
-            <ScrollView style={[styles.mono, styles.raw]} nestedScrollEnabled>
-              <ScrollView horizontal>
-                <MonoText style={styles.monoText}>{quiz.raw}</MonoText>
-              </ScrollView>
-            </ScrollView>
-          ) : null}
-          {button('Esc', ESC_INDEX)}
-        </>
-      )}
+      {options.length === 0 && quiz.raw ? (
+        <ScrollView style={[styles.mono, styles.raw]} nestedScrollEnabled>
+          <ScrollView horizontal>
+            <MonoText style={styles.monoText}>{quiz.raw}</MonoText>
+          </ScrollView>
+        </ScrollView>
+      ) : null}
+      {/* Esc is always there: some options never make it into the list
+          (ExitPlanMode's "tell Claude what to change" is a text field), and
+          Esc is then the only way to say no — feedback follows as a chat
+          message. */}
+      <View style={{ gap: 8 }}>
+        {options.map((o, i) => button(o.label, i))}
+        {button('Esc', ESC_INDEX, options.length > 0)}
+      </View>
 
       {error ? (
         <Text style={styles.error}>{error}</Text>
@@ -143,6 +149,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
+  optionSecondary: { minHeight: 44, alignItems: 'center', backgroundColor: 'transparent' },
+  optionLabelSecondary: { fontWeight: '500', color: colors.textDim },
   optionPressed: { backgroundColor: colors.amberBg, borderColor: colors.amberBorder },
   optionLocked: { opacity: 0.55 },
   optionLabel: { fontSize: 14, fontWeight: '600', color: colors.text },

@@ -76,7 +76,19 @@ describe('PendingQuizCard with a permission prompt', () => {
     for (const o of OPTIONS) expect(screen.getByRole('button', { name: o })).toBeTruthy()
     expect(screen.queryByText('Answer')).toBeNull()
     expect(screen.queryByText(/Other/)).toBeNull()
-    expect(screen.queryByText('Esc')).toBeNull()
+  })
+
+  it('always offers Esc after the options, e.g. to reject a plan whose text option was dropped', async () => {
+    const posted = mockAnswer()
+    await renderCard(permission(['Yes, and auto-accept edits', 'Yes, and manually approve edits']))
+
+    const buttons = screen.getAllByRole('button').map((b) => b.props.accessibilityLabel)
+    expect(buttons).toEqual(['Yes, and auto-accept edits', 'Yes, and manually approve edits', 'Esc'])
+    fireEvent.press(screen.getByRole('button', { name: 'Esc' }))
+
+    await waitFor(() => expect(posted).toHaveLength(1))
+    expect(posted[0].body).toEqual({ answers: [{ question_index: 0, option_indices: [-1] }] })
+    await waitFor(() => expect(isDisabled('Esc')).toBe(true))
   })
 
   it('answers with a single tap on an option and locks the card', async () => {

@@ -16,6 +16,7 @@
 - Copy: badge «Разрешение»; resolved «Разрешение: <title> → <answer_label>» / «Разрешение: <title> → отвечено в терминале»; errors «Диалог изменился, обновляю…» (409 `prompt_changed`) and «Ответ не подтвердился» (SSE `session.quiz_answer_unconfirmed`).
 - Answer body: `{"answers":[{"question_index":0,"option_indices":[i]}]}`; Esc = `option_indices:[-1]`. Never send `text`.
 - One tap = answer: no confirmation step, no «Other» row, no special colouring per option.
+- Spec v2: a secondary «Esc» (`option_indices:[-1]`) always follows the options, not only in the empty-options fallback (ExitPlanMode drops its text option).
 - No tests inside `mobile/app/` (bundling breaks) — screen tests live in `mobile/__tests__/`.
 - Regular quizzes unchanged.
 
