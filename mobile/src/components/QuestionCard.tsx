@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useQuestionAnswer, useQuestionDismiss, useQuestionReply } from '../api/queries'
 import type { Question } from '../api/types'
+import { isBrainstorm } from '../lib/brainstorm'
 import { ago } from '../lib/format'
 import {
   addresseeLabel,
@@ -14,6 +15,7 @@ import {
   toggleAddressee,
 } from '../lib/threads'
 import { colors, mono, radius } from '../theme'
+import { StormAnswerSummary, StormOptions } from './BrainstormAnswer'
 import { QuestionText } from './QuestionText'
 import { useToast } from './Toast'
 import { Badge, GhostButton, MonoText, PrimaryButton } from './ui'
@@ -33,6 +35,8 @@ export function QuestionCard({ q }: { q: Question }) {
   // answer, and closing the thread is the user's call. The human is "" on the
   // wire today and "human" after subtask #736, so recognise both.
   const mine = isHuman(q.asked_by)
+  const storm = isBrainstorm(q)
+  const open = q.status === 'open'
   const others = answerableBy(q.participants ?? [])
 
   const confirmDismiss = () =>
@@ -122,11 +126,25 @@ export function QuestionCard({ q }: { q: Question }) {
         {/* One tap closes the thread with that option — the cheapest answer
             there is, and the reason threads stop piling up (spec v1
             §«Варианты ответа»). `choose` is a 1-based index. */}
-        {q.status === 'open' && (q.options ?? []).length > 0 ? (
+        {storm && !open ? <StormAnswerSummary q={q} /> : null}
+        {storm && open && (q.options ?? []).length > 0 ? (
+          <StormOptions
+            q={q}
+            disabled={busy}
+            onChoose={(choose, comment) =>
+              answer.mutate(
+                { id: q.id, choose, body: comment },
+                { onError: (e: unknown) => toast.show((e as Error).message) },
+              )
+            }
+          />
+        ) : null}
+        {!storm && open && (q.options ?? []).length > 0 ? (
           <View style={styles.optionRow}>
             {(q.options ?? []).map((label, i) => (
               <Pressable
                 key={label}
+                testID={`option-${i + 1}`}
                 style={styles.optionBtn}
                 disabled={busy}
                 onPress={() =>
@@ -177,6 +195,8 @@ export function QuestionCard({ q }: { q: Question }) {
             </View>
           )
         })}
+        {/* A closed thread takes no more answers. */}
+        {open ? (
         <View style={styles.replyBox}>
           {others.length > 0 ? (
             <View style={styles.toRow}>
@@ -234,6 +254,7 @@ export function QuestionCard({ q }: { q: Question }) {
             </>
           )}
         </View>
+        ) : null}
       </View>
     </View>
   )
