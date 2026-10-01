@@ -12,9 +12,12 @@ import TaskScreen from '../../app/task/[id]'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
+/** The route params; a test may add `tab` as a link to the screen would. */
+let mockParams: { id: string; tab?: string } = { id: '12' }
+
 jest.mock('expo-router', () => ({
   router: { navigate: jest.fn(), push: jest.fn(), back: jest.fn() },
-  useLocalSearchParams: () => ({ id: '12' }),
+  useLocalSearchParams: () => mockParams,
 }))
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn() }))
 
@@ -404,5 +407,44 @@ describe('Brainstorm tab', () => {
       expect(screen.getAllByText('Loading…').length).toBeGreaterThan(0)
       expect(screen.queryByText('Waiting for spec')).toBeNull()
     })
+  })
+})
+
+// Storm questions live only in the Brainstorm tab (task #4901, spec v2 §3.1).
+describe('storm questions outside the Brainstorm tab', () => {
+  afterEach(() => {
+    mockParams = { id: '12' }
+    jest.restoreAllMocks()
+  })
+
+  it('keeps storm questions out of the Questions tab and its count', async () => {
+    mockApi({ '/v1/tasks/12': { ...TASK, status: 'in_progress' } })
+    await renderScreen()
+    await waitFor(() => expect(screen.getByText('Questions')).toBeTruthy())
+    // Only the plain decision counts.
+    expect(screen.getByText('1')).toBeTruthy()
+    await fireEvent.press(screen.getByText('Questions'))
+    await waitFor(() => expect(screen.getByText('A plain decision')).toBeTruthy())
+    expect(screen.queryByText('Second storm question')).toBeNull()
+    expect(screen.queryByText('First storm question')).toBeNull()
+  })
+
+  it('the awaiting banner takes a storm question to the Brainstorm tab', async () => {
+    mockApi({
+      '/v1/tasks/12': { ...TASK, status: 'in_progress' },
+      '/v1/tasks/12/questions': { questions: [STORM_OPEN] },
+    })
+    await renderScreen()
+    await waitFor(() => expect(screen.getByText('? awaiting')).toBeTruthy())
+    expect(screen.queryByText('PROBLEM')).toBeNull()
+    await fireEvent.press(screen.getByText('? awaiting'))
+    await waitFor(() => expect(screen.getByText('PROBLEM')).toBeTruthy())
+  })
+
+  it('opens on the Brainstorm tab when linked with ?tab=brainstorm', async () => {
+    mockParams = { id: '12', tab: 'brainstorm' }
+    mockApi({ '/v1/tasks/12': { ...TASK, status: 'in_progress' } })
+    await renderScreen()
+    await waitFor(() => expect(screen.getByText('PROBLEM')).toBeTruthy())
   })
 })
