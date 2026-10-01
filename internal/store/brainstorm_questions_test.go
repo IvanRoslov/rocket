@@ -202,7 +202,7 @@ func TestAnswerAuthors(t *testing.T) {
 		}
 	}
 
-	got, err := s.AnswerAuthors()
+	got, err := s.AnswerAuthors([]int64{a, b, c})
 	if err != nil {
 		t.Fatalf("AnswerAuthors: %v", err)
 	}
@@ -211,5 +211,39 @@ func TestAnswerAuthors(t *testing.T) {
 	}
 	if _, ok := got[c]; ok {
 		t.Fatalf("a dismissal is not an answer: %v", got)
+	}
+
+	// Only the asked-for threads are read.
+	only, err := s.AnswerAuthors([]int64{b})
+	if err != nil {
+		t.Fatalf("AnswerAuthors: %v", err)
+	}
+	if len(only) != 1 || only[b] != "cto" {
+		t.Fatalf("authors of [b] = %v, want only b=cto", only)
+	}
+	if none, err := s.AnswerAuthors(nil); err != nil || len(none) != 0 {
+		t.Fatalf("AnswerAuthors(nil) = %v, %v; want empty", none, err)
+	}
+}
+
+// TestAnswerAuthors_ManyIDs: a listing larger than one batch of query
+// parameters still resolves every thread.
+func TestAnswerAuthors_ManyIDs(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+	var ids []int64
+	for i := 0; i < answerAuthorsBatch+5; i++ {
+		id := addBrainstorm(t, s, taskID)
+		if _, err := s.AddQuestionMessage(QuestionMessage{QuestionID: id, Author: "human", Kind: "answer", Body: "x"}); err != nil {
+			t.Fatalf("AddQuestionMessage: %v", err)
+		}
+		ids = append(ids, id)
+	}
+	got, err := s.AnswerAuthors(ids)
+	if err != nil {
+		t.Fatalf("AnswerAuthors: %v", err)
+	}
+	if len(got) != len(ids) {
+		t.Fatalf("got %d authors, want %d", len(got), len(ids))
 	}
 }

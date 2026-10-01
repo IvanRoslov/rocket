@@ -99,14 +99,18 @@ func handleGetThreads(w http.ResponseWriter, r *http.Request, d Deps) {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	// Only a resolved thread has an answerer, so an open-only listing skips
-	// the lookup.
-	answerAuthors := map[int64]string{}
-	if includeResolved {
-		if answerAuthors, err = d.Store.AnswerAuthors(); err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
+	// Only an answered thread has an answerer, so only those are looked up —
+	// none at all in an open-only listing.
+	var answered []int64
+	for _, th := range threads {
+		if th.Question.Resolution == "answered" {
+			answered = append(answered, th.Question.ID)
 		}
+	}
+	answerAuthors, err := d.Store.AnswerAuthors(answered)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
 	}
 
 	// Task titles and orchestrator ids are looked up once per task, not once

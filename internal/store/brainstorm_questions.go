@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -102,26 +103,46 @@ func (s *Store) SetQuestionOutcome(id int64, outcome string) error {
 	return nil
 }
 
-// AnswerAuthors maps every question that has an answer entry to the author of
-// its latest one — who closed the thread with a decision, as opposed to who
-// dismissed it. One query for all threads, so a listing need not read every
-// thread's messages to name its answerer.
-func (s *Store) AnswerAuthors() (map[int64]string, error) {
-	rows, err := s.db.Query(
-		`SELECT question_id, author FROM question_messages WHERE kind = 'answer' ORDER BY id`)
-	if err != nil {
-		return nil, fmt.Errorf("query answer authors: %w", err)
-	}
-	defer rows.Close()
+// answerAuthorsBatch caps how many question ids AnswerAuthors binds into one
+// query, well under SQLite's host-parameter limit.
+const answerAuthorsBatch = 500
 
+// AnswerAuthors maps each of questionIDs that has an answer entry to the
+// author of its latest one — who closed the thread with a decision, as opposed
+// to who dismissed it. It reads only the listed threads, in a few batched
+// queries, so a listing need not read every thread's messages to name its
+// answerers.
+func (s *Store) AnswerAuthors(questionIDs []int64) (map[int64]string, error) {
 	out := map[int64]string{}
-	for rows.Next() {
-		var qid int64
-		var author sql.NullString
-		if err := rows.Scan(&qid, &author); err != nil {
-			return nil, fmt.Errorf("scan answer author: %w", err)
+	for start := 0; start < len(questionIDs); start += answerAuthorsBatch {
+		end := min(start+answerAuthorsBatch, len(questionIDs))
+		batch := questionIDs[start:end]
+
+		args := make([]any, len(batch))
+		for i, id := range batch {
+			args[i] = id
 		}
-		out[qid] = canonicalParticipant(author.String)
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")
+		rows, err := s.db.Query(
+			`SELECT question_id, author FROM question_messages
+			 WHERE kind = 'answer' AND question_id IN (`+placeholders+`) ORDER BY id`, args...)
+		if err != nil {
+			return nil, fmt.Errorf("query answer authors: %w", err)
+		}
+		for rows.Next() {
+			var qid int64
+			var author sql.NullString
+			if err := rows.Scan(&qid, &author); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan answer author: %w", err)
+			}
+			out[qid] = canonicalParticipant(author.String)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
 	}
-	return out, rows.Err()
+	return out, nil
 }
