@@ -50,6 +50,11 @@ export const EVENT_TYPES = [
   'task.question_resolved',
   // Orchestrator disputed a final answer — the thread is open again.
   'task.question_reopened',
+  // Doc versions and the storm exit gate (docs/12-tasks.md «Гейт»).
+  'task.doc_put',
+  'task.gate_requested',
+  'task.gate_decided',
+  'task.gate_superseded',
   // Role lifecycle and role Q&A (docs/10-agents.md). `agent.issue_opened` /
   // `agent.issue_comment` come from the GitHub poller's role subscriptions.
   'agent.instance_spawned',

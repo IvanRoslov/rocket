@@ -21,7 +21,7 @@ import (
 // validDocKinds and validLogKinds bound the "kind" field accepted by the
 // task docs and task log write endpoints, respectively.
 var (
-	validDocKinds = map[string]bool{"spec": true, "plan": true, "report": true, "doc": true}
+	validDocKinds = map[string]bool{"spec": true, "plan": true, "report": true, "doc": true, "problem": true}
 	validLogKinds = map[string]bool{"decision": true, "problem": true, "note": true, "status": true}
 
 	// startMu serializes task start attempts within this daemon process.
@@ -1111,6 +1111,12 @@ func handlePutTaskDocs(w http.ResponseWriter, r *http.Request, d Deps) {
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
+	}
+	d.Bus.Publish("task.doc_put", task.SessionID, map[string]any{
+		"task_id": task.ID, "kind": doc.Kind, "version": doc.Version,
+	})
+	if doc.Kind == "spec" {
+		supersedeGatesOnSpecPut(d, task)
 	}
 	writeJSON(w, http.StatusOK, toTaskDocResponse(doc))
 }

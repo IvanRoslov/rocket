@@ -226,6 +226,7 @@ func newTaskCmd() *cobra.Command {
 	cmd.AddCommand(newTaskTakeCmd())
 	cmd.AddCommand(newTaskAssignCmd())
 	cmd.AddCommand(newTaskDocCmd())
+	cmd.AddCommand(newTaskGateCmd())
 	cmd.AddCommand(newTaskLogCmd())
 	cmd.AddCommand(newTaskAskCmd())
 	cmd.AddCommand(newTaskAskOrchCmd())
@@ -725,7 +726,7 @@ func newTaskDocPutCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&kind, "kind", "", "тип документа (spec|plan|report|doc)")
+	cmd.Flags().StringVar(&kind, "kind", "", "тип документа (spec|plan|report|doc|problem)")
 	cmd.Flags().StringVar(&title, "title", "", "название документа")
 	cmd.Flags().StringVar(&file, "file", "", "файл с содержимым документа")
 	return cmd

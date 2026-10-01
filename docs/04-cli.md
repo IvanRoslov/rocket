@@ -18,7 +18,12 @@ rocket task show <id>       # карточка: подзадачи, доки, ж
                             # --json отдаёт то же целиком: поля задачи + docs, log, questions, mirrors
 rocket task start <id> [--agent <name>]          # назначить оркестратора
 rocket task move <id> <status> [--force]         # --force: в review при живых воркерах/открытых подзадачах
-rocket task doc put <id> --kind spec|plan|report|doc --title "..." --file <f.md>
+rocket task doc put <id> --kind problem|spec|plan|report|doc --title "..." --file <f.md>
+rocket task gate ls <id>                         # гейты выхода из шторма, новые первыми
+rocket task gate go <gate-id>                    # Go: задача brainstorm → in_progress,
+                                                 #   оркестратору уходит «Go по спеке vN»
+rocket task gate changes <gate-id> "<комментарий>" | --file <f>
+                                                 # нужны правки: комментарий — оркестратору
 rocket task log <id> --kind decision|problem|note|status "<текст>" | --file <f>
 rocket task ask-orch <id> "<вопрос>" | --file <f> [--context <md>] [--to a,b]
                        [--option "<текст>"]... [--fyi]
@@ -298,6 +303,13 @@ rocket spawn --task <name> --repo <id> --prompt "<бриф>" [--agent <name>]
 
 rocket task ... (см. выше)
     Оркестратор ведёт доки/журнал своей задачи, воркер — своей подзадачи.
+
+rocket task gate request <task-id>
+    Оркестратор: запросить выход из шторма. Фиксирует последние версии spec и
+    plan задачи; без спеки — ошибка no_spec. Ожидающий гейт заменяется новым,
+    а новая версия спеки снимает гейт сама — тогда запросить заново. Решает
+    только человек (go / changes); агенту решение приходит сообщением
+    «[rocket gate] ...». Go сам переводит задачу brainstorm → in_progress.
 
 rocket task take <id>
     Только для постоянных агентов и только на майлстонах: агент берёт майлстон

@@ -82,6 +82,7 @@ func NewHandler(d Deps) http.Handler {
 	registerChatRoutes(mux, d)
 	registerTermRoutes(mux, d)
 	registerTaskRoutes(mux, d)
+	registerGateRoutes(mux, d)
 	registerEventsRoutes(mux, d)
 	registerSSERoutes(mux, d)
 	registerInternalActivityRoutes(mux, d)
