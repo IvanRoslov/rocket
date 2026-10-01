@@ -388,7 +388,7 @@ export interface Settings {
 // Chat — docs/13-chat.md. A read-only mirror of the agent's native
 // transcript; sending goes through the regular message queue.
 
-export type ChatRole = 'user' | 'assistant' | 'tool' | 'quiz_answer'
+export type ChatRole = 'user' | 'assistant' | 'tool' | 'quiz_answer' | 'permission'
 
 export interface ChatEntry {
   role: ChatRole
@@ -403,6 +403,19 @@ export interface ChatEntry {
    * `{questions, answers}` where answers maps question text → chosen label.
    */
   quiz?: ClosedQuizEcho | { questions?: RawQuizQuestion[] }
+  /** role="permission" only: a resolved permission dialog from the daemon's log. */
+  permission?: PermissionEcho
+}
+
+/**
+ * A Claude Code permission dialog the daemon saw resolve. `answered_via` is
+ * "terminal" when the dialog went away without an answer through the API.
+ */
+export interface PermissionEcho {
+  title: string
+  context?: string
+  answer_label?: string
+  answered_via: 'chat' | 'terminal'
 }
 
 export interface RawQuizQuestion {
@@ -434,6 +447,13 @@ export interface PendingQuizQuestion {
 export interface PendingQuiz {
   questions: PendingQuizQuestion[]
   asked_at: number
+  /**
+   * "permission" when the daemon read a TUI permission dialog off the pane;
+   * absent for a regular AskUserQuestion quiz.
+   */
+  source?: string
+  /** Permission dialogs only: the bottom pane lines, shown when options are empty. */
+  raw?: string
 }
 
 /** One answer per pending-quiz question: either option indices or free text. */
