@@ -2,8 +2,10 @@ import { useState } from 'react'
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useQuizAnswer } from '../api/queries'
 import type { ClosedQuizEcho, PendingQuiz } from '../api/types'
+import { isPermissionQuiz } from '../lib/permission'
 import { buildQuizAnswers, emptySelection, toggleOption, type QuizSelection } from '../lib/quiz'
 import { colors, radius } from '../theme'
+import { PendingPermissionCard } from './PermissionCard'
 import { useToast } from './Toast'
 import { Badge, PrimaryButton } from './ui'
 
@@ -12,8 +14,16 @@ import { Badge, PrimaryButton } from './ui'
  * Answers go to POST /v1/sessions/{id}/quiz/answer; after 202 the card
  * shows "typing the answer…" until the daemon clears pending_quiz and the
  * parent stops rendering it.
+ *
+ * A permission dialog (source="permission") arrives through the same field
+ * and gets its own one-tap card.
  */
 export function PendingQuizCard({ sessionId, quiz }: { sessionId: string; quiz: PendingQuiz }) {
+  if (isPermissionQuiz(quiz)) return <PendingPermissionCard sessionId={sessionId} quiz={quiz} />
+  return <AskQuizCard sessionId={sessionId} quiz={quiz} />
+}
+
+function AskQuizCard({ sessionId, quiz }: { sessionId: string; quiz: PendingQuiz }) {
   const answer = useQuizAnswer()
   const toast = useToast()
   const [selections, setSelections] = useState<QuizSelection[]>(() => quiz.questions.map(emptySelection))
