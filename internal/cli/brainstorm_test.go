@@ -22,11 +22,11 @@ func TestValidateBrainstormFlags(t *testing.T) {
 		wantErr    string
 	}{
 		{"brainstorm с рекомендацией", true, false, []string{"A", "B"}, 2, ""},
-		{"brainstorm без вариантов", true, false, nil, 0, ""},
+		{"brainstorm без вариантов", true, false, nil, 0, "--option"},
+		{"brainstorm с одним вариантом", true, false, []string{"A"}, 1, "--option"},
 		{"обычный вопрос", false, false, []string{"A", "B"}, 0, ""},
 		{"нет --recommend", true, false, []string{"A", "B"}, 0, "--recommend"},
 		{"--recommend вне диапазона", true, false, []string{"A", "B"}, 3, "--recommend"},
-		{"--recommend без вариантов", true, false, nil, 1, "--recommend"},
 		{"--recommend без --brainstorm", false, false, []string{"A"}, 1, "--brainstorm"},
 		{"--brainstorm с --fyi", true, true, nil, 0, "--fyi"},
 	}

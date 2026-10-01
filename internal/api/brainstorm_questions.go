@@ -68,19 +68,25 @@ func latestAnswerAuthor(msgs []store.QuestionMessage) string {
 	return ""
 }
 
-// validateRecommend checks a new thread's recommendation, writing a 400 and
-// returning false when it is wrong. A brainstorm thread with options must
-// recommend one of them; one without options has nothing to recommend; and no
-// other thread type takes a recommendation at all — silently dropping it would
-// hide a mistyped --brainstorm.
+// minBrainstormOptions is how many options a brainstorm question needs. Every
+// storm question is a decision with a recommendation; an open-ended one could
+// only ever be answered in the human's own words, always scoring wrong_turn
+// and skewing the metric.
+const minBrainstormOptions = 2
+
+// validateRecommend checks a new thread's options and recommendation, writing
+// a 400 and returning false when they are wrong. A brainstorm thread needs at
+// least minBrainstormOptions options and must recommend one of them; no other
+// thread type takes a recommendation at all — silently dropping it would hide
+// a mistyped --brainstorm.
 func validateRecommend(w http.ResponseWriter, threadType string, options []string, recommend int) bool {
 	var msg string
 	switch {
 	case threadType != store.QuestionTypeBrainstorm && recommend != 0:
 		msg = "recommend is only accepted on a brainstorm thread"
-	case threadType == store.QuestionTypeBrainstorm && len(options) == 0 && recommend != 0:
-		msg = "recommend needs options to point at"
-	case threadType == store.QuestionTypeBrainstorm && len(options) > 0 && (recommend < 1 || recommend > len(options)):
+	case threadType == store.QuestionTypeBrainstorm && len(options) < minBrainstormOptions:
+		msg = fmt.Sprintf("a brainstorm thread needs at least %d options", minBrainstormOptions)
+	case threadType == store.QuestionTypeBrainstorm && (recommend < 1 || recommend > len(options)):
 		msg = fmt.Sprintf("a brainstorm thread with options must recommend one: recommend must be between 1 and %d", len(options))
 	default:
 		return true

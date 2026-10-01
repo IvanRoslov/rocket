@@ -10,13 +10,14 @@ import (
 )
 
 const (
-	brainstormFlagUsage = "вопрос шторма: с вариантами нужен --recommend; исход ответа считается автоматически"
-	recommendFlagUsage  = "номер рекомендуемого варианта (1-based), обязателен для --brainstorm с вариантами"
+	brainstormFlagUsage = "вопрос шторма: нужны хотя бы два --option и --recommend; исход ответа считается автоматически"
+	recommendFlagUsage  = "номер рекомендуемого варианта (1-based), обязателен для --brainstorm"
 )
 
 // validateBrainstormFlags rejects contradictory brainstorm flags before the
-// daemon is called. A brainstorm question with options must recommend one of
-// them — the recommendation is what the human's answer is measured against.
+// daemon is called. A brainstorm question is a fork with at least two options
+// and must recommend one of them — the recommendation is what the human's
+// answer is measured against.
 func validateBrainstormFlags(brainstorm, fyi bool, options []string, recommend int, usage string) error {
 	fail := func(why string) error { return &usageError{message: usage + "\n" + why} }
 	switch {
@@ -24,9 +25,9 @@ func validateBrainstormFlags(brainstorm, fyi bool, options []string, recommend i
 		return fail("--brainstorm и --fyi несовместимы: вопрос шторма ждёт ответа человека")
 	case !brainstorm && recommend != 0:
 		return fail("--recommend бывает только у вопроса шторма (--brainstorm)")
-	case brainstorm && len(options) == 0 && recommend != 0:
-		return fail("--recommend без вариантов (--option) рекомендовать нечего")
-	case brainstorm && len(options) > 0 && recommend == 0:
+	case brainstorm && len(options) < 2:
+		return fail("у вопроса шторма должно быть хотя бы два варианта (--option): это развилка с рекомендацией")
+	case brainstorm && recommend == 0:
 		return fail("у вопроса шторма с вариантами укажите рекомендуемый: --recommend <n>")
 	case brainstorm && (recommend < 0 || recommend > len(options)):
 		return fail(fmt.Sprintf("--recommend должен быть от 1 до %d", len(options)))

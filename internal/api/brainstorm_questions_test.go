@@ -85,20 +85,27 @@ func TestBrainstormAsk_RecommendValidation(t *testing.T) {
 	}
 }
 
-// A brainstorm without options is legal: the human can only answer in their
-// own words.
-func TestBrainstormAsk_NoOptionsNoRecommend(t *testing.T) {
-	d := questionsTestDeps(t)
-	srv := newTestServer(t, d)
-	taskID := setupQuestionTask(t, d)
-	resp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
-		map[string]any{"body": "Что болит?", "type": "brainstorm"})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("status = %d, want 201", resp.StatusCode)
-	}
-	if q := decodeQuestion(t, resp); q.RecommendedOption != nil {
-		t.Fatalf("recommended = %v, want null", *q.RecommendedOption)
+// Every brainstorm question is a decision with a recommendation: without at
+// least two options an open question could only ever score wrong_turn and
+// would skew the metric.
+func TestBrainstormAsk_NeedsTwoOptions(t *testing.T) {
+	for name, payload := range map[string]map[string]any{
+		"no options": {"body": "Что болит?", "type": "brainstorm"},
+		"one option": {"body": "Так?", "type": "brainstorm", "options": []string{"A"}, "recommend": 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := questionsTestDeps(t)
+			srv := newTestServer(t, d)
+			taskID := setupQuestionTask(t, d)
+			resp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1", payload)
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", resp.StatusCode)
+			}
+			if eb := decodeErr(t, resp); eb.Error.Code != "bad_request" {
+				t.Errorf("code = %q, want bad_request", eb.Error.Code)
+			}
+		})
 	}
 }
 
