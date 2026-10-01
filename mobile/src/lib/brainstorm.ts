@@ -63,14 +63,20 @@ export function showBrainstormTab(
 }
 
 /**
- * The doc of `kind` at `version` — from the full history, since a gate pins
- * versions that a newer save has since replaced. Newest row wins when two
- * titles share a version number.
+ * The doc a gate pinned. A gate records only kind + version (the newest doc
+ * of that kind when it was requested), so among every version in the history
+ * it is the latest doc of that kind and version written by request time —
+ * the same rule as the web tab.
  */
-export function docAt(docs: TaskDoc[], kind: TaskDocKind, version: number | null): TaskDoc | undefined {
+export function docAt(
+  docs: TaskDoc[],
+  kind: TaskDocKind,
+  version: number | null,
+  requestedAt: number,
+): TaskDoc | undefined {
   if (version == null) return undefined
   return latestDoc(
-    docs.filter((d) => d.version === version),
+    docs.filter((d) => d.version === version && d.created_at <= requestedAt),
     kind,
   )
 }
@@ -82,14 +88,19 @@ export type ExitState =
   | { kind: 'go'; gate: TaskGate }
 
 /**
- * What the exit block shows. `gates` are newest first. A superseded or sent
- * back gate leaves the storm waiting for the next request — not for a spec,
- * which already exists by then.
+ * What the exit block shows (the web tab's `waitingText` rules). `gates` are
+ * newest first; `specVersion` is the latest spec's, undefined without one. A
+ * spec newer than the last gate, no gate yet or a superseded one only needs a
+ * request; after "changes" on the current spec, a revised spec comes first.
  */
-export function exitState(gates: TaskGate[], docs: TaskDoc[]): ExitState {
+export function exitState(gates: TaskGate[], specVersion: number | undefined): ExitState {
   const pending = pendingGate(gates)
   if (pending) return { kind: 'pending', gate: pending }
-  if (gates[0]?.status === 'go') return { kind: 'go', gate: gates[0] }
-  if (gates.length > 0 || latestDoc(docs, 'spec')) return { kind: 'waiting_request' }
+  const latest = gates[0]
+  if (latest?.status === 'go') return { kind: 'go', gate: latest }
+  if (specVersion === undefined) return { kind: 'waiting_spec' }
+  if (!latest || specVersion > latest.spec_version || latest.status === 'superseded') {
+    return { kind: 'waiting_request' }
+  }
   return { kind: 'waiting_spec' }
 }

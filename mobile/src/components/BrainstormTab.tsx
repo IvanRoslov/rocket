@@ -11,7 +11,6 @@ import { ago } from '../lib/format'
 import { colors, radius } from '../theme'
 import { Markdown } from './Markdown'
 import { QuestionCard } from './QuestionCard'
-import { useToast } from './Toast'
 import { Card, PrimaryButton } from './ui'
 
 const COUNTERS: { key: keyof BrainstormStorm; label: string }[] = [
@@ -28,6 +27,7 @@ export function BrainstormTab({
   questions,
   gates,
   gatesError,
+  gatesLoading,
 }: {
   taskId: number
   questions: Question[]
@@ -35,11 +35,13 @@ export function BrainstormTab({
   gates: TaskGate[]
   /** Set when the gates failed to load — never shown as "waiting". */
   gatesError?: string
+  gatesLoading?: boolean
 }) {
   const stats = useBrainstormStats(taskId, true)
   // The full history: a gate pins spec/plan versions a newer save may have replaced.
   const docs = useTaskDocs(taskId, true, true)
   const allDocs = docs.data ?? []
+  const docsError = docs.isError ? `Could not load documents: ${(docs.error as Error).message}` : undefined
   const problem = latestDoc(allDocs, 'problem')
   const storm = questions.filter(isBrainstorm).sort((a, b) => a.ordinal - b.ordinal)
 
@@ -59,7 +61,11 @@ export function BrainstormTab({
       <View>
         <Text style={styles.label}>PROBLEM</Text>
         <Card>
-          {problem ? (
+          {docsError ? (
+            <Text style={styles.error}>{docsError}</Text>
+          ) : docs.isPending ? (
+            <Text style={styles.empty}>Loading…</Text>
+          ) : problem ? (
             <>
               <Text style={styles.meta}>
                 v{problem.version} · {ago(problem.created_at)}
@@ -82,31 +88,172 @@ export function BrainstormTab({
 
       <View>
         <Text style={styles.label}>EXIT</Text>
-        <ExitBlock gates={gates} gatesError={gatesError} docs={allDocs} />
+        <ExitBlock
+          gates={gates}
+          gatesError={gatesError}
+          gatesLoading={gatesLoading}
+          docs={allDocs}
+          docsLoading={docs.isPending}
+          docsError={docsError}
+        />
       </View>
     </View>
   )
 }
 
-function ExitBlock({ gates, gatesError, docs }: { gates: TaskGate[]; gatesError?: string; docs: TaskDoc[] }) {
-  const history = gates.filter((g) => g.status !== 'pending')
-  if (gatesError) {
-    return (
-      <Card>
-        <Text style={{ fontSize: 13.5, color: colors.redFg }}>Could not load gates: {gatesError}</Text>
-      </Card>
+/** Why a decision was refused, in words a human can act on (same as the web tab). */
+function decideError(err: unknown): string {
+  if (err instanceof ApiError && err.status === 409) {
+    return 'This gate is no longer current: the spec changed after it was requested, or it was already decided. Refreshed.'
+  }
+  return err instanceof Error ? `Failed: ${err.message}` : 'Failed'
+}
+
+function ExitBlock({
+  gates,
+  gatesError,
+  gatesLoading,
+  docs,
+  docsLoading,
+  docsError,
+}: {
+  gates: TaskGate[]
+  gatesError?: string
+  gatesLoading?: boolean
+  docs: TaskDoc[]
+  docsLoading: boolean
+  docsError?: string
+}) {
+  const decide = useDecideGate()
+  const [changesOpen, setChangesOpen] = useState(false)
+  const [comment, setComment] = useState('')
+  const [shown, setShown] = useState<TaskDocKind | null>(null)
+  const state = exitState(gates, latestDoc(docs, 'spec')?.version)
+  const pending = state.kind === 'pending' ? state.gate : undefined
+  // Oldest first, like the web tab.
+  const history = gates.filter((g) => g.status !== 'pending').reverse()
+
+  // A new pending gate is a new question: drop the old answer-in-progress and
+  // the old refusal. Until then a refused comment stays, with its error.
+  const [seenPendingId, setSeenPendingId] = useState(pending?.id)
+  if (seenPendingId !== pending?.id) {
+    setSeenPendingId(pending?.id)
+    setShown(null)
+    setChangesOpen(false)
+    setComment('')
+    decide.reset()
+  }
+
+  const send = (decision: 'go' | 'changes') => {
+    if (!pending) return
+    decide.mutate(
+      { id: pending.id, decision, comment: decision === 'changes' ? comment.trim() : '' },
+      {
+        onSuccess: () => {
+          setChangesOpen(false)
+          setComment('')
+        },
+      },
     )
   }
-  const state = exitState(gates, docs)
+
+  let body: React.ReactNode
+  if (gatesError) {
+    body = <Text style={styles.error}>Could not load gates: {gatesError}</Text>
+  } else if (gatesLoading) {
+    body = <Text style={styles.empty}>Loading…</Text>
+  } else if (pending) {
+    const shownDoc =
+      shown === 'spec'
+        ? docAt(docs, 'spec', pending.spec_version, pending.requested_at)
+        : shown === 'plan'
+          ? docAt(docs, 'plan', pending.plan_version, pending.requested_at)
+          : undefined
+    const docLink = (kind: TaskDocKind, label: string) => (
+      <Pressable onPress={() => setShown((o) => (o === kind ? null : kind))} hitSlop={6}>
+        <Text style={styles.link}>{label}</Text>
+      </Pressable>
+    )
+    body = (
+      <View style={{ gap: 12 }}>
+        <View style={styles.versions}>
+          {docLink('spec', `Spec v${pending.spec_version}`)}
+          {pending.plan_version != null ? (
+            <>
+              <Text style={styles.meta}>·</Text>
+              {docLink('plan', `Plan v${pending.plan_version}`)}
+            </>
+          ) : null}
+          <View style={{ flex: 1 }} />
+          <Text style={styles.meta}>requested {ago(pending.requested_at)}</Text>
+        </View>
+        {shown ? (
+          <View style={styles.docBox}>
+            {shownDoc ? (
+              <Markdown>{shownDoc.body}</Markdown>
+            ) : docsError ? (
+              <Text style={styles.error}>{docsError}</Text>
+            ) : docsLoading ? (
+              <Text style={styles.empty}>Loading…</Text>
+            ) : (
+              <Text style={styles.empty}>This document version is not available.</Text>
+            )}
+          </View>
+        ) : null}
+        <View style={{ flexDirection: 'row', gap: 9 }}>
+          <Pressable
+            disabled={decide.isPending}
+            onPress={() => setChangesOpen((o) => !o)}
+            style={[styles.changesBtn, decide.isPending && { opacity: 0.4 }]}
+          >
+            <Text style={styles.changesText}>Needs changes</Text>
+          </Pressable>
+          <PrimaryButton label="Go" disabled={decide.isPending} onPress={() => send('go')} style={{ flex: 1 }} />
+        </View>
+        {changesOpen ? (
+          <View style={{ gap: 9 }}>
+            <TextInput
+              value={comment}
+              onChangeText={setComment}
+              placeholder="What should change in the spec?"
+              placeholderTextColor={colors.textFaint}
+              multiline
+              autoFocus
+              style={styles.input}
+            />
+            <Pressable
+              disabled={decide.isPending || !comment.trim()}
+              onPress={() => send('changes')}
+              style={[styles.changesBtn, styles.sendBtn, (decide.isPending || !comment.trim()) && { opacity: 0.4 }]}
+            >
+              <Text style={styles.changesText}>Send changes</Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </View>
+    )
+  } else if (state.kind === 'go') {
+    const g = state.gate
+    body = (
+      <Text style={[styles.state, { color: colors.greenFg }]}>
+        Go given on spec v{g.spec_version}
+        {g.plan_version != null ? ` · plan v${g.plan_version}` : ''}
+      </Text>
+    )
+  } else if (docsError) {
+    body = <Text style={styles.error}>{docsError}</Text>
+  } else if (docsLoading) {
+    body = <Text style={styles.empty}>Loading…</Text>
+  } else {
+    body = (
+      <Text style={styles.state}>{state.kind === 'waiting_request' ? 'Waiting for gate request' : 'Waiting for spec'}</Text>
+    )
+  }
+
   return (
     <Card style={{ gap: 12 }}>
-      {state.kind === 'waiting_spec' ? <Text style={styles.state}>Waiting for spec</Text> : null}
-      {state.kind === 'waiting_request' ? <Text style={styles.state}>Waiting for gate request</Text> : null}
-      {state.kind === 'go' ? (
-        <Text style={[styles.state, { color: colors.greenFg }]}>Go given on spec v{state.gate.spec_version}</Text>
-      ) : null}
-      {/* Keyed by gate: a new request starts with a clean comment box. */}
-      {state.kind === 'pending' ? <PendingGate key={state.gate.id} gate={state.gate} docs={docs} /> : null}
+      {body}
+      {decide.isError ? <Text style={styles.error}>{decideError(decide.error)}</Text> : null}
       {history.length > 0 ? (
         <View style={{ gap: 6 }}>
           <Text style={styles.label}>HISTORY</Text>
@@ -119,75 +266,6 @@ function ExitBlock({ gates, gatesError, docs }: { gates: TaskGate[]; gatesError?
         </View>
       ) : null}
     </Card>
-  )
-}
-
-function PendingGate({ gate, docs }: { gate: TaskGate; docs: TaskDoc[] }) {
-  const decide = useDecideGate()
-  const toast = useToast()
-  const [comment, setComment] = useState('')
-  const [open, setOpen] = useState<TaskDocKind | null>(null)
-  const shown = open === 'spec' ? docAt(docs, 'spec', gate.spec_version) : open === 'plan' ? docAt(docs, 'plan', gate.plan_version) : undefined
-
-  const send = (decision: 'go' | 'changes') =>
-    decide.mutate(
-      { id: gate.id, decision, comment: decision === 'changes' ? comment.trim() : '' },
-      {
-        onError: (e) => {
-          if (e instanceof ApiError && e.status === 409) {
-            // The spec moved on or someone already decided: the refetch shows the new state.
-            setComment('')
-            toast.show('Gate is no longer current')
-          } else {
-            toast.show((e as Error).message)
-          }
-        },
-      },
-    )
-
-  const docLink = (kind: TaskDocKind, label: string) => (
-    <Pressable onPress={() => setOpen((o) => (o === kind ? null : kind))} hitSlop={6}>
-      <Text style={styles.link}>{label}</Text>
-    </Pressable>
-  )
-
-  return (
-    <View style={{ gap: 12 }}>
-      <View style={styles.versions}>
-        {docLink('spec', `Spec v${gate.spec_version}`)}
-        {gate.plan_version != null ? (
-          <>
-            <Text style={styles.meta}>·</Text>
-            {docLink('plan', `Plan v${gate.plan_version}`)}
-          </>
-        ) : null}
-        <View style={{ flex: 1 }} />
-        <Text style={styles.meta}>requested {ago(gate.requested_at)}</Text>
-      </View>
-      {open ? (
-        <View style={styles.docBox}>
-          {shown ? <Markdown>{shown.body}</Markdown> : <Text style={styles.empty}>This version is not available.</Text>}
-        </View>
-      ) : null}
-      <TextInput
-        value={comment}
-        onChangeText={setComment}
-        placeholder="What needs to change?"
-        placeholderTextColor={colors.textFaint}
-        multiline
-        style={styles.input}
-      />
-      <View style={{ flexDirection: 'row', gap: 9 }}>
-        <Pressable
-          disabled={decide.isPending || !comment.trim()}
-          onPress={() => send('changes')}
-          style={[styles.changesBtn, (decide.isPending || !comment.trim()) && { opacity: 0.4 }]}
-        >
-          <Text style={{ color: colors.redFg, fontSize: 13, fontWeight: '600' }}>Needs changes</Text>
-        </Pressable>
-        <PrimaryButton label="Go" disabled={decide.isPending} onPress={() => send('go')} style={{ flex: 1 }} />
-      </View>
-    </View>
   )
 }
 
@@ -220,6 +298,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     textAlignVertical: 'top',
   },
+  error: { fontSize: 13, lineHeight: 19, color: colors.redFg },
+  changesText: { color: colors.redFg, fontSize: 13, fontWeight: '600' },
+  sendBtn: { flex: 0, height: 42 },
   changesBtn: {
     flex: 1,
     alignItems: 'center',
