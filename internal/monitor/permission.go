@@ -21,6 +21,27 @@ const claudeCodeAgent = "claude-code"
 // the same two-miss filter against capture glitches as quizMissThreshold.
 const permissionMissThreshold = 2
 
+// permissionChangeThreshold is how many consecutive sweeps must read a
+// different dialog than the pending one before the card switches: a single
+// capture taken mid-redraw, or after a resize cut the dialog's header, can
+// read the same dialog with another Context.
+const permissionChangeThreshold = 2
+
+// permissionAnswerSettle is how long after an API answer's keypress the
+// same dialog may still be on the pane. A digit closes a permission dialog
+// at once (recon §3), so the identical dialog seen later is a new instance
+// — Claude asked the same command again — not the answered one. sent_at
+// has one-second resolution, so this is compared in whole seconds and is
+// at least one full second in real time.
+const permissionAnswerSettle = 2 * time.Second
+
+// permissionCandidate is a dialog read off the pane that differs from the
+// pending one, and on how many consecutive sweeps it was read.
+type permissionCandidate struct {
+	prompt runtime.PermissionPrompt
+	seen   int
+}
+
 // pollPermission publishes a Claude Code permission dialog sitting on the
 // pane as the session's pending quiz (source "permission"), switches it
 // when the agent moves on to the next dialog, and clears it once the dialog
@@ -41,16 +62,19 @@ const permissionMissThreshold = 2
 func (m *Monitor) pollPermission(ctx context.Context, sess store.Session) {
 	if sess.Agent != claudeCodeAgent {
 		m.forgetPermissionMisses(sess.ID)
+		m.forgetPermissionCandidate(sess.ID)
 		return
 	}
 	pending, hasPending := session.ParseQuiz(sess.PendingQuiz)
 	if sess.PendingQuiz != "" && (!hasPending || !pending.IsPermission()) {
 		m.forgetPermissionMisses(sess.ID)
+		m.forgetPermissionCandidate(sess.ID)
 		return
 	}
 	if !hasPending {
 		if state, _ := m.Activity(sess.ID); state != activity.WaitingInput && state != activity.Blocked {
 			m.forgetPermissionMisses(sess.ID)
+			m.forgetPermissionCandidate(sess.ID)
 			return
 		}
 	}
@@ -62,12 +86,26 @@ func (m *Monitor) pollPermission(ctx context.Context, sess store.Session) {
 
 	if p, ok := runtime.ParsePermissionPrompt(out); ok {
 		m.forgetPermissionMisses(sess.ID)
-		if hasPending && pending.PermissionPrompt().SameDialog(p) {
-			return
+		switch {
+		case !hasPending:
+			m.publishPermission(sess, p, false)
+		case pending.PermissionPrompt().SameDialog(p):
+			m.forgetPermissionCandidate(sess.ID)
+			if m.answeredAndStillShown(pending) {
+				// The answered dialog closed and Claude asked the very
+				// same thing again within one sweep.
+				if err := m.st.ResolvePermissionPrompt(pending.Permission.PromptID, time.Now().Unix()); err != nil {
+					slog.Warn("monitor: resolve answered permission prompt", "session", sess.ID, "error", err)
+					return
+				}
+				m.publishPermission(sess, p, true)
+			}
+		case m.permissionChangeConfirmed(sess.ID, p):
+			m.publishPermission(sess, p, true)
 		}
-		m.publishPermission(sess, p, hasPending)
 		return
 	}
+	m.forgetPermissionCandidate(sess.ID)
 	if !hasPending {
 		return
 	}
@@ -110,7 +148,7 @@ func (m *Monitor) publishPermission(sess store.Session, p runtime.PermissionProm
 		return
 	}
 	now := time.Now().Unix()
-	id, _, err := m.st.OpenPermissionPrompt(sess.ID, p.Title, p.Context, string(options), now)
+	id, reused, err := m.st.OpenPermissionPrompt(sess.ID, p.Title, p.Context, string(options), now)
 	if err != nil {
 		slog.Warn("monitor: journal permission prompt", "session", sess.ID, "error", err)
 		return
@@ -125,6 +163,13 @@ func (m *Monitor) publishPermission(sess store.Session, p runtime.PermissionProm
 		return
 	}
 	if !swapped {
+		// A hook quiz (or another writer) got there first; nothing points
+		// at a row opened just now, so it must not stay behind.
+		if !reused {
+			if err := m.st.DeletePermissionPrompt(id); err != nil {
+				slog.Warn("monitor: drop unattached permission prompt", "session", sess.ID, "error", err)
+			}
+		}
 		return
 	}
 	slog.Info("monitor: permission dialog open", "session", sess.ID, "title", p.Title)
@@ -138,4 +183,42 @@ func (m *Monitor) forgetPermissionMisses(sessionID string) {
 	m.mu.Lock()
 	delete(m.permMiss, sessionID)
 	m.mu.Unlock()
+}
+
+// permissionChangeConfirmed records that p, a different dialog than the
+// pending one, was read this sweep, and reports whether it has now been
+// read on permissionChangeThreshold consecutive sweeps.
+func (m *Monitor) permissionChangeConfirmed(sessionID string, p runtime.PermissionPrompt) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c := m.permNext[sessionID]
+	if c.seen > 0 && c.prompt.SameDialog(p) {
+		c.seen++
+	} else {
+		c = permissionCandidate{prompt: p, seen: 1}
+	}
+	if c.seen >= permissionChangeThreshold {
+		delete(m.permNext, sessionID)
+		return true
+	}
+	m.permNext[sessionID] = c
+	return false
+}
+
+func (m *Monitor) forgetPermissionCandidate(sessionID string) {
+	m.mu.Lock()
+	delete(m.permNext, sessionID)
+	m.mu.Unlock()
+}
+
+// answeredAndStillShown reports whether an API answer's keypress for the
+// pending dialog was sent at least permissionAnswerSettle ago — so the
+// identical dialog on the pane now is a new one. Without an API answer
+// (terminal answers) this never applies: those close through the miss path.
+func (m *Monitor) answeredAndStillShown(pending session.Quiz) bool {
+	row, err := m.st.GetPermissionPrompt(pending.Permission.PromptID)
+	if err != nil || row.SentAt == 0 || row.ResolvedAt != 0 {
+		return false
+	}
+	return time.Now().Unix()-row.SentAt >= int64(permissionAnswerSettle/time.Second)
 }

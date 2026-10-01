@@ -157,6 +157,10 @@ func TestPermissionNextDialogSwitchesCard(t *testing.T) {
 	defer cancel()
 	rt.setPane(pane(t, "permission-bash-outside-cwd.pane"))
 	m.sweep(context.Background())
+	if q, _ := pendingOf(t, st); q.Permission.PromptID != first.Permission.PromptID {
+		t.Fatalf("card switched on the first sight of the next dialog, want two ticks")
+	}
+	m.sweep(context.Background())
 
 	q, ok := pendingOf(t, st)
 	next, _ := runtime.ParsePermissionPrompt(pane(t, "permission-bash-outside-cwd.pane"))
@@ -350,5 +354,106 @@ func TestPollQuizLeavesPermissionQuizAlone(t *testing.T) {
 	}
 	if after, _ := st.GetSession("sess1"); after.PendingQuiz != b {
 		t.Errorf("pollQuiz touched a permission quiz: %s", after.PendingQuiz)
+	}
+}
+
+// TestPermissionOneTickGlitchKeepsCard: a single capture that reads the same
+// dialog differently (mid-redraw, a resize cutting the header) must not
+// close the real row and open a phantom one.
+func TestPermissionOneTickGlitchKeepsCard(t *testing.T) {
+	m, st, b, rt := permMonitor(t, "permission-bash-rm.pane")
+	m.sweep(context.Background())
+	first, _ := pendingOf(t, st)
+
+	ch, cancel := b.Subscribe()
+	defer cancel()
+	rt.setPane(pane(t, "permission-bash-outside-cwd.pane")) // one odd tick
+	m.sweep(context.Background())
+	rt.setPane(pane(t, "permission-bash-rm.pane"))
+	m.sweep(context.Background())
+
+	q, _ := pendingOf(t, st)
+	if q.Permission.PromptID != first.Permission.PromptID {
+		t.Errorf("card replaced by a one-tick glitch: %+v -> %+v", first.Permission, q.Permission)
+	}
+	events := drainEvents(ch)
+	if n := eventCount(events, "session.quiz_asked") + eventCount(events, "session.quiz_resolved"); n != 0 {
+		t.Errorf("quiz events = %d, want none", n)
+	}
+	if rows := permissionRows(t, st); len(rows) != 0 {
+		t.Errorf("rows closed by a glitch: %+v", rows)
+	}
+}
+
+// TestPermissionSameDialogAgainAfterChatAnswer: the user answered from chat
+// and Claude at once asked the identical command again, so the pane never
+// shows a miss. A digit closes a dialog immediately, so the same dialog
+// still there a settle interval after the keypress is a new instance.
+func TestPermissionSameDialogAgainAfterChatAnswer(t *testing.T) {
+	cases := []struct {
+		name    string
+		sentAgo time.Duration // 0: no keypress recorded
+		newOne  bool
+	}{
+		{"no API answer", 0, false},
+		{"keypress just sent", time.Millisecond, false},
+		{"keypress a settle interval ago", permissionAnswerSettle + time.Second, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, st, b, _ := permMonitor(t, "permission-bash-rm.pane")
+			m.sweep(context.Background())
+			first, _ := pendingOf(t, st)
+			id := first.Permission.PromptID
+			if tc.sentAgo > 0 {
+				_ = st.MarkPermissionPromptAnswered(id, "Yes")
+				_ = st.MarkPermissionPromptSent(id, time.Now().Add(-tc.sentAgo).Unix())
+			}
+
+			ch, cancel := b.Subscribe()
+			defer cancel()
+			m.sweep(context.Background())
+
+			q, _ := pendingOf(t, st)
+			events := drainEvents(ch)
+			if !tc.newOne {
+				if q.Permission.PromptID != id || eventCount(events, "session.quiz_asked") != 0 {
+					t.Fatalf("pending replaced: %+v (events %+v)", q.Permission, events)
+				}
+				return
+			}
+			if q.Permission.PromptID == id {
+				t.Fatalf("identical dialog after the answer kept the answered row %d", id)
+			}
+			if eventCount(events, "session.quiz_resolved") != 1 || eventCount(events, "session.quiz_asked") != 1 {
+				t.Errorf("events = %+v, want one resolved and one asked", events)
+			}
+			rows := permissionRows(t, st)
+			if len(rows) != 1 || rows[0].ID != id || rows[0].AnsweredVia != "chat" || rows[0].AnswerLabel != "Yes" {
+				t.Errorf("rows = %+v, want the answered row closed via chat", rows)
+			}
+		})
+	}
+}
+
+// TestPermissionLosingTheRaceToAHookQuizLeavesNoRow: the row is opened
+// before the pending_quiz swap; if a hook quiz won the swap, nothing points
+// at the row, so it must not stay behind.
+func TestPermissionLosingTheRaceToAHookQuizLeavesNoRow(t *testing.T) {
+	m, st, _, _ := permMonitor(t, "permission-bash-rm.pane")
+	stale, _ := st.GetSession("sess1") // read before the hook quiz landed
+	hook := `{"questions":[{"question":"q","header":"h","multiSelect":false,"options":[]}],"asked_at":1}`
+	_ = st.SetPendingQuiz("sess1", hook)
+	m.mu.Lock()
+	m.cache["sess1"] = activity.WaitingInput
+	m.mu.Unlock()
+
+	m.pollPermission(context.Background(), stale)
+
+	if sess, _ := st.GetSession("sess1"); sess.PendingQuiz != hook {
+		t.Fatalf("hook quiz overwritten: %s", sess.PendingQuiz)
+	}
+	if _, err := st.GetPermissionPrompt(1); err != store.ErrNotFound {
+		t.Errorf("orphan row left behind (err=%v)", err)
 	}
 }

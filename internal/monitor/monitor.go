@@ -121,6 +121,9 @@ type Monitor struct {
 	// permMiss counts consecutive sweeps that saw no permission dialog on
 	// the pane of a session holding a permission quiz — see pollPermission.
 	permMiss map[string]int
+	// permNext is the dialog a session's pane shows instead of its pending
+	// one, until it is confirmed — see permissionChangeConfirmed.
+	permNext map[string]permissionCandidate
 }
 
 // New builds a Monitor. resolveAgent is typically agent.Get.
@@ -139,6 +142,7 @@ func New(st *store.Store, b *bus.Bus, rt runtime.Runtime, cfg *config.Config, re
 
 		inputWaitMiss: make(map[string]int),
 		permMiss:      make(map[string]int),
+		permNext:      make(map[string]permissionCandidate),
 	}
 }
 
@@ -274,6 +278,11 @@ func (m *Monitor) sweep(ctx context.Context) {
 	for id := range m.permMiss {
 		if !sessionIDs[id] {
 			delete(m.permMiss, id)
+		}
+	}
+	for id := range m.permNext {
+		if !sessionIDs[id] {
+			delete(m.permNext, id)
 		}
 	}
 	m.mu.Unlock()

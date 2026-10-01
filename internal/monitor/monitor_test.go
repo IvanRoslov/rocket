@@ -158,6 +158,7 @@ func testMonitor(t *testing.T, rt runtime.Runtime, prober *fakeProber, agents ma
 
 		inputWaitMiss: make(map[string]int),
 		permMiss:      make(map[string]int),
+		permNext:      make(map[string]permissionCandidate),
 	}
 	return m, st, b
 }
