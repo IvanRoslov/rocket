@@ -217,6 +217,10 @@ describe('Questions tab', () => {
       await fireEvent.changeText(screen.getByPlaceholderText('Comment or your own answer…'), 'WAL mode')
       await fireEvent.press(screen.getByText('SQLite'))
       expect(screen.getByText('Answered: SQLite — WAL mode')).toBeTruthy()
+      // In flight: the hidden card's options are disabled until it comes back.
+      expect(
+        screen.getByTestId('option-2', { includeHiddenElements: true }).props.accessibilityState?.disabled,
+      ).toBe(true)
       await elapse(5000)
       await waitFor(() =>
         expect(posts).toEqual([{ path: '/v1/questions/7/answer', body: { choose: 2, body: 'WAL mode' } }]),
