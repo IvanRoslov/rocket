@@ -136,6 +136,7 @@ export default function QuestionsScreen() {
                 <ThreadCard
                   thread={t}
                   onAnswer={onAnswer}
+                  busy={hidden.has(t.id)}
                   onInputFocus={() => {
                     focused.current = t.id
                     reveal()

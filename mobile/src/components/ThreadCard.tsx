@@ -21,12 +21,15 @@ export function ThreadCard({
   onAnswer,
   onInputFocus,
   onInputBlur,
+  busy,
 }: {
   thread: ThreadInboxEntry
   onAnswer: (thread: ThreadInboxEntry, answer: ThreadAnswer, label: string) => void
   /** The answer input gained / lost focus — lets the screen keep it above the keyboard. */
   onInputFocus?: () => void
   onInputBlur?: () => void
+  /** The card's answer is in flight (Undo window or POST): options are disabled. */
+  busy?: boolean
 }) {
   const [text, setText] = useState('')
   const source = threadSource(thread)
@@ -55,6 +58,7 @@ export function ThreadCard({
             <View style={{ marginTop: 12 }}>
               <StormOptions
                 q={thread}
+                disabled={busy}
                 onChoose={(choose, label) => {
                   const comment = text.trim()
                   onAnswer(

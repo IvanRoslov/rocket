@@ -277,9 +277,15 @@ export default function TaskScreen() {
   const detail = useTaskDetail(taskId)
   const questions = useTaskQuestions(taskId)
   const gates = useTaskGates(taskId)
-  // null until the user picks a tab: the default follows the task's status.
+  // null until the user picks a tab. The default follows the status the task
+  // had when first loaded, then stays put — Go moving the task out of
+  // brainstorm must not yank the user off the Brainstorm tab.
   const [picked, setTab] = useState<string | null>(null)
-  const tab = picked ?? (detail.data?.status === 'brainstorm' ? 'brainstorm' : 'overview')
+  const [initialTab, setInitialTab] = useState<string | null>(null)
+  if (initialTab === null && detail.data) {
+    setInitialTab(detail.data.status === 'brainstorm' ? 'brainstorm' : 'overview')
+  }
+  const tab = picked ?? initialTab ?? 'overview'
   const docs = useTaskDocs(taskId, tab === 'docs')
   const log = useTaskLog(taskId, tab === 'journal')
   const { data: allSessions } = useSessions(detail.data?.project_id)
@@ -437,6 +443,7 @@ export default function TaskScreen() {
                 questions={questions.data ?? []}
                 gates={gates.data ?? []}
                 gatesError={gates.isError ? (gates.error as Error).message : undefined}
+                gatesLoading={gates.isPending}
               />
             ) : null}
 

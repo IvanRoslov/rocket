@@ -129,12 +129,15 @@ const PENDING = gate({ id: 2, spec_version: 2, plan_version: 1 })
 const CHANGES = gate({ id: 1, spec_version: 1, status: 'changes', comment: 'tighten the metric', decided_by: 'human', decided_at: 1785622885 })
 
 type Reply = { status: number; body: unknown }
+/** A GET that never answers — the screen stays loading. */
+const HANG = Symbol('hang')
 let posts: { path: string; body: unknown }[] = []
+let bodies: Record<string, unknown> = {}
 
 /** GETs come from `bodies` (a value or a {status, body} reply); POSTs answer `postReply`. */
 function mockApi(overrides: Record<string, unknown> = {}, postReply: Reply = { status: 200, body: {} }) {
   posts = []
-  const bodies: Record<string, unknown> = {
+  bodies = {
     '/v1/tasks/12': TASK,
     '/v1/tasks/12/questions': { questions: [STORM_OPEN, PLAIN, STORM_DONE] },
     '/v1/tasks/12/gates': { gates: [PENDING, CHANGES] },
@@ -150,6 +153,7 @@ function mockApi(overrides: Record<string, unknown> = {}, postReply: Reply = { s
       return { ok: postReply.status < 300, status: postReply.status, json: async () => postReply.body }
     }
     const b = bodies[path]
+    if (b === HANG) return new Promise(() => {})
     if (b === undefined) return { ok: false, status: 404, json: async () => ({ error: { code: 'not_found' } }) }
     if (b && typeof b === 'object' && 'status' in b && 'body' in b && typeof (b as Reply).status === 'number') {
       const r = b as Reply
@@ -242,6 +246,31 @@ describe('Brainstorm tab', () => {
     await waitFor(() => expect(screen.getByText('No problem statement yet.')).toBeTruthy())
   })
 
+  it('shows Loading… while the docs load, not an empty Problem', async () => {
+    mockApi({ '/v1/tasks/12/docs?history=true': HANG })
+    await renderScreen()
+    await waitFor(() => expect(screen.getByText('PROBLEM')).toBeTruthy())
+    expect(screen.queryByText('No problem statement yet.')).toBeNull()
+    expect(screen.queryByText('Waiting for spec')).toBeNull()
+    expect(screen.getAllByText('Loading…').length).toBeGreaterThan(0)
+  })
+
+  it('shows an error when the docs fail to load', async () => {
+    mockApi({ '/v1/tasks/12/docs?history=true': { status: 500, body: { error: { code: 'internal_error', message: 'boom' } } } })
+    await renderScreen()
+    await waitFor(() => expect(screen.getAllByText(/Could not load documents: boom/).length).toBeGreaterThan(0))
+    expect(screen.queryByText('No problem statement yet.')).toBeNull()
+  })
+
+  it('stays on Brainstorm when the status leaves brainstorm (e.g. right after Go)', async () => {
+    mockApi()
+    await renderScreen()
+    await waitFor(() => expect(screen.getByText('PROBLEM')).toBeTruthy())
+    bodies['/v1/tasks/12'] = { ...TASK, status: 'in_progress' }
+    await waitFor(() => expect(screen.getByText('In Progress')).toBeTruthy(), { timeout: 6000 })
+    expect(screen.getByText('PROBLEM')).toBeTruthy()
+  }, 10000)
+
   it('lists only storm questions, in order', async () => {
     mockApi()
     await renderScreen()
@@ -298,33 +327,82 @@ describe('Brainstorm tab', () => {
       await waitFor(() => expect(posts).toEqual([{ path: '/v1/gates/2/decide', body: { decision: 'go', comment: '' } }]))
     })
 
+    it('keeps the comment box behind Needs changes, so Go cannot swallow typed text', async () => {
+      mockApi()
+      await renderScreen()
+      await waitFor(() => expect(screen.getByText('Go')).toBeTruthy())
+      expect(screen.queryByPlaceholderText('What should change in the spec?')).toBeNull()
+      await fireEvent.press(screen.getByText('Needs changes'))
+      expect(screen.getByPlaceholderText('What should change in the spec?')).toBeTruthy()
+    })
+
     it('Needs changes requires a comment and posts it', async () => {
       mockApi()
       await renderScreen()
       await waitFor(() => expect(screen.getByText('Needs changes')).toBeTruthy())
       await fireEvent.press(screen.getByText('Needs changes'))
+      await fireEvent.press(screen.getByText('Send changes'))
       expect(posts).toEqual([])
-      await fireEvent.changeText(screen.getByPlaceholderText('What needs to change?'), 'split the plan')
-      await fireEvent.press(screen.getByText('Needs changes'))
+      await fireEvent.changeText(screen.getByPlaceholderText('What should change in the spec?'), 'split the plan')
+      await fireEvent.press(screen.getByText('Send changes'))
       await waitFor(() =>
         expect(posts).toEqual([{ path: '/v1/gates/2/decide', body: { decision: 'changes', comment: 'split the plan' } }]),
       )
     })
 
-    it('explains a 409 and clears the comment', async () => {
+    it('explains a 409 inline and keeps the typed comment', async () => {
       mockApi({}, { status: 409, body: { error: { code: 'gate_not_pending', message: 'gate is not pending' } } })
       await renderScreen()
       await waitFor(() => expect(screen.getByText('Needs changes')).toBeTruthy())
-      await fireEvent.changeText(screen.getByPlaceholderText('What needs to change?'), 'split the plan')
       await fireEvent.press(screen.getByText('Needs changes'))
-      await waitFor(() => expect(screen.getByText('Gate is no longer current')).toBeTruthy())
-      expect(screen.getByPlaceholderText('What needs to change?').props.value).toBe('')
+      await fireEvent.changeText(screen.getByPlaceholderText('What should change in the spec?'), 'split the plan')
+      await fireEvent.press(screen.getByText('Send changes'))
+      await waitFor(() => expect(screen.getByText(/This gate is no longer current/)).toBeTruthy())
+      expect(screen.getByPlaceholderText('What should change in the spec?').props.value).toBe('split the plan')
     })
 
-    it('reports Go once passed', async () => {
-      mockApi({ '/v1/tasks/12/gates': { gates: [gate({ status: 'go', spec_version: 2, decided_at: 1785622899 })] } })
+    it('shows other decision errors inline', async () => {
+      mockApi({}, { status: 500, body: { error: { code: 'internal_error', message: 'disk full' } } })
       await renderScreen()
-      await waitFor(() => expect(screen.getByText('Go given on spec v2')).toBeTruthy())
+      await waitFor(() => expect(screen.getByText('Go')).toBeTruthy())
+      await fireEvent.press(screen.getByText('Go'))
+      await waitFor(() => expect(screen.getByText('Failed: disk full')).toBeTruthy())
+    })
+
+    it('reports Go once passed, with the pinned versions', async () => {
+      mockApi({ '/v1/tasks/12/gates': { gates: [gate({ status: 'go', spec_version: 2, plan_version: 1, decided_at: 1785622899 })] } })
+      await renderScreen()
+      await waitFor(() => expect(screen.getByText('Go given on spec v2 · plan v1')).toBeTruthy())
+    })
+
+    it('waits for a revised spec after Needs changes on the current spec', async () => {
+      mockApi({ '/v1/tasks/12/gates': { gates: [gate({ status: 'changes', spec_version: 3, comment: 'x' })] } })
+      await renderScreen()
+      await waitFor(() => expect(screen.getByText('Waiting for spec')).toBeTruthy())
+    })
+
+    it('lists the gate history oldest first', async () => {
+      mockApi({
+        '/v1/tasks/12/gates': {
+          gates: [
+            gate({ id: 3, spec_version: 3, status: 'go' }),
+            gate({ id: 2, spec_version: 2, status: 'superseded' }),
+            gate({ id: 1, spec_version: 1, status: 'changes', comment: 'a' }),
+          ],
+        },
+      })
+      await renderScreen()
+      await waitFor(() => expect(screen.getByText('v3 — Go')).toBeTruthy())
+      const lines = screen.getAllByText(/^v\d — /).map(textOf)
+      expect(lines).toEqual(['v1 — Needs changes: “a”', 'v2 — Superseded by a newer spec', 'v3 — Go'])
+    })
+
+    it('shows Loading… while the gates load, not a waiting state', async () => {
+      mockApi({ '/v1/tasks/12/gates': HANG })
+      await renderScreen()
+      await waitFor(() => expect(screen.getByText('PROBLEM')).toBeTruthy())
+      expect(screen.getAllByText('Loading…').length).toBeGreaterThan(0)
+      expect(screen.queryByText('Waiting for spec')).toBeNull()
     })
   })
 })
