@@ -15,7 +15,7 @@ import {
   toggleAddressee,
 } from '../lib/threads'
 import { colors, mono, radius } from '../theme'
-import { StormAnswerSummary, StormOptions } from './BrainstormAnswer'
+import { STORM_INPUT_PLACEHOLDER, StormAnswerSummary, StormOptions } from './BrainstormAnswer'
 import { QuestionText } from './QuestionText'
 import { useToast } from './Toast'
 import { Badge, GhostButton, MonoText, PrimaryButton } from './ui'
@@ -131,10 +131,11 @@ export function QuestionCard({ q }: { q: Question }) {
           <StormOptions
             q={q}
             disabled={busy}
-            onChoose={(choose, comment) =>
+            onChoose={(choose) =>
               answer.mutate(
-                { id: q.id, choose, body: comment },
-                { onError: (e: unknown) => toast.show((e as Error).message) },
+                // The reply box doubles as the option's comment.
+                { id: q.id, choose, body: text },
+                { onSuccess: () => setText(''), onError: (e: unknown) => toast.show((e as Error).message) },
               )
             }
           />
@@ -220,7 +221,9 @@ export function QuestionCard({ q }: { q: Question }) {
           ) : null}
           <TextInput
             style={styles.replyInput}
-            placeholder={mine ? 'Ask a follow-up…' : 'Write a reply or give your final answer…'}
+            placeholder={
+              storm ? STORM_INPUT_PLACEHOLDER : mine ? 'Ask a follow-up…' : 'Write a reply or give your final answer…'
+            }
             placeholderTextColor={colors.textFaint}
             value={text}
             onChangeText={setText}

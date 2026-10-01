@@ -199,6 +199,47 @@ describe('Questions tab', () => {
     await waitFor(() => expect(posts).toEqual([{ path: '/v1/questions/7/answer', body: { choose: 1 } }]))
   })
 
+  describe('brainstorm thread', () => {
+    const STORM = { ...MINE, type: 'brainstorm', recommended_option: 2, chosen_option: null, outcome: '' }
+
+    it('stars the recommended option', async () => {
+      mockApi({ threads: [STORM] })
+      await renderScreen()
+      await waitFor(() => expect(screen.getByText('SQLite')).toBeTruthy())
+      expect(within(screen.getByTestId('option-2')).getByText('★ Recommended')).toBeTruthy()
+      expect(within(screen.getByTestId('option-1')).queryByText('★ Recommended')).toBeNull()
+    })
+
+    it('sends the option with its comment after the undo window', async () => {
+      mockApi({ threads: [STORM] })
+      await renderScreen()
+      await waitFor(() => expect(screen.getByPlaceholderText('Comment or your own answer…')).toBeTruthy())
+      await fireEvent.changeText(screen.getByPlaceholderText('Comment or your own answer…'), 'WAL mode')
+      await fireEvent.press(screen.getByText('SQLite'))
+      expect(screen.getByText('Answered: SQLite — WAL mode')).toBeTruthy()
+      await elapse(5000)
+      await waitFor(() =>
+        expect(posts).toEqual([{ path: '/v1/questions/7/answer', body: { choose: 2, body: 'WAL mode' } }]),
+      )
+    })
+
+    it('has a single text box on the card', async () => {
+      mockApi({ threads: [STORM] })
+      await renderScreen()
+      await waitFor(() => expect(screen.getByText('SQLite')).toBeTruthy())
+      expect(screen.queryByPlaceholderText('Your answer…')).toBeNull()
+    })
+
+    it('sends a bare choose without a comment', async () => {
+      mockApi({ threads: [STORM] })
+      await renderScreen()
+      await waitFor(() => expect(screen.getByText('Postgres')).toBeTruthy())
+      await fireEvent.press(screen.getByText('Postgres'))
+      await elapse(5000)
+      await waitFor(() => expect(posts).toEqual([{ path: '/v1/questions/7/answer', body: { choose: 1 } }]))
+    })
+  })
+
   it('Undo cancels the answer and brings the card back', async () => {
     mockApi()
     await renderScreen()

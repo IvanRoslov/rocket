@@ -92,8 +92,8 @@ describe('brainstorm QuestionCard — open', () => {
   it('sends the comment along with the tapped option', async () => {
     mockFetch()
     await renderCard(STORM)
-    await fireEvent.changeText(screen.getByPlaceholderText('Comment (optional)'), 'but keep it small')
-    await waitFor(() => expect(screen.getByPlaceholderText('Comment (optional)').props.value).toBe('but keep it small'))
+    await fireEvent.changeText(screen.getByPlaceholderText('Comment or your own answer…'), 'but keep it small')
+    await waitFor(() => expect(screen.getByPlaceholderText('Comment or your own answer…').props.value).toBe('but keep it small'))
     await fireEvent.press(screen.getByTestId('option-2'))
     await waitFor(() => {
       const call = callTo('/v1/questions/5/answer')
@@ -109,6 +109,22 @@ describe('brainstorm QuestionCard — open', () => {
     await waitFor(() => expect(JSON.parse(callTo('/v1/questions/5/answer')[1].body)).toEqual({ choose: 1 }))
   })
 
+  it('answers in own words from the same box', async () => {
+    mockFetch()
+    await renderCard(STORM)
+    await fireEvent.changeText(screen.getByPlaceholderText('Comment or your own answer…'), 'neither — use a view')
+    await fireEvent.press(screen.getByText('Answer & close'))
+    await waitFor(() =>
+      expect(JSON.parse(callTo('/v1/questions/5/answer')[1].body)).toEqual({ body: 'neither — use a view' }),
+    )
+  })
+
+  it('has a single text box, so nothing typed is lost on an option tap', async () => {
+    mockFetch()
+    await renderCard(STORM)
+    expect(screen.queryByPlaceholderText(/Write a reply/)).toBeNull()
+  })
+
   it('renders an old brainstorm thread without a recommendation and no star', async () => {
     mockFetch()
     await renderCard({ ...STORM, recommended_option: null })
@@ -119,7 +135,7 @@ describe('brainstorm QuestionCard — open', () => {
   it('keeps a plain decision thread free of the comment field', async () => {
     mockFetch()
     await renderCard({ ...STORM, type: 'decision', recommended_option: null })
-    expect(screen.queryByPlaceholderText('Comment (optional)')).toBeNull()
+    expect(screen.queryByPlaceholderText('Comment or your own answer…')).toBeNull()
   })
 })
 

@@ -2,7 +2,7 @@
 // options with the recommendation starred plus an optional comment, and the
 // answer summary with its outcome, which the human may correct.
 import { useState } from 'react'
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
+import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { useSetQuestionOutcome } from '../api/queries'
 import type { BrainstormFields, BrainstormOutcome } from '../api/types'
 import { OUTCOME_LABEL, OUTCOMES, chosenLabel, isRecommended } from '../lib/brainstorm'
@@ -10,57 +10,41 @@ import { colors, radius } from '../theme'
 import { useToast } from './Toast'
 import { Badge } from './ui'
 
+/** Placeholder of a storm card's one text box: a comment for an option, or the whole answer. */
+export const STORM_INPUT_PLACEHOLDER = 'Comment or your own answer…'
+
 /**
- * One tap answers with an option; whatever is typed in the comment field
- * goes along with it. `onChoose` gets the 1-based option and the trimmed
- * comment (`''` when none).
+ * The option buttons of an open storm question, the recommendation starred.
+ * The card owns the one text box: what is typed there goes along with a
+ * tapped option as its comment, so nothing typed is lost.
  */
 export function StormOptions({
   q,
   disabled,
   onChoose,
-  onInputFocus,
-  onInputBlur,
 }: {
   q: { options?: string[] } & Pick<BrainstormFields, 'recommended_option'>
   disabled?: boolean
-  onChoose: (choose: number, comment: string, label: string) => void
-  onInputFocus?: () => void
-  onInputBlur?: () => void
+  /** `choose` is 1-based. */
+  onChoose: (choose: number, label: string) => void
 }) {
-  const [comment, setComment] = useState('')
   return (
-    <View style={{ marginBottom: 12 }}>
-      <View style={styles.optionRow}>
-        {(q.options ?? []).map((label, i) => {
-          const rec = isRecommended(q, i)
-          return (
-            <Pressable
-              key={i}
-              testID={`option-${i + 1}`}
-              disabled={disabled}
-              style={[styles.optionBtn, rec ? styles.optionRec : null]}
-              onPress={() => {
-                onChoose(i + 1, comment.trim(), label)
-                setComment('')
-              }}
-            >
-              {rec ? <Text style={styles.recLabel}>★ Recommended</Text> : null}
-              <Text style={styles.optionText}>{label}</Text>
-            </Pressable>
-          )
-        })}
-      </View>
-      <TextInput
-        value={comment}
-        onChangeText={setComment}
-        onFocus={onInputFocus}
-        onBlur={onInputBlur}
-        placeholder="Comment (optional)"
-        placeholderTextColor={colors.textFaint}
-        multiline
-        style={styles.comment}
-      />
+    <View style={styles.optionRow}>
+      {(q.options ?? []).map((label, i) => {
+        const rec = isRecommended(q, i)
+        return (
+          <Pressable
+            key={i}
+            testID={`option-${i + 1}`}
+            disabled={disabled}
+            style={[styles.optionBtn, rec ? styles.optionRec : null]}
+            onPress={() => onChoose(i + 1, label)}
+          >
+            {rec ? <Text style={styles.recLabel}>★ Recommended</Text> : null}
+            <Text style={styles.optionText}>{label}</Text>
+          </Pressable>
+        )
+      })}
     </View>
   )
 }
@@ -129,7 +113,7 @@ export function StormAnswerSummary({
 }
 
 const styles = StyleSheet.create({
-  optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
   optionBtn: {
     paddingVertical: 9,
     paddingHorizontal: 14,
@@ -141,17 +125,6 @@ const styles = StyleSheet.create({
   optionRec: { borderColor: colors.amberDeep, backgroundColor: colors.amberBgSoft },
   recLabel: { fontSize: 10.5, fontWeight: '700', color: colors.amberDeep, marginBottom: 2 },
   optionText: { fontSize: 13, fontWeight: '600', color: colors.text },
-  comment: {
-    minHeight: 44,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    fontSize: 13.5,
-    color: colors.text,
-    backgroundColor: colors.card,
-    textAlignVertical: 'top',
-  },
   summary: {
     borderWidth: 1,
     borderColor: colors.border,
