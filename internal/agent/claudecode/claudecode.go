@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/IvanRoslov/rocket/internal/agent"
+	"github.com/IvanRoslov/rocket/internal/prompts"
 )
 
 type ClaudeCode struct{}
@@ -54,19 +55,44 @@ func (c *ClaudeCode) SetupWorkspace(spec agent.LaunchSpec) error {
 		}
 	}
 
+	if spec.Kind == "orchestrator" {
+		if err := syncOrchestratorSkill(spec); err != nil {
+			return fmt.Errorf("lay orchestrator skill: %w", err)
+		}
+	}
+
 	// Keep rocket's own harness plumbing out of the worker's git status: a
 	// worker running `git status`/`git diff` (or a reviewer looking at its
 	// PR) should never see .claude/settings.local.json, the .rocket/
-	// directory, or the launch/prompt scaffolding files rocket writes.
-	// Best-effort and a no-op for already-tracked paths or non-git dirs.
+	// directory, the launch/prompt scaffolding files or the orchestrator
+	// skill rocket writes. Best-effort and a no-op for already-tracked paths
+	// or non-git dirs.
 	agent.ExcludeFromGit(spec.WorktreePath, []string{
 		".claude/settings.local.json",
 		".rocket/",
 		".rocket-prompt.md",
 		".rocket-launch.sh",
+		orchestratorSkillRelDir + "/",
 	})
 
 	return nil
+}
+
+// orchestratorSkillRelDir is where rocket's own brainstorm skill lives in an
+// orchestrator's worktree: project-level skills, so the global ~/.claude is
+// never touched.
+const orchestratorSkillRelDir = ".claude/skills/" + prompts.CustomBrainstormSkill
+
+// syncOrchestratorSkill lays the embedded orchestrator-brainstorming skill
+// into the worktree when the orchestrator's prompt names it, and removes it
+// otherwise. It must not linger for a stock-skill orchestrator: both skills
+// carry the same description, so a stray copy could be picked instead of
+// superpowers:brainstorming and blur the per-skill brainstorm metric.
+func syncOrchestratorSkill(spec agent.LaunchSpec) error {
+	if spec.BrainstormSkill == prompts.CustomBrainstormSkill {
+		return prompts.WriteOrchestratorSkill(filepath.Join(spec.WorktreePath, ".claude", "skills"))
+	}
+	return os.RemoveAll(filepath.Join(spec.WorktreePath, filepath.FromSlash(orchestratorSkillRelDir)))
 }
 
 // activityHookRelPath is the hook script's path relative to the worktree

@@ -50,6 +50,11 @@ type LaunchSpec struct {
 	Model          string
 	PermissionMode string
 	SocketPath     string
+	// BrainstormSkill is the brainstorm skill an orchestrator's prompt names
+	// (prompts.CustomBrainstormSkill or prompts.StockBrainstormSkill). Agents
+	// that ship skills lay the custom one into the worktree only when it is
+	// named here. Empty for workers.
+	BrainstormSkill string
 }
 
 // Agent represents an AI coding agent that can be launched with a given spec.
