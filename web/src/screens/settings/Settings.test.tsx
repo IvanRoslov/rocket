@@ -262,3 +262,29 @@ describe('SettingsScreen', () => {
     expect(screen.getByText('/home/dev/.rocket/config.toml')).toBeInTheDocument()
   })
 })
+
+// Task #4901 §3.4: which skill orchestrators storm with.
+describe('SettingsScreen — Brainstorm', () => {
+  it('toggles the custom orchestrator brainstorm, sending only that field', async () => {
+    const user = userEvent.setup()
+    const bodies: unknown[] = []
+    server.events.on('request:start', async ({ request }) => {
+      if (request.method === 'PUT' && new URL(request.url).pathname === '/v1/settings') {
+        bodies.push(await request.clone().json())
+      }
+    })
+    renderScreen()
+    await gotoSection(user, 'Brainstorm')
+
+    const toggle = await screen.findByRole('checkbox', {
+      name: 'Custom orchestrator brainstorm (orchestrator-brainstorming)',
+    })
+    await waitFor(() => expect(toggle).not.toBeDisabled())
+    expect(toggle).not.toBeChecked()
+
+    await user.click(toggle)
+    await waitFor(() => expect(toggle).toBeChecked())
+    expect(bodies).toEqual([{ orchestrator_brainstorm_custom: true }])
+    server.events.removeAllListeners()
+  })
+})

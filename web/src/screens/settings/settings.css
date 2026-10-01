@@ -321,3 +321,28 @@
   background: #fff;
   border-radius: 8px;
 }
+
+/* Brainstorm toggle (task #4901). */
+.settings-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.settings-toggle__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: 600 14px var(--font-ui);
+  color: var(--text);
+  cursor: pointer;
+}
+.settings-toggle__hint {
+  margin: 0;
+  font: 12.5px var(--font-ui);
+  color: var(--text-3);
+}
+.settings-toggle__error {
+  margin: 0;
+  font: 13px var(--font-ui);
+  color: var(--err-text);
+}
