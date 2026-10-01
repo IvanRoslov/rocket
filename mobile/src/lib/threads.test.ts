@@ -2,7 +2,6 @@ import {
   addresseeLabel,
   addresseePayload,
   answerableBy,
-  countYourTurn,
   isHuman,
   participantInitial,
   participantLabel,
@@ -87,22 +86,6 @@ describe('addresseePayload', () => {
 
   it('sends the picked addressees', () => {
     expect(addresseePayload(['cto'])).toEqual({ to: ['cto'] })
-  })
-})
-
-describe('countYourTurn', () => {
-  it('counts only open threads waiting on us', () => {
-    const threads = [
-      { status: 'open', your_turn: true },
-      { status: 'open', your_turn: false },
-      { status: 'resolved', your_turn: true },
-      { status: 'open' },
-    ]
-    expect(countYourTurn(threads)).toBe(1)
-  })
-
-  it('is 0 for no threads', () => {
-    expect(countYourTurn([])).toBe(0)
   })
 })
 

@@ -67,6 +67,52 @@ async function renderScreen() {
 
 const elapse = (ms: number) => act(async () => { jest.advanceTimersByTime(ms) })
 
+const storm = (id: number, taskId: number, over: Record<string, unknown> = {}) => ({
+  local_ref: `${taskId}/Q${id}`, kind: 'task', task_id: taskId, task_title: `Task ${taskId}`, subject: `task #${taskId}`,
+  id, ordinal: id, asked_by: 'orch', title: `Storm question ${id}`, body: 'q', status: 'open', type: 'brainstorm',
+  options: ['A', 'B'], participants: ['human', 'orch'], attention: ['human'], waiting_on: ['human'], your_turn: true,
+  asked_at: 1, updated_at: 1, ...over,
+})
+
+// Storm questions (task #4901, spec v2 §3.1) are answered only in the task's
+// Brainstorm tab: the inbox lists no storm thread, one row per task instead.
+describe('Questions tab — storms', () => {
+  afterEach(() => jest.restoreAllMocks())
+
+  it('shows one row per task storm, counted once, and lists no storm thread', async () => {
+    mockApi({
+      threads: [
+        MINE,
+        storm(21, 30),
+        storm(22, 30),
+        storm(23, 30, { status: 'resolved', resolution: 'answered', your_turn: false, attention: [], waiting_on: [] }),
+        storm(24, 31),
+        storm(25, 32, { your_turn: false, attention: ['orch'], waiting_on: ['orch'] }),
+      ],
+    })
+    await renderScreen()
+    await waitFor(() => expect(screen.getByText('Storm #30 «Task 30»: 2 questions waiting')).toBeTruthy())
+    expect(screen.getByText('Storm #31 «Task 31»: 1 question waiting')).toBeTruthy()
+    expect(screen.queryByText(/Storm #32/)).toBeNull()
+    // MINE + two task storms.
+    expect(screen.getByText('Waiting on you (3)')).toBeTruthy()
+    expect(screen.queryByText(/Storm question/)).toBeNull()
+    // A storm waiting on the agent is not listed among the others either.
+    expect(screen.queryByText(/Other open/)).toBeNull()
+  })
+
+  it('a storm row opens the task on its Brainstorm tab', async () => {
+    const { router } = jest.requireMock('expo-router') as { router: { navigate: jest.Mock } }
+    router.navigate.mockClear()
+    mockApi({ threads: [storm(21, 30)] })
+    await renderScreen()
+    await waitFor(() => expect(screen.getByText(/Storm #30/)).toBeTruthy())
+    await fireEvent.press(screen.getByText(/Storm #30/))
+    expect(router.navigate).toHaveBeenCalledWith('/task/30?tab=brainstorm')
+    expect(screen.queryByText('No questions waiting on you.')).toBeNull()
+  })
+})
+
 describe('Questions tab', () => {
   beforeEach(() => jest.useFakeTimers())
   afterEach(() => {
@@ -197,51 +243,6 @@ describe('Questions tab', () => {
     expect(posts).toEqual([])
     await elapse(5000)
     await waitFor(() => expect(posts).toEqual([{ path: '/v1/questions/7/answer', body: { choose: 1 } }]))
-  })
-
-  describe('brainstorm thread', () => {
-    const STORM = { ...MINE, type: 'brainstorm', recommended_option: 2, chosen_option: null, outcome: '' }
-
-    it('stars the recommended option', async () => {
-      mockApi({ threads: [STORM] })
-      await renderScreen()
-      await waitFor(() => expect(screen.getByText('SQLite')).toBeTruthy())
-      expect(within(screen.getByTestId('option-2')).getByText('★ Recommended')).toBeTruthy()
-      expect(within(screen.getByTestId('option-1')).queryByText('★ Recommended')).toBeNull()
-    })
-
-    it('sends the option with its comment after the undo window', async () => {
-      mockApi({ threads: [STORM] })
-      await renderScreen()
-      await waitFor(() => expect(screen.getByPlaceholderText('Comment or your own answer…')).toBeTruthy())
-      await fireEvent.changeText(screen.getByPlaceholderText('Comment or your own answer…'), 'WAL mode')
-      await fireEvent.press(screen.getByText('SQLite'))
-      expect(screen.getByText('Answered: SQLite — WAL mode')).toBeTruthy()
-      // In flight: the hidden card's options are disabled until it comes back.
-      expect(
-        screen.getByTestId('option-2', { includeHiddenElements: true }).props.accessibilityState?.disabled,
-      ).toBe(true)
-      await elapse(5000)
-      await waitFor(() =>
-        expect(posts).toEqual([{ path: '/v1/questions/7/answer', body: { choose: 2, body: 'WAL mode' } }]),
-      )
-    })
-
-    it('has a single text box on the card', async () => {
-      mockApi({ threads: [STORM] })
-      await renderScreen()
-      await waitFor(() => expect(screen.getByText('SQLite')).toBeTruthy())
-      expect(screen.queryByPlaceholderText('Your answer…')).toBeNull()
-    })
-
-    it('sends a bare choose without a comment', async () => {
-      mockApi({ threads: [STORM] })
-      await renderScreen()
-      await waitFor(() => expect(screen.getByText('Postgres')).toBeTruthy())
-      await fireEvent.press(screen.getByText('Postgres'))
-      await elapse(5000)
-      await waitFor(() => expect(posts).toEqual([{ path: '/v1/questions/7/answer', body: { choose: 1 } }]))
-    })
   })
 
   it('Undo cancels the answer and brings the card back', async () => {

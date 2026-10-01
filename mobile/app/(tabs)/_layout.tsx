@@ -2,7 +2,7 @@ import { Tabs } from 'expo-router'
 import { View } from 'react-native'
 import { useAgents, useThreads } from '../../src/api/queries'
 import { awaitingUser } from '../../src/lib/agents'
-import { countYourTurn } from '../../src/lib/threads'
+import { inboxCount } from '../../src/lib/storm'
 import { colors } from '../../src/theme'
 
 // Tab icons rebuilt from the mockup SVGs with plain Views (no svg dep).
@@ -107,7 +107,8 @@ export default function TabsLayout() {
   const agents = useAgents()
   const awaiting = awaitingUser(agents.data ?? [])
   const threads = useThreads()
-  const yourTurn = countYourTurn(threads.data ?? [])
+  // A task's storm counts once: the inbox shows it as one row (task #4901).
+  const yourTurn = inboxCount(threads.data ?? [])
 
   return (
     <Tabs

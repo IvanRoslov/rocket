@@ -51,14 +51,6 @@ export function addresseePayload(sel: string[]): { to?: string[] } {
 }
 
 /**
- * Open threads whose next word is ours. Driven by `your_turn`, the
- * participant-aware field — never by the compat `whose_turn`.
- */
-export function countYourTurn(threads: { status: string; your_turn?: boolean }[]): number {
-  return threads.filter((t) => t.status === 'open' && t.your_turn === true).length
-}
-
-/**
  * The one thread id a human sees — "1023/Q2" for a task thread, "cto/Q1" for
  * a role thread (task #1023 spec v1 §«Тред и его id»). `Q<ordinal>` is the
  * fallback for a daemon that predates it; the global numeric id is never
