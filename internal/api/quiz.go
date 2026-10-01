@@ -36,6 +36,12 @@ type quizQuestionResponse struct {
 type quizResponse struct {
 	Questions []quizQuestionResponse `json:"questions"`
 	AskedAt   int64                  `json:"asked_at"`
+	// Source is "permission" for a Claude Code permission dialog the
+	// monitor read off the pane (see session.QuizSourcePermission); absent
+	// for an AskUserQuestion quiz. Raw is that dialog's pane tail, shown
+	// when Options is empty.
+	Source string `json:"source,omitempty"`
+	Raw    string `json:"raw,omitempty"`
 }
 
 // parseQuizResponse converts a session's raw PendingQuiz JSON (as stored by
@@ -53,7 +59,12 @@ func parseQuizResponse(pendingQuizJSON string) *quizResponse {
 		return nil
 	}
 
-	out := quizResponse{Questions: make([]quizQuestionResponse, len(quiz.Questions)), AskedAt: quiz.AskedAt}
+	out := quizResponse{
+		Questions: make([]quizQuestionResponse, len(quiz.Questions)),
+		AskedAt:   quiz.AskedAt,
+		Source:    quiz.Source,
+		Raw:       quiz.Raw,
+	}
 	for i, q := range quiz.Questions {
 		options := make([]quizOptionResponse, len(q.Options))
 		for j, o := range q.Options {
@@ -87,6 +98,10 @@ type quizAnswerRequest struct {
 // actual completion is only ever confirmed out-of-band by the
 // session.quiz_resolved event (see docs/superpowers/specs/
 // 2026-07-19-remote-quiz-design.md §4).
+//
+// A permission quiz (source "permission") takes exactly one option index
+// and is answered with one keypress; it adds 400 invalid_answer and 409
+// prompt_changed (see session.Manager.answerPermission).
 //
 // Errors: 404 session_not_found, 409 no_pending_quiz (nothing to answer —
 // e.g. already answered in the terminal), 409 quiz_answer_in_flight (a
