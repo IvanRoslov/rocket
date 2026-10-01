@@ -210,14 +210,26 @@ describe('ThreadCard — storm thread', () => {
     outcome: '',
   }
 
-  it('stars the recommendation and passes the comment with the pick', async () => {
+  it('stars the recommendation and says the answer box rides along as the comment', async () => {
     const onChoose = vi.fn()
     renderCard({ entry: storm, onChoose })
 
     expect(screen.getAllByText('★')).toHaveLength(1)
-    await userEvent.type(screen.getByLabelText('Comment on your pick'), 'с архивом')
+    expect(screen.getByText(/goes with the option as your comment/)).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: /Ledger table.*recommended/ }))
-    expect(onChoose).toHaveBeenCalledWith(1, 'с архивом')
+    expect(onChoose).toHaveBeenCalledWith(1)
+  })
+
+  it('disables the outcome control while a change is in flight and shows its failure', () => {
+    renderCard({
+      entry: { ...storm, status: 'resolved', resolution: 'answered', chosen_option: 2, outcome: 'accepted' },
+      detail: { messages: [], resolutionText: 'Ledger table', isLoading: false },
+      onOverride: vi.fn(),
+      overrideBusy: true,
+      overrideError: 'only the human may override a brainstorm outcome',
+    })
+    expect(screen.getByLabelText('Outcome')).toBeDisabled()
+    expect(screen.getByRole('alert')).toHaveTextContent(/only the human/)
   })
 
   it('shows the outcome of a closed storm thread and lets the human change it', async () => {
@@ -244,6 +256,6 @@ describe('ThreadCard — storm thread', () => {
   it('keeps a decision thread free of the storm controls', () => {
     renderCard({ entry: { ...entry, options: ['Yes', 'No'] } })
     expect(screen.queryByText('★')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Comment on your pick')).not.toBeInTheDocument()
+    expect(screen.queryByText(/goes with the option as your comment/)).not.toBeInTheDocument()
   })
 })

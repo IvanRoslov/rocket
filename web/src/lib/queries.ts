@@ -224,6 +224,22 @@ export function useTaskDocs(id: number | undefined): UseQueryResult<TaskDoc[]> {
   })
 }
 
+/**
+ * `GET /v1/tasks/{id}/docs?history=true` — every version of every doc. The
+ * plain list carries only the newest version of each (kind, title), so a
+ * gate's pinned "Spec v1" is only resolvable from here.
+ */
+export function useTaskDocHistory(id: number | undefined): UseQueryResult<TaskDoc[]> {
+  return useQuery({
+    queryKey: ['task', id, 'docs', 'history'],
+    queryFn: async () => {
+      const res = await api.get<{ docs: TaskDoc[] }>(`/v1/tasks/${id}/docs?history=true`)
+      return res.docs
+    },
+    enabled: id !== undefined,
+  })
+}
+
 export function useTaskLog(id: number | undefined): UseQueryResult<TaskLogEntry[]> {
   return useQuery({
     queryKey: ['task', id, 'log'],
@@ -704,9 +720,14 @@ export function useUpdateSettings(): UseMutationResult<
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (payload) => api.put<Settings>('/v1/settings', payload),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['settings'] })
-      queryClient.invalidateQueries({ queryKey: ['github-repos'] })
+    // The PUT answers with the full settings, so it IS the new cache entry —
+    // no refetch, no flicker. `login` is dropped: GET never carries it.
+    onSuccess: ({ login: _login, ...settings }, payload) => {
+      queryClient.setQueryData(['settings'], settings)
+      // Only a new token changes which GitHub repos are visible.
+      if (payload.github_token !== undefined) {
+        queryClient.invalidateQueries({ queryKey: ['github-repos'] })
+      }
     },
   })
 }

@@ -68,3 +68,10 @@ describe('BrainstormResult', () => {
     expect(container).toBeEmptyDOMElement()
   })
 })
+
+describe('BrainstormResult — override failure', () => {
+  it('shows why an outcome change was refused', () => {
+    render(<BrainstormResult question={answered} onOverride={vi.fn()} error="the thread has no answer to grade" />)
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not change the outcome: the thread has no answer to grade')
+  })
+})

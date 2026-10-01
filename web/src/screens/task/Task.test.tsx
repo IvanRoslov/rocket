@@ -697,7 +697,7 @@ describe('TaskScreen — storm questions in the Questions tab', () => {
     )
     await openQuestions()
 
-    await userEvent.type(screen.getByLabelText('Comment on your pick'), 'с архивом')
+    await userEvent.type(screen.getByLabelText('Reply to 17/Q2'), 'с архивом')
     await userEvent.click(screen.getByRole('button', { name: /Ledger table in Postgres — recommended/ }))
     await waitFor(() => expect(bodies).toEqual([{ choose: 2, body: 'с архивом' }]))
   })

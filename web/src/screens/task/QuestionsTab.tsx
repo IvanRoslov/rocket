@@ -154,6 +154,7 @@ export function ResolvedThreadRow({ taskId, question, orchestratorName }: Resolv
             <BrainstormResult
               question={question}
               busy={setOutcome.isPending}
+              error={setOutcome.error?.message}
               onOverride={(outcome) => setOutcome.mutate({ id: question.id, taskId, outcome })}
             />
           )}

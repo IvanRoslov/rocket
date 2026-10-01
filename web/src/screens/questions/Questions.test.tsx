@@ -387,7 +387,7 @@ describe('Ask an agent', () => {
 
 // Storm questions (task #4901): fixture 17/Q2 is open with option 2 recommended.
 describe('storm threads in the inbox', () => {
-  test('a pick carries the comment typed next to the options', async () => {
+  test('a pick carries the text typed in the answer box as its comment', async () => {
     const user = userEvent.setup()
     const sent: Record<string, unknown>[] = []
     server.use(
@@ -401,9 +401,23 @@ describe('storm threads in the inbox', () => {
     const rail = document.querySelector('.q__rail') as HTMLElement
     await user.click(within(rail).getByRole('button', { name: /17\/Q2/ }))
 
-    await user.type(screen.getByLabelText('Comment on your pick'), 'с архивом')
+    await user.type(screen.getByLabelText('Your answer'), 'с архивом')
     await user.click(screen.getByRole('button', { name: /Ledger table in Postgres — recommended/ }))
 
     await waitFor(() => expect(sent).toEqual([{ choose: 2, body: 'с архивом' }]))
+  })
+
+  test('Undo puts the comment back in the answer box', async () => {
+    const user = userEvent.setup()
+    renderQuestions(60_000)
+    await screen.findByRole('heading', { level: 2 })
+    const rail = document.querySelector('.q__rail') as HTMLElement
+    await user.click(within(rail).getByRole('button', { name: /17\/Q2/ }))
+
+    await user.type(screen.getByLabelText('Your answer'), 'с архивом')
+    await user.click(screen.getByRole('button', { name: /Ledger table in Postgres — recommended/ }))
+    await user.click(screen.getByRole('button', { name: /Undo/ }))
+
+    expect(await screen.findByLabelText('Your answer')).toHaveValue('с архивом')
   })
 })

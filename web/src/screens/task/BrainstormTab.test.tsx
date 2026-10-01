@@ -223,12 +223,22 @@ describe('Brainstorm tab — exit gate', () => {
     await waitFor(() => expect(lists).toBeGreaterThan(before))
   })
 
-  it('waits for a spec when no gate was ever requested', async () => {
-    server.use(http.get('/v1/tasks/:id/gates', () => HttpResponse.json({ gates: [] })))
+  it('waits for a spec when there is neither a spec nor a gate', async () => {
+    server.use(
+      http.get('/v1/tasks/:id/gates', () => HttpResponse.json({ gates: [] })),
+      http.get('/v1/tasks/:id/docs', () => HttpResponse.json({ docs: [] })),
+    )
     const tab = await openStorm()
     const gate = (await within(tab).findByRole('region', { name: 'Storm exit' })) as HTMLElement
     expect(await within(gate).findByText('Waiting for spec')).toBeInTheDocument()
     expect(within(gate).queryByRole('button', { name: 'Go' })).not.toBeInTheDocument()
+  })
+
+  it('waits for a gate request when a spec exists but no gate was requested', async () => {
+    server.use(http.get('/v1/tasks/:id/gates', () => HttpResponse.json({ gates: [] })))
+    const tab = await openStorm()
+    const gate = (await within(tab).findByRole('region', { name: 'Storm exit' })) as HTMLElement
+    expect(await within(gate).findByText('Waiting for gate request')).toBeInTheDocument()
   })
 
   it('shows the Go and the gate history once decided', async () => {
@@ -255,5 +265,91 @@ describe('Brainstorm tab — exit gate', () => {
     expect(within(gate).queryByRole('button', { name: 'Go' })).not.toBeInTheDocument()
     expect(within(gate).getByText('v1 — changes: “seats must stay as a floor”')).toBeInTheDocument()
     expect(within(gate).getByText('v2 — Go')).toBeInTheDocument()
+  })
+})
+
+describe('Brainstorm tab — review fixes', () => {
+  const gate = (over: Record<string, unknown>) => ({
+    id: 9, task_id: 17, spec_version: 1, plan_version: null, status: 'pending', comment: '',
+    decided_by: '', requested_by: 'orch', requested_at: 1_800_000_000, decided_at: null, ...over,
+  })
+
+  // The gate pins versions; a newer plan saved since must not hide the pinned one.
+  it('resolves the pinned spec and plan versions from the doc history', async () => {
+    server.use(
+      http.get('/v1/tasks/:id/gates', () =>
+        HttpResponse.json({ gates: [gate({ id: 5, spec_version: 1, plan_version: 1 })] }),
+      ),
+    )
+    const tab = await openStorm()
+    const g = (await within(tab).findByRole('region', { name: 'Storm exit' })) as HTMLElement
+    await userEvent.click(await within(g).findByRole('button', { name: 'Spec v1' }))
+    expect(await within(g).findByText(/Per-seat billing with idle-seat credits/)).toBeInTheDocument()
+  })
+
+  it('shows the outcome change failure instead of snapping back silently', async () => {
+    server.use(
+      http.patch('/v1/questions/40/outcome', () =>
+        HttpResponse.json({ error: { code: 'forbidden', message: 'only the human may override' } }, { status: 403 }),
+      ),
+    )
+    const tab = await openStorm()
+    await userEvent.selectOptions(await within(tab).findByLabelText('Outcome'), 'corrected')
+    expect(await within(tab).findByRole('alert')).toHaveTextContent(/only the human may override/)
+  })
+
+  it('says the gates could not be read instead of waiting for a spec', async () => {
+    server.use(
+      http.get('/v1/tasks/:id/gates', () =>
+        HttpResponse.json({ error: { code: 'internal_error', message: 'db down' } }, { status: 500 }),
+      ),
+    )
+    const tab = await openStorm()
+    const g = (await within(tab).findByRole('region', { name: 'Storm exit' })) as HTMLElement
+    expect(await within(g).findByRole('alert')).toHaveTextContent(/Could not load the gates: db down/)
+    expect(within(g).queryByText(/Waiting for/)).not.toBeInTheDocument()
+  })
+
+  it('waits for a gate request when the newest gate was superseded by a newer spec', async () => {
+    server.use(
+      http.get('/v1/tasks/:id/gates', () =>
+        HttpResponse.json({ gates: [gate({ id: 5, spec_version: 1, status: 'superseded' })] }),
+      ),
+    )
+    const tab = await openStorm()
+    const g = (await within(tab).findByRole('region', { name: 'Storm exit' })) as HTMLElement
+    expect(await within(g).findByText('Waiting for gate request')).toBeInTheDocument()
+  })
+
+  it('waits for a revised spec after changes until a newer spec lands', async () => {
+    server.use(
+      http.get('/v1/tasks/:id/gates', () =>
+        HttpResponse.json({ gates: [gate({ id: 5, spec_version: 2, status: 'changes', comment: 'more' })] }),
+      ),
+    )
+    const tab = await openStorm()
+    const g = (await within(tab).findByRole('region', { name: 'Storm exit' })) as HTMLElement
+    expect(await within(g).findByText('Waiting for spec')).toBeInTheDocument()
+  })
+
+  it('clears the 409 and the changes box when a new pending gate arrives', async () => {
+    let current = gate({ id: 5, spec_version: 1 })
+    server.use(
+      http.get('/v1/tasks/:id/gates', () => HttpResponse.json({ gates: [current] })),
+      http.post('/v1/gates/5/decide', () => {
+        // The orchestrator re-requested meanwhile: the list now holds gate 6.
+        current = gate({ id: 6, spec_version: 2, plan_version: 1 })
+        return HttpResponse.json({ error: { code: 'gate_superseded', message: 'stale' } }, { status: 409 })
+      }),
+    )
+    const tab = await openStorm()
+    const g = (await within(tab).findByRole('region', { name: 'Storm exit' })) as HTMLElement
+    await userEvent.click(await within(g).findByRole('button', { name: 'Needs changes' }))
+    await userEvent.type(within(g).getByLabelText('What to change'), 'x')
+    await userEvent.click(within(g).getByRole('button', { name: 'Send changes' }))
+
+    expect(await within(g).findByRole('button', { name: 'Spec v2' })).toBeInTheDocument()
+    expect(within(g).queryByRole('alert')).not.toBeInTheDocument()
+    expect(within(g).queryByLabelText('What to change')).not.toBeInTheDocument()
   })
 })

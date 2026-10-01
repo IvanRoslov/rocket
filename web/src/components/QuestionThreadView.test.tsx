@@ -303,13 +303,23 @@ describe('QuestionThreadView — storm thread', () => {
     expect(screen.getAllByText('★')).toHaveLength(1)
   })
 
-  it('sends the picked option with the optional comment', async () => {
+  // One text box: whatever is typed in the reply box rides along with the
+  // picked option as the comment — never silently dropped.
+  it('sends the reply box text as the comment of the picked option', async () => {
     const onChooseWithComment = vi.fn()
     render(<QuestionThreadView {...storm} onChooseWithComment={onChooseWithComment} />)
 
-    await userEvent.type(screen.getByLabelText('Comment on your pick'), 'но с архивом')
+    await userEvent.type(screen.getByLabelText('Reply to Q2'), 'но с архивом')
     await userEvent.click(screen.getByRole('button', { name: /Ledger table/ }))
     expect(onChooseWithComment).toHaveBeenCalledWith(2, 'но с архивом')
+    expect(screen.getByLabelText('Reply to Q2')).toHaveValue('')
+  })
+
+  it('picks with no comment when the reply box is empty', async () => {
+    const onChooseWithComment = vi.fn()
+    render(<QuestionThreadView {...storm} onChooseWithComment={onChooseWithComment} />)
+    await userEvent.click(screen.getByRole('button', { name: /Kafka topic/ }))
+    expect(onChooseWithComment).toHaveBeenCalledWith(1, '')
   })
 
   it('answers in own words through the composer', async () => {
@@ -325,6 +335,6 @@ describe('QuestionThreadView — storm thread', () => {
     render(<QuestionThreadView {...base} options={['Yes', 'No']} onChoose={vi.fn()} />)
 
     expect(screen.queryByText('★')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Comment on your pick')).not.toBeInTheDocument()
+    expect(screen.queryByText(/goes with the option as your comment/)).not.toBeInTheDocument()
   })
 })

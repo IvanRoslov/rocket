@@ -22,9 +22,11 @@ export interface BrainstormResultProps {
   /** Present only where the human may correct the outcome. */
   onOverride?: (outcome: BrainstormOutcome) => void
   busy?: boolean
+  /** Why the last outcome change was refused (403 agent, 409 not answered). */
+  error?: string
 }
 
-export function BrainstormResult({ question, onOverride, busy }: BrainstormResultProps) {
+export function BrainstormResult({ question, onOverride, busy, error }: BrainstormResultProps) {
   const outcome = question.outcome
   // Open, dismissed or pre-storm threads have nothing to grade.
   if (!outcome) return null
@@ -75,6 +77,11 @@ export function BrainstormResult({ question, onOverride, busy }: BrainstormResul
         )}
       </div>
       {comment && <div className="brainstorm-result__comment">{comment}</div>}
+      {error && (
+        <div className="brainstorm-result__error" role="alert">
+          Could not change the outcome: {error}
+        </div>
+      )}
     </div>
   )
 }

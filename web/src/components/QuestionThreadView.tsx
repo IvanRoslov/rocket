@@ -225,7 +225,10 @@ export function QuestionThreadView({
             options={options}
             recommended={recommendedOption}
             busy={busy}
-            onChoose={onChooseWithComment}
+            onChoose={(choose) => {
+              onChooseWithComment(choose, body.trim())
+              setBody('')
+            }}
           />
         )}
 

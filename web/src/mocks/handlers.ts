@@ -711,9 +711,18 @@ export const handlers = [
     return HttpResponse.json(task)
   }),
 
-  http.get('/v1/tasks/:id/docs', ({ params }) => {
+  // Mirrors store.ListTaskDocs: only the newest version of each (kind, title)
+  // unless ?history=true asks for every version.
+  http.get('/v1/tasks/:id/docs', ({ params, request }) => {
     const id = Number(params.id)
-    return HttpResponse.json({ docs: docsState.filter((d) => d.task_id === id) })
+    const history = new URL(request.url).searchParams.get('history') === 'true'
+    const own = docsState.filter((d) => d.task_id === id)
+    const docs = history
+      ? own
+      : own.filter(
+          (d) => !own.some((o) => o.kind === d.kind && o.title === d.title && o.version > d.version),
+        )
+    return HttpResponse.json({ docs })
   }),
 
   http.put('/v1/tasks/:id/docs', async ({ params, request }) => {

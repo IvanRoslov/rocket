@@ -288,3 +288,26 @@ describe('SettingsScreen — Brainstorm', () => {
     server.events.removeAllListeners()
   })
 })
+
+describe('SettingsScreen — Brainstorm cache', () => {
+  it('takes the PUT response as the new settings instead of refetching', async () => {
+    const user = userEvent.setup()
+    let gets = 0
+    server.events.on('request:start', ({ request }) => {
+      if (request.method === 'GET' && new URL(request.url).pathname === '/v1/settings') gets++
+    })
+    renderScreen()
+    await gotoSection(user, 'Brainstorm')
+    const toggle = await screen.findByRole('checkbox', {
+      name: 'Custom orchestrator brainstorm (orchestrator-brainstorming)',
+    })
+    await waitFor(() => expect(toggle).not.toBeDisabled())
+    const before = gets
+
+    await user.click(toggle)
+    await waitFor(() => expect(toggle).toBeChecked())
+    await waitFor(() => expect(toggle).not.toBeDisabled())
+    expect(gets).toBe(before)
+    server.events.removeAllListeners()
+  })
+})

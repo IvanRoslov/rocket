@@ -82,8 +82,12 @@ function WeeklyChart({ weeks }: { weeks: BrainstormWeek[] }) {
   )
 }
 
+/** YYYY-MM-DD in the viewer's local time — the day the human pressed Go. */
 function goDate(ts: number | null): string {
-  return ts === null ? '—' : new Date(ts * 1000).toISOString().slice(0, 10)
+  if (ts === null) return '—'
+  const d = new Date(ts * 1000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
 function StormsTable({ storms }: { storms: BrainstormStorm[] }) {

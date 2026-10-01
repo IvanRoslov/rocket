@@ -71,3 +71,31 @@ describe('BrainstormMetricsScreen', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/Could not load/)
   })
 })
+
+describe('BrainstormMetricsScreen — Go date', () => {
+  it('formats the Go date in local time', async () => {
+    const tz = process.env.TZ
+    process.env.TZ = 'America/Los_Angeles'
+    try {
+      server.use(
+        http.get('/v1/stats/brainstorm', () =>
+          HttpResponse.json({
+            weeks: [],
+            storms: [
+              {
+                task_id: 5, title: 'Late Go', project_id: 'billing', skill: 'unknown', questions: 1, answered: 1,
+                accepted: 1, accepted_with_comment: 0, corrected: 0, wrong_turn: 0, spec_changes: 0,
+                // 2026-10-01T03:00:00Z — still 30 September in Los Angeles.
+                go_at: Date.UTC(2026, 9, 1, 3) / 1000,
+              },
+            ],
+          }),
+        ),
+      )
+      renderScreen()
+      expect(await screen.findByText('2026-09-30')).toBeInTheDocument()
+    } finally {
+      process.env.TZ = tz
+    }
+  })
+})

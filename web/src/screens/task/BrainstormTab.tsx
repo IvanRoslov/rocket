@@ -2,7 +2,7 @@
 // counters, the problem it starts from, the storm questions in the order they
 // were asked, and the exit gate the human decides with Go / Needs changes.
 
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { BrainstormResult } from '../../components/BrainstormResult'
 import { Button } from '../../components/Button'
 import { Markdown } from '../../components/Markdown'
@@ -10,7 +10,13 @@ import { QuestionContent } from '../../components/QuestionContent'
 import { QuestionThread } from '../../components/QuestionThread'
 import { ApiError } from '../../lib/api'
 import { timeAgo } from '../../lib/format'
-import { useDecideGate, useSetOutcome, useTaskBrainstormStats, useTaskGates } from '../../lib/queries'
+import {
+  useDecideGate,
+  useSetOutcome,
+  useTaskBrainstormStats,
+  useTaskDocHistory,
+  useTaskGates,
+} from '../../lib/queries'
 import { questionTitle } from '../../lib/thread'
 import type { BrainstormStorm, Question, TaskDoc, TaskDocKind, TaskGate } from '../../lib/types'
 import './BrainstormTab.css'
@@ -22,11 +28,20 @@ export interface BrainstormTabProps {
   orchestratorName?: string
 }
 
-/** The newest version of `kind`, or the exact `version` when given. */
-function findDoc(docs: TaskDoc[], kind: TaskDocKind, version?: number): TaskDoc | undefined {
-  const ofKind = docs.filter((d) => d.kind === kind)
-  if (version !== undefined) return ofKind.find((d) => d.version === version)
-  return ofKind.sort((a, b) => b.version - a.version)[0]
+/** The newest doc of `kind` — the most recently written, whatever its title. */
+function latestDoc(docs: TaskDoc[], kind: TaskDocKind): TaskDoc | undefined {
+  return docs.filter((d) => d.kind === kind).sort((a, b) => b.id - a.id)[0]
+}
+
+/**
+ * The doc a gate pinned. A gate records only kind + version (the newest doc
+ * of that kind when it was requested), so among every version in the history
+ * it is the latest doc of that kind and version written by request time.
+ */
+function pinnedDoc(history: TaskDoc[], kind: TaskDocKind, version: number, requestedAt: number): TaskDoc | undefined {
+  return history
+    .filter((d) => d.kind === kind && d.version === version && d.created_at <= requestedAt)
+    .sort((a, b) => b.id - a.id)[0]
 }
 
 function Counters({ stats }: { stats?: BrainstormStorm }) {
@@ -73,6 +88,7 @@ function ClosedStormQuestion({ taskId, question }: { taskId: number; question: Q
       <BrainstormResult
         question={question}
         busy={setOutcome.isPending}
+        error={setOutcome.error?.message}
         onOverride={(outcome) => setOutcome.mutate({ id: question.id, taskId, outcome })}
       />
       <button
@@ -118,20 +134,48 @@ function decideError(err: unknown): string {
   return err instanceof Error ? `Failed: ${err.message}` : 'Failed'
 }
 
+/** What the exit block waits for when no gate is pending. */
+function waitingText(latest: TaskGate | undefined, specVersion: number | undefined): string {
+  if (specVersion === undefined) return 'Waiting for spec'
+  // A spec newer than the last gate (or no gate yet) only needs a request;
+  // after "changes" on the current spec, a revised spec comes first.
+  if (!latest || specVersion > latest.spec_version || latest.status === 'superseded') {
+    return 'Waiting for gate request'
+  }
+  return 'Waiting for spec'
+}
+
 function GateBlock({ taskId, docs }: { taskId: number; docs: TaskDoc[] }) {
-  const { data: gates } = useTaskGates(taskId)
+  const gatesQuery = useTaskGates(taskId)
+  const { data: history } = useTaskDocHistory(taskId)
   const decide = useDecideGate()
   const [shown, setShown] = useState<'spec' | 'plan' | null>(null)
   const [changesOpen, setChangesOpen] = useState(false)
   const [comment, setComment] = useState('')
 
-  const list = gates ?? []
+  const list = gatesQuery.data ?? []
   const pending = list.find((g) => g.status === 'pending')
   const latest = list[0]
-  const history = list.filter((g) => g.status !== 'pending')
+  const decided = list.filter((g) => g.status !== 'pending')
+
+  // A new pending gate is a new question: drop the old answer-in-progress
+  // and the old refusal.
+  const [seenPendingId, setSeenPendingId] = useState(pending?.id)
+  if (seenPendingId !== pending?.id) {
+    setSeenPendingId(pending?.id)
+    setShown(null)
+    setChangesOpen(false)
+    setComment('')
+    decide.reset()
+  }
+
   const shownDoc =
     pending && shown
-      ? findDoc(docs, shown, shown === 'spec' ? pending.spec_version : (pending.plan_version ?? undefined))
+      ? shown === 'spec'
+        ? pinnedDoc(history ?? [], 'spec', pending.spec_version, pending.requested_at)
+        : pending.plan_version !== null
+          ? pinnedDoc(history ?? [], 'plan', pending.plan_version, pending.requested_at)
+          : undefined
       : undefined
 
   function send(decision: 'go' | 'changes') {
@@ -147,66 +191,86 @@ function GateBlock({ taskId, docs }: { taskId: number; docs: TaskDoc[] }) {
     )
   }
 
+  let state: ReactNode
+  if (gatesQuery.isError) {
+    state = (
+      <p className="brainstorm-tab__error" role="alert">
+        Could not load the gates: {gatesQuery.error.message}
+      </p>
+    )
+  } else if (gatesQuery.isLoading) {
+    state = <p className="brainstorm-tab__empty">Loading…</p>
+  } else if (pending) {
+    state = (
+      <>
+        <div className="brainstorm-tab__gate-versions">
+          <button type="button" className="brainstorm-tab__doc-link" onClick={() => setShown(shown === 'spec' ? null : 'spec')}>
+            Spec v{pending.spec_version}
+          </button>
+          {pending.plan_version !== null && (
+            <>
+              <span aria-hidden="true">·</span>
+              <button type="button" className="brainstorm-tab__doc-link" onClick={() => setShown(shown === 'plan' ? null : 'plan')}>
+                Plan v{pending.plan_version}
+              </button>
+            </>
+          )}
+          <span className="brainstorm-tab__when">requested {timeAgo(pending.requested_at)}</span>
+        </div>
+        {shown && (
+          <div className="brainstorm-tab__doc">
+            {shownDoc ? (
+              <Markdown>{shownDoc.body}</Markdown>
+            ) : history === undefined ? (
+              <p>Loading…</p>
+            ) : (
+              <p>This document version is not available.</p>
+            )}
+          </div>
+        )}
+        <div className="brainstorm-tab__gate-actions">
+          <Button variant="primary" onClick={() => send('go')} disabled={decide.isPending}>
+            Go
+          </Button>
+          <Button variant="secondary" onClick={() => setChangesOpen((o) => !o)} disabled={decide.isPending}>
+            Needs changes
+          </Button>
+        </div>
+        {changesOpen && (
+          <div className="brainstorm-tab__changes">
+            <textarea
+              aria-label="What to change"
+              placeholder="What should change in the spec — sent to the orchestrator"
+              rows={3}
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+            />
+            <Button
+              variant="secondary"
+              onClick={() => send('changes')}
+              disabled={decide.isPending || !comment.trim()}
+            >
+              Send changes
+            </Button>
+          </div>
+        )}
+      </>
+    )
+  } else if (latest?.status === 'go') {
+    state = (
+      <p className="brainstorm-tab__gate-state">
+        Go on spec v{latest.spec_version}
+        {latest.plan_version !== null ? ` · plan v${latest.plan_version}` : ''}
+      </p>
+    )
+  } else {
+    state = <p className="brainstorm-tab__gate-state">{waitingText(latest, latestDoc(docs, 'spec')?.version)}</p>
+  }
+
   return (
     <section className="brainstorm-tab__section brainstorm-tab__gate" aria-label="Storm exit">
       <h3 className="brainstorm-tab__heading">Storm exit</h3>
-
-      {pending ? (
-        <>
-          <div className="brainstorm-tab__gate-versions">
-            <button type="button" className="brainstorm-tab__doc-link" onClick={() => setShown(shown === 'spec' ? null : 'spec')}>
-              Spec v{pending.spec_version}
-            </button>
-            {pending.plan_version !== null && (
-              <>
-                <span aria-hidden="true">·</span>
-                <button type="button" className="brainstorm-tab__doc-link" onClick={() => setShown(shown === 'plan' ? null : 'plan')}>
-                  Plan v{pending.plan_version}
-                </button>
-              </>
-            )}
-            <span className="brainstorm-tab__when">requested {timeAgo(pending.requested_at)}</span>
-          </div>
-          {shown && (
-            <div className="brainstorm-tab__doc">
-              {shownDoc ? <Markdown>{shownDoc.body}</Markdown> : <p>This document version is not available.</p>}
-            </div>
-          )}
-          <div className="brainstorm-tab__gate-actions">
-            <Button variant="primary" onClick={() => send('go')} disabled={decide.isPending}>
-              Go
-            </Button>
-            <Button variant="secondary" onClick={() => setChangesOpen((o) => !o)} disabled={decide.isPending}>
-              Needs changes
-            </Button>
-          </div>
-          {changesOpen && (
-            <div className="brainstorm-tab__changes">
-              <textarea
-                aria-label="What to change"
-                placeholder="What should change in the spec — sent to the orchestrator"
-                rows={3}
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-              />
-              <Button
-                variant="secondary"
-                onClick={() => send('changes')}
-                disabled={decide.isPending || !comment.trim()}
-              >
-                Send changes
-              </Button>
-            </div>
-          )}
-        </>
-      ) : latest?.status === 'go' ? (
-        <p className="brainstorm-tab__gate-state">
-          Go on spec v{latest.spec_version}
-          {latest.plan_version !== null ? ` · plan v${latest.plan_version}` : ''}
-        </p>
-      ) : (
-        <p className="brainstorm-tab__gate-state">Waiting for spec</p>
-      )}
+      {state}
 
       {decide.isError && (
         <p className="brainstorm-tab__error" role="alert">
@@ -214,9 +278,9 @@ function GateBlock({ taskId, docs }: { taskId: number; docs: TaskDoc[] }) {
         </p>
       )}
 
-      {history.length > 0 && (
+      {decided.length > 0 && (
         <ul className="brainstorm-tab__history" aria-label="Gate history">
-          {[...history].reverse().map((g) => (
+          {[...decided].reverse().map((g) => (
             <li key={g.id}>{gateHistoryLine(g)}</li>
           ))}
         </ul>
@@ -227,7 +291,7 @@ function GateBlock({ taskId, docs }: { taskId: number; docs: TaskDoc[] }) {
 
 export function BrainstormTab({ taskId, docs, questions, orchestratorName }: BrainstormTabProps) {
   const { data: stats } = useTaskBrainstormStats(taskId)
-  const problem = findDoc(docs, 'problem')
+  const problem = latestDoc(docs, 'problem')
   const storm = questions.filter((q) => q.type === 'brainstorm').sort((a, b) => a.ordinal - b.ordinal)
 
   return (

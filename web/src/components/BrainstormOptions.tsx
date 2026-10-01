@@ -1,9 +1,8 @@
 // The options of a storm question (task #4901 spec §3.1): one button per
-// option, the asker's recommendation starred, and an optional comment that
-// travels with whichever option is picked. Answering in one's own words is
-// not here — that is the thread's ordinary composer.
+// option, the asker's recommendation starred. The comment is whatever the
+// human typed in the thread's composer — one text box, so nothing typed there
+// is lost when an option is picked.
 
-import { useState } from 'react'
 import './brainstorm.css'
 
 export interface BrainstormOptionsProps {
@@ -11,13 +10,11 @@ export interface BrainstormOptionsProps {
   /** 1-based recommended option; null/absent on a thread without one. */
   recommended?: number | null
   busy?: boolean
-  /** `choose` is 1-based; `comment` is "" when the human wrote none. */
-  onChoose: (choose: number, comment: string) => void
+  /** `choose` is 1-based. */
+  onChoose: (choose: number) => void
 }
 
 export function BrainstormOptions({ options, recommended, busy, onChoose }: BrainstormOptionsProps) {
-  const [comment, setComment] = useState('')
-
   return (
     <div className="brainstorm-options">
       <div className="brainstorm-options__list" aria-label="Answer options">
@@ -34,7 +31,7 @@ export function BrainstormOptions({ options, recommended, busy, onChoose }: Brai
               }
               aria-label={isRecommended ? `${label} — recommended` : undefined}
               disabled={busy}
-              onClick={() => onChoose(i + 1, comment.trim())}
+              onClick={() => onChoose(i + 1)}
             >
               <span className="brainstorm-options__num">{i + 1}</span>
               {isRecommended && (
@@ -47,17 +44,9 @@ export function BrainstormOptions({ options, recommended, busy, onChoose }: Brai
           )
         })}
       </div>
-      <input
-        type="text"
-        className="brainstorm-options__comment"
-        aria-label="Comment on your pick"
-        placeholder="Comment on your pick — optional, sent with the option"
-        value={comment}
-        onChange={(e) => setComment(e.target.value)}
-      />
       <div className="brainstorm-options__hint">
-        ★ marks the agent's recommendation. Picking an option closes the thread; if none fits, write your own
-        answer below.
+        ★ marks the agent's recommendation. Picking an option closes the thread; text in the reply box below
+        goes with the option as your comment. If none fits, write your own answer and use Answer &amp; close.
       </div>
     </div>
   )

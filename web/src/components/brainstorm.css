@@ -45,15 +45,6 @@
 .brainstorm-options__star {
   color: var(--warn);
 }
-.brainstorm-options__comment {
-  height: 34px;
-  padding: 0 11px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font: 13px var(--font-ui);
-  background: var(--surface);
-  color: var(--text);
-}
 .brainstorm-options__hint {
   font: 12px var(--font-ui);
   color: var(--text-3);
@@ -113,4 +104,8 @@
   font: 13.5px/1.55 var(--font-ui);
   color: var(--text-2-alt);
   white-space: pre-wrap;
+}
+.brainstorm-result__error {
+  font: 12.5px var(--font-ui);
+  color: var(--err-text);
 }
