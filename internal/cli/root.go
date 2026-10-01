@@ -65,6 +65,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newInboxCmd())
 	root.AddCommand(newPairCmd())
 	root.AddCommand(newDevicesCmd())
+	root.AddCommand(newStatsCmd())
 	return root
 }
 
