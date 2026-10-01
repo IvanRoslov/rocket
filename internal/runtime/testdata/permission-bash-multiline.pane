@@ -1,0 +1,80 @@
+  ⎿  Interrupted · What should Claude do instead?
+
+✻ Cogitated for 2s · done 11:34 AM
+
+❯ Use the WebFetch tool to fetch https://example.com and tell me its title. Do nothing else.
+
+⏺ Fetch(https://example.com)
+  ⎿  Interrupted · What should Claude do instead?
+
+✻ Brewed for 4s · done 11:34 AM
+
+❯ Without using any tools, reply with a short question "Which option do you prefer?" followed by a numbered list of
+  three colours: 1. Red 2. Green 3. Blue, each on its own line. Nothing else.
+
+⏺ Which option do you prefer?
+  1. Red
+  2. Green
+  3. Blue
+
+✻ Brewed for 1s · done 11:35 AM
+
+❯ Use the AskUserQuestion tool to ask me one question "Which colour?" with options Red, Green, Blue.
+
+⏺ User declined to answer questions
+  ⎿  · Which colour? (Red / Green / Blue)
+
+✻ Crunched for 2s · done 11:35 AM
+
+❯ Run one Bash command that is a multi-line shell script of about 15 lines: a for loop over 1..12 that each echoes
+  "line N" on its own line (write each echo explicitly, no loop needed actually: 12 separate echo lines joined by
+  newlines). Use a single Bash tool call.
+
+⏺ Bash(echo "line 1"
+      echo "line 2"…)
+  ⎿  line 1
+     line 2
+     line 3
+     … +9 lines (ctrl+o to expand)
+
+⏺ The command ran and printed "line 1" through "line 12", each on its own line.
+
+✻ Cogitated for 4s · done 11:35 AM
+
+❯ Run ONE Bash tool call whose command is 14 lines: first line "mkdir -p out", then 13 lines "touch out/f1" ... "touch
+  out/f13", each on its own line (newline separated, no && or loop).
+
+⏺ Bash(mkdir -p out
+      touch out/f1…)
+  ⎿  Waiting…
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+ Tip: auto mode handles these prompts for you — choose "switch to auto mode" below
+ Create out directory with thirteen empty files
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ │ mkdir -p out
+ │ touch out/f1
+ │ touch out/f2
+ │ touch out/f3
+ │ touch out/f4
+ │ touch out/f5
+ │ touch out/f6
+ │ touch out/f7
+ │ touch out/f8
+ │ touch out/f9
+ │ touch out/f10
+ │ touch out/f11
+ │ touch out/f12
+ │ touch out/f13
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for mkdir -p out, touch out/f1, touch out/f2, touch out/f3, and touch out/f4 commands in
+      /private/tmp/claude-501/-Users-ivanroslov--rocket-worktrees-rocket-task-4881-prompt-parser/e5294f83-7c4f-447b-810f
+      -3d4cb32de35a/scratchpad/recon/proj
+   3. Yes, and switch to auto mode · auto mode handles these prompts for you
+   4. No
+
+ Esc to cancel · Tab to amend
+

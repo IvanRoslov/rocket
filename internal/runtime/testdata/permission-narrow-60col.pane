@@ -1,0 +1,80 @@
+✻ Baked for 6s · done 11:39 AM
+⏺ I ran all three commands; the third one failed.
+
+  1. rm -rf ./build finished with no output. I didn't check
+     beforehand whether ./build existed, so I can't say if
+     anything was actually deleted.
+  2. ls /etc | head -3 listed afpovertcp.cfg, aliases and
+     aliases.db.
+  3. sudo -n true exited with code 1 and the message "sudo:
+     a password is required", so sudo can't run here without
+     a password.
+
+✻ Cogitated for 7s · done 11:37 AM
+
+❯ Call the EnterPlanMode tool, then immediately call
+  ExitPlanMode with the one-line plan "Create file plan.txt
+  containing ok". Do not explore anything.
+
+⏺ Entered plan mode
+  Claude is now exploring and designing an implementation
+  approach.
+
+⏺ Updated plan
+  ⎿  /plan to preview
+  ⎿  User rejected Claude's plan:
+     ╭────────────────────────────────────╮
+     │ Create file plan.txt containing ok │
+     ╰────────────────────────────────────╯
+
+✻ Baked for 6s · done 11:39 AM
+
+❯ Call ExitPlanMode again with the same one-line plan. If
+  approved, execute it with the Write tool.
+
+⏺ User approved Claude's plan
+  ⎿  Plan saved to: ~/.claude/plans/parsed-dancing-fern.md ·
+     /plan to edit
+     Create file plan.txt containing ok
+
+⏺ Write(plan.txt)
+  ⎿  Wrote 1 line to plan.txt
+      1 ok
+
+⏺ You approved the plan on the second try, and I created
+  plan.txt in the current directory containing ok.
+
+  The plan line is saved in
+  ~/.claude/plans/parsed-dancing-fern.md. I wrote it there
+  before my first ExitPlanMode call because that tool reads
+  the plan from a file rather than taking it as an argument.
+
+✻ Sautéed for 6s · done 11:39 AM
+
+❯ Run exactly this Bash command: touch
+  ./narrow-test-file-with-a-rather-long-name.txt
+
+⏺ Bash(touch ./narrow-test-file-with-a-rather-long-name.txt)
+  ⎿  Waiting…
+
+────────────────────────────────────────────────────────────
+ Bash command
+ Tip: auto mode handles these prompts for you — choose
+ "switch to auto mode" below
+ Create an empty test file
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ touch ./narrow-test-file-with-a-rather-long-name.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and always allow access to
+      /private/tmp/claude-501/-Users-ivanroslov--rocket-work
+      trees-rocket-task-4881-prompt-parser/e5294f83-7c4f-447
+      b-810f-3d4cb32de35a/scratchpad/recon/proj from this
+      project
+   3. Yes, and switch to auto mode · auto mode handles these
+      prompts for you
+   4. No
+
+ Esc to cancel · Tab to amend
+
