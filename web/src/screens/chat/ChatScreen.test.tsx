@@ -589,6 +589,27 @@ describe('ChatScreen permission prompt', () => {
   })
 })
 
+describe('ChatScreen resolved permission entries', () => {
+  it('renders compact "Разрешение: <title> → <answer>" cards, incl. answered in the terminal', async () => {
+    renderPage('s-perm-demo-worker')
+    const chat = await screen.findByText('Разрешение: Do you want to run this command?')
+    expect(chat.closest('[data-testid="permission-entry"]')).toHaveTextContent(
+      'Разрешение: Do you want to run this command? → Yes',
+    )
+    const term = screen.getByText('Разрешение: Do you want to make this edit to CLAUDE.md?')
+    expect(term.closest('[data-testid="permission-entry"]')).toHaveTextContent(
+      'Разрешение: Do you want to make this edit to CLAUDE.md? → отвечено в терминале',
+    )
+    expect(screen.getAllByTestId('permission-entry')).toHaveLength(2)
+  })
+
+  it('falls back to the entry text when the permission object is missing', async () => {
+    appendChatEntry('s-billing-v2-orch', { role: 'permission', text: 'Do you want to proceed?', ts: 1 })
+    renderPage()
+    expect(await screen.findByText('Разрешение: Do you want to proceed?')).toBeInTheDocument()
+  })
+})
+
 describe('ChatScreen closed quiz rounds', () => {
   it('renders a tool+quiz_answer pair as one bubble with the chosen option highlighted', async () => {
     renderPage('s-quiz-demo-orch')

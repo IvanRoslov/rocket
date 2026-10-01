@@ -556,6 +556,37 @@ function LiveQuizBubble({
   )
 }
 
+/**
+ * A resolved permission prompt from the daemon's log (`role:"permission"`,
+ * task #4881) — one compact line: «Разрешение: <title> → <answer>», or
+ * «… → отвечено в терминале» when the dialog closed without a chat answer.
+ */
+function PermissionEntryRow({ entry }: { entry: ChatEntry }) {
+  const p = entry.permission
+  const title = p?.title || entry.text
+  const viaTerminal = p?.answered_via === 'terminal'
+  const answer = viaTerminal ? 'отвечено в терминале' : p?.answer_label
+  return (
+    <div className="chat-screen__row">
+      <div className="chat-screen__permission-entry" data-testid="permission-entry">
+        <span>Разрешение: {title}</span>{' '}
+        {answer && (
+          <span
+            className={
+              viaTerminal
+                ? 'chat-screen__permission-entry-answer chat-screen__permission-entry-answer--terminal'
+                : 'chat-screen__permission-entry-answer'
+            }
+          >
+            → {answer}
+          </span>
+        )}
+        {entry.ts > 0 && <span className="chat-screen__when">{timeAgo(entry.ts)}</span>}
+      </div>
+    </div>
+  )
+}
+
 /** Splits a permission quiz's `question` (`"<Title>\n\n<Context>"`, context optional) into its parts. */
 export function splitPermissionQuestion(question: string): { title: string; context: string } {
   const at = question.indexOf('\n\n')
@@ -879,6 +910,9 @@ export function ChatScreen() {
             return <QuizRoundBubble key={item.key} tool={item.tool} answer={item.answer} />
           }
           const { entry } = item
+          if (entry.role === 'permission') {
+            return <PermissionEntryRow key={item.key} entry={entry} />
+          }
           if (entry.role === 'tool') {
             return <ToolDigestLine key={item.key} entry={entry} />
           }
