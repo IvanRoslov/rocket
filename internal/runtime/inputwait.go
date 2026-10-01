@@ -24,8 +24,8 @@ var inputWaitMarkers = []string{
 
 // LooksLikeInputWait reports whether the bottom of a pane is showing
 // something that is actually blocked on a human keystroke: Claude Code's
-// AskUserQuestion widget (LooksLikeQuizWidget) or its tool-permission
-// prompt.
+// AskUserQuestion widget (LooksLikeQuizWidget) or one of its permission
+// dialogs (ParsePermissionPrompt, backed up by inputWaitMarkers).
 //
 // It exists because the waiting_input activity state has exactly one
 // source — Claude Code's Notification hook — which also fires when the
@@ -39,6 +39,9 @@ var inputWaitMarkers = []string{
 func LooksLikeInputWait(pane string) bool {
 	tail := tailLines(trimTrailingBlank(pane), inputWaitWindow)
 	if LooksLikeQuizWidget(tail) {
+		return true
+	}
+	if _, ok := ParsePermissionPrompt(tail); ok {
 		return true
 	}
 	for _, marker := range inputWaitMarkers {
