@@ -317,7 +317,7 @@ func (m *Manager) AnswerQuiz(ctx context.Context, id string, answers []QuizAnswe
 	}
 
 	h := runtime.Handle{Name: sess.TmuxName}
-	go m.runQuizAnswer(id, h, steps, nil)
+	go m.runQuizAnswer(id, h, steps, nil, nil)
 
 	return nil
 }
@@ -369,9 +369,11 @@ func (m *Manager) clearQuizInFlight(id string) {
 // waitQuizResolved. clearQuizInFlight always runs before returning (see its
 // doc comment), satisfying AnswerQuiz's in-flight-guard contract.
 //
-// onSendFail, if non-nil, runs when the injection fails — the permission
-// path uses it to withdraw the journal's "answered from chat" mark.
-func (m *Manager) runQuizAnswer(id string, h runtime.Handle, steps []keyStep, onSendFail func()) {
+// onSent, if non-nil, runs once every key was sent; onSendFail, if non-nil,
+// runs when the injection fails. The permission path uses them to record
+// when its keypress landed and to withdraw the journal's "answered from
+// chat" mark.
+func (m *Manager) runQuizAnswer(id string, h runtime.Handle, steps []keyStep, onSent, onSendFail func()) {
 	defer m.clearQuizInFlight(id)
 
 	ch, cancel := m.bus.Subscribe()
@@ -403,6 +405,8 @@ func (m *Manager) runQuizAnswer(id string, h runtime.Handle, steps []keyStep, on
 		if onSendFail != nil {
 			onSendFail()
 		}
+	} else if onSent != nil {
+		onSent()
 	}
 
 	m.waitQuizResolved(id, resolved)

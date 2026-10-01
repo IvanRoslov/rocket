@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"time"
 
 	"github.com/IvanRoslov/rocket/internal/runtime"
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -186,7 +187,25 @@ func (m *Manager) answerPermission(ctx context.Context, sess store.Session, quiz
 		}
 	}
 
+	sent := func() {
+		if err := m.st.MarkPermissionPromptSent(promptID, time.Now().Unix()); err != nil {
+			slog.Default().Warn("permission answer: record keypress", "session", sess.ID, "error", err)
+		}
+	}
+
 	started = true
-	go m.runQuizAnswer(sess.ID, h, []keyStep{step}, withdraw)
+	go m.runQuizAnswer(sess.ID, h, []keyStep{step}, sent, withdraw)
 	return nil
+}
+
+// clearPendingForTerminal drops what a session that reached a terminal state
+// can no longer answer: its pending quiz and any permission dialog still
+// open in the journal (closed as terminal, so it shows in the chat feed
+// rather than staying open forever). Best-effort, like the state change it
+// accompanies.
+func (m *Manager) clearPendingForTerminal(id string) {
+	_ = m.st.ClearPendingQuiz(id)
+	if err := m.st.ResolveOpenPermissionPrompts(id, time.Now().Unix()); err != nil {
+		slog.Default().Warn("close open permission prompts", "session", id, "error", err)
+	}
 }

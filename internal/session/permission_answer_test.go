@@ -220,3 +220,70 @@ func TestAnswerPermission_SendFailureWithdrawsJournalLabel(t *testing.T) {
 		t.Errorf("journal = (%q, %q), want the chat mark withdrawn", label, via)
 	}
 }
+
+func TestAnswerPermission_RecordsWhenKeySent(t *testing.T) {
+	m, st, rt, id := seedPermissionQuiz(t, "permission-bash-rm.pane")
+	before := time.Now().Unix()
+
+	if err := m.AnswerQuiz(context.Background(), "sess1", []QuizAnswer{{QuestionIndex: 0, OptionIndices: []int{0}}}); err != nil {
+		t.Fatalf("AnswerQuiz: %v", err)
+	}
+	sentKeysEventually(rt, 1)
+	deadline := time.Now().Add(time.Second)
+	var r store.PermissionPromptRow
+	for time.Now().Before(deadline) {
+		r, _ = st.GetPermissionPrompt(id)
+		if r.SentAt != 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if r.SentAt < before {
+		t.Errorf("sent_at = %d, want >= %d", r.SentAt, before)
+	}
+}
+
+func TestAnswerPermission_FailedSendRecordsNoSentAt(t *testing.T) {
+	m, st, rt, id := seedPermissionQuiz(t, "permission-bash-rm.pane")
+	rt.sendErr = errors.New("send-keys failed")
+
+	_ = m.AnswerQuiz(context.Background(), "sess1", []QuizAnswer{{QuestionIndex: 0, OptionIndices: []int{0}}})
+	sentKeysEventually(rt, 1)
+	time.Sleep(30 * time.Millisecond)
+	if r, _ := st.GetPermissionPrompt(id); r.SentAt != 0 {
+		t.Errorf("sent_at = %d after a failed send, want 0", r.SentAt)
+	}
+}
+
+func openRowResolved(t *testing.T, st *store.Store, id int64) store.PermissionPromptRow {
+	t.Helper()
+	r, err := st.GetPermissionPrompt(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// A session that ends with a dialog still journalled closes the row, so it
+// is not left open forever.
+func TestKillClosesOpenPermissionRow(t *testing.T) {
+	m, st, _, _ := seedPermissionQuiz(t, "permission-bash-rm.pane")
+	id, _, _ := st.OpenPermissionPrompt("sess1", "x?", "", "[]", 1) // the seeded row is closed by this open; use the new one
+	if err := m.Kill(context.Background(), "sess1", false); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	if r := openRowResolved(t, st, id); r.ResolvedAt == 0 || r.AnsweredVia != "terminal" {
+		t.Errorf("row after kill = %+v, want closed via terminal", r)
+	}
+}
+
+func TestReconcileTmuxMissingClosesOpenPermissionRow(t *testing.T) {
+	m, st, rt, id := seedPermissionQuiz(t, "permission-bash-rm.pane")
+	rt.listNames = []string{}
+	if err := m.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if r := openRowResolved(t, st, id); r.ResolvedAt == 0 {
+		t.Errorf("row after reconcile = %+v, want closed", r)
+	}
+}
