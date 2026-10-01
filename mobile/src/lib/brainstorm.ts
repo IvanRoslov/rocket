@@ -61,3 +61,35 @@ export function showBrainstormTab(
     task.status === 'brainstorm' || !!task.brainstorm_skill || questions.some(isBrainstorm) || gates.length > 0
   )
 }
+
+/**
+ * The doc of `kind` at `version` — from the full history, since a gate pins
+ * versions that a newer save has since replaced. Newest row wins when two
+ * titles share a version number.
+ */
+export function docAt(docs: TaskDoc[], kind: TaskDocKind, version: number | null): TaskDoc | undefined {
+  if (version == null) return undefined
+  return latestDoc(
+    docs.filter((d) => d.version === version),
+    kind,
+  )
+}
+
+export type ExitState =
+  | { kind: 'waiting_spec' }
+  | { kind: 'waiting_request' }
+  | { kind: 'pending'; gate: TaskGate }
+  | { kind: 'go'; gate: TaskGate }
+
+/**
+ * What the exit block shows. `gates` are newest first. A superseded or sent
+ * back gate leaves the storm waiting for the next request — not for a spec,
+ * which already exists by then.
+ */
+export function exitState(gates: TaskGate[], docs: TaskDoc[]): ExitState {
+  const pending = pendingGate(gates)
+  if (pending) return { kind: 'pending', gate: pending }
+  if (gates[0]?.status === 'go') return { kind: 'go', gate: gates[0] }
+  if (gates.length > 0 || latestDoc(docs, 'spec')) return { kind: 'waiting_request' }
+  return { kind: 'waiting_spec' }
+}

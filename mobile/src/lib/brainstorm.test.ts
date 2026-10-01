@@ -3,6 +3,8 @@ import {
   OUTCOME_LABEL,
   OUTCOMES,
   chosenLabel,
+  docAt,
+  exitState,
   gateHistoryLabel,
   isBrainstorm,
   isRecommended,
@@ -107,5 +109,42 @@ describe('showBrainstormTab', () => {
   })
   it('hides on an old task without any storm', () => {
     expect(showBrainstormTab({ status: 'in_progress', brainstorm_skill: '' }, [q({ type: 'decision' })], [])).toBe(false)
+  })
+})
+
+describe('docAt', () => {
+  const docs = [
+    doc({ id: 1, kind: 'spec', version: 1, body: 'old spec' }),
+    doc({ id: 2, kind: 'spec', version: 2, body: 'new spec' }),
+    doc({ id: 3, kind: 'plan', version: 1 }),
+  ]
+  it('finds the pinned version of a kind in the history', () => {
+    expect(docAt(docs, 'spec', 1)?.body).toBe('old spec')
+  })
+  it('is undefined for a missing version or a null pin', () => {
+    expect(docAt(docs, 'spec', 9)).toBeUndefined()
+    expect(docAt(docs, 'plan', null)).toBeUndefined()
+  })
+})
+
+describe('exitState', () => {
+  const spec = [doc({ kind: 'spec' })]
+  it('waits for a spec when there is none and no gate', () => {
+    expect(exitState([], [])).toEqual({ kind: 'waiting_spec' })
+  })
+  it('waits for a gate request once a spec exists', () => {
+    expect(exitState([], spec)).toEqual({ kind: 'waiting_request' })
+  })
+  it('waits for a new request when the newest gate was superseded or sent back', () => {
+    expect(exitState([gate({ status: 'superseded' })], spec)).toEqual({ kind: 'waiting_request' })
+    expect(exitState([gate({ status: 'changes', comment: 'x' })], spec)).toEqual({ kind: 'waiting_request' })
+  })
+  it('offers the decision on a pending gate', () => {
+    const g = gate({ id: 4, status: 'pending' })
+    expect(exitState([g, gate({ id: 3, status: 'changes' })], spec)).toEqual({ kind: 'pending', gate: g })
+  })
+  it('reports Go when the newest gate passed', () => {
+    const g = gate({ id: 5, status: 'go' })
+    expect(exitState([g], spec)).toEqual({ kind: 'go', gate: g })
   })
 })
