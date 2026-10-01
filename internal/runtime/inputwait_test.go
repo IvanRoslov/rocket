@@ -71,3 +71,18 @@ func TestLooksLikeInputWaitTrimsTrailingBlankRows(t *testing.T) {
 		t.Errorf("LooksLikeInputWait = false for a prompt padded with blank rows, want true")
 	}
 }
+
+// Any dialog ParsePermissionPrompt recognises is a wait, including the
+// ExitPlanMode approval, whose wording is not among inputWaitMarkers.
+func TestLooksLikeInputWaitRecognisesParsedPermissionPrompts(t *testing.T) {
+	for _, name := range []string{"permission-exit-plan.pane", "permission-bash-rm.pane", "permission-webfetch.pane"} {
+		if !LooksLikeInputWait(fixture(t, name)) {
+			t.Errorf("%s: LooksLikeInputWait = false, want true", name)
+		}
+	}
+	for _, name := range []string{"permission-neg-numbered-output.pane", "permission-neg-idle.pane"} {
+		if LooksLikeInputWait(fixture(t, name)) {
+			t.Errorf("%s: LooksLikeInputWait = true, want false", name)
+		}
+	}
+}

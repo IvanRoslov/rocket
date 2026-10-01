@@ -1,0 +1,40 @@
+[38;5;174m ▐[48;5;16m▛███▛█[39m[49m   [1mClaude[0m [1mCode[0m [38;5;246mv2.1.286[39m
+[38;5;174m▝▜[48;5;16m█████[49m█▀[39m  [38;5;246mOpus[39m [38;5;246m5.5[39m [38;5;246m·[39m [38;5;246mClaude[39m [38;5;246mMax[39m
+[38;5;174m ▝▝[39m   [38;5;174m▝▝[39m   [38;5;246m/…/e5294f83-7c4f-447b-810f-3d4cb32de35a/scratchpad/recon/proj[39m
+
+
+[38;5;239m[48;5;237m❯ [38;5;231mUse the Edit tool to change .claude/settings.json so its content becomes {"env": {"FOO": "1"}}. Do nothing else.[39m
+
+[49m  [38;5;246mRead [1m1[0m[38;5;246m file (ctrl+o to expand)[39m
+
+[38;5;246m⏺[39m [1mUpdate[0m(]8;id=pg9h34;file:///private/tmp/claude-501/-Users-ivanroslov--rocket-worktrees-rocket-task-4881-prompt-parser/e5294f83-7c4f-447b-810f-3d4cb32de35a/scratchpad/recon/proj/.claude/settings.json\.claude/settings.json]8;;\)
+
+[38;5;153m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m [1m[38;5;153mEdit file[0m
+ [38;5;246m.claude/settings.json[39m
+[38;5;239m╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+[38;5;167m[48;5;52m 1 -[38;5;231m{}
+[38;5;77m[48;5;22m 1 +[38;5;231m{[38;5;148m"env"[38;5;231m: {[38;5;148m"FOO"[38;5;231m: [38;5;186m"1"[38;5;231m}}
+[38;5;239m[49m╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+[39m Do you want to make this edit to [1msettings.json[0m?
+ [38;5;153m❯[39m [38;5;246m1.[39m [38;5;153mYes[39m
+   [38;5;246m2.[39m Yes, and allow Claude to edit files in this project's .claude folder for this session
+   [38;5;246m3. [39mNo
+
+ [38;5;246mEsc[39m [38;5;246mto[39m [38;5;246mcancel[39m [38;5;246m·[39m [38;5;246mTab[39m [38;5;246mto[39m [38;5;246mamend[39m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
