@@ -125,6 +125,9 @@ export function AppShell() {
               </span>
             )}
           </NavLink>
+          <NavLink to="/brainstorm" style={navLinkStyle}>
+            Brainstorm
+          </NavLink>
           <NavLink to="/system" style={navLinkStyle}>
             System
           </NavLink>

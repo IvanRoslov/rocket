@@ -1,0 +1,161 @@
+/* Categorical slots 1–3 of the dataviz reference palette, validated on the
+   light surface (CVD ΔE ≥ 9). Slot 3 sits under 3:1 contrast, so every bar
+   carries its value as text and the table repeats the numbers. */
+.bm {
+  --viz-series-1: #2a78d6;
+  --viz-series-2: #eb6834;
+  --viz-series-3: #1baf7a;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 28px 24px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.bm__title {
+  margin: 0;
+  font: 700 22px var(--font-ui);
+  color: var(--text);
+}
+.bm__lede {
+  margin: 0;
+  font: 13.5px var(--font-ui);
+  color: var(--text-3);
+}
+.bm__subtitle {
+  margin: 12px 0 0;
+  font: 600 15px var(--font-ui);
+  color: var(--text);
+}
+.bm-empty {
+  font: 13.5px var(--font-ui);
+  color: var(--text-4);
+}
+.bm-error {
+  padding: 8px 12px;
+  border-radius: 8px;
+  font: 13px var(--font-ui);
+  color: var(--err-text);
+  background: var(--err-bg-2);
+}
+
+.bm-chart {
+  margin: 0;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+}
+.bm-chart__title {
+  font: 600 13px var(--font-ui);
+  color: var(--text-2);
+}
+.bm-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 10px 0 18px;
+  padding: 0;
+  list-style: none;
+  font: 12.5px var(--font-ui);
+  color: var(--text-2);
+}
+.bm-chart__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.bm-chart__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.bm-chart__plot {
+  position: relative;
+  display: flex;
+  gap: 18px;
+  height: 200px;
+  padding: 18px 0 24px 38px;
+  overflow-x: auto;
+}
+.bm-chart__grid {
+  position: absolute;
+  inset: 18px 0 24px 0;
+  pointer-events: none;
+}
+.bm-chart__grid span {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--q-line);
+  font: 10.5px var(--font-mono);
+  color: var(--text-4);
+  line-height: 0;
+}
+.bm-chart__group {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 56px;
+}
+.bm-chart__bars {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+}
+.bm-chart__slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  width: 22px;
+  height: 100%;
+}
+.bm-chart__bar {
+  position: relative;
+  width: 100%;
+  border-radius: 4px 4px 0 0;
+}
+.bm-chart__value {
+  position: absolute;
+  bottom: calc(100% + 3px);
+  left: 50%;
+  transform: translateX(-50%);
+  font: 600 10.5px var(--font-ui);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.bm-chart__week {
+  position: absolute;
+  bottom: -20px;
+  left: 0;
+  font: 11px var(--font-mono);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.bm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font: 13px var(--font-ui);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+}
+.bm-table th,
+.bm-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+.bm-table th {
+  font: 600 11px var(--font-ui);
+  color: var(--text-4);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.bm-table td a {
+  color: var(--accent-text);
+}

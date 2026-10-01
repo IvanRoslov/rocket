@@ -167,3 +167,10 @@ test('a 503 from the status probe does not redirect', async () => {
     resetUnauthorizedLatch()
   }
 })
+
+// The storm metric (task #4901) is global, like Milestones.
+test('таб Brainstorm ведёт на экран метрики брейншторма', () => {
+  renderShell('/brainstorm')
+  expect(tabHref('Brainstorm')).toBe('/brainstorm')
+  expect(screen.getByRole('link', { name: 'Brainstorm' })).toHaveAttribute('aria-current', 'page')
+})
