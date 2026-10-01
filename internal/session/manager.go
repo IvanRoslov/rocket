@@ -589,16 +589,19 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 		return store.Session{}, err
 	}
 
+	brainstormSkill := m.brainstormSkill(task, ag)
+
 	sysPrompt, err := prompts.Render(m.cfg.Home, "orchestrator", prompts.Vars{
-		"feature_slug":   slug,
-		"task_id":        fmt.Sprint(task.ID),
-		"project_name":   project.Name,
-		"main_repo":      project.MainRepo,
-		"main_repo_path": repo.Path,
-		"allowed_repos":  allowedRepos,
-		"session_id":     id,
-		"worktree_path":  wtRes.Path,
-		"project_rules":  "",
+		"brainstorm_skill": brainstormSkill,
+		"feature_slug":     slug,
+		"task_id":          fmt.Sprint(task.ID),
+		"project_name":     project.Name,
+		"main_repo":        project.MainRepo,
+		"main_repo_path":   repo.Path,
+		"allowed_repos":    allowedRepos,
+		"session_id":       id,
+		"worktree_path":    wtRes.Path,
+		"project_rules":    "",
 	})
 	if err != nil {
 		m.markErrored(id, err)
@@ -606,6 +609,7 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 	}
 
 	kickoff, err := prompts.Render(m.cfg.Home, "kickoff", prompts.Vars{
+		"brainstorm_skill": brainstormSkill,
 		"task_id":          fmt.Sprint(task.ID),
 		"task_title":       task.Title,
 		"task_description": task.Description,
@@ -617,15 +621,16 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 	}
 
 	spec := agent.LaunchSpec{
-		SessionID:    id,
-		Kind:         "orchestrator",
-		ProjectID:    project.ID,
-		RepoID:       project.MainRepo,
-		Feature:      slug,
-		WorktreePath: wtRes.Path,
-		SystemPrompt: sysPrompt,
-		FirstMessage: kickoff,
-		SocketPath:   m.cfg.SocketPath(),
+		SessionID:       id,
+		Kind:            "orchestrator",
+		ProjectID:       project.ID,
+		RepoID:          project.MainRepo,
+		Feature:         slug,
+		WorktreePath:    wtRes.Path,
+		SystemPrompt:    sysPrompt,
+		FirstMessage:    kickoff,
+		SocketPath:      m.cfg.SocketPath(),
+		BrainstormSkill: brainstormSkill,
 	}
 
 	if err := ag.SetupWorkspace(spec); err != nil {
@@ -654,6 +659,26 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 	m.bus.Publish("session.state_changed", id, map[string]any{"from": "spawning", "to": "running"})
 
 	return sess, nil
+}
+
+// brainstormSkill returns the brainstorm skill task's orchestrator runs with:
+// the one recorded when the task was started, or — for a task started before
+// that was recorded — whatever the orchestrator_brainstorm_custom setting
+// says now, and the custom skill only for an agent that lays it out. An
+// unreadable setting falls back to the stock skill.
+func (m *Manager) brainstormSkill(task store.Task, ag agent.Agent) string {
+	if task.BrainstormSkill != "" {
+		return task.BrainstormSkill
+	}
+	if !agent.ShipsBrainstormSkill(ag) {
+		return prompts.StockBrainstormSkill
+	}
+	custom, err := m.st.OrchestratorBrainstormCustom()
+	if err != nil {
+		slog.Warn("session: read orchestrator_brainstorm_custom failed, using stock skill", "error", err)
+		return prompts.StockBrainstormSkill
+	}
+	return prompts.BrainstormSkill(custom)
 }
 
 // reserveOrchestratorSlug returns an unused (slug, sessionID) pair for an
@@ -870,7 +895,7 @@ func (m *Manager) Restore(ctx context.Context, id string) error {
 		SocketPath:   m.cfg.SocketPath(),
 	}
 
-	m.fillRestorePrompt(&spec, sess, repo, path)
+	m.fillRestorePrompt(&spec, ag, sess, repo, path)
 
 	if err := ag.SetupWorkspace(spec); err != nil {
 		m.markErrored(id, err)
@@ -913,7 +938,7 @@ func (m *Manager) Restore(ctx context.Context, id string) error {
 // rebuild the same system prompt Start/Spawn used. If no such task is
 // found (e.g. a session restored outside the task system, or in tests),
 // spec is left untouched and Restore proceeds exactly as before.
-func (m *Manager) fillRestorePrompt(spec *agent.LaunchSpec, sess store.Session, repo store.Repo, worktreePath string) {
+func (m *Manager) fillRestorePrompt(spec *agent.LaunchSpec, ag agent.Agent, sess store.Session, repo store.Repo, worktreePath string) {
 	task, err := m.st.GetTaskBySessionID(sess.ID)
 	if err != nil {
 		return
@@ -930,21 +955,24 @@ func (m *Manager) fillRestorePrompt(spec *agent.LaunchSpec, sess store.Session, 
 		if err != nil {
 			return
 		}
+		brainstormSkill := m.brainstormSkill(task, ag)
 		sysPrompt, err := prompts.Render(m.cfg.Home, "orchestrator", prompts.Vars{
-			"feature_slug":   sess.FeatureSlug,
-			"task_id":        fmt.Sprint(task.ID),
-			"project_name":   proj.Name,
-			"main_repo":      proj.MainRepo,
-			"main_repo_path": repo.Path,
-			"allowed_repos":  allowedRepos,
-			"session_id":     sess.ID,
-			"worktree_path":  worktreePath,
-			"project_rules":  "",
+			"brainstorm_skill": brainstormSkill,
+			"feature_slug":     sess.FeatureSlug,
+			"task_id":          fmt.Sprint(task.ID),
+			"project_name":     proj.Name,
+			"main_repo":        proj.MainRepo,
+			"main_repo_path":   repo.Path,
+			"allowed_repos":    allowedRepos,
+			"session_id":       sess.ID,
+			"worktree_path":    worktreePath,
+			"project_rules":    "",
 		})
 		if err != nil {
 			return
 		}
 		spec.SystemPrompt = sysPrompt
+		spec.BrainstormSkill = brainstormSkill
 		spec.FirstMessage = fmt.Sprintf(
 			"[rocket restore] You were relaunched after a crash or interruption. "+
 				"This is task #%d %q. Run `rocket task show %d` to see the spec, decisions, "+

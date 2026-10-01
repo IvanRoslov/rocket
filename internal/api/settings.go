@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -44,19 +45,31 @@ func maskToken(token string) string {
 	}
 }
 
-// handleGetSettings serves GET /v1/settings, returning the masked GitHub
-// token (or "" if unset).
+// handleGetSettings serves GET /v1/settings: the masked GitHub token (or ""
+// if unset) and the orchestrator_brainstorm_custom toggle as a bool.
 func handleGetSettings(w http.ResponseWriter, r *http.Request, d Deps) {
 	token, err := d.Store.GetSetting("github_token")
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"github_token": maskToken(token)})
+	custom, err := d.Store.OrchestratorBrainstormCustom()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"github_token":                   maskToken(token),
+		"orchestrator_brainstorm_custom": custom,
+	})
 }
 
+// putSettingsRequest is the PUT /v1/settings body. Every field is optional
+// and only the ones present are applied, so flipping the brainstorm toggle
+// never touches the token (and vice versa).
 type putSettingsRequest struct {
-	GithubToken string `json:"github_token"`
+	GithubToken                  *string `json:"github_token"`
+	OrchestratorBrainstormCustom *bool   `json:"orchestrator_brainstorm_custom"`
 }
 
 type githubUserResponse struct {
@@ -109,42 +122,69 @@ func validateGithubToken(apiBase, token string) (login string, invalid bool, unr
 	return u.Login, false, false, nil
 }
 
-// handlePutSettings serves PUT /v1/settings {github_token}. An empty token
-// deletes the stored setting. A non-empty token is validated against
-// GitHub's /user endpoint before being stored.
+// handlePutSettings serves PUT /v1/settings {github_token?,
+// orchestrator_brainstorm_custom?}. An empty token deletes the stored
+// setting; a non-empty token is validated against GitHub's /user endpoint
+// before being stored. The token is checked first so a rejected token leaves
+// the toggle unchanged too. The response carries both settings (masked
+// token) plus "login" when a token was validated.
 func handlePutSettings(w http.ResponseWriter, r *http.Request, d Deps) {
 	var req putSettingsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
 		return
 	}
+	if req.GithubToken == nil && req.OrchestratorBrainstormCustom == nil {
+		writeErr(w, http.StatusBadRequest, "bad_request",
+			"nothing to update: send github_token and/or orchestrator_brainstorm_custom")
+		return
+	}
 
-	if req.GithubToken == "" {
-		if err := d.Store.DeleteSetting("github_token"); err != nil {
+	resp := map[string]any{}
+	if req.GithubToken != nil {
+		token := *req.GithubToken
+		if token == "" {
+			if err := d.Store.DeleteSetting("github_token"); err != nil {
+				writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+				return
+			}
+		} else {
+			login, invalid, unreachable, err := validateGithubToken(d.Cfg.GithubAPIBase, token)
+			if invalid {
+				writeErr(w, http.StatusBadRequest, "invalid_token", "GitHub rejected the token")
+				return
+			}
+			if unreachable || err != nil {
+				writeErr(w, http.StatusBadGateway, "github_unreachable", "could not reach GitHub to validate token")
+				return
+			}
+			if err := d.Store.SetSetting("github_token", token); err != nil {
+				writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+				return
+			}
+			resp["login"] = login
+		}
+	}
+
+	if req.OrchestratorBrainstormCustom != nil {
+		if err := d.Store.SetSetting(store.SettingOrchestratorBrainstormCustom,
+			strconv.FormatBool(*req.OrchestratorBrainstormCustom)); err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"github_token": ""})
-		return
 	}
 
-	login, invalid, unreachable, err := validateGithubToken(d.Cfg.GithubAPIBase, req.GithubToken)
-	if invalid {
-		writeErr(w, http.StatusBadRequest, "invalid_token", "GitHub rejected the token")
-		return
-	}
-	if unreachable || err != nil {
-		writeErr(w, http.StatusBadGateway, "github_unreachable", "could not reach GitHub to validate token")
-		return
-	}
-
-	if err := d.Store.SetSetting("github_token", req.GithubToken); err != nil {
+	token, err := d.Store.GetSetting("github_token")
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-
-	writeJSON(w, http.StatusOK, map[string]string{
-		"github_token": maskToken(req.GithubToken),
-		"login":        login,
-	})
+	custom, err := d.Store.OrchestratorBrainstormCustom()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	resp["github_token"] = maskToken(token)
+	resp["orchestrator_brainstorm_custom"] = custom
+	writeJSON(w, http.StatusOK, resp)
 }

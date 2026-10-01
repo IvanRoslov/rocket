@@ -58,6 +58,10 @@ type Task struct {
 	// AssignedRole is the id of the persistent agent holding the milestone,
 	// empty when nobody has taken it. Only milestones ever carry it.
 	AssignedRole string
+	// BrainstormSkill is the brainstorm skill the task's orchestrator prompt
+	// names, fixed when the task is started (task #4901); empty for tasks
+	// started before it was recorded.
+	BrainstormSkill string
 }
 
 // TaskFilter narrows the results of ListTasks. Empty Project/Status mean "no
@@ -79,7 +83,8 @@ type TaskFilter struct {
 // taskColumns is the column list every task SELECT shares, in the order
 // scanTask reads them.
 const taskColumns = `id, parent_id, title, description, project_id, repo_id, status, feature_slug,
-	session_id, created_by, created_at, updated_at, completed_at, milestone, assigned_role`
+	session_id, created_by, created_at, updated_at, completed_at, milestone, assigned_role,
+	brainstorm_skill`
 
 // AddTask inserts a new task. Status defaults to "backlog" and CreatedBy
 // defaults to "user" when empty. CreatedAt/UpdatedAt default to now. Returns
@@ -231,6 +236,20 @@ func (s *Store) UpdateTask(t Task) error {
 	return checkRowsAffected(res)
 }
 
+// SetTaskBrainstormSkill records the brainstorm skill the task's
+// orchestrator runs with, refreshing updated_at. Returns ErrNotFound if the
+// task doesn't exist.
+func (s *Store) SetTaskBrainstormSkill(id int64, skill string) error {
+	res, err := s.db.Exec(
+		`UPDATE tasks SET brainstorm_skill = ?, updated_at = ? WHERE id = ?`,
+		skill, time.Now().Unix(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("set task brainstorm skill: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
 // SetTaskAssignedRole sets (or, with an empty role, clears) the persistent
 // agent holding a milestone, refreshing updated_at. Returns ErrNotFound if the
 // task doesn't exist.
@@ -254,6 +273,7 @@ func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	err := row.Scan(
 		&t.ID, &parentID, &t.Title, &t.Description, &t.ProjectID, &repoID, &t.Status, &featureSlug,
 		&sessionID, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt, &completedAt, &milestone, &assignedRole,
+		&t.BrainstormSkill,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Task{}, ErrNotFound

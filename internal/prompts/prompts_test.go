@@ -11,6 +11,7 @@ import (
 // completeVars returns a complete set of Vars for testing.
 func completeVars() Vars {
 	return Vars{
+		"brainstorm_skill": "superpowers:brainstorming",
 		"feature_slug":     "test-feature",
 		"task_id":          "123",
 		"project_name":     "rocket",
@@ -230,12 +231,9 @@ func TestRenderKickoffTemplate(t *testing.T) {
 		t.Error("task_title not properly substituted")
 	}
 
-	// Spec confirmation gate: reopens on any spec edit.
-	if !strings.Contains(result, "reopens this gate") {
-		t.Error("kickoff template missing spec re-confirmation gate phrase")
-	}
-	if !strings.Contains(result, `rocket task ask 123 --title "Confirm spec v<N>`) {
-		t.Error("kickoff template missing rocket task ask confirmation command")
+	// Exit from the storm is the gate, re-requested on every spec change.
+	if !strings.Contains(result, "rocket task gate request 123") {
+		t.Error("kickoff template missing the gate request command")
 	}
 }
 
@@ -290,9 +288,9 @@ func TestRenderOrchestratorFieldFixes(t *testing.T) {
 		t.Error("orchestrator template missing field-tested finishing sequence")
 	}
 
-	// Spec re-confirmation on edit.
-	if !strings.Contains(result, "re-confirmation via") {
-		t.Error("orchestrator template missing spec re-confirmation tracking bullet")
+	// Any spec edit re-opens the gate.
+	if !strings.Contains(result, "gate request again") {
+		t.Error("orchestrator template missing the re-request-on-spec-edit rule")
 	}
 }
 
@@ -312,8 +310,8 @@ func TestPromptsTeachBrainstormStatus(t *testing.T) {
 			if !strings.Contains(result, "brainstorm") {
 				t.Errorf("%s template never names the brainstorm status", name)
 			}
-			if !strings.Contains(result, "rocket task move 123 in_progress") {
-				t.Errorf("%s template missing the move-to-in_progress command", name)
+			if !strings.Contains(result, "in_progress") {
+				t.Errorf("%s template never says the gate moves the task to in_progress", name)
 			}
 		})
 	}

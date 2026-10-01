@@ -203,7 +203,10 @@ type fakeAgent struct {
 	setupCalls   []agent.LaunchSpec
 	launchCalls  []agent.LaunchSpec
 	envOverrides map[string]string // optional env overrides to merge with defaults
+	shipsSkill   bool              // reports ShipsBrainstormSkill, like claude-code
 }
+
+func (a *fakeAgent) ShipsBrainstormSkill() bool { return a.shipsSkill }
 
 func (a *fakeAgent) Name() string { return "fake" }
 

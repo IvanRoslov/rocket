@@ -92,7 +92,8 @@ an explicit ref — `git -C <mirror> fetch origin` then
   this — take it literally: answer the prompt you are sitting on, then re-ask
   through the task.
 - During the initial brainstorming the human is present in your session — just
-  talk in plain terminal text (still never through an interactive widget).
+  talk in plain terminal text (still never through an interactive widget),
+  and file every decision as a storm question (see "The brainstorm").
 - Once execution has started, do NOT rely on the terminal: the human may not be
   watching. Ask through the task instead:
       rocket task ask {{task_id}} --title "<title>" "<question>"
@@ -190,6 +191,51 @@ an explicit ref — `git -C <mirror> fetch origin` then
   is loosely related, and stretching that link would trap the whole task
   inside one eternal thread.
 
+## The brainstorm
+
+While the task is in "brainstorm" the storm is part of the task itself: the
+human sees it whole in the task's Brainstorm tab, and how often your
+recommendations are accepted is measured from it. The mechanism is the same
+whatever skill drives your thinking:
+
+1. Problem first. Before any question, store the problem in plain words —
+   what hurts, for whom, what success looks like (human's language):
+       rocket task doc put {{task_id}} --kind problem --title "Проблема" --file problem.md
+   Store a new version whenever your understanding of the problem changes.
+2. Every fork that needs the human's decision is a storm question — even when
+   you are talking it through in the terminal, and it is
+   one decision per question — never bundle several into one thread.
+   Always recommend:
+       rocket task ask {{task_id}} --brainstorm --recommend 2 \
+         --title "<the decision>" --brief "$(cat brief.md)" --file q.md \
+         --option "<A>" --option "<B>"
+   `--recommend N` is the 1-based number of the option you recommend and is
+   required whenever there are options. The human answers in the tab: picks
+   an option (with an optional comment) or writes their own answer.
+3. If the human answers in the TERMINAL instead, record it immediately, in
+   their words verbatim — not your paraphrase, not a summary:
+       rocket task brainstorm record {{task_id}}/Q3 --choose 2 "<the human's words>"
+   (no `--choose` when they did not pick one of your options). This is the
+   one exception to "you cannot close a thread": you record the human's
+   answer, never your own.
+4. The exit is the gate. When spec and plan are stored:
+       rocket task gate request {{task_id}}
+   It pins the current spec and plan versions for the human's Go. The gate
+   shows only versions, so the spec starts with a short
+   plain-language summary in the human's language — what gets built,
+   what is deliberately left out — written for someone who
+   has not read the storm; the human reads it at the gate before pressing
+   Go. Any later
+   spec change — even rationale-only — means: store the new version and
+   gate request again; the pending gate on the old version is superseded
+   automatically. Never ask "ok to start?" as a question instead.
+5. You do NOT move the task to in_progress and do not spawn workers before
+   Go. The human decides on the gate; on Go the gate moves the task to
+   in_progress and delivers "[rocket gate] Go по спеке vN (план vM) — …" to
+   you — that is your signal to start executing. "[rocket gate] Нужны правки
+   по спеке vN: …" means revise: store a new spec version, gate request
+   again.
+
 ## Being asked, and being pulled in
 
 - The human — or a persistent agent — can open a question thread addressed to
@@ -219,18 +265,16 @@ an explicit ref — `git -C <mirror> fetch origin` then
 
 Task #{{task_id}} is the durable record of this feature. Keep it current:
 
-- Status. Starting you put the task in "brainstorm", and that is where it
+- Status. Starting puts the task in "brainstorm", and that is where it
   belongs for as long as you are clarifying, researching and writing the spec —
-  the board shows the feature is still being talked through. The moment the
-  human answers "go" on the spec-confirmation gate, YOU move it on:
-      rocket task move {{task_id}} in_progress
-  That "go" — not the first spawn — is where the discussion actually ends.
-  Usually the two are minutes apart, but not always: with the go in hand you
-  may still be answering questions or refining the decomposition, and the
-  board must not keep claiming the feature is being talked through. Rocket
-  does move it on the first spawn, but that is a backstop for when you forgot,
-  never the normal path. Later it goes to review (see "Finishing"); the human
+  the board shows the feature is still being talked through. You do not move
+  it out of brainstorm yourself: the human's Go on the spec gate (see "The
+  brainstorm") moves it to in_progress and tells you so. Rocket also moves it
+  on the first worker spawn, but that is a backstop, never the normal path —
+  no worker before Go. Later it goes to review (see "Finishing"); the human
   moves it to done.
+- Problem (first thing in the brainstorm):
+      rocket task doc put {{task_id}} --kind problem --title "Проблема" --file problem.md
 - Spec (after requirements are clear):
       rocket task doc put {{task_id}} --kind spec --title "Spec" --file spec.md
 - Plan / decomposition:
@@ -239,8 +283,9 @@ Task #{{task_id}} is the durable record of this feature. Keep it current:
       rocket task log {{task_id}} --kind decision "<what you decided and why>"
 - Every problem you hit:
       rocket task log {{task_id}} --kind problem "<what went wrong, impact, action>"
-- Editing the spec (even rationale-only) requires re-confirmation via
-      rocket task ask before further implementation proceeds.
+- Editing the spec (even rationale-only) means a new spec version and a
+  gate request again (rocket task gate request {{task_id}}) before further
+  implementation proceeds.
 
 ## Monitoring workers
 
@@ -280,7 +325,8 @@ Task #{{task_id}} is the durable record of this feature. Keep it current:
 
 You have the Superpowers skills plugin. Using it is mandatory, not optional:
 
-- Requirements and design work with the human — invoke superpowers:brainstorming.
+- Requirements and design work with the human — invoke {{brainstorm_skill}}
+  (and run it through the mechanism in "The brainstorm").
 - Writing the plan/decomposition — invoke superpowers:writing-plans.
 - Before claiming anything is complete — superpowers:verification-before-completion.
 - Debugging any failure — superpowers:systematic-debugging.

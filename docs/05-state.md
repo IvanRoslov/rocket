@@ -102,7 +102,7 @@ composer_busy_deadline: 10m # сколько доставку держат, по
 
 ```sql
 CREATE TABLE settings (
-  key   TEXT PRIMARY KEY,   -- напр. 'github_token'
+  key   TEXT PRIMARY KEY,   -- 'github_token', 'orchestrator_brainstorm_custom' ("true"/"false", нет строки = выкл.)
   value TEXT NOT NULL
 );
 
@@ -173,6 +173,8 @@ CREATE TABLE tasks (
   session_id   TEXT REFERENCES sessions(id),   -- задача → оркестратор, подзадача → воркер
   milestone    INTEGER NOT NULL DEFAULT 0,     -- 1 = майлстон: корневая задача вне проектов (project_id = '')
   assigned_role TEXT,                          -- id постоянного агента, взявшего майлстон; NULL/'' — не взят
+  brainstorm_skill TEXT NOT NULL DEFAULT '',   -- скилл шторма оркестратора, фиксируется при start (миграция 0020):
+                                               -- orchestrator-brainstorming | superpowers:brainstorming; '' — стартовала раньше
   created_by   TEXT NOT NULL DEFAULT 'user',   -- user|orchestrator|agent
   created_at   INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL,
