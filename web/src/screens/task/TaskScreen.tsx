@@ -8,6 +8,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { Badge, type BadgeTone } from '../../components/Badge'
 import { timeAgo } from '../../lib/format'
 import { useProjects, useSessions, useTask, useTaskDocs, useTaskLog, useTaskQuestions, useMessages } from '../../lib/queries'
+import { isStorm } from '../../lib/storm'
 import type { TaskCreatedBy, TaskStatus } from '../../lib/types'
 import { BrainstormTab } from './BrainstormTab'
 import { DocsTab } from './DocsTab'
@@ -89,6 +90,8 @@ export function TaskScreen() {
     [questions],
   )
   const bannerQuestion = openQuestions[0]
+  // The Questions tab holds everything but the storm (task #4901, spec v2 §3.1).
+  const openPlainCount = openQuestions.filter((q) => !isStorm(q)).length
 
   // Another task in the same screen instance (a subtask link) starts over.
   const [tabTaskId, setTabTaskId] = useState(taskId)
@@ -120,7 +123,7 @@ export function TaskScreen() {
     ...(isMilestone
       ? []
       : [{ id: 'brainstorm' as const, label: 'Brainstorm', count: stormQuestions.length || undefined }]),
-    { id: 'questions', label: 'Questions', count: openQuestions.length || undefined, warn: openQuestions.length > 0 },
+    { id: 'questions', label: 'Questions', count: openPlainCount || undefined, warn: openPlainCount > 0 },
     { id: 'overview', label: 'Overview' },
     { id: 'docs', label: 'Docs', count: docs?.length },
     { id: 'journal', label: 'Journal', count: log?.length },
@@ -162,7 +165,11 @@ export function TaskScreen() {
           </div>
 
           {bannerQuestion && (
-            <QuestionBanner taskId={task.id} question={bannerQuestion} onOpen={() => setTab('questions')} />
+            <QuestionBanner
+              taskId={task.id}
+              question={bannerQuestion}
+              onOpen={() => setTab(isStorm(bannerQuestion) && !isMilestone ? 'brainstorm' : 'questions')}
+            />
           )}
 
           <div className="task-screen__tabs" role="tablist">

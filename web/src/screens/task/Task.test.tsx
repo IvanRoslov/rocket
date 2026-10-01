@@ -678,14 +678,36 @@ describe('TaskScreen for a milestone', () => {
   })
 })
 
-// Storm questions in the ordinary Questions tab (task #4901 spec §3.1: they
-// stay visible there). Fixture task #17: Q1 answered from the terminal, Q2 open.
-describe('TaskScreen — storm questions in the Questions tab', () => {
-  async function openQuestions() {
+// Storm questions live only in the Brainstorm tab (task #4901, spec v2 §3.1).
+// Fixture task #17: Q1 answered from the terminal, Q2 open on the human.
+describe('TaskScreen — storm questions only in the Brainstorm tab', () => {
+  async function openTask() {
     renderTask('billing', 17)
     expect(await screen.findByText('Metering rewrite')).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('tab', { name: /Questions/ }))
   }
+
+  it('keeps storm questions out of the Questions tab and its count', async () => {
+    await openTask()
+    const tab = screen.getByRole('tab', { name: /Questions/ })
+    expect(tab).toHaveTextContent(/^Questions$/)
+    await userEvent.click(tab)
+
+    // The banner above the tabs still names the open storm question; the tab does not.
+    const panel = document.querySelector('.questions-tab') as HTMLElement
+    expect(within(panel).queryByText('Where do usage events land?')).not.toBeInTheDocument()
+    expect(within(panel).queryByText('Bill per seat or per event?')).not.toBeInTheDocument()
+    expect(within(panel).getByText('No questions yet.')).toBeInTheDocument()
+  })
+
+  it('the banner sends a storm question to the Brainstorm tab, without option buttons', async () => {
+    await openTask()
+    await userEvent.click(screen.getByRole('tab', { name: /Overview/ }))
+
+    const banner = document.querySelector('.question-banner') as HTMLElement
+    expect(within(banner).queryByRole('button', { name: /Ledger table/ })).not.toBeInTheDocument()
+    await userEvent.click(within(banner).getByRole('button', { name: /Where do usage events land/ }))
+    expect(screen.getByRole('tab', { name: /Brainstorm/ })).toHaveAttribute('aria-selected', 'true')
+  })
 
   it('stars the recommendation and sends the comment with the pick', async () => {
     const bodies: unknown[] = []
@@ -695,29 +717,10 @@ describe('TaskScreen — storm questions in the Questions tab', () => {
         return HttpResponse.json({ id: 41 })
       }),
     )
-    await openQuestions()
+    await openTask()
 
     await userEvent.type(screen.getByLabelText('Reply to 17/Q2'), 'с архивом')
     await userEvent.click(screen.getByRole('button', { name: /Ledger table in Postgres — recommended/ }))
     await waitFor(() => expect(bodies).toEqual([{ choose: 2, body: 'с архивом' }]))
-  })
-
-  it('labels the answered storm thread with its outcome and lets the human change it', async () => {
-    const bodies: unknown[] = []
-    server.use(
-      http.patch('/v1/questions/40/outcome', async ({ request }) => {
-        bodies.push(await request.json())
-        return HttpResponse.json({ id: 40 })
-      }),
-    )
-    await openQuestions()
-
-    const row = screen.getByText('Bill per seat or per event?').closest('.questions-tab__resolved') as HTMLElement
-    expect(within(row).getByText('Accepted with comment')).toBeInTheDocument()
-    await userEvent.click(within(row).getByRole('button', { expanded: false }))
-    expect(within(row).getByText('From terminal')).toBeInTheDocument()
-
-    await userEvent.selectOptions(within(row).getByLabelText('Outcome'), 'corrected')
-    await waitFor(() => expect(bodies).toEqual([{ outcome: 'corrected' }]))
   })
 })
