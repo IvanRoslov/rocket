@@ -4,11 +4,12 @@
 // orchestrator + worker sessions.
 
 import { useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { Badge, type BadgeTone } from '../../components/Badge'
 import { timeAgo } from '../../lib/format'
 import { useProjects, useSessions, useTask, useTaskDocs, useTaskLog, useTaskQuestions, useMessages } from '../../lib/queries'
 import type { TaskCreatedBy, TaskStatus } from '../../lib/types'
+import { BrainstormTab } from './BrainstormTab'
 import { DocsTab } from './DocsTab'
 import { JournalTab } from './JournalTab'
 import { MessagesTab } from './MessagesTab'
@@ -19,7 +20,9 @@ import { AgentRail } from '../milestones/AgentRail'
 import { SessionRail } from './SessionRail'
 import './TaskScreen.css'
 
-type TabId = 'questions' | 'overview' | 'docs' | 'journal' | 'messages'
+type TabId = 'brainstorm' | 'questions' | 'overview' | 'docs' | 'journal' | 'messages'
+
+const TAB_IDS: TabId[] = ['brainstorm', 'questions', 'overview', 'docs', 'journal', 'messages']
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
   backlog: 'Backlog',
@@ -49,7 +52,14 @@ export function TaskScreen() {
   const { projectId, taskId: taskIdParam } = useParams<{ projectId: string; taskId: string }>()
   const taskId = taskIdParam ? Number(taskIdParam) : undefined
 
-  const [tab, setTab] = useState<TabId>('overview')
+  // `?tab=` lets a link land on a tab (the storm metric links to Brainstorm).
+  // Without one, nothing is picked until the task loads: a task in
+  // brainstorm opens on its storm, anything else on Overview (task #4901).
+  const [searchParams] = useSearchParams()
+  const requestedTab = searchParams.get('tab') as TabId | null
+  const [pickedTab, setTab] = useState<TabId | null>(
+    requestedTab && TAB_IDS.includes(requestedTab) ? requestedTab : null,
+  )
 
   const { data: projects } = useProjects()
   const { data: task } = useTask(taskId)
@@ -80,7 +90,19 @@ export function TaskScreen() {
   )
   const bannerQuestion = openQuestions[0]
 
+  // Another task in the same screen instance (a subtask link) starts over.
+  const [tabTaskId, setTabTaskId] = useState(taskId)
+  if (tabTaskId !== taskId) {
+    setTabTaskId(taskId)
+    setTab(null)
+  }
+  // The default is decided once, when the task first loads — a Go moves the
+  // task out of brainstorm, and the tab must not jump away from under the
+  // human who just pressed it.
+  if (task && task.id === taskId && pickedTab === null) setTab(task.status === 'brainstorm' ? 'brainstorm' : 'overview')
+
   if (!taskId || !task) return null
+  const tab: TabId = pickedTab ?? (task.status === 'brainstorm' ? 'brainstorm' : 'overview')
 
   // A milestone (task #1023, spec v2) belongs to no project: it is reached at
   // /milestones/:taskId, goes back to the milestones board, and shows the
@@ -92,7 +114,12 @@ export function TaskScreen() {
   const backLabel = isMilestone ? 'Milestones' : `${project?.name ?? projectId} board`
   const taskPath = (id: number) => (isMilestone ? `/milestones/${id}` : `/p/${projectId}/tasks/${id}`)
 
+  const stormQuestions = (questions ?? []).filter((q) => q.type === 'brainstorm')
   const tabs: Array<{ id: TabId; label: string; count?: number; warn?: boolean }> = [
+    // A milestone is a persistent agent's work, never a storm.
+    ...(isMilestone
+      ? []
+      : [{ id: 'brainstorm' as const, label: 'Brainstorm', count: stormQuestions.length || undefined }]),
     { id: 'questions', label: 'Questions', count: openQuestions.length || undefined, warn: openQuestions.length > 0 },
     { id: 'overview', label: 'Overview' },
     { id: 'docs', label: 'Docs', count: docs?.length },
@@ -165,6 +192,14 @@ export function TaskScreen() {
             })}
           </div>
 
+          {tab === 'brainstorm' && (
+            <BrainstormTab
+              taskId={taskId}
+              docs={docs ?? []}
+              questions={questions ?? []}
+              orchestratorName={orchestrator?.tmux_name}
+            />
+          )}
           {tab === 'questions' && (
             <QuestionsTab
               taskId={taskId}

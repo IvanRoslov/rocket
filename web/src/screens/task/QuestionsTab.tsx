@@ -3,13 +3,14 @@
 // form) plus a collapsed list of resolved threads below.
 
 import { useState } from 'react'
+import { BrainstormResult, outcomeLabel } from '../../components/BrainstormResult'
 import { Markdown } from '../../components/Markdown'
 import { QuestionContent } from '../../components/QuestionContent'
 import { QuestionThread, authorLabel } from '../../components/QuestionThread'
 import { isHuman } from '../../lib/participants'
 import { timeAgo } from '../../lib/format'
 import { questionTitle } from '../../lib/thread'
-import { useAskOrchestrator } from '../../lib/queries'
+import { useAskOrchestrator, useSetOutcome } from '../../lib/queries'
 import { usePasteImage } from '../../lib/usePasteImage'
 import type { Question } from '../../lib/types'
 import './QuestionsTab.css'
@@ -27,6 +28,10 @@ function resolutionLabel(question: Question): string {
   // "resolved" would claim somebody did (spec v1 §«Тип треда»).
   if (question.type === 'fyi' || question.resolution === 'fyi') return 'fyi'
   if (question.resolution === 'dismissed') return 'dismissed'
+  // A storm answer is graded against the recommendation (task #4901).
+  if (question.type === 'brainstorm' && question.outcome) {
+    return outcomeLabel(question.outcome, question.answer_comment ?? '')
+  }
   return 'resolved'
 }
 
@@ -107,13 +112,16 @@ function AskOrchestratorForm({ taskId, disabled }: AskOrchestratorFormProps) {
   )
 }
 
-interface ResolvedThreadRowProps {
+export interface ResolvedThreadRowProps {
+  taskId: number
   question: Question
   orchestratorName?: string
 }
 
-function ResolvedThreadRow({ question, orchestratorName }: ResolvedThreadRowProps) {
+/** A closed thread, collapsed to one row; also the Brainstorm tab's answered questions. */
+export function ResolvedThreadRow({ taskId, question, orchestratorName }: ResolvedThreadRowProps) {
   const [open, setOpen] = useState(false)
+  const setOutcome = useSetOutcome()
 
   return (
     <div className="questions-tab__resolved">
@@ -141,6 +149,15 @@ function ResolvedThreadRow({ question, orchestratorName }: ResolvedThreadRowProp
             body={question.body}
             bodyClassName="questions-tab__resolved-question"
           />
+
+          {question.type === 'brainstorm' && (
+            <BrainstormResult
+              question={question}
+              busy={setOutcome.isPending}
+              error={setOutcome.error?.message}
+              onOverride={(outcome) => setOutcome.mutate({ id: question.id, taskId, outcome })}
+            />
+          )}
 
           {question.messages.length > 0 && (
             <div className="question-thread__messages">
@@ -195,7 +212,7 @@ export function QuestionsTab({ taskId, questions, orchestratorName, hasLiveOrche
         <>
           <div className="questions-tab__resolved-label">Resolved</div>
           {resolved.map((q) => (
-            <ResolvedThreadRow key={q.id} question={q} orchestratorName={orchestratorName} />
+            <ResolvedThreadRow key={q.id} taskId={taskId} question={q} orchestratorName={orchestratorName} />
           ))}
         </>
       )}

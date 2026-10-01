@@ -195,3 +195,67 @@ describe('ThreadCard with a brief', () => {
     expect(screen.queryByRole('button', { name: /Details/ })).not.toBeInTheDocument()
   })
 })
+
+// Storm questions in the inbox (task #4901 spec §3.1): the option buttons work
+// with the recommendation and a comment there too.
+describe('ThreadCard — storm thread', () => {
+  const storm: ThreadInboxEntry = {
+    ...entry,
+    type: 'brainstorm',
+    options: ['Kafka topic', 'Ledger table'],
+    recommended_option: 2,
+    chosen_option: null,
+    answer_comment: '',
+    answer_source: '',
+    outcome: '',
+  }
+
+  it('stars the recommendation and says the answer box rides along as the comment', async () => {
+    const onChoose = vi.fn()
+    renderCard({ entry: storm, onChoose })
+
+    expect(screen.getAllByText('★')).toHaveLength(1)
+    expect(screen.getByText(/goes with the option as your comment/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /Ledger table.*recommended/ }))
+    expect(onChoose).toHaveBeenCalledWith(1)
+  })
+
+  it('disables the outcome control while a change is in flight and shows its failure', () => {
+    renderCard({
+      entry: { ...storm, status: 'resolved', resolution: 'answered', chosen_option: 2, outcome: 'accepted' },
+      detail: { messages: [], resolutionText: 'Ledger table', isLoading: false },
+      onOverride: vi.fn(),
+      overrideBusy: true,
+      overrideError: 'only the human may override a brainstorm outcome',
+    })
+    expect(screen.getByLabelText('Outcome')).toBeDisabled()
+    expect(screen.getByRole('alert')).toHaveTextContent(/only the human/)
+  })
+
+  it('shows the outcome of a closed storm thread and lets the human change it', async () => {
+    const onOverride = vi.fn()
+    renderCard({
+      entry: {
+        ...storm,
+        status: 'resolved',
+        resolution: 'answered',
+        chosen_option: 1,
+        outcome: 'corrected',
+        answer_source: 'terminal',
+      },
+      detail: { messages: [], resolutionText: 'Kafka topic', isLoading: false },
+      onOverride,
+    })
+
+    expect(screen.getByText('Corrected', { selector: '.brainstorm-result__outcome' })).toBeInTheDocument()
+    expect(screen.getByText('From terminal')).toBeInTheDocument()
+    await userEvent.selectOptions(screen.getByLabelText('Outcome'), 'accepted')
+    expect(onOverride).toHaveBeenCalledWith('accepted')
+  })
+
+  it('keeps a decision thread free of the storm controls', () => {
+    renderCard({ entry: { ...entry, options: ['Yes', 'No'] } })
+    expect(screen.queryByText('★')).not.toBeInTheDocument()
+    expect(screen.queryByText(/goes with the option as your comment/)).not.toBeInTheDocument()
+  })
+})

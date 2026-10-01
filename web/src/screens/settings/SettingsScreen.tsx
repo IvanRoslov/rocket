@@ -3,6 +3,7 @@
 // is local UI state (no sub-routes), matching the mockup's `state.section`.
 
 import { useState } from 'react'
+import { BrainstormSection } from './BrainstormSection'
 import { DaemonSection } from './DaemonSection'
 import { DevicesSection } from './DevicesSection'
 import { GithubSection } from './GithubSection'
@@ -10,12 +11,13 @@ import { ProjectSection } from './ProjectSection'
 import { ReposSection } from './ReposSection'
 import './settings.css'
 
-type SettingsSection = 'github' | 'repos' | 'project' | 'daemon' | 'devices'
+type SettingsSection = 'github' | 'repos' | 'project' | 'brainstorm' | 'daemon' | 'devices'
 
 const NAV_ITEMS: { key: SettingsSection; label: string }[] = [
   { key: 'github', label: 'GitHub' },
   { key: 'repos', label: 'Repositories' },
   { key: 'project', label: 'Project' },
+  { key: 'brainstorm', label: 'Brainstorm' },
   { key: 'daemon', label: 'Daemon' },
   { key: 'devices', label: 'Устройства' },
 ]
@@ -42,6 +44,7 @@ export function SettingsScreen() {
         {section === 'github' && <GithubSection />}
         {section === 'repos' && <ReposSection />}
         {section === 'project' && <ProjectSection />}
+        {section === 'brainstorm' && <BrainstormSection />}
         {section === 'daemon' && <DaemonSection />}
         {section === 'devices' && <DevicesSection />}
       </div>

@@ -75,6 +75,11 @@ export function QuestionThread({ taskId, question, orchestratorName }: QuestionT
       onAnswer={(body, to) => answer.mutate({ id: question.id, body, to, taskId })}
       onDismiss={() => answer.mutate({ id: question.id, dismiss: true, taskId })}
       onChoose={(choose) => answer.mutate({ id: question.id, choose, taskId })}
+      brainstorm={question.type === 'brainstorm'}
+      recommendedOption={question.recommended_option}
+      onChooseWithComment={(choose, comment) =>
+        answer.mutate({ id: question.id, choose, body: comment, taskId })
+      }
     />
   )
 }

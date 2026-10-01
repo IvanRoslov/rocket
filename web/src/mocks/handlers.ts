@@ -12,6 +12,8 @@ import { slugify } from '../lib/slug'
 import type {
   Agent,
   AgentInboxMessage,
+  BrainstormOutcome,
+  BrainstormStorm,
   ChatEntry,
   PendingQuiz,
   Project,
@@ -21,6 +23,7 @@ import type {
   Settings,
   Task,
   TaskDoc,
+  TaskGate,
   TaskLogEntry,
   TaskStatus,
 } from '../lib/types'
@@ -28,6 +31,7 @@ import {
   agentInbox,
   agentQuestions,
   agents,
+  brainstormStats,
   chatEntries,
   githubIssues,
   githubRepos,
@@ -37,6 +41,9 @@ import {
   repos,
   sessions,
   settings,
+  stormDocs,
+  stormGates,
+  stormQuestions,
   subtasks,
   systemInfo,
   taskDocs,
@@ -133,25 +140,69 @@ export function appendChatEntry(sessionId: string, entry: ChatEntry): void {
 let tasksState: Task[] = [...tasks, ...subtasks, ...milestones].map((t) => ({ ...t }))
 let nextTaskId = Math.max(...tasksState.map((t) => t.id)) + 1
 
+// Storm gates (task #4901). A Go moves the task, so `resetTasks()` resets them too.
+let gatesState: TaskGate[] = stormGates.map((g) => ({ ...g }))
+
 export function resetTasks(): void {
   tasksState = [...tasks, ...subtasks, ...milestones].map((t) => ({ ...t }))
   nextTaskId = Math.max(...tasksState.map((t) => t.id)) + 1
+  gatesState = stormGates.map((g) => ({ ...g }))
 }
 
-let questionsState: Question[] = questions.map((q) => ({ ...q, messages: q.messages.map((m) => ({ ...m })) }))
+const allQuestions = (): Question[] =>
+  [...questions, ...stormQuestions].map((q) => ({ ...q, messages: q.messages.map((m) => ({ ...m })) }))
+let questionsState: Question[] = allQuestions()
 let nextQuestionId = Math.max(...questionsState.map((q) => q.id)) + 1
 
 export function resetQuestions(): void {
-  questionsState = questions.map((q) => ({ ...q, messages: q.messages.map((m) => ({ ...m })) }))
+  questionsState = allQuestions()
   nextQuestionId = Math.max(...questionsState.map((q) => q.id)) + 1
 }
 
-let docsState: TaskDoc[] = taskDocs.map((d) => ({ ...d }))
+let docsState: TaskDoc[] = [...taskDocs, ...stormDocs].map((d) => ({ ...d }))
 let nextDocId = Math.max(...docsState.map((d) => d.id)) + 1
 
 export function resetDocs(): void {
-  docsState = taskDocs.map((d) => ({ ...d }))
+  docsState = [...taskDocs, ...stormDocs].map((d) => ({ ...d }))
   nextDocId = Math.max(...docsState.map((d) => d.id)) + 1
+}
+
+/** Mirrors the outcome rule of store.ResolveBrainstormQuestion. */
+function stormOutcome(q: Question, chosen: number | null): BrainstormOutcome {
+  if (chosen === null) return 'wrong_turn'
+  return chosen === q.recommended_option ? 'accepted' : 'corrected'
+}
+
+/** The fields every thread carries for a storm answer (brainstormWire). */
+function brainstormWire(q: Question) {
+  return {
+    recommended_option: q.recommended_option ?? null,
+    chosen_option: q.chosen_option ?? null,
+    answer_comment: q.answer_comment ?? '',
+    answer_source: q.answer_source ?? '',
+    outcome: q.outcome ?? '',
+    outcome_overridden: q.outcome_overridden ?? false,
+    answered_by: q.answered_by ?? '',
+  }
+}
+
+/** An empty storm row — what the daemon reports for a task with no storm yet. */
+function emptyStorm(taskId: number): BrainstormStorm {
+  const task = tasksState.find((t) => t.id === taskId)
+  return {
+    task_id: taskId,
+    title: task?.title ?? '',
+    project_id: task?.project_id ?? '',
+    skill: task?.brainstorm_skill || 'unknown',
+    questions: 0,
+    answered: 0,
+    accepted: 0,
+    accepted_with_comment: 0,
+    corrected: 0,
+    wrong_turn: 0,
+    spec_changes: 0,
+    go_at: null,
+  }
 }
 
 let logState: TaskLogEntry[] = taskLog.map((l) => ({ ...l }))
@@ -660,9 +711,18 @@ export const handlers = [
     return HttpResponse.json(task)
   }),
 
-  http.get('/v1/tasks/:id/docs', ({ params }) => {
+  // Mirrors store.ListTaskDocs: only the newest version of each (kind, title)
+  // unless ?history=true asks for every version.
+  http.get('/v1/tasks/:id/docs', ({ params, request }) => {
     const id = Number(params.id)
-    return HttpResponse.json({ docs: docsState.filter((d) => d.task_id === id) })
+    const history = new URL(request.url).searchParams.get('history') === 'true'
+    const own = docsState.filter((d) => d.task_id === id)
+    const docs = history
+      ? own
+      : own.filter(
+          (d) => !own.some((o) => o.kind === d.kind && o.title === d.title && o.version > d.version),
+        )
+    return HttpResponse.json({ docs })
   }),
 
   http.put('/v1/tasks/:id/docs', async ({ params, request }) => {
@@ -760,6 +820,7 @@ export const handlers = [
         stale: q.stale,
         project_id: task?.project_id,
         task_title: task?.title,
+        ...brainstormWire(q),
       }
     })
 
@@ -873,6 +934,9 @@ export const handlers = [
     // `choose` is a 1-based index into `options`; the daemon substitutes the
     // option's own text as the answer (internal/api/threads.go
     // chooseOptionBody), so the mock does the same rather than echoing a body.
+    // On a storm thread the human's own words are the comment; the answer
+    // message is the option text followed by them (task #4901).
+    const comment = body.body ?? ''
     if (body.choose) {
       const picked = (question.options ?? [])[body.choose - 1]
       if (picked === undefined) {
@@ -881,8 +945,17 @@ export const handlers = [
           { status: 400 },
         )
       }
-      body.body = picked
+      body.body = question.type === 'brainstorm' && comment.trim() ? `${picked}\n\n${comment}` : picked
       delete body.to
+    }
+    if (question.type === 'brainstorm' && !body.dismiss) {
+      const chosen = body.choose ? body.choose : null
+      question.chosen_option = chosen
+      question.answer_comment = comment
+      question.answer_source = 'ui'
+      question.outcome = stormOutcome(question, chosen)
+      question.outcome_overridden = false
+      question.answered_by = 'human'
     }
     if (body.dismiss) {
       // Dismissing resolves the question without adding a thread message.
@@ -906,15 +979,90 @@ export const handlers = [
   }),
 
   // --------------------------------------------------------------------
+  // Storm — internal/api/brainstorm_questions.go, gates.go, stats (task #4901).
+  // --------------------------------------------------------------------
+
+  http.patch('/v1/questions/:id/outcome', async ({ params, request }) => {
+    const question = questionsState.find((q) => q.id === Number(params.id))
+    if (!question) {
+      return HttpResponse.json({ error: { code: 'not_found', message: 'question not found' } }, { status: 404 })
+    }
+    if (question.type !== 'brainstorm') {
+      return HttpResponse.json({ error: { code: 'not_brainstorm', message: 'only a brainstorm thread has an outcome' } }, { status: 400 })
+    }
+    if (question.status !== 'resolved' || question.resolution !== 'answered') {
+      return HttpResponse.json({ error: { code: 'not_answered', message: 'the thread has no answer to grade' } }, { status: 409 })
+    }
+    const body = (await request.json()) as { outcome: BrainstormOutcome }
+    question.outcome = body.outcome
+    question.outcome_overridden = true
+    return HttpResponse.json(question)
+  }),
+
+  http.get('/v1/tasks/:id/gates', ({ params }) => {
+    const id = Number(params.id)
+    return HttpResponse.json({ gates: gatesState.filter((g) => g.task_id === id).sort((a, b) => b.id - a.id) })
+  }),
+
+  http.post('/v1/gates/:id/decide', async ({ params, request }) => {
+    const gate = gatesState.find((g) => g.id === Number(params.id))
+    if (!gate) {
+      return HttpResponse.json({ error: { code: 'not_found', message: 'gate not found' } }, { status: 404 })
+    }
+    const body = (await request.json()) as { decision: 'go' | 'changes'; comment?: string }
+    const comment = (body.comment ?? '').trim()
+    if (body.decision === 'changes' && !comment) {
+      return HttpResponse.json({ error: { code: 'comment_required', message: 'needs-changes requires a comment' } }, { status: 400 })
+    }
+    if (gate.status !== 'pending') {
+      return HttpResponse.json(
+        { error: { code: 'gate_not_pending', message: `gate is ${gate.status}, not pending: request a new gate` } },
+        { status: 409 },
+      )
+    }
+    gate.status = body.decision
+    gate.comment = comment
+    gate.decided_by = 'human'
+    gate.decided_at = nowSeconds()
+    const task = tasksState.find((t) => t.id === gate.task_id)
+    if (body.decision === 'go' && task?.status === 'brainstorm') task.status = 'in_progress'
+    return HttpResponse.json(gate)
+  }),
+
+  http.get('/v1/tasks/:id/brainstorm/stats', ({ params }) => {
+    const id = Number(params.id)
+    return HttpResponse.json(brainstormStats.storms.find((s) => s.task_id === id) ?? emptyStorm(id))
+  }),
+
+  http.get('/v1/stats/brainstorm', () => HttpResponse.json(brainstormStats)),
+
+  // --------------------------------------------------------------------
   // Settings & GitHub — internal/api/settings.go, internal/api/
   // github_catalog.go. Verified against .superpowers/sdd/phase4-contract.md.
   // --------------------------------------------------------------------
 
   // GET always 200s; `login` is never present here (only on PUT).
-  http.get('/v1/settings', () => HttpResponse.json({ github_token: maskToken(settingsState.github_token) })),
+  http.get('/v1/settings', () =>
+    HttpResponse.json({
+      github_token: maskToken(settingsState.github_token),
+      orchestrator_brainstorm_custom: settingsState.orchestrator_brainstorm_custom ?? false,
+    }),
+  ),
 
   http.put('/v1/settings', async ({ request }) => {
-    const body = (await request.json()) as { github_token?: string }
+    const body = (await request.json()) as { github_token?: string; orchestrator_brainstorm_custom?: boolean }
+    // Only the fields present are applied (handlePutSettings): the storm
+    // toggle alone never touches the token.
+    if (body.github_token === undefined) {
+      if (body.orchestrator_brainstorm_custom === undefined) {
+        return HttpResponse.json({ error: { code: 'bad_request', message: 'nothing to update' } }, { status: 400 })
+      }
+      settingsState = { ...settingsState, orchestrator_brainstorm_custom: body.orchestrator_brainstorm_custom }
+      return HttpResponse.json({
+        github_token: maskToken(settingsState.github_token),
+        orchestrator_brainstorm_custom: settingsState.orchestrator_brainstorm_custom,
+      })
+    }
     const token = body.github_token ?? ''
     if (token === '') {
       settingsState = { github_token: '' }

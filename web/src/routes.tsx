@@ -3,6 +3,7 @@ import { AgentScreen } from './screens/agents/AgentScreen'
 import { AgentsScreen } from './screens/agents/AgentsScreen'
 import { GlobalAgentsScreen } from './screens/agents/GlobalAgentsScreen'
 import { AppShell } from './components/AppShell'
+import { BrainstormMetricsScreen } from './screens/brainstorm/BrainstormMetricsScreen'
 import { ChatScreen } from './screens/chat/ChatScreen'
 import { LoginScreen } from './screens/login/LoginScreen'
 import { KanbanScreen } from './screens/kanban/KanbanScreen'
@@ -43,6 +44,8 @@ export const router = createBrowserRouter([
       { path: '/milestones', element: <MilestonesScreen /> },
       { path: '/milestones/:taskId', element: <TaskScreen /> },
       { path: '/questions', element: <QuestionsScreen /> },
+      // Storm metric (task #4901): global, across projects.
+      { path: '/brainstorm', element: <BrainstormMetricsScreen /> },
       { path: '/system', element: <SystemScreen /> },
       { path: '/settings', element: <SettingsScreen /> },
     ],

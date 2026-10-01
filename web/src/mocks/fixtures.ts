@@ -9,6 +9,7 @@ import type {
   Agent,
   AgentInboxMessage,
   AgentQuestion,
+  BrainstormStats,
   ChatEntry,
   GithubIssue,
   GithubRepo,
@@ -22,6 +23,7 @@ import type {
   SystemInfo,
   Task,
   TaskDoc,
+  TaskGate,
   TaskLogEntry,
 } from '../lib/types'
 
@@ -339,11 +341,13 @@ export const tasks: Task[] = [
     description: 'Shape up per-seat vs per-event metering before committing to a plan.',
     project_id: 'billing',
     status: 'brainstorm',
+    // The storm showcase (task #4901): problem doc, storm questions, gates.
+    brainstorm_skill: 'orchestrator-brainstorming',
     created_by: 'user',
     created_at: NOW - 5 * DAY,
     updated_at: NOW - 1 * DAY,
-    open_questions: 0,
-    questions_awaiting_user: 0,
+    open_questions: 1,
+    questions_awaiting_user: 1,
   },
 ]
 
@@ -487,6 +491,50 @@ export const taskDocs: TaskDoc[] = [
       '1. Migrate schema (api)\n2. Rebuild billing UI (web)\n3. Cut over ' +
       'and monitor.',
     version: 1,
+    created_at: NOW - 2 * DAY,
+  },
+]
+
+/** Task #17's storm documents (task #4901): the problem, two spec versions, a plan. */
+export const stormDocs: TaskDoc[] = [
+  {
+    id: 101,
+    task_id: 17,
+    kind: 'problem',
+    title: 'Metering: problem',
+    body: 'Customers on per-seat plans pay for idle seats; **success** is a bill that follows real usage.',
+    version: 1,
+    author: 's-metering-orch',
+    created_at: NOW - 5 * DAY,
+  },
+  {
+    id: 102,
+    task_id: 17,
+    kind: 'spec',
+    title: 'Metering spec',
+    body: '# Metering v1\n\nPer-seat billing with idle-seat credits.',
+    version: 1,
+    author: 's-metering-orch',
+    created_at: NOW - 4 * DAY,
+  },
+  {
+    id: 103,
+    task_id: 17,
+    kind: 'spec',
+    title: 'Metering spec',
+    body: '# Metering v2\n\nPer-event billing, seats only as a floor.',
+    version: 2,
+    author: 's-metering-orch',
+    created_at: NOW - 2 * DAY,
+  },
+  {
+    id: 104,
+    task_id: 17,
+    kind: 'plan',
+    title: 'Metering plan',
+    body: '1. Event ledger\n2. Rating job\n3. Invoice lines',
+    version: 1,
+    author: 's-metering-orch',
     created_at: NOW - 2 * DAY,
   },
 ]
@@ -725,6 +773,144 @@ export const questions: Question[] = [
     ],
   },
 ]
+
+/**
+ * Task #17's storm questions (task #4901): Q1 answered from the terminal with
+ * the recommendation, Q2 open with ★ on option 2.
+ */
+export const stormQuestions: Question[] = [
+  {
+    id: 40,
+    task_id: 17,
+    ordinal: 1,
+    local_ref: '17/Q1',
+    asked_by: 's-metering-orch',
+    title: 'Bill per seat or per event?',
+    brief: 'Per-event follows usage; per-seat is simpler. **Recommendation:** per event.',
+    body: 'Which unit do we bill?',
+    status: 'resolved',
+    resolution: 'answered',
+    type: 'brainstorm',
+    options: ['Per seat', 'Per event', 'Hybrid'],
+    recommended_option: 2,
+    chosen_option: 2,
+    answer_comment: 'seats stay as a floor',
+    answer_source: 'terminal',
+    outcome: 'accepted',
+    outcome_overridden: false,
+    answered_by: 'human',
+    participants: ['human', 's-metering-orch'],
+    waiting_on: [],
+    attention: [],
+    your_turn: false,
+    whose_turn: '',
+    asked_at: NOW - 4 * DAY,
+    resolved_at: NOW - 4 * DAY + HOUR,
+    messages: [
+      {
+        id: 401,
+        author: 'human',
+        kind: 'answer',
+        body: 'Per event\n\nseats stay as a floor',
+        created_at: NOW - 4 * DAY + HOUR,
+      },
+    ],
+  },
+  {
+    id: 41,
+    task_id: 17,
+    ordinal: 2,
+    local_ref: '17/Q2',
+    asked_by: 's-metering-orch',
+    title: 'Where do usage events land?',
+    brief: 'A ledger table is cheap now; a queue scales later. **Recommendation:** ledger table.',
+    body: 'Where do we store raw usage events?',
+    status: 'open',
+    type: 'brainstorm',
+    options: ['Kafka topic', 'Ledger table in Postgres'],
+    recommended_option: 2,
+    chosen_option: null,
+    answer_comment: '',
+    answer_source: '',
+    outcome: '',
+    outcome_overridden: false,
+    answered_by: '',
+    participants: ['human', 's-metering-orch'],
+    waiting_on: ['human'],
+    attention: ['human'],
+    your_turn: true,
+    whose_turn: 'user',
+    asked_at: NOW - 1 * DAY,
+    messages: [],
+  },
+]
+
+/** Task #17's gates, newest first: v2 pending, v1 sent back for changes. */
+export const stormGates: TaskGate[] = [
+  {
+    id: 2,
+    task_id: 17,
+    spec_version: 2,
+    plan_version: 1,
+    status: 'pending',
+    comment: '',
+    decided_by: '',
+    requested_by: 's-metering-orch',
+    requested_at: NOW - 2 * DAY,
+    decided_at: null,
+  },
+  {
+    id: 1,
+    task_id: 17,
+    spec_version: 1,
+    plan_version: null,
+    status: 'changes',
+    comment: 'seats must stay as a floor',
+    decided_by: 'human',
+    requested_by: 's-metering-orch',
+    requested_at: NOW - 4 * DAY,
+    decided_at: NOW - 3 * DAY,
+  },
+]
+
+/** `GET /v1/stats/brainstorm` fixture. */
+export const brainstormStats: BrainstormStats = {
+  weeks: [
+    { week: '2026-W39', skill: 'superpowers:brainstorming', answered: 4, accepted: 2, accepted_with_comment: 1, corrected: 1, wrong_turn: 1 },
+    { week: '2026-W40', skill: 'orchestrator-brainstorming', answered: 5, accepted: 4, accepted_with_comment: 2, corrected: 1, wrong_turn: 0 },
+    { week: '2026-W40', skill: 'superpowers:brainstorming', answered: 2, accepted: 1, accepted_with_comment: 0, corrected: 0, wrong_turn: 1 },
+  ],
+  storms: [
+    {
+      task_id: 17,
+      title: 'Metering rewrite',
+      project_id: 'billing',
+      skill: 'orchestrator-brainstorming',
+      questions: 2,
+      answered: 1,
+      accepted: 1,
+      accepted_with_comment: 1,
+      corrected: 0,
+      wrong_turn: 0,
+      spec_changes: 1,
+      go_at: null,
+    },
+    {
+      task_id: 12,
+      title: 'Billing v2',
+      project_id: 'billing',
+      skill: 'superpowers:brainstorming',
+      questions: 6,
+      answered: 6,
+      accepted: 3,
+      accepted_with_comment: 1,
+      corrected: 2,
+      wrong_turn: 1,
+      spec_changes: 0,
+      go_at: NOW - 2 * DAY,
+    },
+  ],
+}
 
 export const messages: Message[] = [
   {

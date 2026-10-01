@@ -9,6 +9,7 @@
 import { useAnswerQuestion } from '../../lib/queries'
 import { questionTitle } from '../../lib/thread'
 import type { Question } from '../../lib/types'
+import '../../components/brainstorm.css'
 import './QuestionBanner.css'
 
 export interface QuestionBannerProps {
@@ -56,6 +57,11 @@ export function QuestionBanner({ taskId, question, onOpen }: QuestionBannerProps
               // `choose` is a 1-based index into `options`.
               onClick={() => answer.mutate({ id: question.id, choose: i + 1, taskId })}
             >
+              {question.recommended_option === i + 1 && (
+                <span className="brainstorm-options__star" title="Recommended by the agent">
+                  ★{' '}
+                </span>
+              )}
               {label}
             </button>
           ))}

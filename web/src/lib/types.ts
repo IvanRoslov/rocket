@@ -342,6 +342,12 @@ export interface Task {
    * by the daemon (subtask #1032); treat its absence as "not quiet".
    */
   quiet?: boolean
+  /**
+   * The storm skill remembered when the task was started (task #4901):
+   * `orchestrator-brainstorming` or `superpowers:brainstorming`; `""` on
+   * tasks started before the field existed, absent on an older daemon.
+   */
+  brainstorm_skill?: string
 }
 
 /**
@@ -360,7 +366,8 @@ export interface TaskDetail extends Task {
   open_questions: number
 }
 
-export type TaskDocKind = 'spec' | 'plan' | 'report' | 'doc'
+/** `problem` is the storm's first document — what hurts, for whom, what success is (task #4901). */
+export type TaskDocKind = 'spec' | 'plan' | 'report' | 'doc' | 'problem'
 
 /** `GET /v1/tasks/{id}/docs` entry. `author` is "" (omitted) for the user. */
 export interface TaskDoc {
@@ -393,12 +400,41 @@ export type QuestionStatus = 'open' | 'resolved'
  * §«Тип треда»).
  */
 export type QuestionResolution = 'answered' | 'dismissed' | 'fyi'
-/** `questions.type` — internal/api/threads.go `normalizeThreadType`. */
-export type ThreadType = 'decision' | 'fyi'
+/**
+ * `questions.type` — internal/api/threads.go `normalizeThreadType`.
+ * `brainstorm` is an orchestrator's storm question (task #4901): a decision
+ * thread that also records the recommendation and how the answer related to it.
+ */
+export type ThreadType = 'decision' | 'fyi' | 'brainstorm'
+
+/** How a storm answer related to the recommendation. */
+export type BrainstormOutcome = 'accepted' | 'corrected' | 'wrong_turn'
+
+/**
+ * `brainstormWire` — internal/api/brainstorm_questions.go. Sent on every task
+ * thread (questionResponse and the inbox row) so clients read one shape: on a
+ * non-storm thread the options are null and the strings empty. Optional here
+ * because an older daemon sends none of it.
+ */
+export interface BrainstormFields {
+  /** 1-based option the asker recommends; null when there is none. */
+  recommended_option?: number | null
+  /** 1-based option the human picked; null when they answered in their own words. */
+  chosen_option?: number | null
+  /** The human's own words next to the choice (or the whole answer). */
+  answer_comment?: string
+  /** `ui`, `terminal` (recorded by the orchestrator), or `""` while unanswered. */
+  answer_source?: 'ui' | 'terminal' | ''
+  outcome?: BrainstormOutcome | ''
+  /** The human changed the computed outcome by hand. */
+  outcome_overridden?: boolean
+  /** Who closed the thread with an answer: "human", an agent id, or "". */
+  answered_by?: string
+}
 export type QuestionWhoseTurn = 'user' | 'orchestrator' | ''
 
 /** `questionResponse` — internal/api/questions.go. */
-export interface Question {
+export interface Question extends BrainstormFields {
   id: number
   task_id: number
   /** 1-based, displayed as "Q<ordinal>". */
@@ -479,7 +515,7 @@ export interface GlobalQuestion extends Question {
  * It deliberately carries the question body only, never the conversation: a
  * row that is expanded fetches the full thread from its per-subject endpoint.
  */
-export interface ThreadInboxEntry {
+export interface ThreadInboxEntry extends BrainstormFields {
   /** "1023/Q2" or "cto/Q1" — the id a human types back. */
   local_ref: string
   kind: 'task' | 'role'
@@ -581,6 +617,70 @@ export interface GithubIssue {
 export interface Settings {
   github_token: string
   login?: string
+  /**
+   * Orchestrators storm with the custom `orchestrator-brainstorming` skill
+   * instead of `superpowers:brainstorming` (task #4901). Absent on an older daemon.
+   */
+  orchestrator_brainstorm_custom?: boolean
+}
+
+// ---------------------------------------------------------------------------
+// Storm gate and metric — internal/api/gates.go, GET /v1/stats/brainstorm
+// (task #4901). Times are unix seconds.
+// ---------------------------------------------------------------------------
+
+export type GateStatus = 'pending' | 'go' | 'changes' | 'superseded'
+
+/** `gateResponse` — one storm exit gate, bound to the spec (and plan) version current when requested. */
+export interface TaskGate {
+  id: number
+  task_id: number
+  spec_version: number
+  /** null when no plan existed at request time. */
+  plan_version: number | null
+  status: GateStatus
+  /** The human's comment — required on `changes`. */
+  comment: string
+  decided_by: string
+  requested_by: string
+  requested_at: number
+  /** null until decided. */
+  decided_at: number | null
+}
+
+/** Answer counters shared by a week row and a storm row. */
+export interface BrainstormCounts {
+  answered: number
+  accepted: number
+  accepted_with_comment: number
+  corrected: number
+  wrong_turn: number
+}
+
+/** One ISO week of one storm skill. `skill` is `"unknown"` for tasks started without one. */
+export interface BrainstormWeek extends BrainstormCounts {
+  /** ISO week, e.g. "2026-W40". */
+  week: string
+  skill: string
+}
+
+/** One task's storm — also the shape of `GET /v1/tasks/{id}/brainstorm/stats`. */
+export interface BrainstormStorm extends BrainstormCounts {
+  task_id: number
+  title: string
+  project_id: string
+  skill: string
+  questions: number
+  /** Gates decided `changes`. */
+  spec_changes: number
+  /** When the storm got its Go; null if not yet. */
+  go_at: number | null
+}
+
+/** `GET /v1/stats/brainstorm?weeks=N`. */
+export interface BrainstormStats {
+  weeks: BrainstormWeek[]
+  storms: BrainstormStorm[]
 }
 
 // ---------------------------------------------------------------------------

@@ -284,3 +284,57 @@ describe('QuestionThreadView, rebuilt card', () => {
     expect(screen.queryByText(/context/i)).not.toBeInTheDocument()
   })
 })
+
+// Storm questions (task #4901 spec §3.1): the recommendation is starred, a
+// choice can carry a comment, and the composer stays the "own answer" path.
+describe('QuestionThreadView — storm thread', () => {
+  const storm = {
+    ...base,
+    brainstorm: true,
+    options: ['Kafka topic', 'Ledger table'],
+    recommendedOption: 2,
+  }
+
+  it('stars only the recommended option', () => {
+    render(<QuestionThreadView {...storm} onChooseWithComment={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: /Ledger table.*recommended/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^1\s*Kafka topic$/ })).toBeInTheDocument()
+    expect(screen.getAllByText('★')).toHaveLength(1)
+  })
+
+  // One text box: whatever is typed in the reply box rides along with the
+  // picked option as the comment — never silently dropped.
+  it('sends the reply box text as the comment of the picked option', async () => {
+    const onChooseWithComment = vi.fn()
+    render(<QuestionThreadView {...storm} onChooseWithComment={onChooseWithComment} />)
+
+    await userEvent.type(screen.getByLabelText('Reply to Q2'), 'но с архивом')
+    await userEvent.click(screen.getByRole('button', { name: /Ledger table/ }))
+    expect(onChooseWithComment).toHaveBeenCalledWith(2, 'но с архивом')
+    expect(screen.getByLabelText('Reply to Q2')).toHaveValue('')
+  })
+
+  it('picks with no comment when the reply box is empty', async () => {
+    const onChooseWithComment = vi.fn()
+    render(<QuestionThreadView {...storm} onChooseWithComment={onChooseWithComment} />)
+    await userEvent.click(screen.getByRole('button', { name: /Kafka topic/ }))
+    expect(onChooseWithComment).toHaveBeenCalledWith(1, '')
+  })
+
+  it('answers in own words through the composer', async () => {
+    const onAnswer = vi.fn()
+    render(<QuestionThreadView {...storm} onAnswer={onAnswer} onChooseWithComment={vi.fn()} />)
+
+    await userEvent.type(screen.getByLabelText('Reply to Q2'), 'ни то ни другое')
+    await userEvent.click(screen.getByRole('button', { name: /Answer & close/ }))
+    expect(onAnswer).toHaveBeenCalledWith('ни то ни другое', [])
+  })
+
+  it('keeps a plain decision thread free of stars and comment field', () => {
+    render(<QuestionThreadView {...base} options={['Yes', 'No']} onChoose={vi.fn()} />)
+
+    expect(screen.queryByText('★')).not.toBeInTheDocument()
+    expect(screen.queryByText(/goes with the option as your comment/)).not.toBeInTheDocument()
+  })
+})

@@ -5,6 +5,7 @@
 // in the mutations wired into the callbacks below.
 
 import { useState } from 'react'
+import { BrainstormOptions } from './BrainstormOptions'
 import { Markdown } from './Markdown'
 import { QuestionContent } from './QuestionContent'
 import { timeAgo } from '../lib/format'
@@ -75,6 +76,16 @@ export interface QuestionThreadViewProps {
   onDismiss: () => void
   /** Close the thread by picking option `choose` — a **1-based** index. */
   onChoose?: (choose: number) => void
+  /**
+   * A storm question (task #4901): options render with the recommendation
+   * starred and a comment field, and picking one calls `onChooseWithComment`
+   * instead of `onChoose`. The composer's "Answer & close" stays the
+   * own-words answer.
+   */
+  brainstorm?: boolean
+  /** 1-based recommended option of a storm question. */
+  recommendedOption?: number | null
+  onChooseWithComment?: (choose: number, comment: string) => void
 }
 
 export function QuestionThreadView({
@@ -98,6 +109,9 @@ export function QuestionThreadView({
   onAnswer,
   onDismiss,
   onChoose,
+  brainstorm,
+  recommendedOption,
+  onChooseWithComment,
 }: QuestionThreadViewProps) {
   const [body, setBody] = useState('')
   const [allReplies, setAllReplies] = useState(false)
@@ -206,7 +220,19 @@ export function QuestionThreadView({
           })}
         </div>
 
-        {options && options.length > 0 && onChoose && (
+        {brainstorm && options && options.length > 0 && onChooseWithComment && (
+          <BrainstormOptions
+            options={options}
+            recommended={recommendedOption}
+            busy={busy}
+            onChoose={(choose) => {
+              onChooseWithComment(choose, body.trim())
+              setBody('')
+            }}
+          />
+        )}
+
+        {!brainstorm && options && options.length > 0 && onChoose && (
           <div className="question-thread__options" aria-label="Answer options">
             {options.map((label, i) => (
               <button
