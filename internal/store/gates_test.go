@@ -138,3 +138,91 @@ func TestSupersedePendingGatesOnlyTouchesPending(t *testing.T) {
 		t.Errorf("second supersede = %v, %v; want none", again, err)
 	}
 }
+
+// A spec written without going through the supersede path (or whose
+// supersede failed) must still stop a Go on the old version.
+func TestDecideTaskGateStaleSpecSupersedes(t *testing.T) {
+	s := openTestStore(t)
+	id := addGateTestTask(t, s)
+	putGateTestDoc(t, s, id, "spec")
+	g, _, err := s.RequestTaskGate(id, "orch")
+	if err != nil {
+		t.Fatalf("RequestTaskGate: %v", err)
+	}
+	putGateTestDoc(t, s, id, "spec")
+
+	got, err := s.DecideTaskGate(g.ID, "go", "", "user")
+	if !errors.Is(err, ErrGateSuperseded) {
+		t.Fatalf("err = %v, want ErrGateSuperseded", err)
+	}
+	if got.Status != "superseded" {
+		t.Errorf("returned status = %q, want superseded", got.Status)
+	}
+	stored, _ := s.GetTaskGate(g.ID)
+	if stored.Status != "superseded" || stored.DecidedAt != nil {
+		t.Errorf("stored = %+v, want superseded, undecided", stored)
+	}
+}
+
+func TestReopenTaskGate(t *testing.T) {
+	s := openTestStore(t)
+	id := addGateTestTask(t, s)
+	putGateTestDoc(t, s, id, "spec")
+	g, _, _ := s.RequestTaskGate(id, "orch")
+	if _, err := s.DecideTaskGate(g.ID, "go", "", "user"); err != nil {
+		t.Fatalf("DecideTaskGate: %v", err)
+	}
+	if err := s.ReopenTaskGate(g.ID); err != nil {
+		t.Fatalf("ReopenTaskGate: %v", err)
+	}
+	got, _ := s.GetTaskGate(g.ID)
+	if got.Status != "pending" || got.DecidedBy != "" || got.DecidedAt != nil || got.Comment != "" {
+		t.Errorf("reopened = %+v, want clean pending", got)
+	}
+	if _, err := s.DecideTaskGate(g.ID, "go", "", "user"); err != nil {
+		t.Errorf("decide after reopen: %v", err)
+	}
+}
+
+func TestOnePendingGatePerTask(t *testing.T) {
+	s := openTestStore(t)
+	id := addGateTestTask(t, s)
+	putGateTestDoc(t, s, id, "spec")
+	if _, _, err := s.RequestTaskGate(id, "orch"); err != nil {
+		t.Fatalf("RequestTaskGate: %v", err)
+	}
+	_, err := s.db.Exec(`INSERT INTO task_gates (task_id, spec_version, status, requested_at) VALUES (?, 1, 'pending', 1)`, id)
+	if err == nil {
+		t.Fatal("second pending gate inserted, want unique violation")
+	}
+}
+
+func TestRequestTaskGateConcurrent(t *testing.T) {
+	s := openTestStore(t)
+	id := addGateTestTask(t, s)
+	putGateTestDoc(t, s, id, "spec")
+
+	const n = 8
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			_, _, err := s.RequestTaskGate(id, "orch")
+			errs <- err
+		}()
+	}
+	for i := 0; i < n; i++ {
+		if err := <-errs; err != nil {
+			t.Errorf("concurrent request: %v", err)
+		}
+	}
+	gates, _ := s.ListTaskGates(id)
+	pending := 0
+	for _, g := range gates {
+		if g.Status == "pending" {
+			pending++
+		}
+	}
+	if len(gates) != n || pending != 1 {
+		t.Errorf("gates = %d, pending = %d; want %d and 1", len(gates), pending, n)
+	}
+}

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -15,6 +16,10 @@ var (
 	// ErrGateNotPending is returned by DecideTaskGate for a gate that was
 	// already decided or superseded.
 	ErrGateNotPending = errors.New("gate is not pending")
+	// ErrGateSuperseded is returned by DecideTaskGate when a newer spec
+	// version exists than the one the gate was requested for; the gate is
+	// moved to superseded on the way.
+	ErrGateSuperseded = errors.New("gate is superseded by a newer spec")
 )
 
 // TaskGate is one storm exit gate (task #4901, spec v1 §2.3): a request to
@@ -58,6 +63,61 @@ type queryer interface {
 	QueryRow(query string, args ...any) *sql.Row
 	Query(query string, args ...any) (*sql.Rows, error)
 	Exec(query string, args ...any) (sql.Result, error)
+}
+
+// immediateTx is a write transaction opened with BEGIN IMMEDIATE on a
+// dedicated connection: it takes SQLite's write lock up front, so concurrent
+// writers queue on busy_timeout instead of failing to upgrade a read lock
+// (SQLITE_BUSY) halfway through. database/sql has no per-transaction lock
+// mode, and the DSN-wide _txlock would change every transaction in the store.
+type immediateTx struct {
+	ctx  context.Context
+	conn *sql.Conn
+	done bool
+}
+
+func (s *Store) beginImmediate() (*immediateTx, error) {
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return &immediateTx{ctx: ctx, conn: conn}, nil
+}
+
+func (t *immediateTx) QueryRow(q string, args ...any) *sql.Row {
+	return t.conn.QueryRowContext(t.ctx, q, args...)
+}
+
+func (t *immediateTx) Query(q string, args ...any) (*sql.Rows, error) {
+	return t.conn.QueryContext(t.ctx, q, args...)
+}
+
+func (t *immediateTx) Exec(q string, args ...any) (sql.Result, error) {
+	return t.conn.ExecContext(t.ctx, q, args...)
+}
+
+func (t *immediateTx) Commit() error {
+	_, err := t.conn.ExecContext(t.ctx, `COMMIT`)
+	if err == nil {
+		t.done = true
+		t.conn.Close()
+	}
+	return err
+}
+
+// Rollback is a no-op after a successful Commit, so it can be deferred.
+func (t *immediateTx) Rollback() {
+	if t.done {
+		return
+	}
+	t.done = true
+	t.conn.ExecContext(t.ctx, `ROLLBACK`) //nolint:errcheck // best effort
+	t.conn.Close()
 }
 
 // latestDocVersion returns the version of the most recently written doc of
@@ -119,11 +179,11 @@ func supersedePending(q queryer, taskID int64) ([]TaskGate, error) {
 // plan versions. Any gate already pending on the task is superseded first and
 // returned as superseded. Without a spec it fails with ErrNoSpec.
 func (s *Store) RequestTaskGate(taskID int64, requestedBy string) (TaskGate, []TaskGate, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.beginImmediate()
 	if err != nil {
 		return TaskGate{}, nil, fmt.Errorf("begin request gate tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck // no-op if committed
+	defer tx.Rollback()
 
 	spec, ok, err := latestDocVersion(tx, taskID, "spec")
 	if err != nil {
@@ -218,27 +278,65 @@ func (s *Store) ListTaskGates(taskID int64) ([]TaskGate, error) {
 
 // DecideTaskGate records the human's decision (go | changes) on a pending
 // gate. A gate that is no longer pending fails with ErrGateNotPending; an
-// unknown id with ErrNotFound. The status check and the update are one
-// statement, so two concurrent decisions cannot both win.
+// unknown id with ErrNotFound. A gate whose spec version is no longer the
+// task's latest is moved to superseded and fails with ErrGateSuperseded — the
+// check is part of the conditional UPDATE, so a spec written concurrently (or
+// one whose on-put supersede failed) can never be approved by a stale gate.
 func (s *Store) DecideTaskGate(id int64, status, comment, decidedBy string) (TaskGate, error) {
 	if status != "go" && status != "changes" {
 		return TaskGate{}, fmt.Errorf("invalid gate decision %q", status)
 	}
-	res, err := s.db.Exec(`UPDATE task_gates SET status = ?, comment = ?, decided_by = ?, decided_at = ?
-		WHERE id = ? AND status = 'pending'`, status, comment, decidedBy, time.Now().Unix(), id)
+	tx, err := s.beginImmediate()
 	if err != nil {
-		return TaskGate{}, fmt.Errorf("decide gate: %w", err)
+		return TaskGate{}, fmt.Errorf("begin decide gate tx: %w", err)
 	}
-	n, err := res.RowsAffected()
+	defer tx.Rollback()
+
+	g, err := scanTaskGate(tx.QueryRow(`SELECT `+gateColumns+` FROM task_gates WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return TaskGate{}, ErrNotFound
+	}
 	if err != nil {
-		return TaskGate{}, fmt.Errorf("decide gate rows: %w", err)
+		return TaskGate{}, fmt.Errorf("get gate: %w", err)
 	}
-	g, err := s.GetTaskGate(id)
+	if g.Status != "pending" {
+		return g, ErrGateNotPending
+	}
+	spec, _, err := latestDocVersion(tx, g.TaskID, "spec")
 	if err != nil {
 		return TaskGate{}, err
 	}
-	if n == 0 {
-		return g, ErrGateNotPending
+	if spec != g.SpecVersion {
+		if _, err := tx.Exec(`UPDATE task_gates SET status = 'superseded' WHERE id = ?`, id); err != nil {
+			return TaskGate{}, fmt.Errorf("supersede stale gate: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return TaskGate{}, fmt.Errorf("commit supersede stale gate: %w", err)
+		}
+		g.Status = "superseded"
+		return g, ErrGateSuperseded
 	}
+
+	now := time.Now().Unix()
+	if _, err := tx.Exec(`UPDATE task_gates SET status = ?, comment = ?, decided_by = ?, decided_at = ?
+		WHERE id = ?`, status, comment, decidedBy, now, id); err != nil {
+		return TaskGate{}, fmt.Errorf("decide gate: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return TaskGate{}, fmt.Errorf("commit decide gate: %w", err)
+	}
+	g.Status, g.Comment, g.DecidedBy, g.DecidedAt = status, comment, decidedBy, &now
 	return g, nil
+}
+
+// ReopenTaskGate rolls a decided gate back to a clean pending state. It undoes
+// a decision whose follow-up (the task's status move) failed, so the human's
+// retry is a fresh decision rather than a 409. Only go/changes gates move.
+func (s *Store) ReopenTaskGate(id int64) error {
+	_, err := s.db.Exec(`UPDATE task_gates SET status = 'pending', comment = '', decided_by = '', decided_at = NULL
+		WHERE id = ? AND status IN ('go', 'changes')`, id)
+	if err != nil {
+		return fmt.Errorf("reopen gate: %w", err)
+	}
+	return nil
 }

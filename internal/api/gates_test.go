@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -353,6 +354,73 @@ func TestDecideGateWithoutLiveOrchestrator(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if task, _ := f.d.Store.GetTask(f.taskID); task.Status != "in_progress" {
+		t.Errorf("task status = %q, want in_progress", task.Status)
+	}
+}
+
+// A spec written behind the supersede path's back (concurrent put, or a
+// failed on-put supersede) still blocks Go on the old version.
+func TestDecideGateStaleSpecWithoutOnPutSupersede(t *testing.T) {
+	f := newGateFixture(t, "brainstorm")
+	f.putDoc(t, "spec")
+	g := f.request(t, "orch-1")
+	if _, err := f.d.Store.PutTaskDoc(store.TaskDoc{TaskID: f.taskID, Kind: "spec", Title: "spec", Body: "v2"}); err != nil {
+		t.Fatalf("PutTaskDoc: %v", err)
+	}
+
+	resp := f.decide(t, "", g.ID, "go", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	if eb := decodeErr(t, resp); eb.Error.Code != "gate_superseded" {
+		t.Errorf("code = %q, want gate_superseded", eb.Error.Code)
+	}
+	if task, _ := f.d.Store.GetTask(f.taskID); task.Status != "brainstorm" {
+		t.Errorf("task status = %q, want brainstorm", task.Status)
+	}
+	if got, _ := f.d.Store.GetTaskGate(g.ID); got.Status != "superseded" {
+		t.Errorf("gate status = %q, want superseded", got.Status)
+	}
+	if len(f.eventTypes(t)["task.gate_superseded"]) != 1 {
+		t.Errorf("want one task.gate_superseded event")
+	}
+	if msgs := f.orchMessages(t); len(msgs) != 0 {
+		t.Errorf("messages = %q, want none", msgs)
+	}
+}
+
+// If the Go's status move fails, the decision is rolled back so the human's
+// retry works instead of hitting 409.
+func TestDecideGateGoStatusFailureIsRetryable(t *testing.T) {
+	f := newGateFixture(t, "brainstorm")
+	f.putDoc(t, "spec")
+	g := f.request(t, "orch-1")
+
+	orig := gateStatusChange
+	gateStatusChange = func(Deps, store.Task, *store.Session, string) error { return errors.New("boom") }
+	resp := f.decide(t, "", g.ID, "go", "")
+	resp.Body.Close()
+	gateStatusChange = orig
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", resp.StatusCode)
+	}
+	if got, _ := f.d.Store.GetTaskGate(g.ID); got.Status != "pending" {
+		t.Fatalf("gate status = %q after failed move, want pending", got.Status)
+	}
+	if msgs := f.orchMessages(t); len(msgs) != 0 {
+		t.Errorf("messages = %q, want none after failure", msgs)
+	}
+	if len(f.eventTypes(t)["task.gate_decided"]) != 0 {
+		t.Errorf("gate_decided published for a rolled-back decision")
+	}
+
+	resp = f.decide(t, "", g.ID, "go", "")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("retry status = %d, want 200", resp.StatusCode)
 	}
 	if task, _ := f.d.Store.GetTask(f.taskID); task.Status != "in_progress" {
 		t.Errorf("task status = %q, want in_progress", task.Status)

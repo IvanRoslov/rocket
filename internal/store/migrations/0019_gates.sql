@@ -21,3 +21,7 @@ CREATE TABLE IF NOT EXISTS task_gates (
 );
 
 CREATE INDEX IF NOT EXISTS idx_task_gates_task ON task_gates(task_id, id);
+
+-- Не больше одного ожидающего гейта на задачу: запрос нового снимает старый в
+-- той же транзакции, а индекс страхует от гонки двух запросов.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_task_gates_one_pending ON task_gates(task_id) WHERE status = 'pending';

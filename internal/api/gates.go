@@ -47,6 +47,10 @@ func toGateResponse(g store.TaskGate) gateResponse {
 	}
 }
 
+// gateStatusChange is the status move a Go performs; a variable so tests can
+// make it fail and check the decision is rolled back.
+var gateStatusChange = applyTaskStatusChange
+
 func registerGateRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("POST /v1/tasks/{id}/gates", func(w http.ResponseWriter, r *http.Request) {
 		handleRequestGate(w, r, d)
@@ -165,6 +169,12 @@ func handleDecideGate(w http.ResponseWriter, r *http.Request, d Deps) {
 	case errors.Is(err, store.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "not_found", "gate not found")
 		return
+	case errors.Is(err, store.ErrGateSuperseded):
+		if task, terr := d.Store.GetTask(gate.TaskID); terr == nil {
+			publishGate(d, "task.gate_superseded", task.SessionID, gate)
+		}
+		writeErr(w, http.StatusConflict, "gate_superseded", "the spec changed after this gate was requested: request a new gate")
+		return
 	case errors.Is(err, store.ErrGateNotPending):
 		writeErr(w, http.StatusConflict, "gate_not_pending", "gate is "+gate.Status+", not pending: request a new gate")
 		return
@@ -174,25 +184,16 @@ func handleDecideGate(w http.ResponseWriter, r *http.Request, d Deps) {
 	}
 
 	task, err := d.Store.GetTask(gate.TaskID)
+	if err == nil && gate.Status == "go" {
+		err = applyGo(d, task, caller, gate)
+	}
 	if err != nil {
+		// Undo the decision so the human's retry is a fresh decision, not 409.
+		if rerr := d.Store.ReopenTaskGate(gate.ID); rerr != nil {
+			slog.Warn("api: reopen gate after failed decision", "gate_id", gate.ID, "err", rerr)
+		}
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
-	}
-
-	if gate.Status == "go" {
-		if task.Status == "brainstorm" {
-			if err := applyTaskStatusChange(d, task, caller, "in_progress"); err != nil {
-				writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-				return
-			}
-		} else if _, err := d.Store.AddTaskLog(store.TaskLogEntry{
-			TaskID: task.ID,
-			Kind:   "note",
-			Body:   fmt.Sprintf("gate #%d: go по спеке v%d; статус задачи %s не тронут (не brainstorm)", gate.ID, gate.SpecVersion, task.Status),
-		}); err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
-		}
 	}
 
 	publishGate(d, "task.gate_decided", task.SessionID, gate)
@@ -204,6 +205,21 @@ func handleDecideGate(w http.ResponseWriter, r *http.Request, d Deps) {
 	}
 
 	writeJSON(w, http.StatusOK, toGateResponse(gate))
+}
+
+// applyGo performs a Go's effect on the task: brainstorm → in_progress the
+// way `rocket task move` does it, or — when the task has already left
+// brainstorm — just a journal note, leaving the status alone.
+func applyGo(d Deps, task store.Task, caller *store.Session, gate store.TaskGate) error {
+	if task.Status == "brainstorm" {
+		return gateStatusChange(d, task, caller, "in_progress")
+	}
+	_, err := d.Store.AddTaskLog(store.TaskLogEntry{
+		TaskID: task.ID,
+		Kind:   "note",
+		Body:   fmt.Sprintf("gate #%d: go по спеке v%d; статус задачи %s не тронут (не brainstorm)", gate.ID, gate.SpecVersion, task.Status),
+	})
+	return err
 }
 
 // gateMessage is the text delivered to the task's orchestrator on a decision.
