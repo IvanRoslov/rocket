@@ -40,3 +40,22 @@ func (s *Store) DeleteSetting(key string) error {
 	}
 	return nil
 }
+
+// SettingOrchestratorBrainstormCustom is the settings key of the
+// "custom orchestrator brainstorm" toggle: "true" makes newly started tasks'
+// orchestrators run rocket's own orchestrator-brainstorming skill instead of
+// superpowers:brainstorming. Unset means off.
+const SettingOrchestratorBrainstormCustom = "orchestrator_brainstorm_custom"
+
+// OrchestratorBrainstormCustom reports whether the custom orchestrator
+// brainstorm toggle is on. Only the exact value "true" turns it on.
+func (s *Store) OrchestratorBrainstormCustom() (bool, error) {
+	v, err := s.GetSetting(SettingOrchestratorBrainstormCustom)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return v == "true", nil
+}
