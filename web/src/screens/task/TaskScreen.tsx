@@ -90,6 +90,17 @@ export function TaskScreen() {
   )
   const bannerQuestion = openQuestions[0]
 
+  // Another task in the same screen instance (a subtask link) starts over.
+  const [tabTaskId, setTabTaskId] = useState(taskId)
+  if (tabTaskId !== taskId) {
+    setTabTaskId(taskId)
+    setTab(null)
+  }
+  // The default is decided once, when the task first loads — a Go moves the
+  // task out of brainstorm, and the tab must not jump away from under the
+  // human who just pressed it.
+  if (task && task.id === taskId && pickedTab === null) setTab(task.status === 'brainstorm' ? 'brainstorm' : 'overview')
+
   if (!taskId || !task) return null
   const tab: TabId = pickedTab ?? (task.status === 'brainstorm' ? 'brainstorm' : 'overview')
 

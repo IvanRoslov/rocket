@@ -9,7 +9,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { handlers, resetDocs, resetQuestions, resetSessions, resetTasks } from '../../mocks/handlers'
 import { TaskScreen } from './TaskScreen'
@@ -74,6 +74,30 @@ describe('Brainstorm tab — default', () => {
     renderTask(12, '?tab=brainstorm')
     expect(await screen.findByText('Billing v2')).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /Brainstorm/ })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  // A subtask/parent link keeps the same TaskScreen instance: the next task
+  // gets its own default, not the tab picked on the previous one.
+  it('re-picks the default when the screen moves to another task', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/p/billing/tasks/12']}>
+          <Link to="/p/billing/tasks/17">go to 17</Link>
+          <Routes>
+            <Route path="/p/:projectId/tasks/:taskId" element={<TaskScreen />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByText('Billing v2')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Overview/ })).toHaveAttribute('aria-selected', 'true')
+
+    await userEvent.click(screen.getByRole('link', { name: 'go to 17' }))
+    expect(await screen.findByText('Metering rewrite')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: /Brainstorm/ })).toHaveAttribute('aria-selected', 'true'),
+    )
   })
 })
 
@@ -141,6 +165,15 @@ describe('Brainstorm tab — exit gate', () => {
     const gate = (await within(tab).findByRole('region', { name: 'Storm exit' })) as HTMLElement
     await userEvent.click(within(gate).getByRole('button', { name: 'Go' }))
     await waitFor(() => expect(bodies).toEqual([{ decision: 'go', comment: '' }]))
+  })
+
+  // A Go moves the task out of brainstorm; the human must stay where they are.
+  it('stays on the Brainstorm tab after Go moves the task to in progress', async () => {
+    const tab = await openStorm()
+    const gate = (await within(tab).findByRole('region', { name: 'Storm exit' })) as HTMLElement
+    await userEvent.click(within(gate).getByRole('button', { name: 'Go' }))
+    expect(await screen.findByText('In Progress')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Brainstorm/ })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('Needs changes requires a comment', async () => {
