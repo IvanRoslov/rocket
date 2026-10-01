@@ -28,6 +28,11 @@ func TestCloseRequestBody(t *testing.T) {
 			want: map[string]any{"choose": 2},
 		},
 		{
+			name: "выбором варианта с комментарием",
+			opts: threadCloseOptions{choose: 2, body: "но без кэша"},
+			want: map[string]any{"choose": 2, "body": "но без кэша"},
+		},
+		{
 			name: "как неактуальный",
 			opts: threadCloseOptions{dismiss: true},
 			want: map[string]any{"dismiss": true},
@@ -80,7 +85,9 @@ func TestCloseOptionsValidate(t *testing.T) {
 		{"выбор", threadCloseOptions{choose: 1}, false},
 		{"dismiss", threadCloseOptions{dismiss: true}, false},
 		{"dismiss с причиной", threadCloseOptions{dismiss: true, body: "почему"}, false},
-		{"выбор и ответ вместе", threadCloseOptions{choose: 1, body: "текст"}, true},
+		// With a choice the text is the chooser's comment, not a second resolution.
+		{"выбор с комментарием", threadCloseOptions{choose: 1, body: "текст"}, false},
+		{"dismiss с выбором и текстом", threadCloseOptions{choose: 1, dismiss: true, body: "текст"}, true},
 		{"выбор и dismiss вместе", threadCloseOptions{choose: 1, dismiss: true}, true},
 		{"ничего", threadCloseOptions{}, true},
 		{"отрицательный выбор", threadCloseOptions{choose: -1}, true},

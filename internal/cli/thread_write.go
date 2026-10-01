@@ -14,7 +14,7 @@ import (
 // Shared flag help, so all six writing commands describe a flag identically.
 const (
 	dismissFlagUsage = "закрыть тред без ответа (можно с текстом-причиной)"
-	chooseFlagUsage  = "закрыть тред выбором варианта по его номеру (1-based)"
+	chooseFlagUsage  = "закрыть тред выбором варианта по его номеру (1-based); текст рядом — комментарий к выбору"
 	dryRunFlagUsage  = "показать цель записи и ничего не отправлять"
 	joinFlagUsage    = "войти в тред, участником которого вы не являетесь (осознанно)"
 	disputeFlagUsage = "оспорить финальный ответ: реплика переоткрывает закрытый тред"
@@ -58,7 +58,8 @@ func disputeHint(status string, dispute, dryRun bool) string {
 }
 
 // threadCloseOptions is a close, in one of three mutually exclusive flavours:
-// an answer, a choice among the thread's options, or a dismissal.
+// an answer, a choice among the thread's options (optionally with a comment),
+// or a dismissal.
 type threadCloseOptions struct {
 	body    string
 	choose  int
@@ -79,11 +80,12 @@ func (o threadCloseOptions) validate(usage string) error {
 	if o.choose > 0 {
 		given++
 	}
-	// A dismissal may carry a reason, so the two count as one way of closing;
-	// a bare answer counts separately.
+	// A dismissal may carry a reason and a choice may carry a comment, so in
+	// both the text is part of that one way of closing; only a bare answer
+	// counts on its own.
 	if o.dismiss {
 		given++
-	} else if o.body != "" {
+	} else if o.body != "" && o.choose == 0 {
 		given++
 	}
 	if given != 1 {
@@ -104,6 +106,11 @@ func (o threadCloseOptions) requestBody() map[string]any {
 		}
 	case o.choose > 0:
 		req["choose"] = o.choose
+		// The comment follows the option text in the answer; on a brainstorm
+		// thread it is also recorded as the human's comment to the choice.
+		if o.body != "" {
+			req["body"] = o.body
+		}
 	default:
 		req["body"] = o.body
 	}

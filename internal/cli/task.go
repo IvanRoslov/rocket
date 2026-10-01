@@ -153,15 +153,24 @@ type questionRow struct {
 	YourTurn     bool     `json:"your_turn,omitempty"`
 	WhoseTurn    string   `json:"whose_turn,omitempty"`
 	// Attention is WaitingOn under its stored name (task #1023); Type is
-	// decision|fyi; Options are the answer choices --choose picks from;
-	// LocalRef is the one id printed and typed back, e.g. "1023/Q2".
-	Attention  []string             `json:"attention,omitempty"`
-	Type       string               `json:"type,omitempty"`
-	Options    []string             `json:"options,omitempty"`
-	LocalRef   string               `json:"local_ref,omitempty"`
-	AskedAt    int64                `json:"asked_at"`
-	ResolvedAt int64                `json:"resolved_at,omitempty"`
-	Messages   []questionMessageRow `json:"messages"`
+	// decision|fyi|brainstorm; Options are the answer choices --choose picks
+	// from; LocalRef is the one id printed and typed back, e.g. "1023/Q2".
+	Attention []string `json:"attention,omitempty"`
+	Type      string   `json:"type,omitempty"`
+	Options   []string `json:"options,omitempty"`
+	LocalRef  string   `json:"local_ref,omitempty"`
+	// The recommendation and the recorded answer of a brainstorm thread
+	// (task #4901); absent or null on every other thread.
+	RecommendedOption *int                 `json:"recommended_option,omitempty"`
+	ChosenOption      *int                 `json:"chosen_option,omitempty"`
+	AnswerComment     string               `json:"answer_comment,omitempty"`
+	AnswerSource      string               `json:"answer_source,omitempty"`
+	Outcome           string               `json:"outcome,omitempty"`
+	OutcomeOverridden bool                 `json:"outcome_overridden,omitempty"`
+	AnsweredBy        string               `json:"answered_by,omitempty"`
+	AskedAt           int64                `json:"asked_at"`
+	ResolvedAt        int64                `json:"resolved_at,omitempty"`
+	Messages          []questionMessageRow `json:"messages"`
 	// Echo is the target confirmation a write returns; DryRun marks a write
 	// that was only rehearsed. Both are absent on a read.
 	Echo   string `json:"echo,omitempty"`
@@ -224,6 +233,7 @@ func newTaskCmd() *cobra.Command {
 	cmd.AddCommand(newTaskReplyCmd())
 	cmd.AddCommand(newTaskCloseCmd(false))
 	cmd.AddCommand(newTaskAnswerCmd())
+	cmd.AddCommand(newTaskBrainstormCmd())
 	return cmd
 }
 
@@ -789,8 +799,10 @@ func newTaskAskCmd() *cobra.Command {
 	var file string
 	var options []string
 	var fyi bool
+	var brainstorm bool
+	var recommend int
 
-	const usage = "usage: rocket task ask <task-id> \"<вопрос>\" | --file <path> [--title <строка>] [--brief <md>] [--context <md>] [--to <id,...>] [--option <текст>]... [--fyi]"
+	const usage = "usage: rocket task ask <task-id> \"<вопрос>\" | --file <path> [--title <строка>] [--brief <md>] [--context <md>] [--to <id,...>] [--option <текст>]... [--fyi | --brainstorm [--recommend <n>]]"
 
 	cmd := &cobra.Command{
 		Use:   "ask <task-id> [\"<вопрос>\"]",
@@ -803,6 +815,9 @@ func newTaskAskCmd() *cobra.Command {
 				return &usageError{message: "invalid task id"}
 			}
 			if err := validateAskFlags(options, fyi, usage); err != nil {
+				return err
+			}
+			if err := validateBrainstormFlags(brainstorm, fyi, options, recommend, usage); err != nil {
 				return err
 			}
 
@@ -825,6 +840,7 @@ func newTaskAskCmd() *cobra.Command {
 
 			reqBody := askRequestBody(title, body, context, parseTo(to), options, fyi)
 			setBrief(reqBody, brief)
+			setBrainstorm(reqBody, brainstorm, recommend)
 
 			path := apiPath("v1", "tasks", args[0], "questions")
 			var resp questionRow
@@ -847,6 +863,8 @@ func newTaskAskCmd() *cobra.Command {
 	cmd.Flags().StringVar(&file, "file", "", "файл с вопросом ('-' — stdin)")
 	cmd.Flags().StringArrayVar(&options, "option", nil, optionFlagUsage)
 	cmd.Flags().BoolVar(&fyi, "fyi", false, fyiFlagUsage)
+	cmd.Flags().BoolVar(&brainstorm, "brainstorm", false, brainstormFlagUsage)
+	cmd.Flags().IntVar(&recommend, "recommend", 0, recommendFlagUsage)
 	return cmd
 }
 
@@ -1080,7 +1098,7 @@ func newTaskCloseCmd(hidden bool) *cobra.Command {
 	}
 
 	usage := "usage: rocket task " + name + " <task-id>/Q<n>|<question-id> \"<резолюция>\" | --file <path> | " +
-		"--choose <n> | --dismiss [\"<почему>\"] (ровно одно) [--task <task-id>] [--to <id,...>] [--dry-run] [--join]"
+		"--choose <n> [\"<комментарий>\"] | --dismiss [\"<почему>\"] (ровно одно) [--task <task-id>] [--to <id,...>] [--dry-run] [--join]"
 
 	cmd := &cobra.Command{
 		Use:    name + " <task-id>/Q<n>|<question-id> [\"<резолюция>\"]",
