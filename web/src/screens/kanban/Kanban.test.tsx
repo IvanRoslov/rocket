@@ -95,6 +95,19 @@ test('question badge: neutral "open" when open_questions > 0 but nothing awaitin
   expect(within(card).queryByText(/awaiting you/)).not.toBeInTheDocument()
 })
 
+// A storm question is answered in the Brainstorm tab and counts once per task
+// (task #4901, spec v2 §3.1): the card says a storm waits, not "N awaiting you".
+// #17 "Metering rewrite" (fixtures.ts): its one open question, 17/Q2, is a storm one.
+test('question badge: a storm waiting on you is one marker, not a question count', async () => {
+  renderKanban()
+  await waitFor(() => expect(screen.getByText('Metering rewrite')).toBeInTheDocument())
+
+  const card = screen.getByText('Metering rewrite').closest('.kanban-card') as HTMLElement
+  await waitFor(() => expect(within(card).getByText('Storm waiting')).toBeInTheDocument())
+  expect(within(card).queryByText(/awaiting you/)).not.toBeInTheDocument()
+  expect(within(card).queryByText(/\? \d+ open/)).not.toBeInTheDocument()
+})
+
 test('Brainstorm column sits between Backlog and In Progress and holds brainstorm tasks', async () => {
   renderKanban()
   await waitFor(() => expect(screen.getByText('Invoice PDF export')).toBeInTheDocument())
