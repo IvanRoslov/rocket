@@ -87,10 +87,17 @@
   position: absolute;
   left: 0;
   right: 0;
-  border-top: 1px solid var(--q-line);
   font: 10.5px var(--font-mono);
   color: var(--text-4);
   line-height: 0;
+}
+/* The rule starts right of the label, so the two never cross. */
+.bm-chart__grid span::after {
+  content: '';
+  position: absolute;
+  left: 34px;
+  right: 0;
+  border-top: 1px solid var(--q-line);
 }
 .bm-chart__group {
   position: relative;
