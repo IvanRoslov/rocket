@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/config"
+	"github.com/IvanRoslov/rocket/internal/prompts"
 	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
@@ -52,6 +53,10 @@ type taskResponse struct {
 	// agent; AssignedRole names that agent (empty until somebody takes it).
 	Milestone    bool   `json:"milestone,omitempty"`
 	AssignedRole string `json:"assigned_role,omitempty"`
+	// BrainstormSkill is the brainstorm skill the orchestrator was started
+	// with (orchestrator-brainstorming | superpowers:brainstorming); "" for
+	// tasks never started or started before it was recorded.
+	BrainstormSkill string `json:"brainstorm_skill"`
 	// Open-question annotations (docs/superpowers/specs/2026-07-21-questions-
 	// visibility-design.md §1): populated by list/board/detail handlers from
 	// one taskQuestionCounts(d) aggregate, not per-task queries.
@@ -74,21 +79,22 @@ type taskResponse struct {
 
 func toTaskResponse(t store.Task) taskResponse {
 	return taskResponse{
-		ID:           t.ID,
-		ParentID:     t.ParentID,
-		Title:        t.Title,
-		Description:  t.Description,
-		ProjectID:    t.ProjectID,
-		RepoID:       t.RepoID,
-		Status:       t.Status,
-		FeatureSlug:  t.FeatureSlug,
-		SessionID:    t.SessionID,
-		CreatedBy:    t.CreatedBy,
-		CreatedAt:    t.CreatedAt,
-		UpdatedAt:    t.UpdatedAt,
-		CompletedAt:  t.CompletedAt,
-		Milestone:    t.Milestone,
-		AssignedRole: t.AssignedRole,
+		ID:              t.ID,
+		ParentID:        t.ParentID,
+		Title:           t.Title,
+		Description:     t.Description,
+		ProjectID:       t.ProjectID,
+		RepoID:          t.RepoID,
+		Status:          t.Status,
+		FeatureSlug:     t.FeatureSlug,
+		SessionID:       t.SessionID,
+		CreatedBy:       t.CreatedBy,
+		CreatedAt:       t.CreatedAt,
+		UpdatedAt:       t.UpdatedAt,
+		CompletedAt:     t.CompletedAt,
+		Milestone:       t.Milestone,
+		AssignedRole:    t.AssignedRole,
+		BrainstormSkill: t.BrainstormSkill,
 	}
 }
 
@@ -982,9 +988,24 @@ func handlePostTaskStart(w http.ResponseWriter, r *http.Request, d Deps) {
 		agentName = d.Cfg.DefaultAgent
 	}
 
+	// The brainstorm skill is fixed at start from the setting as it is now;
+	// flipping the setting later never changes a started task (restore and
+	// the brainstorm metric read it back from the task).
+	custom, err := d.Store.OrchestratorBrainstormCustom()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	task.BrainstormSkill = prompts.BrainstormSkill(custom)
+
 	sess, err := d.Manager.SpawnOrchestrator(r.Context(), task, project, agentName)
 	if err != nil {
 		writeManagerErr(w, err)
+		return
+	}
+
+	if err := d.Store.SetTaskBrainstormSkill(task.ID, task.BrainstormSkill); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 
