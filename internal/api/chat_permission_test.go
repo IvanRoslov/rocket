@@ -205,3 +205,27 @@ func TestChatTailLimitCountsPermissionEntries(t *testing.T) {
 		t.Fatalf("entries = %s", got)
 	}
 }
+
+// TestChatCursorReadTrimmedByLimitKeepsPermission: a cursor read with more
+// new entries than limit trims the oldest transcript entries; a new
+// permission row must not be trimmed with them — the mark moves past it, so
+// it would never arrive. It is delivered exactly once.
+func TestChatCursorReadTrimmedByLimitKeepsPermission(t *testing.T) {
+	d, base, path := permissionChatSetup(t, 2)
+	resolvedPermission(t, d.Store, "Zero?", transcriptTS(0), "")
+	b1 := getChat(t, base, "")
+
+	resolvedPermission(t, d.Store, "Early?", transcriptTS(2), "")
+	for i := 3; i < 8; i++ {
+		appendChatLine(t, path, `{"type":"user","timestamp":"2026-07-18T21:00:0`+string(rune('0'+i))+`Z","message":{"role":"user","content":"msg `+string(rune('0'+i))+`"}}`)
+	}
+
+	b2 := getChat(t, base, "?limit=3&cursor="+url.QueryEscape(b1.Next))
+	b3 := getChat(t, base, "?cursor="+url.QueryEscape(b2.Next))
+	if got := entryTexts(b2.Entries); got != "permission:Early? | user:msg 5 | user:msg 6 | user:msg 7" {
+		t.Errorf("trimmed cursor read = %s", got)
+	}
+	if n := countPermission(b3.Entries); n != 0 {
+		t.Errorf("permission re-delivered: %s", entryTexts(b3.Entries))
+	}
+}

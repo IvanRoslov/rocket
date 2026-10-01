@@ -136,11 +136,7 @@ func handleSessionChat(w http.ResponseWriter, r *http.Request, d Deps) {
 		slog.Warn("api: list permission prompts for chat", "session", sess.ID, "error", err)
 		permissions = nil
 	}
-	out, nextMark := mergePermissionEntries(entries, permissions, q.Get("cursor") == "", mark)
-
-	if len(out) > limit {
-		out = out[len(out)-limit:]
-	}
+	out, nextMark := mergePermissionEntries(entries, permissions, q.Get("cursor") == "", mark, limit)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"entries":     out,

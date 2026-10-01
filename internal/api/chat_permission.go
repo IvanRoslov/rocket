@@ -65,7 +65,13 @@ func joinChatCursor(adapterCursor string, mark permissionMark) string {
 // A row sits at its asked_at, before the first transcript entry that is
 // newer; transcript order itself is never changed (entries without a
 // timestamp keep their place).
-func mergePermissionEntries(entries []agent.ChatEntry, rows []store.PermissionPromptRow, tail bool, mark permissionMark) ([]chatEntryResponse, permissionMark) {
+//
+// limit caps the response. A tail read or a re-read is history: the merged
+// list is cut to its last limit entries, like the transcript alone. An
+// ordinary cursor read cuts only the transcript entries: its rows are new
+// since the mark, which moves past them, so a row cut here would never
+// arrive — and there are only ever a few.
+func mergePermissionEntries(entries []agent.ChatEntry, rows []store.PermissionPromptRow, tail bool, mark permissionMark, limit int) ([]chatEntryResponse, permissionMark) {
 	var maxID int64
 	for _, r := range rows {
 		if r.ID > maxID {
@@ -80,10 +86,14 @@ func mergePermissionEntries(entries []agent.ChatEntry, rows []store.PermissionPr
 	}
 
 	rescan := len(entries) > 0 && entries[0].TS > 0 && entries[0].TS < mark.ts
+	history := tail || (mark.present && rescan)
+	if !history && len(entries) > limit {
+		entries = entries[len(entries)-limit:]
+	}
 	var pick []store.PermissionPromptRow
 	for _, r := range rows {
 		switch {
-		case tail || (mark.present && rescan):
+		case history:
 			pick = append(pick, r)
 		case mark.present && r.ID > mark.id:
 			pick = append(pick, r)
@@ -101,6 +111,10 @@ func mergePermissionEntries(entries []agent.ChatEntry, rows []store.PermissionPr
 	}
 	for _, r := range pick {
 		out = append(out, toPermissionEntry(r))
+	}
+
+	if history && len(out) > limit {
+		out = out[len(out)-limit:]
 	}
 
 	next := permissionMark{present: maxID > 0 || mark.present, id: maxID, ts: lastTS}
