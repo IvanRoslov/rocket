@@ -38,6 +38,9 @@ func escapeDSNPath(path string) string {
 	return path
 }
 
+// maxOpenConns caps the SQLite connection pool; see Open.
+const maxOpenConns = 8
+
 // Store wraps a SQLite database handle with rocket's DAOs.
 type Store struct {
 	db *sql.DB
@@ -53,6 +56,14 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
+	// Bound the pool. Unbounded, a burst of requests opened hundreds of
+	// connections, each with its own page cache: gigabytes of memory, CPU
+	// burnt on contention, writers starved past busy_timeout — and the daemon
+	// never came back without a restart. SQLite runs one writer at a time
+	// anyway; extra queries now wait in line for a connection. Safe because no
+	// store code holds one connection while taking another.
+	db.SetMaxOpenConns(maxOpenConns)
+	db.SetMaxIdleConns(maxOpenConns)
 
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {

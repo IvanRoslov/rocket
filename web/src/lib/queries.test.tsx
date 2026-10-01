@@ -7,7 +7,7 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { setupServer } from 'msw/node'
 import type { ReactNode } from 'react'
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { handlers } from '../mocks/handlers'
 import {
   useAgentInbox,
@@ -34,6 +34,7 @@ import {
   useTaskBrainstormStats,
   useTaskGates,
   wireInvalidation,
+  INVALIDATION_WINDOW_MS,
 } from './queries'
 
 const server = setupServer(...handlers)
@@ -441,9 +442,63 @@ describe('brainstorm (task #4901)', () => {
   })
 
   it('task.* events refresh the brainstorm metric', () => {
+    vi.useFakeTimers()
+    try {
+      const queryClient = new QueryClient()
+      const spy = vi.spyOn(queryClient, 'invalidateQueries')
+      wireInvalidation(queryClient)({ id: 1, ts: 1, type: 'task.question_outcome_set' })
+      vi.advanceTimersByTime(INVALIDATION_WINDOW_MS)
+      expect(spy).toHaveBeenCalledWith({ queryKey: ['stats'] }, { cancelRefetch: false })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+// A burst of SSE events must not turn into a burst of requests: every event
+// used to cancel the in-flight /v1/tasks and send a new one, and the daemon —
+// which does not notice a client hanging up — kept running all of them.
+describe('wireInvalidation coalescing', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('collapses a burst of events into one invalidation per key', () => {
     const queryClient = new QueryClient()
     const spy = vi.spyOn(queryClient, 'invalidateQueries')
-    wireInvalidation(queryClient)({ id: 1, ts: 1, type: 'task.question_outcome_set' })
-    expect(spy).toHaveBeenCalledWith({ queryKey: ['stats'] })
+    const invalidate = wireInvalidation(queryClient)
+    for (let i = 0; i < 50; i++) invalidate({ id: i, ts: i, type: 'task.status_changed' })
+    expect(spy).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(INVALIDATION_WINDOW_MS)
+    const tasksCalls = spy.mock.calls.filter(([f]) => JSON.stringify(f?.queryKey) === '["tasks"]')
+    expect(tasksCalls).toHaveLength(1)
+  })
+
+  it('never cancels a refetch that is already in flight', () => {
+    const queryClient = new QueryClient()
+    const spy = vi.spyOn(queryClient, 'invalidateQueries')
+    wireInvalidation(queryClient)({ id: 1, ts: 1, type: 'pr.state_changed' })
+    vi.advanceTimersByTime(INVALIDATION_WINDOW_MS)
+    expect(spy.mock.calls.length).toBeGreaterThan(0)
+    for (const [, opts] of spy.mock.calls) expect(opts).toEqual({ cancelRefetch: false })
+  })
+
+  it('a later burst gets its own invalidation', () => {
+    const queryClient = new QueryClient()
+    const spy = vi.spyOn(queryClient, 'invalidateQueries')
+    const invalidate = wireInvalidation(queryClient)
+    invalidate({ id: 1, ts: 1, type: 'message.queued' })
+    vi.advanceTimersByTime(INVALIDATION_WINDOW_MS)
+    invalidate({ id: 2, ts: 2, type: 'message.queued' })
+    vi.advanceTimersByTime(INVALIDATION_WINDOW_MS)
+    expect(spy).toHaveBeenCalledTimes(2)
+  })
+
+  it('ignores session.chat_updated — it fires on every tick of a talking agent', () => {
+    const queryClient = new QueryClient()
+    const spy = vi.spyOn(queryClient, 'invalidateQueries')
+    wireInvalidation(queryClient)({ id: 1, ts: 1, type: 'session.chat_updated' })
+    vi.advanceTimersByTime(INVALIDATION_WINDOW_MS)
+    expect(spy).not.toHaveBeenCalled()
   })
 })

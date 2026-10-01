@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { useServers } from '../servers/ServerContext'
 import { authHeaders, notifyUnauthorized } from './client'
@@ -41,6 +41,35 @@ export function parseEventType(type: string): string[] {
  */
 export function keyMatches(queryKey: readonly unknown[], segments: string[]): boolean {
   return typeof queryKey[1] === 'string' && segments.includes(queryKey[1])
+}
+
+/** How long SSE invalidations are collected before they are applied at once. */
+export const INVALIDATION_WINDOW_MS = 1000
+
+/**
+ * Collects the segments a burst of events touches for INVALIDATION_WINDOW_MS
+ * and invalidates them in one go, reusing a fetch already in flight instead of
+ * cancelling it (`cancelRefetch: false`). Invalidating on every event, with
+ * React Query's default of cancelling the running fetch, turned an event burst
+ * into a request burst — and the daemon, which does not notice a client
+ * hanging up, kept executing every abandoned request until it drowned.
+ */
+export function createInvalidationBatcher(qc: QueryClient): (segments: string[]) => void {
+  const pending = new Set<string>()
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const flush = () => {
+    timer = undefined
+    const segments = [...pending]
+    pending.clear()
+    qc.invalidateQueries({ predicate: (q) => keyMatches(q.queryKey, segments) }, { cancelRefetch: false })
+  }
+
+  return (segments) => {
+    if (segments.length === 0) return
+    for (const s of segments) pending.add(s)
+    timer ??= setTimeout(flush, INVALIDATION_WINDOW_MS)
+  }
 }
 
 type DaemonEventListener = (type: string, data: string) => void
@@ -103,6 +132,7 @@ export function useEventStream(): { connected: boolean } {
     // While auth is lost there is no valid token to stream with; re-pairing flips
     // authLost back and this effect reconnects.
     if (!baseUrl || authLost) return
+    const invalidate = createInvalidationBatcher(qc)
     const conn = connectSse(
       `${baseUrl}/v1/events/stream`,
       {
@@ -114,9 +144,7 @@ export function useEventStream(): { connected: boolean } {
         },
         onEvent: (type, data) => {
           emitDaemonEvent(type, data)
-          const segments = parseEventType(type)
-          if (segments.length === 0) return
-          qc.invalidateQueries({ predicate: (q) => keyMatches(q.queryKey, segments) })
+          invalidate(parseEventType(type))
         },
       },
       4000,
