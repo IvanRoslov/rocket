@@ -1,0 +1,116 @@
+/* Storm question pieces (task #4901): starred options with a comment, and
+   the answered result with its outcome badge. */
+
+.brainstorm-options {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.brainstorm-options__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.brainstorm-options__option {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 6px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  font: 600 13px var(--font-ui);
+  color: var(--text-2-alt);
+  cursor: pointer;
+  text-align: left;
+}
+.brainstorm-options__option--recommended {
+  background: var(--accent-selected-bg);
+  border-color: var(--accent-selected-border);
+  color: var(--accent-text);
+}
+.brainstorm-options__option:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.brainstorm-options__option:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.brainstorm-options__num {
+  font: 600 11px var(--font-mono);
+  color: var(--text-3);
+}
+.brainstorm-options__star {
+  color: var(--warn);
+}
+.brainstorm-options__comment {
+  height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: 13px var(--font-ui);
+  background: var(--surface);
+  color: var(--text);
+}
+.brainstorm-options__hint {
+  font: 12px var(--font-ui);
+  color: var(--text-3);
+}
+
+.brainstorm-result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+}
+.brainstorm-result__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.brainstorm-result__choice {
+  font: 600 13px var(--font-ui);
+  color: var(--text-2-alt);
+}
+.brainstorm-result__outcome {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font: 600 11.5px var(--font-ui);
+}
+.brainstorm-result__outcome--accepted {
+  color: var(--ok-text);
+  background: var(--ok-bg);
+}
+.brainstorm-result__outcome--corrected {
+  color: var(--warn-text);
+  background: var(--warn-bg);
+}
+.brainstorm-result__outcome--wrong_turn {
+  color: var(--err-text);
+  background: var(--err-bg);
+}
+.brainstorm-result__note,
+.brainstorm-result__source {
+  font: 11.5px var(--font-ui);
+  color: var(--text-3);
+}
+.brainstorm-result__source {
+  padding: 1px 7px;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+}
+.brainstorm-result__override {
+  margin-left: auto;
+  font: 12px var(--font-ui);
+}
+.brainstorm-result__comment {
+  font: 13.5px/1.55 var(--font-ui);
+  color: var(--text-2-alt);
+  white-space: pre-wrap;
+}

@@ -677,3 +677,47 @@ describe('TaskScreen for a milestone', () => {
     expect(screen.getByText('◆ sre')).toBeInTheDocument()
   })
 })
+
+// Storm questions in the ordinary Questions tab (task #4901 spec §3.1: they
+// stay visible there). Fixture task #17: Q1 answered from the terminal, Q2 open.
+describe('TaskScreen — storm questions in the Questions tab', () => {
+  async function openQuestions() {
+    renderTask('billing', 17)
+    expect(await screen.findByText('Metering rewrite')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('tab', { name: /Questions/ }))
+  }
+
+  it('stars the recommendation and sends the comment with the pick', async () => {
+    const bodies: unknown[] = []
+    server.use(
+      http.post('/v1/questions/41/answer', async ({ request }) => {
+        bodies.push(await request.json())
+        return HttpResponse.json({ id: 41 })
+      }),
+    )
+    await openQuestions()
+
+    await userEvent.type(screen.getByLabelText('Комментарий к выбору'), 'с архивом')
+    await userEvent.click(screen.getByRole('button', { name: /Ledger table in Postgres — рекомендация/ }))
+    await waitFor(() => expect(bodies).toEqual([{ choose: 2, body: 'с архивом' }]))
+  })
+
+  it('labels the answered storm thread with its outcome and lets the human change it', async () => {
+    const bodies: unknown[] = []
+    server.use(
+      http.patch('/v1/questions/40/outcome', async ({ request }) => {
+        bodies.push(await request.json())
+        return HttpResponse.json({ id: 40 })
+      }),
+    )
+    await openQuestions()
+
+    const row = screen.getByText('Bill per seat or per event?').closest('.questions-tab__resolved') as HTMLElement
+    expect(within(row).getByText('принята с комментарием')).toBeInTheDocument()
+    await userEvent.click(within(row).getByRole('button', { expanded: false }))
+    expect(within(row).getByText('из терминала')).toBeInTheDocument()
+
+    await userEvent.selectOptions(within(row).getByLabelText('Исход'), 'corrected')
+    await waitFor(() => expect(bodies).toEqual([{ outcome: 'corrected' }]))
+  })
+})
