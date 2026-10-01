@@ -188,6 +188,12 @@ func handlePostBrainstormRecord(w http.ResponseWriter, r *http.Request, d Deps) 
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
+	// Writing into a thread joins it: the author of this entry is the human,
+	// exactly as on the ordinary answer path.
+	if err := d.Store.AddParticipants(id, store.ParticipantHuman); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
 	ordinal, err := d.Store.QuestionOrdinal(q)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())

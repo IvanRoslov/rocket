@@ -604,3 +604,32 @@ func TestBrainstormReopen_ResetsAnswer(t *testing.T) {
 		t.Fatalf("new answer outcome = %q/%v, want corrected/false", fresh.Outcome, fresh.OutcomeOverridden)
 	}
 }
+
+// TestBrainstormRecord_HumanJoinsThread: the recorded answer is the human's,
+// so the human is a participant afterwards — as on the ordinary answer path —
+// even on a thread whose participants were never seeded with them.
+func TestBrainstormRecord_HumanJoinsThread(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+	qid, err := d.Store.AddQuestion(store.Question{
+		TaskID: taskID, AskedBy: "orch-1", Body: "Где кэш?",
+		Type: store.QuestionTypeBrainstorm, Options: []string{"A", "B"}, RecommendedOption: 1,
+	})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+	if err := d.Store.AddParticipants(qid, "orch-1"); err != nil {
+		t.Fatalf("AddParticipants: %v", err)
+	}
+
+	resp := postJSONWithHeader(t, recordURL(srv, qid), "orch-1", map[string]any{"choose": 1})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("record = %d, want 200", resp.StatusCode)
+	}
+	got := decodeQuestion(t, resp)
+	if !contains(got.Participants, "human") {
+		t.Fatalf("participants = %v, want the human among them", got.Participants)
+	}
+}
