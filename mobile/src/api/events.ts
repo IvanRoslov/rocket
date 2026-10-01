@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { useServers } from '../servers/ServerContext'
 import { authHeaders, notifyUnauthorized } from './client'
 import { connectSse } from './sse'
@@ -43,6 +43,46 @@ export function keyMatches(queryKey: readonly unknown[], segments: string[]): bo
   return typeof queryKey[1] === 'string' && segments.includes(queryKey[1])
 }
 
+type DaemonEventListener = (type: string, data: string) => void
+
+const listeners = new Set<DaemonEventListener>()
+
+/**
+ * Raw daemon events for screens that react to an event itself rather than
+ * to refetched data (e.g. session.quiz_answer_unconfirmed has no state to
+ * refetch). Returns the unsubscribe function.
+ */
+export function subscribeDaemonEvents(cb: DaemonEventListener): () => void {
+  listeners.add(cb)
+  return () => {
+    listeners.delete(cb)
+  }
+}
+
+export function emitDaemonEvent(type: string, data: string): void {
+  listeners.forEach((cb) => cb(type, data))
+}
+
+/** Calls `handler` whenever the stream delivers `type` for `sessionId`. */
+export function useSessionEvent(sessionId: string, type: string, handler: () => void): void {
+  const handlerRef = useRef(handler)
+  handlerRef.current = handler
+  useEffect(
+    () =>
+      subscribeDaemonEvents((t, data) => {
+        if (t !== type) return
+        let ev: { session_id?: string }
+        try {
+          ev = JSON.parse(data)
+        } catch {
+          return
+        }
+        if (ev?.session_id === sessionId) handlerRef.current()
+      }),
+    [sessionId, type],
+  )
+}
+
 export const ConnectionContext = createContext<{ sse: boolean }>({ sse: false })
 
 export function useConnection() {
@@ -72,7 +112,8 @@ export function useEventStream(): { connected: boolean } {
           setConnected(false)
           notifyUnauthorized(baseUrl)
         },
-        onEvent: (type) => {
+        onEvent: (type, data) => {
+          emitDaemonEvent(type, data)
           const segments = parseEventType(type)
           if (segments.length === 0) return
           qc.invalidateQueries({ predicate: (q) => keyMatches(q.queryKey, segments) })
