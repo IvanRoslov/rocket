@@ -7,12 +7,14 @@
 
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { BrainstormResult } from '../../components/BrainstormResult'
 import { Markdown } from '../../components/Markdown'
 import { QuestionContent } from '../../components/QuestionContent'
 import { timeAgo } from '../../lib/format'
 import { isHuman, threadParticipantLabel } from '../../lib/participants'
 import { questionTitle, splitReplies } from '../../lib/thread'
-import type { ThreadInboxEntry } from '../../lib/types'
+import type { BrainstormOutcome, ThreadInboxEntry } from '../../lib/types'
+import '../../components/brainstorm.css'
 import { statusChip } from './model'
 import type { ThreadDetail } from './useThreadDetail'
 
@@ -38,7 +40,10 @@ export interface ThreadCardProps {
   onDraft: (value: string) => void
   picks: string[]
   onTogglePick: (participant: string) => void
-  onChoose: (index: number) => void
+  /** `index` is 0-based; `comment` is the storm comment ("" when none, task #4901). */
+  onChoose: (index: number, comment: string) => void
+  /** The human corrects a closed storm thread's outcome (task #4901). */
+  onOverride?: (outcome: BrainstormOutcome) => void
   onAnswerClose: () => void
   onReply: () => void
   onSkip: () => void
@@ -51,6 +56,8 @@ export function ThreadCard(props: ThreadCardProps) {
   const { entry, detail, pendingResolution } = props
   // Resets itself per thread: QuestionsScreen keys the card by thread id.
   const [allReplies, setAllReplies] = useState(false)
+  const [comment, setComment] = useState('')
+  const storm = entry.type === 'brainstorm'
   const closed = entry.status !== 'open' || pendingResolution !== undefined
   const resolutionText = pendingResolution ?? detail.resolutionText
   const chip = statusChip(entry, resolutionText)
@@ -100,19 +107,40 @@ export function ThreadCard(props: ThreadCardProps) {
           <>
             <div className="q__options-label">One tap closes this thread</div>
             <div className="q__options">
-              {options.map((option, i) => (
-                <button
-                  key={option}
-                  type="button"
-                  className="q__option"
-                  onClick={() => props.onChoose(i)}
-                >
-                  <span className="q__option-num">{i + 1}</span>
-                  <span className="q__option-label">{option}</span>
-                  <span className="q__option-note">closes thread</span>
-                </button>
-              ))}
+              {options.map((option, i) => {
+                const recommended = storm && entry.recommended_option === i + 1
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    className="q__option"
+                    aria-label={recommended ? `${option} — рекомендация` : undefined}
+                    onClick={() => props.onChoose(i, storm ? comment.trim() : '')}
+                  >
+                    <span className="q__option-num">{i + 1}</span>
+                    <span className="q__option-label">
+                      {recommended && (
+                        <span className="brainstorm-options__star" title="Рекомендация агента">
+                          ★{' '}
+                        </span>
+                      )}
+                      {option}
+                    </span>
+                    <span className="q__option-note">closes thread</span>
+                  </button>
+                )
+              })}
             </div>
+            {storm && (
+              <input
+                type="text"
+                className="brainstorm-options__comment"
+                aria-label="Комментарий к выбору"
+                placeholder="Комментарий к выбору — необязательно, уйдёт вместе с вариантом"
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+              />
+            )}
           </>
         )}
       </QuestionContent>
@@ -227,6 +255,7 @@ export function ThreadCard(props: ThreadCardProps) {
               </div>
             </div>
           )}
+          {storm && <BrainstormResult question={entry} onOverride={props.onOverride} />}
           <div className="q__closed-actions">
             <button type="button" className="q__btn-dark-sm" onClick={props.onBackToQueue}>
               Back to the queue

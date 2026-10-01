@@ -16,7 +16,14 @@
 // the decision instead of dropping it.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useAnswerThread, useAskThread, useReplyThread, useThreads, type ThreadRef } from '../../lib/queries'
+import {
+  useAnswerThread,
+  useAskThread,
+  useReplyThread,
+  useSetOutcome,
+  useThreads,
+  type ThreadRef,
+} from '../../lib/queries'
 import type { ThreadInboxEntry } from '../../lib/types'
 import { AskComposer } from './AskComposer'
 import { BrowseMode } from './BrowseMode'
@@ -68,6 +75,7 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
   // `all: true` — Browse mode is history too, and the queue filters itself.
   const { data: threads } = useThreads({ all: true })
   const answer = useAnswerThread()
+  const setOutcome = useSetOutcome()
   const reply = useReplyThread()
   const ask = useAskThread()
 
@@ -195,12 +203,13 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
     })
   }
 
-  function choose(entry: ThreadInboxEntry, index: number) {
+  function choose(entry: ThreadInboxEntry, index: number, comment = '') {
     const option = entry.options?.[index]
     if (!option) return
     closeWith(entry, option, `${entry.local_ref} closed · ${index + 1} ${option}`, () =>
-      // 1-based: the daemon substitutes the option's own text.
-      answer.mutate({ ref: refOf(entry), choose: index + 1 }),
+      // 1-based: the daemon substitutes the option's own text; a storm
+      // thread's comment rides along as the body (task #4901).
+      answer.mutate({ ref: refOf(entry), choose: index + 1, body: comment || undefined }),
     )
   }
 
@@ -343,7 +352,12 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
           }
         })
       }
-      onChoose={(i) => choose(current, i)}
+      onChoose={(i, comment) => choose(current, i, comment)}
+      onOverride={
+        current.kind === 'task' && current.task_id !== undefined
+          ? (outcome) => setOutcome.mutate({ id: current.id, taskId: current.task_id!, outcome })
+          : undefined
+      }
       onAnswerClose={() => answerClose(current)}
       onReply={() => askBack(current)}
       onSkip={() => skip(current)}

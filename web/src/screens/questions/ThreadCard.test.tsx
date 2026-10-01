@@ -195,3 +195,55 @@ describe('ThreadCard with a brief', () => {
     expect(screen.queryByRole('button', { name: /Details/ })).not.toBeInTheDocument()
   })
 })
+
+// Storm questions in the inbox (task #4901 spec §3.1): the option buttons work
+// with the recommendation and a comment there too.
+describe('ThreadCard — storm thread', () => {
+  const storm: ThreadInboxEntry = {
+    ...entry,
+    type: 'brainstorm',
+    options: ['Kafka topic', 'Ledger table'],
+    recommended_option: 2,
+    chosen_option: null,
+    answer_comment: '',
+    answer_source: '',
+    outcome: '',
+  }
+
+  it('stars the recommendation and passes the comment with the pick', async () => {
+    const onChoose = vi.fn()
+    renderCard({ entry: storm, onChoose })
+
+    expect(screen.getAllByText('★')).toHaveLength(1)
+    await userEvent.type(screen.getByLabelText('Комментарий к выбору'), 'с архивом')
+    await userEvent.click(screen.getByRole('button', { name: /Ledger table.*рекомендация/ }))
+    expect(onChoose).toHaveBeenCalledWith(1, 'с архивом')
+  })
+
+  it('shows the outcome of a closed storm thread and lets the human change it', async () => {
+    const onOverride = vi.fn()
+    renderCard({
+      entry: {
+        ...storm,
+        status: 'resolved',
+        resolution: 'answered',
+        chosen_option: 1,
+        outcome: 'corrected',
+        answer_source: 'terminal',
+      },
+      detail: { messages: [], resolutionText: 'Kafka topic', isLoading: false },
+      onOverride,
+    })
+
+    expect(screen.getByText('поправлена', { selector: '.brainstorm-result__outcome' })).toBeInTheDocument()
+    expect(screen.getByText('из терминала')).toBeInTheDocument()
+    await userEvent.selectOptions(screen.getByLabelText('Исход'), 'accepted')
+    expect(onOverride).toHaveBeenCalledWith('accepted')
+  })
+
+  it('keeps a decision thread free of the storm controls', () => {
+    renderCard({ entry: { ...entry, options: ['Yes', 'No'] } })
+    expect(screen.queryByText('★')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Комментарий к выбору')).not.toBeInTheDocument()
+  })
+})

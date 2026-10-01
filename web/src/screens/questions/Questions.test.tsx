@@ -384,3 +384,26 @@ describe('Ask an agent', () => {
     expect(sent[0]).toEqual({ body: 'What is the deploy plan?', title: 'Deploy plan' })
   })
 })
+
+// Storm questions (task #4901): fixture 17/Q2 is open with option 2 recommended.
+describe('storm threads in the inbox', () => {
+  test('a pick carries the comment typed next to the options', async () => {
+    const user = userEvent.setup()
+    const sent: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/questions/41/answer', async ({ request }) => {
+        sent.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 41 })
+      }),
+    )
+    renderQuestions(60)
+    await screen.findByRole('heading', { level: 2 })
+    const rail = document.querySelector('.q__rail') as HTMLElement
+    await user.click(within(rail).getByRole('button', { name: /17\/Q2/ }))
+
+    await user.type(screen.getByLabelText('Комментарий к выбору'), 'с архивом')
+    await user.click(screen.getByRole('button', { name: /Ledger table in Postgres — рекомендация/ }))
+
+    await waitFor(() => expect(sent).toEqual([{ choose: 2, body: 'с архивом' }]))
+  })
+})
