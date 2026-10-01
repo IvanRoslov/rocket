@@ -225,7 +225,70 @@ func handlePostBrainstormRecord(w http.ResponseWriter, r *http.Request, d Deps) 
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// handlePatchQuestionOutcome is defined with the override (Task 4).
+type patchQuestionOutcomeRequest struct {
+	Outcome string `json:"outcome"`
+}
+
+// handlePatchQuestionOutcome serves PATCH /v1/questions/{id}/outcome
+// {outcome}: the human corrects the outcome computed for an answered
+// brainstorm thread — e.g. a choice of another option that was really a small
+// tweak of the recommendation. Only the human (any agent, persistent ones
+// included, gets 403): the outcome grades the agent's recommendations, and an
+// agent must not grade itself. The thread must be a brainstorm (400) that
+// stands answered (409 while open or after a dismissal: there is no outcome).
 func handlePatchQuestionOutcome(w http.ResponseWriter, r *http.Request, d Deps) {
-	writeErr(w, http.StatusNotImplemented, "not_implemented", "not implemented")
+	id, ok := parseQuestionID(w, r)
+	if !ok {
+		return
+	}
+	q, ok := getQuestionOr404(w, d, id)
+	if !ok {
+		return
+	}
+	caller, err := callerSession(r, d.Store)
+	if writeCallerErr(w, err) {
+		return
+	}
+	if caller != nil {
+		writeErr(w, http.StatusForbidden, "forbidden", "only the human may override a brainstorm outcome")
+		return
+	}
+
+	var req patchQuestionOutcomeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+	if !store.ValidOutcome(req.Outcome) {
+		writeErr(w, http.StatusBadRequest, "bad_request",
+			"outcome must be \"accepted\", \"corrected\" or \"wrong_turn\"")
+		return
+	}
+	if q.Type != store.QuestionTypeBrainstorm {
+		writeErr(w, http.StatusBadRequest, "not_brainstorm", "only a brainstorm thread has an outcome")
+		return
+	}
+	if q.Status != "resolved" || q.Resolution != "answered" {
+		writeErr(w, http.StatusConflict, "not_answered", "the thread has no answer to grade")
+		return
+	}
+
+	if err := d.Store.SetQuestionOutcome(id, req.Outcome); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	d.Bus.Publish("task.question_outcome_set", "", map[string]any{
+		"task_id": q.TaskID, "question_id": id, "outcome": req.Outcome,
+	})
+
+	updated, ok := getQuestionOr404(w, d, id)
+	if !ok {
+		return
+	}
+	resp, err := buildQuestionResponse(d, caller, updated)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

@@ -462,3 +462,138 @@ func TestBrainstormRecord_BadInput(t *testing.T) {
 		})
 	}
 }
+
+func outcomeURL(srv *httptest.Server, id int64) string {
+	return srv.URL + "/v1/questions/" + itoa(id) + "/outcome"
+}
+
+// answeredBrainstorm opens a brainstorm thread and answers it with the
+// recommended option, so its computed outcome is accepted.
+func answeredBrainstorm(t *testing.T, srv *httptest.Server, taskID int64) questionResponse {
+	t.Helper()
+	q := askBrainstorm(t, srv, taskID)
+	resp := postJSON(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/answer", map[string]any{"choose": 2})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("answer = %d", resp.StatusCode)
+	}
+	return decodeQuestion(t, resp)
+}
+
+func TestBrainstormOutcome_HumanOverrides(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+	q := answeredBrainstorm(t, srv, taskID)
+
+	resp := patchJSON(t, outcomeURL(srv, q.ID), map[string]any{"outcome": "corrected"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("override = %d, want 200", resp.StatusCode)
+	}
+	got := decodeQuestion(t, resp)
+	if got.Outcome != store.OutcomeCorrected || !got.OutcomeOverridden {
+		t.Fatalf("outcome/overridden = %q/%v, want corrected/true", got.Outcome, got.OutcomeOverridden)
+	}
+	if !eqIntPtr(got.ChosenOption, intPtr(2)) {
+		t.Fatalf("override touched the choice: %v", got.ChosenOption)
+	}
+}
+
+func TestBrainstormOutcome_AgentsForbidden(t *testing.T) {
+	for _, caller := range []string{"orch-1", "cto"} {
+		t.Run(caller, func(t *testing.T) {
+			d := questionsTestDeps(t)
+			srv := newTestServer(t, d)
+			taskID := setupQuestionTask(t, d)
+			setupQuestionAgent(t, d)
+			addLiveAgentSession(t, d, "cto")
+			q := answeredBrainstorm(t, srv, taskID)
+
+			resp := patchJSONWithHeader(t, outcomeURL(srv, q.ID), caller, map[string]any{"outcome": "corrected"})
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403", resp.StatusCode)
+			}
+			if stored, _ := d.Store.GetQuestion(q.ID); stored.OutcomeOverridden || stored.Outcome != store.OutcomeAccepted {
+				t.Fatalf("outcome changed: %+v", stored)
+			}
+		})
+	}
+}
+
+func TestBrainstormOutcome_Rejections(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+
+	answered := answeredBrainstorm(t, srv, taskID)
+	open := askBrainstorm(t, srv, taskID)
+
+	dismissed := askBrainstorm(t, srv, taskID)
+	dr := postJSON(t, srv.URL+"/v1/questions/"+itoa(dismissed.ID)+"/answer", map[string]any{"dismiss": true})
+	dr.Body.Close()
+
+	dresp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1", map[string]any{"body": "Q"})
+	decision := decodeQuestion(t, dresp)
+	dresp.Body.Close()
+	ar := postJSON(t, srv.URL+"/v1/questions/"+itoa(decision.ID)+"/answer", map[string]any{"body": "ok"})
+	ar.Body.Close()
+
+	cases := []struct {
+		name    string
+		id      int64
+		outcome string
+		want    int
+	}{
+		{"unknown outcome", answered.ID, "maybe", http.StatusBadRequest},
+		{"decision thread", decision.ID, "accepted", http.StatusBadRequest},
+		{"open thread", open.ID, "accepted", http.StatusConflict},
+		{"dismissed thread", dismissed.ID, "accepted", http.StatusConflict},
+		{"unknown thread", 99999, "accepted", http.StatusNotFound},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			resp := patchJSON(t, outcomeURL(srv, c.id), map[string]any{"outcome": c.outcome})
+			defer resp.Body.Close()
+			if resp.StatusCode != c.want {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, c.want)
+			}
+		})
+	}
+}
+
+// Reopening a brainstorm thread wipes its answer: it waits on the human
+// again, and the next answer computes a fresh outcome.
+func TestBrainstormReopen_ResetsAnswer(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+	q := answeredBrainstorm(t, srv, taskID)
+	ov := patchJSON(t, outcomeURL(srv, q.ID), map[string]any{"outcome": "wrong_turn"})
+	ov.Body.Close()
+
+	resp := postJSONWithHeader(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/reply", "orch-1",
+		map[string]any{"body": "Оспариваю: B ломает миграцию", "dispute": true})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("dispute = %d, want 201", resp.StatusCode)
+	}
+	got := decodeQuestion(t, resp)
+	if got.Status != "open" || got.Type != "brainstorm" {
+		t.Fatalf("status/type = %q/%q, want open/brainstorm", got.Status, got.Type)
+	}
+	if got.ChosenOption != nil || got.AnswerComment != "" || got.AnswerSource != "" ||
+		got.Outcome != "" || got.OutcomeOverridden || got.AnsweredBy != "" {
+		t.Fatalf("reopened thread kept the answer: %+v", got.brainstormWire)
+	}
+	if !eqIntPtr(got.RecommendedOption, intPtr(2)) {
+		t.Fatalf("recommendation lost: %v", got.RecommendedOption)
+	}
+
+	again := postJSON(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/answer", map[string]any{"choose": 1})
+	defer again.Body.Close()
+	if fresh := decodeQuestion(t, again); fresh.Outcome != store.OutcomeCorrected || fresh.OutcomeOverridden {
+		t.Fatalf("new answer outcome = %q/%v, want corrected/false", fresh.Outcome, fresh.OutcomeOverridden)
+	}
+}
