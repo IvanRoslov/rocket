@@ -33,10 +33,16 @@ type QuizQuestion struct {
 }
 
 // Quiz is the full pending-quiz payload stored on Session.PendingQuiz:
-// {"questions":[...],"asked_at":<unix>}.
+// {"questions":[...],"asked_at":<unix>}. A quiz the monitor built from a
+// Claude Code permission dialog (see permission.go) also carries
+// source:"permission", the pane tail in raw, and its identity in permission;
+// a hook-driven AskUserQuestion quiz has none of them.
 type Quiz struct {
-	Questions []QuizQuestion `json:"questions"`
-	AskedAt   int64          `json:"asked_at"`
+	Questions  []QuizQuestion `json:"questions"`
+	AskedAt    int64          `json:"asked_at"`
+	Source     string         `json:"source,omitempty"`
+	Raw        string         `json:"raw,omitempty"`
+	Permission *PermissionRef `json:"permission,omitempty"`
 }
 
 // QuizAnswer is one answer in a POST /v1/sessions/{id}/quiz/answer request:
