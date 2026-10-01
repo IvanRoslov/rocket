@@ -20,10 +20,10 @@ import {
   useAnswerThread,
   useAskThread,
   useReplyThread,
-  useSetOutcome,
   useThreads,
   type ThreadRef,
 } from '../../lib/queries'
+import { isStorm, stormGroups } from '../../lib/storm'
 import type { ThreadInboxEntry } from '../../lib/types'
 import { AskComposer } from './AskComposer'
 import { BrowseMode } from './BrowseMode'
@@ -75,7 +75,6 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
   // `all: true` — Browse mode is history too, and the queue filters itself.
   const { data: threads } = useThreads({ all: true })
   const answer = useAnswerThread()
-  const setOutcome = useSetOutcome()
   const reply = useReplyThread()
   const ask = useAskThread()
 
@@ -130,16 +129,21 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
   }
 
   // The list every view works off: the server's threads with the not-yet-sent
-  // local closes folded in.
+  // local closes folded in. Storm threads are not in it: a storm question is
+  // answered only in its task's Brainstorm tab (task #4901, spec v2 §3.1), and
+  // the inbox shows one row per task for them instead — `storms`.
   const rows: ThreadInboxEntry[] = useMemo(
     () =>
-      (threads ?? []).map((t) =>
-        pending[t.id] !== undefined
-          ? { ...t, status: 'resolved' as const, resolution: 'answered' as const }
-          : t,
-      ),
+      (threads ?? [])
+        .filter((t) => !isStorm(t))
+        .map((t) =>
+          pending[t.id] !== undefined
+            ? { ...t, status: 'resolved' as const, resolution: 'answered' as const }
+            : t,
+        ),
     [threads, pending],
   )
+  const storms = useMemo(() => stormGroups(threads ?? []), [threads])
 
   const queue = queueOf(rows, later)
   const mine = rows.filter((t) => t.status === 'open' && t.your_turn)
@@ -155,7 +159,9 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
   const seen = useRef<Set<number>>(undefined)
   useEffect(() => {
     if (!threads) return
-    const now = new Set(threads.filter((t) => t.status === 'open' && t.your_turn).map((t) => t.id))
+    const now = new Set(
+      threads.filter((t) => t.status === 'open' && t.your_turn && !isStorm(t)).map((t) => t.id),
+    )
     const before = seen.current
     seen.current = now
     if (!before) return
@@ -189,7 +195,6 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
     resolution: string,
     toastText: string,
     run: () => void,
-    onUndo?: () => void,
   ) {
     setPending((p) => ({ ...p, [entry.id]: resolution }))
     setCleared((n) => n + 1)
@@ -201,25 +206,18 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
       setCleared((n) => Math.max(0, n - 1))
       setCurrentId(entry.id)
       setMode('focus')
-      onUndo?.()
     })
   }
 
   function choose(entry: ThreadInboxEntry, index: number) {
     const option = entry.options?.[index]
     if (!option) return
-    // A storm thread takes the answer box draft as the comment on the pick
-    // (task #4901), so what the human typed is sent, not dropped. Undo puts
-    // it back in the box.
-    const comment = entry.type === 'brainstorm' ? (drafts[entry.id] ?? '').trim() : ''
-    if (comment) setDrafts((d) => ({ ...d, [entry.id]: '' }))
     closeWith(
       entry,
-      comment ? `${option} — ${comment}` : option,
+      option,
       `${entry.local_ref} closed · ${index + 1} ${option}`,
       // 1-based: the daemon substitutes the option's own text.
-      () => answer.mutate({ ref: refOf(entry), choose: index + 1, body: comment || undefined }),
-      comment ? () => setDrafts((d) => ({ ...d, [entry.id]: comment })) : undefined,
+      () => answer.mutate({ ref: refOf(entry), choose: index + 1 }),
     )
   }
 
@@ -338,10 +336,12 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
     }
   }
 
-  const headline = mine.length > 0 ? `${mine.length} decisions on you` : 'Nothing on you'
+  // A task's storm is one item on you, however many questions it holds.
+  const onYou = mine.length + storms.length
+  const headline = onYou > 0 ? `${onYou} decisions on you` : 'Nothing on you'
   const subline =
     staleCount > 0 ? `${staleCount} stale · ${cleared} cleared today` : `${cleared} cleared today`
-  const total = mine.length + cleared
+  const total = onYou + cleared
   const progress = total > 0 ? Math.round((cleared / total) * 100) : 100
 
   const card = current ? (
@@ -363,14 +363,6 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
         })
       }
       onChoose={(i) => choose(current, i)}
-      onOverride={
-        current.kind === 'task' && current.task_id !== undefined
-          ? (outcome) => setOutcome.mutate({ id: current.id, taskId: current.task_id!, outcome })
-          : undefined
-      }
-      // One mutation serves every card: only the thread it acted on shows its state.
-      overrideBusy={setOutcome.isPending && setOutcome.variables?.id === current.id}
-      overrideError={setOutcome.variables?.id === current.id ? setOutcome.error?.message : undefined}
       onAnswerClose={() => answerClose(current)}
       onReply={() => askBack(current)}
       onSkip={() => skip(current)}
@@ -432,6 +424,7 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
       {mode === 'focus' ? (
         <FocusMode
           queue={queue}
+          storms={storms}
           currentId={current?.id}
           onSelect={select}
           waitingOnAgents={waitingOnAgents}
@@ -444,6 +437,7 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
       ) : (
         <BrowseMode
           threads={rows}
+          storms={storms}
           query={query}
           onQuery={setQuery}
           filter={filter}

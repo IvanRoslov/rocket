@@ -269,7 +269,8 @@ describe('Browse mode', () => {
     const headings = Array.from(document.querySelectorAll('.q__group-label')).map(
       (el) => el.textContent,
     )
-    expect(headings).toEqual(['Your turn', 'Waiting on agents'])
+    // Storms first: the fixture's task #17 has a storm question on you.
+    expect(headings).toEqual(['Storms', 'Your turn', 'Waiting on agents'])
     expect(screen.getByText('13/Q1')).toBeInTheDocument()
   })
 
@@ -385,39 +386,68 @@ describe('Ask an agent', () => {
   })
 })
 
-// Storm questions (task #4901): fixture 17/Q2 is open with option 2 recommended.
+// Storm questions (task #4901, spec v2 §3.1) are answered only in the task's
+// Brainstorm tab: the inbox lists no storm thread, only one row per task.
+// Fixture: 17/Q2 is the one open storm question, task #17 "Metering rewrite".
 describe('storm threads in the inbox', () => {
-  test('a pick carries the text typed in the answer box as its comment', async () => {
-    const user = userEvent.setup()
-    const sent: Record<string, unknown>[] = []
-    server.use(
-      http.post('/v1/questions/41/answer', async ({ request }) => {
-        sent.push((await request.json()) as Record<string, unknown>)
-        return HttpResponse.json({ id: 41 })
-      }),
-    )
-    renderQuestions(60)
+  function stormThread(id: number, taskId: number, over: Record<string, unknown> = {}) {
+    return {
+      local_ref: `${taskId}/Q${id}`, kind: 'task', task_id: taskId, project_id: 'billing',
+      task_title: `Task ${taskId}`, subject: `task #${taskId}`, id, ordinal: id, asked_by: 'orch',
+      title: `Storm question ${id}`, body: 'q', status: 'open', type: 'brainstorm', options: ['A', 'B'],
+      participants: ['human', 'orch'], attention: ['human'], waiting_on: ['human'], your_turn: true,
+      asked_at: 1, updated_at: 1, ...over,
+    }
+  }
+
+  test('no storm thread is listed — one row per task links to its Brainstorm tab', async () => {
+    renderQuestions()
     await screen.findByRole('heading', { level: 2 })
     const rail = document.querySelector('.q__rail') as HTMLElement
-    await user.click(within(rail).getByRole('button', { name: /17\/Q2/ }))
 
-    await user.type(screen.getByLabelText('Your answer'), 'с архивом')
-    await user.click(screen.getByRole('button', { name: /Ledger table in Postgres — recommended/ }))
-
-    await waitFor(() => expect(sent).toEqual([{ choose: 2, body: 'с архивом' }]))
+    expect(within(rail).queryByText(/17\/Q2/)).not.toBeInTheDocument()
+    const row = within(rail).getByRole('link', { name: /Storm #17 «Metering rewrite»: 1 question waiting/ })
+    expect(row).toHaveAttribute('href', '/p/billing/tasks/17?tab=brainstorm')
   })
 
-  test('Undo puts the comment back in the answer box', async () => {
+  test('Browse lists no storm thread either', async () => {
     const user = userEvent.setup()
-    renderQuestions(60_000)
+    renderQuestions()
     await screen.findByRole('heading', { level: 2 })
-    const rail = document.querySelector('.q__rail') as HTMLElement
-    await user.click(within(rail).getByRole('button', { name: /17\/Q2/ }))
+    await user.click(screen.getByRole('button', { name: /Browse/ }))
+    await user.click(screen.getByRole('button', { name: /Everything/ }))
 
-    await user.type(screen.getByLabelText('Your answer'), 'с архивом')
-    await user.click(screen.getByRole('button', { name: /Ledger table in Postgres — recommended/ }))
-    await user.click(screen.getByRole('button', { name: /Undo/ }))
+    expect(screen.queryByText('17/Q2')).not.toBeInTheDocument()
+    expect(screen.queryByText('17/Q1')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Storm #17/ })).toHaveAttribute('href', '/p/billing/tasks/17?tab=brainstorm')
+  })
 
-    expect(await screen.findByLabelText('Your answer')).toHaveValue('с архивом')
+  test('counts each task storm once, with K its open questions; resolved ones never show', async () => {
+    server.use(
+      http.get('/v1/threads', () =>
+        HttpResponse.json({
+          threads: [
+            stormThread(1, 30),
+            stormThread(2, 30),
+            stormThread(3, 30, { status: 'resolved', resolution: 'answered', your_turn: false, attention: [], waiting_on: [] }),
+            stormThread(4, 31),
+            stormThread(5, 32, { your_turn: false, attention: ['orch'], waiting_on: ['orch'] }),
+          ],
+        }),
+      ),
+    )
+    renderQuestions()
+
+    const rail = await waitFor(() => {
+      const el = document.querySelector('.q__rail') as HTMLElement
+      within(el).getByRole('link', { name: /Storm #30/ })
+      return el
+    })
+    expect(within(rail).getByRole('link', { name: /Storm #30 «Task 30»: 2 questions waiting/ })).toBeInTheDocument()
+    expect(within(rail).getByRole('link', { name: /Storm #31 «Task 31»: 1 question waiting/ })).toBeInTheDocument()
+    // A storm waiting on the agent is not on you.
+    expect(within(rail).queryByRole('link', { name: /Storm #32/ })).not.toBeInTheDocument()
+    expect(screen.getByText('2 decisions on you')).toBeInTheDocument()
+    expect(document.querySelector('.q__card')).toBeNull()
   })
 })

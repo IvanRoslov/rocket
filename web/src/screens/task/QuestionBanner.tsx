@@ -1,20 +1,23 @@
 // Yellow (awaiting-you) / neutral (awaiting-orchestrator) banner shown above
 // the tabs when the task has an open question — docs/design/Task.dc.html
-// "QUESTIONS ALERT". Clicking it jumps to the Questions tab.
+// "QUESTIONS ALERT". Clicking it jumps to the Questions tab — or, for a storm
+// question, to the Brainstorm tab: a storm question is answered only there,
+// so the banner offers no options for it (task #4901, spec v2 §3.1).
 //
 // Since task #1023 the banner is also where a thread can END: answer options
 // close it in one click, which is the cheapest possible answer and the reason
 // threads stop piling up unanswered.
 
 import { useAnswerQuestion } from '../../lib/queries'
+import { isStorm } from '../../lib/storm'
 import { questionTitle } from '../../lib/thread'
 import type { Question } from '../../lib/types'
-import '../../components/brainstorm.css'
 import './QuestionBanner.css'
 
 export interface QuestionBannerProps {
   taskId: number
   question: Question
+  /** Opens the question's tab — the caller knows which one a storm question lives in. */
   onOpen: () => void
 }
 
@@ -24,7 +27,8 @@ export function QuestionBanner({ taskId, question, onOpen }: QuestionBannerProps
   // apart from "some other participant" in a multi-party thread.
   const awaitingUser = question.your_turn === true
   const classes = ['question-banner', awaitingUser ? 'question-banner--warn' : 'question-banner--neutral']
-  const options = question.options ?? []
+  const storm = isStorm(question)
+  const options = storm ? [] : (question.options ?? [])
 
   // The banner used to be one big <button>; options and the close affordance
   // are buttons too, and a button cannot nest inside a button.
@@ -43,7 +47,7 @@ export function QuestionBanner({ taskId, question, onOpen }: QuestionBannerProps
           </span>
         )}
         <span className="question-banner__text">{questionTitle(question)}</span>
-        <span className="question-banner__cta">Open thread →</span>
+        <span className="question-banner__cta">{storm ? 'Open in Brainstorm →' : 'Open thread →'}</span>
       </button>
 
       {options.length > 0 && (
@@ -57,11 +61,6 @@ export function QuestionBanner({ taskId, question, onOpen }: QuestionBannerProps
               // `choose` is a 1-based index into `options`.
               onClick={() => answer.mutate({ id: question.id, choose: i + 1, taskId })}
             >
-              {question.recommended_option === i + 1 && (
-                <span className="brainstorm-options__star" title="Recommended by the agent">
-                  ★{' '}
-                </span>
-              )}
               {label}
             </button>
           ))}

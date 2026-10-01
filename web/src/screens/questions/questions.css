@@ -1208,3 +1208,9 @@
 .q__clear .q__btn-light-sm {
   margin-top: 18px;
 }
+
+/* A task storm in the queue: a link to the Brainstorm tab, not a thread. */
+.q__qrow--storm {
+  color: inherit;
+  text-decoration: none;
+}

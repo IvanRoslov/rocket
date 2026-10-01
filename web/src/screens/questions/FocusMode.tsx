@@ -6,8 +6,10 @@
 
 import type { ReactNode } from 'react'
 import { timeAgo } from '../../lib/format'
+import type { StormGroup } from '../../lib/storm'
 import { questionTitle } from '../../lib/thread'
 import type { ThreadInboxEntry } from '../../lib/types'
+import { StormRows } from './StormRows'
 
 /** "2h ago" -> "2h": the rail has room for the number, not the sentence. */
 function shortAge(ts: number): string {
@@ -17,6 +19,8 @@ function shortAge(ts: number): string {
 
 export interface FocusModeProps {
   queue: ThreadInboxEntry[]
+  /** One row per task storm on you; each links to the task's Brainstorm tab. */
+  storms: StormGroup[]
   currentId?: number
   onSelect: (id: number) => void
   waitingOnAgents: number
@@ -29,15 +33,16 @@ export interface FocusModeProps {
 }
 
 export function FocusMode(props: FocusModeProps) {
-  const { queue, card } = props
+  const { queue, storms, card } = props
 
   return (
     <div className="q__focus">
       <div className="q__rail q__scroll">
         <div className="q__rail-head">
           <span className="q__eyebrow">Queue · your turn</span>
-          <span className="q__count">{queue.length}</span>
+          <span className="q__count">{queue.length + storms.length}</span>
         </div>
+        <StormRows storms={storms} className="q__qrow q__qrow--storm" />
         {queue.map((t) => {
           const on = t.id === props.currentId
           const options = t.options?.length ?? 0
@@ -87,7 +92,9 @@ export function FocusMode(props: FocusModeProps) {
             </div>
             <div className="q__clear-title">Queue clear</div>
             <div className="q__clear-text">
-              {props.clearedToday > 0
+              {storms.length > 0
+                ? 'Only storm questions are left — answer them in their task’s Brainstorm tab.'
+                : props.clearedToday > 0
                 ? `You cleared ${props.clearedToday} threads. ${props.waitingOnAgents} are waiting on agents — they will come back to you if they need you.`
                 : 'Nothing is blocked on you right now.'}
             </div>

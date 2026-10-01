@@ -38,7 +38,7 @@ import { useToast } from '../../src/components/Toast'
 import type { Session, TaskLogKind, TaskStatus } from '../../src/api/types'
 import { BackButton, Badge, Card, ChipTabs, Dot, EmptyState, GhostButton, MonoText, PrimaryButton } from '../../src/components/ui'
 import { ago, sessionBadge, sessionDot } from '../../src/lib/format'
-import { showBrainstormTab } from '../../src/lib/brainstorm'
+import { isBrainstorm, showBrainstormTab } from '../../src/lib/brainstorm'
 import { questionPreview } from '../../src/lib/questions'
 import { threadBadges, threadRefLabel } from '../../src/lib/threads'
 import { colors, mono, radius } from '../../src/theme'
@@ -272,7 +272,8 @@ function SessionsSheet({
 }
 
 export default function TaskScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>()
+  // `tab` lets a link land on a tab — the inbox's storm row opens Brainstorm.
+  const { id, tab: linkedTab } = useLocalSearchParams<{ id: string; tab?: string }>()
   const taskId = Number(id)
   const detail = useTaskDetail(taskId)
   const questions = useTaskQuestions(taskId)
@@ -280,7 +281,7 @@ export default function TaskScreen() {
   // null until the user picks a tab. The default follows the status the task
   // had when first loaded, then stays put — Go moving the task out of
   // brainstorm must not yank the user off the Brainstorm tab.
-  const [picked, setTab] = useState<string | null>(null)
+  const [picked, setTab] = useState<string | null>(linkedTab ?? null)
   const [initialTab, setInitialTab] = useState<string | null>(null)
   if (initialTab === null && detail.data) {
     setInitialTab(detail.data.status === 'brainstorm' ? 'brainstorm' : 'overview')
@@ -302,9 +303,14 @@ export default function TaskScreen() {
   const onErr = (e: unknown) => toast.show((e as Error).message)
 
   const t = detail.data
-  const open = (questions.data ?? []).filter((q) => q.status === 'open')
-  const resolved = (questions.data ?? []).filter((q) => q.status === 'resolved')
-  const awaiting = open.filter((q) => q.your_turn)
+  // Storm questions are answered only in the Brainstorm tab (task #4901, spec
+  // v2 §3.1): the Questions tab and its count hold everything else.
+  const plain = (questions.data ?? []).filter((q) => !isBrainstorm(q))
+  const open = plain.filter((q) => q.status === 'open')
+  const resolved = plain.filter((q) => q.status === 'resolved')
+  const awaiting = (questions.data ?? []).filter((q) => q.status === 'open' && q.your_turn)
+  // The banner takes a storm question to the tab it is answered in.
+  const awaitingTab = awaiting[0] && isBrainstorm(awaiting[0]) ? 'brainstorm' : 'questions'
   const orch = allSessions?.find((s) => s.id === t?.session?.id)
   const workers = (allSessions ?? []).filter((s) => s.kind === 'worker' && s.parent_id === t?.session?.id)
   const liveWorkers = workers.filter((w) => w.state === 'running' || w.state === 'spawning')
@@ -324,7 +330,7 @@ export default function TaskScreen() {
       key: 'questions',
       label: 'Questions',
       ...(open.length > 0 ? { count: open.length } : {}),
-      warn: awaiting.length > 0,
+      warn: open.some((q) => q.your_turn),
     },
     ...(showBrainstormTab(t, questions.data ?? [], gates.data ?? [])
       ? [{ key: 'brainstorm', label: 'Brainstorm' }]
@@ -394,8 +400,8 @@ export default function TaskScreen() {
                 {t.created_by === 'user' ? 'you' : 'orch'} · {ago(t.created_at)} · updated {ago(t.updated_at)}
               </Text>
             </View>
-            {awaiting.length > 0 && tab !== 'questions' ? (
-              <Pressable style={styles.awaitBanner} onPress={() => setTab('questions')}>
+            {awaiting.length > 0 && tab !== awaitingTab ? (
+              <Pressable style={styles.awaitBanner} onPress={() => setTab(awaitingTab)}>
                 <Badge label="? awaiting" fg={colors.amberDeep} bg={colors.amberBg} />
                 <Text style={styles.awaitText} numberOfLines={2}>
                   {questionPreview(awaiting[0])}
