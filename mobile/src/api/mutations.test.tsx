@@ -4,13 +4,16 @@ import { ServerProvider, useServers } from '../servers/ServerContext'
 import {
   useCancelTask,
   useCreateQuestion,
+  useDecideGate,
   useKillSession,
   useMoveTask,
   useQuestionAnswer,
   useQuestionDismiss,
   useQuestionReply,
   useRestoreSession,
+  useSetQuestionOutcome,
   useSystemCleanup,
+  useThreadAnswer,
 } from './queries'
 
 const BASE = 'http://192.168.1.10:4477'
@@ -151,5 +154,53 @@ describe('mutation hooks', () => {
     const { url, init } = lastCall()
     expect(url).toBe(`${BASE}/v1/tasks/12/questions`)
     expect(JSON.parse(init.body as string)).toEqual({ body: 'who owns this?', to: ['cto'] })
+  })
+
+  it('answer sends an option together with its comment (brainstorm)', async () => {
+    const r = await setup(useQuestionAnswer)
+    await act(async () => {
+      await r.current.hook.mutateAsync({ id: 7, choose: 2, body: 'только без миграции' })
+    })
+    expect(JSON.parse(lastCall().init.body as string)).toEqual({ choose: 2, body: 'только без миграции' })
+  })
+
+  it('answer with an option and no comment sends choose alone', async () => {
+    const r = await setup(useQuestionAnswer)
+    await act(async () => {
+      await r.current.hook.mutateAsync({ id: 7, choose: 1, body: '  ' })
+    })
+    expect(JSON.parse(lastCall().init.body as string)).toEqual({ choose: 1 })
+  })
+
+  it('inbox answer passes an option with its comment through', async () => {
+    const r = await setup(useThreadAnswer)
+    await act(async () => {
+      await r.current.hook.mutateAsync({ thread: { id: 7, kind: 'task' }, answer: { choose: 1, body: 'ок' } })
+    })
+    const { url, init } = lastCall()
+    expect(url).toBe(`${BASE}/v1/questions/7/answer`)
+    expect(JSON.parse(init.body as string)).toEqual({ choose: 1, body: 'ок' })
+  })
+
+  it('outcome override PATCHes the question outcome', async () => {
+    const r = await setup(useSetQuestionOutcome)
+    await act(async () => {
+      await r.current.hook.mutateAsync({ id: 7, outcome: 'corrected' })
+    })
+    const { url, init } = lastCall()
+    expect(url).toBe(`${BASE}/v1/questions/7/outcome`)
+    expect(init.method).toBe('PATCH')
+    expect(JSON.parse(init.body as string)).toEqual({ outcome: 'corrected' })
+  })
+
+  it('gate decision posts decision and comment', async () => {
+    const r = await setup(useDecideGate)
+    await act(async () => {
+      await r.current.hook.mutateAsync({ id: 3, decision: 'changes', comment: 'уточни метрику' })
+    })
+    const { url, init } = lastCall()
+    expect(url).toBe(`${BASE}/v1/gates/3/decide`)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ decision: 'changes', comment: 'уточни метрику' })
   })
 })

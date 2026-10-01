@@ -138,6 +138,12 @@ export interface Task {
   quiet?: boolean
   open_questions?: number
   questions_awaiting_user?: number
+  /**
+   * Brainstorm skill picked when the task started (task #4901):
+   * `orchestrator-brainstorming` or `superpowers:brainstorming`; `""` on
+   * tasks started before it, absent on an older daemon.
+   */
+  brainstorm_skill?: string
 }
 
 /** A milestone as listed on its holder's agent card. */
@@ -157,7 +163,7 @@ export interface TaskDetail extends Task {
   open_questions: number
 }
 
-export type TaskDocKind = 'spec' | 'plan' | 'report' | 'doc'
+export type TaskDocKind = 'spec' | 'plan' | 'report' | 'doc' | 'problem'
 
 export interface TaskDoc {
   id: number
@@ -183,6 +189,33 @@ export interface TaskLogEntry {
 
 export type QuestionStatus = 'open' | 'resolved'
 
+/** How a brainstorm answer relates to the asker's recommendation (task #4901, spec §2.2). */
+export type BrainstormOutcome = 'accepted' | 'corrected' | 'wrong_turn'
+
+/**
+ * The brainstorm part of a thread's JSON. The daemon sends it on every
+ * thread: on non-brainstorm threads the options are null and the strings
+ * empty; an older daemon omits it entirely — hence all optional.
+ */
+export interface BrainstormFields {
+  /** 1-based option the asker recommends; null when none. */
+  recommended_option?: number | null
+  /** 1-based option the human picked; null for an answer in their own words. */
+  chosen_option?: number | null
+  /** The human's own text: the comment to a picked option, or the whole answer. */
+  answer_comment?: string
+  /** `ui` | `terminal`; `""` while unanswered. */
+  answer_source?: '' | 'ui' | 'terminal'
+  /** `""` while unanswered or dismissed. */
+  outcome?: '' | BrainstormOutcome
+  /** The human changed the computed outcome by hand. */
+  outcome_overridden?: boolean
+  /** Who closed the thread with an answer: "human", an agent id, or "". */
+  answered_by?: string
+}
+
+export type QuestionType = 'decision' | 'fyi' | 'brainstorm'
+
 export interface QuestionMessage {
   id: number
   author?: string
@@ -196,7 +229,7 @@ export interface QuestionMessage {
   created_at: number
 }
 
-export interface Question {
+export interface Question extends BrainstormFields {
   id: number
   task_id: number
   ordinal: number
@@ -223,8 +256,12 @@ export interface Question {
   whose_turn?: 'user' | 'orchestrator' | ''
   /** The one thread id a human sees — "1023/Q2" / "cto/Q1". See threadRefLabel(). */
   local_ref?: string
-  /** `decision` (the default) or `fyi` — a status note, born closed. */
-  type?: 'decision' | 'fyi'
+  /**
+   * `decision` (the default), `fyi` — a status note, born closed — or
+   * `brainstorm`: a decision thread of the orchestrator's storm that carries
+   * a recommendation and an outcome (task #4901).
+   */
+  type?: QuestionType
   /** Answer choices; `choose` is a **1-based** index into this array. */
   options?: string[]
   /**
@@ -330,7 +367,7 @@ export interface AgentQuestion {
  * It deliberately carries the question body only, never the conversation: a
  * row that is expanded fetches the full thread from its per-subject endpoint.
  */
-export interface ThreadInboxEntry {
+export interface ThreadInboxEntry extends BrainstormFields {
   /** "1023/Q2" or "cto/Q1" — the id a human types back. */
   local_ref: string
   kind: 'task' | 'role'
@@ -355,7 +392,7 @@ export interface ThreadInboxEntry {
   body: string
   status: QuestionStatus
   resolution?: 'answered' | 'dismissed' | 'fyi'
-  type: 'decision' | 'fyi'
+  type: QuestionType
   options?: string[]
   participants: string[]
   /** The stored "whose turn" set; `waiting_on` is the same array, older name. */
@@ -372,6 +409,42 @@ export interface ThreadInboxEntry {
   /** Task threads only: the context a row needs to link and label itself. */
   project_id?: string
   task_title?: string
+}
+
+/** Storm exit gate (task #4901, spec §2.3). Times are unix seconds. */
+export type GateStatus = 'pending' | 'go' | 'changes' | 'superseded'
+
+export interface TaskGate {
+  id: number
+  task_id: number
+  spec_version: number
+  plan_version: number | null
+  status: GateStatus
+  /** The human's comment on "changes"; may be empty on "go". */
+  comment: string
+  decided_by: string
+  requested_by: string
+  requested_at: number
+  decided_at: number | null
+}
+
+/** One storm's counters — `GET /v1/tasks/{id}/brainstorm/stats`. */
+export interface BrainstormStorm {
+  task_id: number
+  title: string
+  project_id: string
+  /** Skill of the storm; `"unknown"` for tasks without one. */
+  skill: string
+  questions: number
+  answered: number
+  accepted: number
+  accepted_with_comment: number
+  corrected: number
+  wrong_turn: number
+  /** Gates decided as "changes". */
+  spec_changes: number
+  /** Unix seconds of the Go; null while there is none. */
+  go_at: number | null
 }
 
 export interface GithubRepo {

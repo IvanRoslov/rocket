@@ -305,7 +305,8 @@ describe('task status', () => {
     mockApi({ '/v1/tasks/12': { ...TASK, status: 'brainstorm' } })
     renderWithProviders(<TaskScreen />)
 
-    await waitFor(() => expect(screen.getByText('Brainstorm')).toBeTruthy())
+    // The status badge, plus the Brainstorm tab chip (task #4901).
+    await waitFor(() => expect(screen.getAllByText('Brainstorm').length).toBe(2))
     fireEvent.press(screen.getByText('⋯'))
     expect(await screen.findByText('Move to In Progress')).toBeTruthy()
     expect(screen.queryByText('Move to Brainstorm')).toBeNull()

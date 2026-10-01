@@ -3,9 +3,11 @@ import { useState } from 'react'
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import type { ThreadAnswer } from '../api/queries'
 import type { ThreadInboxEntry } from '../api/types'
+import { isBrainstorm } from '../lib/brainstorm'
 import { threadSource } from '../lib/questions'
 import { participantLabel } from '../lib/threads'
 import { colors, radius } from '../theme'
+import { STORM_INPUT_PLACEHOLDER, StormOptions } from './BrainstormAnswer'
 import { QuestionText } from './QuestionText'
 import { Badge, Card, MonoText } from './ui'
 
@@ -30,6 +32,7 @@ export function ThreadCard({
   const source = threadSource(thread)
   const options = thread.options ?? []
   const actionable = thread.your_turn
+  const storm = isBrainstorm(thread)
 
   return (
     <Card style={{ padding: 14, marginBottom: 12 }}>
@@ -47,7 +50,23 @@ export function ThreadCard({
       <QuestionText q={thread} />
       {actionable ? (
         <>
-          {options.length > 0 ? (
+          {/* A storm question stars the recommendation; the typed text rides along as the comment. */}
+          {storm && options.length > 0 ? (
+            <View style={{ marginTop: 12 }}>
+              <StormOptions
+                q={thread}
+                onChoose={(choose, label) => {
+                  const comment = text.trim()
+                  onAnswer(
+                    thread,
+                    comment ? { choose, body: comment } : { choose },
+                    comment ? `${label} — ${comment}` : label,
+                  )
+                }}
+              />
+            </View>
+          ) : null}
+          {!storm && options.length > 0 ? (
             <View style={styles.optionRow}>
               {options.map((label, i) => (
                 <Pressable key={i} style={styles.optionBtn} onPress={() => onAnswer(thread, { choose: i + 1 }, label)}>
@@ -61,7 +80,7 @@ export function ThreadCard({
             onChangeText={setText}
             onFocus={onInputFocus}
             onBlur={onInputBlur}
-            placeholder="Your answer…"
+            placeholder={storm ? STORM_INPUT_PLACEHOLDER : 'Your answer…'}
             placeholderTextColor={colors.textFaint}
             multiline
             style={styles.input}

@@ -5,6 +5,8 @@ import { addresseePayload } from '../lib/threads'
 import { useServers } from '../servers/ServerContext'
 import type {
   Agent,
+  BrainstormOutcome,
+  BrainstormStorm,
   AgentInboxMessage,
   AgentQuestion,
   GithubRepo,
@@ -21,6 +23,7 @@ import type {
   Task,
   TaskDetail,
   TaskDoc,
+  TaskGate,
   TaskLogEntry,
   TaskStatus,
   ThreadInboxEntry,
@@ -138,12 +141,14 @@ export function useTaskDetail(id: number) {
   })
 }
 
-export function useTaskDocs(id: number, enabled: boolean) {
+/** Latest version of each doc; `history` returns every version instead. */
+export function useTaskDocs(id: number, enabled: boolean, history = false) {
   const baseUrl = useBaseUrl()
   const refetchInterval = usePoll(10000, 60000)
+  const qs = history ? '?history=true' : ''
   return useQuery({
-    queryKey: [baseUrl, 'task', id, 'docs'],
-    queryFn: async () => (await api.get<{ docs: TaskDoc[] }>(baseUrl, `/v1/tasks/${id}/docs`)).docs ?? [],
+    queryKey: [baseUrl, 'task', id, 'docs', history ? 'history' : 'latest'],
+    queryFn: async () => (await api.get<{ docs: TaskDoc[] }>(baseUrl, `/v1/tasks/${id}/docs${qs}`)).docs ?? [],
     enabled,
     refetchInterval,
   })
@@ -168,6 +173,61 @@ export function useTaskQuestions(id: number) {
     queryFn: async () =>
       (await api.get<{ questions: Question[] }>(baseUrl, `/v1/tasks/${id}/questions`)).questions ?? [],
     refetchInterval,
+  })
+}
+
+// --- Brainstorm (task #4901) ----------------------------------------------
+
+/** Storm exit gates of a task, newest first. */
+export function useTaskGates(id: number, enabled = true) {
+  const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(5000)
+  return useQuery({
+    queryKey: [baseUrl, 'task', id, 'gates'],
+    queryFn: async () => (await api.get<{ gates: TaskGate[] }>(baseUrl, `/v1/tasks/${id}/gates`)).gates ?? [],
+    enabled,
+    refetchInterval,
+  })
+}
+
+/** The storm's counters for the Brainstorm tab. */
+export function useBrainstormStats(id: number, enabled: boolean) {
+  const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(10000, 60000)
+  return useQuery({
+    queryKey: [baseUrl, 'task', id, 'brainstorm'],
+    queryFn: () => api.get<BrainstormStorm>(baseUrl, `/v1/tasks/${id}/brainstorm/stats`),
+    enabled,
+    refetchInterval,
+  })
+}
+
+/** Go / needs changes on a pending gate — the human's call only. */
+export function useDecideGate() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { id: number; decision: 'go' | 'changes'; comment?: string }) =>
+      api.post<TaskGate>(baseUrl, `/v1/gates/${p.id}/decide`, { decision: p.decision, comment: p.comment ?? '' }),
+    // Settled, not success: a 409 means the gate moved under us — refetch either way.
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'task'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'tasks'] })
+    },
+  })
+}
+
+/** Human override of a brainstorm answer's computed outcome. */
+export function useSetQuestionOutcome() {
+  const baseUrl = useBaseUrl()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { id: number; outcome: BrainstormOutcome }) =>
+      api.patch(baseUrl, `/v1/questions/${p.id}/outcome`, { outcome: p.outcome }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [baseUrl, 'task'] })
+      qc.invalidateQueries({ queryKey: [baseUrl, 'threads'] })
+    },
   })
 }
 
@@ -330,8 +390,9 @@ export function useQuestionAnswer() {
         // `choose` is a 1-based index into `options`; the daemon substitutes
         // the option's own text as the resolution. Picking one closes the
         // thread, so nobody is left to answer and `to` would be meaningless.
+        // A brainstorm thread takes a comment along with the option.
         p.choose
-          ? { choose: p.choose }
+          ? { choose: p.choose, ...(p.body?.trim() ? { body: p.body.trim() } : {}) }
           : { body: p.body, ...addresseePayload(p.to ?? []) },
       ),
     onSuccess: () => {
@@ -633,7 +694,8 @@ export function useThreads() {
   })
 }
 
-export type ThreadAnswer = { choose: number } | { body: string } | { dismiss: true }
+/** `{choose, body}` answers a brainstorm thread with an option plus a comment. */
+export type ThreadAnswer = { choose: number; body?: string } | { body: string } | { dismiss: true }
 
 /** Answers any inbox thread; the endpoint depends on whether it is a task or an agent thread. */
 export function useThreadAnswer() {
