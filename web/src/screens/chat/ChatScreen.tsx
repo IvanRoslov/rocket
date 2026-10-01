@@ -599,9 +599,11 @@ const PERMISSION_ESC_INDEX = -1
 /**
  * The live card for a Claude Code TUI permission dialog (`pending_quiz.source
  * === "permission"`, task #4881): one tap on an option = the answer (the
- * daemon presses that digit), no confirm step and no free-text row. With no
- * parsed options it falls back to the raw pane + a single Esc button
- * (`option_indices: [-1]`). Rendered for every session kind — a worker's
+ * daemon presses that digit), no confirm step and no free-text row. A
+ * secondary Esc (`option_indices: [-1]`) always follows the options — e.g.
+ * ExitPlanMode's "Tell Claude what to change" is a text field the parser
+ * drops, so Esc is the only way to reject the plan. With no parsed options it
+ * falls back to the raw pane + that single Esc button. Rendered for every session kind — a worker's
  * agent can block on a permission too, even though its chat has no composer.
  */
 function PermissionCard({
@@ -684,6 +686,14 @@ function PermissionCard({
                   {o.label}
                 </button>
               ))}
+              <button
+                type="button"
+                className="chat-screen__permission-esc"
+                disabled={disabled}
+                onClick={() => answer(PERMISSION_ESC_INDEX)}
+              >
+                Esc
+              </button>
             </div>
           </>
         ) : (
