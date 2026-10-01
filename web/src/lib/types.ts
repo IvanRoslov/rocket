@@ -76,6 +76,17 @@ export interface PendingQuizQuestion {
 export interface PendingQuiz {
   questions: PendingQuizQuestion[]
   asked_at: number
+  /**
+   * `"permission"` when the daemon monitor recognised a Claude Code TUI
+   * permission dialog on the pane (task #4881) rather than a hook-driven
+   * AskUserQuestion quiz; absent for a regular quiz. A permission quiz has
+   * exactly one single-select question whose `question` is
+   * `"<Title>\n\n<Context>"` (context may be absent); `options` may be empty,
+   * in which case only `raw` + an Esc answer (`option_indices: [-1]`) apply.
+   */
+  source?: 'permission'
+  /** Bottom ~20 lines of the pane — fallback display for a permission prompt. */
+  raw?: string
 }
 
 /**
@@ -163,7 +174,7 @@ export interface Message {
 // Chat — internal/api/chat.go, docs/13-chat.md
 // ---------------------------------------------------------------------------
 
-export type ChatRole = 'user' | 'assistant' | 'tool' | 'quiz_answer'
+export type ChatRole = 'user' | 'assistant' | 'tool' | 'quiz_answer' | 'permission'
 
 /**
  * One entry in a session's chat feed (`GET /v1/sessions/{id}/chat`) — a
@@ -187,6 +198,20 @@ export interface ChatEntry {
   tool_name?: string
   ts: number
   quiz?: QuizToolInput | QuizAnswerEcho
+  /** Present only on `role:"permission"` entries — a resolved permission prompt from the daemon's log. */
+  permission?: PermissionEntry
+}
+
+/**
+ * A resolved Claude Code permission prompt merged into the chat feed by the
+ * daemon (`permission_prompts` table, task #4881). `answered_via:"terminal"`
+ * means the dialog vanished without an answer through the API.
+ */
+export interface PermissionEntry {
+  title: string
+  context: string
+  answer_label: string
+  answered_via: 'chat' | 'terminal'
 }
 
 /**

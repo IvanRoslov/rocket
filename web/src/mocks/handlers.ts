@@ -343,6 +343,27 @@ export const handlers = [
     }
     const quiz = session.pending_quiz
     const answers = body.answers ?? []
+    if (quiz.source === 'permission') {
+      // Permission prompt (task #4881): exactly one option index (or -1 =
+      // Esc) for question 0; free text has no meaning for a TUI dialog.
+      const a = answers[0]
+      const idx = a?.option_indices
+      const optionCount = quiz.questions[0]?.options.length ?? 0
+      if (
+        answers.length !== 1 ||
+        a.question_index !== 0 ||
+        a.text !== undefined ||
+        idx?.length !== 1 ||
+        idx[0] < -1 ||
+        idx[0] >= optionCount
+      ) {
+        return HttpResponse.json(
+          { error: { code: 'invalid_answer', message: 'permission answer needs exactly one option_index' } },
+          { status: 400 },
+        )
+      }
+      return HttpResponse.json({ status: 'answering' }, { status: 202 })
+    }
     if (answers.length !== quiz.questions.length) {
       return HttpResponse.json(
         { error: { code: 'quiz_answer_invalid', message: 'all questions must be answered' } },
