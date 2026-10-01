@@ -58,7 +58,7 @@ export function QuestionBanner({ taskId, question, onOpen }: QuestionBannerProps
               onClick={() => answer.mutate({ id: question.id, choose: i + 1, taskId })}
             >
               {question.recommended_option === i + 1 && (
-                <span className="brainstorm-options__star" title="Рекомендация агента">
+                <span className="brainstorm-options__star" title="Recommended by the agent">
                   ★{' '}
                 </span>
               )}

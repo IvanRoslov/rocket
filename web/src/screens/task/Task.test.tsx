@@ -697,8 +697,8 @@ describe('TaskScreen — storm questions in the Questions tab', () => {
     )
     await openQuestions()
 
-    await userEvent.type(screen.getByLabelText('Комментарий к выбору'), 'с архивом')
-    await userEvent.click(screen.getByRole('button', { name: /Ledger table in Postgres — рекомендация/ }))
+    await userEvent.type(screen.getByLabelText('Comment on your pick'), 'с архивом')
+    await userEvent.click(screen.getByRole('button', { name: /Ledger table in Postgres — recommended/ }))
     await waitFor(() => expect(bodies).toEqual([{ choose: 2, body: 'с архивом' }]))
   })
 
@@ -713,11 +713,11 @@ describe('TaskScreen — storm questions in the Questions tab', () => {
     await openQuestions()
 
     const row = screen.getByText('Bill per seat or per event?').closest('.questions-tab__resolved') as HTMLElement
-    expect(within(row).getByText('принята с комментарием')).toBeInTheDocument()
+    expect(within(row).getByText('Accepted with comment')).toBeInTheDocument()
     await userEvent.click(within(row).getByRole('button', { expanded: false }))
-    expect(within(row).getByText('из терминала')).toBeInTheDocument()
+    expect(within(row).getByText('From terminal')).toBeInTheDocument()
 
-    await userEvent.selectOptions(within(row).getByLabelText('Исход'), 'corrected')
+    await userEvent.selectOptions(within(row).getByLabelText('Outcome'), 'corrected')
     await waitFor(() => expect(bodies).toEqual([{ outcome: 'corrected' }]))
   })
 })

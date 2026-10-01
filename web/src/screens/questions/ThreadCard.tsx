@@ -114,13 +114,13 @@ export function ThreadCard(props: ThreadCardProps) {
                     key={option}
                     type="button"
                     className="q__option"
-                    aria-label={recommended ? `${option} — рекомендация` : undefined}
+                    aria-label={recommended ? `${option} — recommended` : undefined}
                     onClick={() => props.onChoose(i, storm ? comment.trim() : '')}
                   >
                     <span className="q__option-num">{i + 1}</span>
                     <span className="q__option-label">
                       {recommended && (
-                        <span className="brainstorm-options__star" title="Рекомендация агента">
+                        <span className="brainstorm-options__star" title="Recommended by the agent">
                           ★{' '}
                         </span>
                       )}
@@ -135,8 +135,8 @@ export function ThreadCard(props: ThreadCardProps) {
               <input
                 type="text"
                 className="brainstorm-options__comment"
-                aria-label="Комментарий к выбору"
-                placeholder="Комментарий к выбору — необязательно, уйдёт вместе с вариантом"
+                aria-label="Comment on your pick"
+                placeholder="Comment on your pick — optional, sent with the option"
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
               />

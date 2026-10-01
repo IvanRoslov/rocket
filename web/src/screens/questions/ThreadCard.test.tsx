@@ -215,8 +215,8 @@ describe('ThreadCard — storm thread', () => {
     renderCard({ entry: storm, onChoose })
 
     expect(screen.getAllByText('★')).toHaveLength(1)
-    await userEvent.type(screen.getByLabelText('Комментарий к выбору'), 'с архивом')
-    await userEvent.click(screen.getByRole('button', { name: /Ledger table.*рекомендация/ }))
+    await userEvent.type(screen.getByLabelText('Comment on your pick'), 'с архивом')
+    await userEvent.click(screen.getByRole('button', { name: /Ledger table.*recommended/ }))
     expect(onChoose).toHaveBeenCalledWith(1, 'с архивом')
   })
 
@@ -235,15 +235,15 @@ describe('ThreadCard — storm thread', () => {
       onOverride,
     })
 
-    expect(screen.getByText('поправлена', { selector: '.brainstorm-result__outcome' })).toBeInTheDocument()
-    expect(screen.getByText('из терминала')).toBeInTheDocument()
-    await userEvent.selectOptions(screen.getByLabelText('Исход'), 'accepted')
+    expect(screen.getByText('Corrected', { selector: '.brainstorm-result__outcome' })).toBeInTheDocument()
+    expect(screen.getByText('From terminal')).toBeInTheDocument()
+    await userEvent.selectOptions(screen.getByLabelText('Outcome'), 'accepted')
     expect(onOverride).toHaveBeenCalledWith('accepted')
   })
 
   it('keeps a decision thread free of the storm controls', () => {
     renderCard({ entry: { ...entry, options: ['Yes', 'No'] } })
     expect(screen.queryByText('★')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Комментарий к выбору')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Comment on your pick')).not.toBeInTheDocument()
   })
 })

@@ -32,13 +32,13 @@ export function BrainstormOptions({ options, recommended, busy, onChoose }: Brai
                   ? 'brainstorm-options__option brainstorm-options__option--recommended'
                   : 'brainstorm-options__option'
               }
-              aria-label={isRecommended ? `${label} — рекомендация` : undefined}
+              aria-label={isRecommended ? `${label} — recommended` : undefined}
               disabled={busy}
               onClick={() => onChoose(i + 1, comment.trim())}
             >
               <span className="brainstorm-options__num">{i + 1}</span>
               {isRecommended && (
-                <span className="brainstorm-options__star" title="Рекомендация агента" aria-hidden="true">
+                <span className="brainstorm-options__star" title="Recommended by the agent" aria-hidden="true">
                   ★
                 </span>
               )}
@@ -50,14 +50,14 @@ export function BrainstormOptions({ options, recommended, busy, onChoose }: Brai
       <input
         type="text"
         className="brainstorm-options__comment"
-        aria-label="Комментарий к выбору"
-        placeholder="Комментарий к выбору — необязательно, уйдёт вместе с вариантом"
+        aria-label="Comment on your pick"
+        placeholder="Comment on your pick — optional, sent with the option"
         value={comment}
         onChange={(e) => setComment(e.target.value)}
       />
       <div className="brainstorm-options__hint">
-        ★ — рекомендация агента. Выбор варианта закрывает тред; если не подходит ни один — напишите свой
-        ответ ниже.
+        ★ marks the agent's recommendation. Picking an option closes the thread; if none fits, write your own
+        answer below.
       </div>
     </div>
   )

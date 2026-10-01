@@ -6,14 +6,14 @@ import type { BrainstormFields, BrainstormOutcome } from '../lib/types'
 import './brainstorm.css'
 
 const OUTCOMES: { value: BrainstormOutcome; label: string }[] = [
-  { value: 'accepted', label: 'принята' },
-  { value: 'corrected', label: 'поправлена' },
-  { value: 'wrong_turn', label: 'ушли не туда' },
+  { value: 'accepted', label: 'Accepted' },
+  { value: 'corrected', label: 'Corrected' },
+  { value: 'wrong_turn', label: 'Wrong turn' },
 ]
 
 /** The outcome as the human reads it; an accepted answer with words is "with a comment". */
 export function outcomeLabel(outcome: BrainstormOutcome, comment: string): string {
-  if (outcome === 'accepted' && comment.trim()) return 'принята с комментарием'
+  if (outcome === 'accepted' && comment.trim()) return 'Accepted with comment'
   return OUTCOMES.find((o) => o.value === outcome)?.label ?? outcome
 }
 
@@ -39,29 +39,29 @@ export function BrainstormResult({ question, onOverride, busy }: BrainstormResul
         <span className="brainstorm-result__choice">
           {chosen !== null ? (
             <>
-              Вариант {chosen}
+              Option {chosen}
               {optionText ? `: ${optionText}` : ''}
               {chosen === question.recommended_option && (
-                <span className="brainstorm-options__star" title="Рекомендация агента">
+                <span className="brainstorm-options__star" title="Recommended by the agent">
                   {' '}★
                 </span>
               )}
             </>
           ) : (
-            'Свой ответ'
+            'Own answer'
           )}
         </span>
         <span className={`brainstorm-result__outcome brainstorm-result__outcome--${outcome}`}>
           {outcomeLabel(outcome, comment)}
         </span>
-        {question.outcome_overridden && <span className="brainstorm-result__note">изменён вручную</span>}
+        {question.outcome_overridden && <span className="brainstorm-result__note">changed by hand</span>}
         {question.answer_source === 'terminal' && (
-          <span className="brainstorm-result__source">из терминала</span>
+          <span className="brainstorm-result__source">From terminal</span>
         )}
         {onOverride && (
           <select
             className="brainstorm-result__override"
-            aria-label="Исход"
+            aria-label="Outcome"
             value={outcome}
             disabled={busy}
             onChange={(e) => onOverride(e.target.value as BrainstormOutcome)}

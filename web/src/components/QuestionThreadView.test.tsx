@@ -298,7 +298,7 @@ describe('QuestionThreadView — storm thread', () => {
   it('stars only the recommended option', () => {
     render(<QuestionThreadView {...storm} onChooseWithComment={vi.fn()} />)
 
-    expect(screen.getByRole('button', { name: /Ledger table.*рекомендация/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Ledger table.*recommended/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^1\s*Kafka topic$/ })).toBeInTheDocument()
     expect(screen.getAllByText('★')).toHaveLength(1)
   })
@@ -307,7 +307,7 @@ describe('QuestionThreadView — storm thread', () => {
     const onChooseWithComment = vi.fn()
     render(<QuestionThreadView {...storm} onChooseWithComment={onChooseWithComment} />)
 
-    await userEvent.type(screen.getByLabelText('Комментарий к выбору'), 'но с архивом')
+    await userEvent.type(screen.getByLabelText('Comment on your pick'), 'но с архивом')
     await userEvent.click(screen.getByRole('button', { name: /Ledger table/ }))
     expect(onChooseWithComment).toHaveBeenCalledWith(2, 'но с архивом')
   })
@@ -325,6 +325,6 @@ describe('QuestionThreadView — storm thread', () => {
     render(<QuestionThreadView {...base} options={['Yes', 'No']} onChoose={vi.fn()} />)
 
     expect(screen.queryByText('★')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Комментарий к выбору')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Comment on your pick')).not.toBeInTheDocument()
   })
 })

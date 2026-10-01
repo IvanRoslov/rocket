@@ -1,0 +1,161 @@
+.brainstorm-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.brainstorm-tab__counters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+}
+.brainstorm-tab__counter {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel-sm);
+  background: var(--surface);
+  min-width: 110px;
+}
+.brainstorm-tab__counter-label {
+  font: 600 11px var(--font-ui);
+  color: var(--text-4);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.brainstorm-tab__counter-value {
+  margin: 4px 0 0;
+  font: 600 18px var(--font-ui);
+  color: var(--text);
+}
+
+.brainstorm-tab__section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.brainstorm-tab__heading {
+  margin: 0;
+  font: 600 13px var(--font-ui);
+  color: var(--text-2);
+}
+.brainstorm-tab__when {
+  font: 12px var(--font-ui);
+  color: var(--text-4);
+}
+.brainstorm-tab__empty {
+  margin: 0;
+  font: 13.5px var(--font-ui);
+  color: var(--text-4);
+}
+.brainstorm-tab__doc {
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+}
+
+.brainstorm-tab__closed {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+}
+.brainstorm-tab__closed-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.brainstorm-tab__ref {
+  font: 600 12px var(--font-mono);
+  color: var(--text-3);
+}
+.brainstorm-tab__closed-title {
+  flex: 1;
+  font: 600 14px var(--font-ui);
+  color: var(--text);
+}
+.brainstorm-tab__dismissed {
+  font: 11.5px var(--font-ui);
+  color: var(--text-3);
+}
+.brainstorm-tab__toggle {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  padding: 0;
+  font: 12px var(--font-ui);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+.brainstorm-tab__closed-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.brainstorm-tab__message {
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+}
+
+.brainstorm-tab__gate {
+  padding: 16px 18px;
+  border: 1.5px solid var(--border-hover);
+  border-radius: var(--radius-panel-lg);
+  background: var(--surface);
+}
+.brainstorm-tab__gate-versions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 600 14px var(--font-ui);
+}
+.brainstorm-tab__doc-link {
+  border: none;
+  background: none;
+  padding: 0;
+  font: 600 14px var(--font-ui);
+  color: var(--accent-text);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.brainstorm-tab__gate-actions {
+  display: flex;
+  gap: 8px;
+}
+.brainstorm-tab__changes {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.brainstorm-tab__changes textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font: 13.5px var(--font-ui);
+  resize: vertical;
+}
+.brainstorm-tab__gate-state {
+  margin: 0;
+  font: 600 14px var(--font-ui);
+  color: var(--text-2);
+}
+.brainstorm-tab__error {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font: 13px var(--font-ui);
+  color: var(--err-text);
+  background: var(--err-bg-2);
+}
+.brainstorm-tab__history {
+  margin: 0;
+  padding-left: 18px;
+  font: 13px var(--font-ui);
+  color: var(--text-3);
+}

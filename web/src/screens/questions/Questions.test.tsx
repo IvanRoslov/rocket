@@ -401,8 +401,8 @@ describe('storm threads in the inbox', () => {
     const rail = document.querySelector('.q__rail') as HTMLElement
     await user.click(within(rail).getByRole('button', { name: /17\/Q2/ }))
 
-    await user.type(screen.getByLabelText('Комментарий к выбору'), 'с архивом')
-    await user.click(screen.getByRole('button', { name: /Ledger table in Postgres — рекомендация/ }))
+    await user.type(screen.getByLabelText('Comment on your pick'), 'с архивом')
+    await user.click(screen.getByRole('button', { name: /Ledger table in Postgres — recommended/ }))
 
     await waitFor(() => expect(sent).toEqual([{ choose: 2, body: 'с архивом' }]))
   })

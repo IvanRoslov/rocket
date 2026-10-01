@@ -18,10 +18,10 @@ const answered = {
 
 describe('outcomeLabel', () => {
   it('names every outcome, and an accepted one with a comment', () => {
-    expect(outcomeLabel('accepted', '')).toBe('принята')
-    expect(outcomeLabel('accepted', 'да, но')).toBe('принята с комментарием')
-    expect(outcomeLabel('corrected', '')).toBe('поправлена')
-    expect(outcomeLabel('wrong_turn', 'своё')).toBe('ушли не туда')
+    expect(outcomeLabel('accepted', '')).toBe('Accepted')
+    expect(outcomeLabel('accepted', 'да, но')).toBe('Accepted with comment')
+    expect(outcomeLabel('corrected', '')).toBe('Corrected')
+    expect(outcomeLabel('wrong_turn', 'своё')).toBe('Wrong turn')
   })
 })
 
@@ -29,10 +29,10 @@ describe('BrainstormResult', () => {
   it('shows the chosen option, the comment and the outcome', () => {
     render(<BrainstormResult question={{ ...answered, answer_comment: 'seats as a floor' }} />)
 
-    expect(screen.getByText(/Вариант 2: Per event/)).toBeInTheDocument()
+    expect(screen.getByText(/Option 2: Per event/)).toBeInTheDocument()
     expect(screen.getByText('seats as a floor')).toBeInTheDocument()
-    expect(screen.getByText('принята с комментарием')).toBeInTheDocument()
-    expect(screen.queryByText('из терминала')).not.toBeInTheDocument()
+    expect(screen.getByText('Accepted with comment')).toBeInTheDocument()
+    expect(screen.queryByText('From terminal')).not.toBeInTheDocument()
   })
 
   it('says when the answer was given in own words', () => {
@@ -41,26 +41,26 @@ describe('BrainstormResult', () => {
         question={{ ...answered, chosen_option: null, answer_comment: 'neither', outcome: 'wrong_turn' }}
       />,
     )
-    expect(screen.getByText('Свой ответ')).toBeInTheDocument()
-    expect(screen.getByText('ушли не туда')).toBeInTheDocument()
+    expect(screen.getByText('Own answer')).toBeInTheDocument()
+    expect(screen.getByText('Wrong turn')).toBeInTheDocument()
   })
 
   it('marks an answer recorded from the terminal', () => {
     render(<BrainstormResult question={{ ...answered, answer_source: 'terminal' }} />)
-    expect(screen.getByText('из терминала')).toBeInTheDocument()
+    expect(screen.getByText('From terminal')).toBeInTheDocument()
   })
 
   it('lets the human override the outcome', async () => {
     const onOverride = vi.fn()
     render(<BrainstormResult question={answered} onOverride={onOverride} />)
 
-    await userEvent.selectOptions(screen.getByLabelText('Исход'), 'corrected')
+    await userEvent.selectOptions(screen.getByLabelText('Outcome'), 'corrected')
     expect(onOverride).toHaveBeenCalledWith('corrected')
   })
 
   it('marks an overridden outcome', () => {
     render(<BrainstormResult question={{ ...answered, outcome: 'corrected', outcome_overridden: true }} />)
-    expect(screen.getByText('изменён вручную')).toBeInTheDocument()
+    expect(screen.getByText('changed by hand')).toBeInTheDocument()
   })
 
   it('renders nothing for a thread without an outcome', () => {
