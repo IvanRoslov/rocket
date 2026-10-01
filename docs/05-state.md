@@ -9,6 +9,7 @@
 ├── rocketd.pid
 ├── rocket.db          # SQLite: всё состояние, включая реестр репо и проектов
 ├── logs/rocketd.log   # ротация по размеру
+├── logs/rocketd.stderr.log  # stderr фонового демона: паники и дамп горутин по `kill -QUIT $(cat ~/.rocket/rocketd.pid)` — первое, что снять, если демон завис
 ├── repos/             # чекауты, склонированные самим rocket'ом
 │   └── <owner>__<name>/
 ├── worktrees/

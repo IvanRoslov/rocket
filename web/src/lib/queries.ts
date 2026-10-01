@@ -1213,46 +1213,75 @@ export function useSetOutcome(): UseMutationResult<
  * backed (see useSessionChat.ts) — it listens to these same three types
  * directly to refetch `pending_quiz` promptly.
  */
+/** How long SSE invalidations are collected before they are applied at once. */
+export const INVALIDATION_WINDOW_MS = 1000
+
+/** The query keys an SSE event makes stale; empty when it moves nothing. */
+function eventQueryKeys(type: string): string[][] {
+  if (type === 'session.chat_updated') {
+    // Fires on every activity tick of a talking agent; the chat screen polls
+    // its own cursor. Invalidating on it refetched sessions and projects many
+    // times a second per open tab.
+    return []
+  }
+  if (type.startsWith('session.')) return [['sessions'], ['projects']]
+  if (type.startsWith('message.')) return [['messages']]
+  if (type.startsWith('task.')) {
+    // Answers, outcome overrides and gate decisions all move the storm metric.
+    return [['tasks'], ['task'], ['questions'], ['threads'], ['stats']]
+  }
+  if (type.startsWith('milestone.')) {
+    // `milestone.quiet` (subtask #1032) flips the quiet flag the milestone
+    // cards render, on both the board and the holder's agent card.
+    return [['tasks'], ['agents'], ['agent']]
+  }
+  if (type === 'orchestrator.heartbeat_sent') {
+    // High-frequency event; keep invalidation minimal — only the task
+    // detail view (which shows session/heartbeat state) needs to refresh.
+    return [['task']]
+  }
+  if (type.startsWith('agent.')) {
+    // Agent registration, session start/stop and Q&A threads all move the
+    // agents list and the open agent card; the session rows behind
+    // `session_alive` move with them.
+    return [['agents'], ['agent'], ['sessions']]
+  }
+  if (type.startsWith('repo.clone_')) return [['repos']]
+  if (type.startsWith('pr.')) {
+    // PR state changes (phase 4): re-fetch the sessions carrying pr_*
+    // fields plus the task/board views that surface PR badges.
+    return [['sessions'], ['tasks'], ['task']]
+  }
+  return []
+}
+
+/**
+ * Turns SSE events into query invalidations, coalesced: the keys a burst of
+ * events touches are collected for INVALIDATION_WINDOW_MS and invalidated once,
+ * and a refetch already in flight is reused instead of cancelled
+ * (`cancelRefetch: false`). Invalidating on every event, with React Query's
+ * default of cancelling the running fetch, turned an event burst into a
+ * request burst — and the daemon, which does not notice a client hanging up,
+ * kept executing every abandoned request until it drowned.
+ */
 export function wireInvalidation(queryClient: QueryClient) {
-  return (event: RocketEvent) => {
-    if (event.type.startsWith('session.')) {
-      queryClient.invalidateQueries({ queryKey: ['sessions'] })
-      queryClient.invalidateQueries({ queryKey: ['projects'] })
-    } else if (event.type.startsWith('message.')) {
-      queryClient.invalidateQueries({ queryKey: ['messages'] })
-    } else if (event.type.startsWith('task.')) {
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      queryClient.invalidateQueries({ queryKey: ['task'] })
-      queryClient.invalidateQueries({ queryKey: ['questions'] })
-      queryClient.invalidateQueries({ queryKey: ['threads'] })
-      // Answers, outcome overrides and gate decisions all move the storm metric.
-      queryClient.invalidateQueries({ queryKey: ['stats'] })
-    } else if (event.type.startsWith('milestone.')) {
-      // `milestone.quiet` (subtask #1032) flips the quiet flag the milestone
-      // cards render, on both the board and the holder's agent card.
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      queryClient.invalidateQueries({ queryKey: ['agents'] })
-      queryClient.invalidateQueries({ queryKey: ['agent'] })
-    } else if (event.type === 'orchestrator.heartbeat_sent') {
-      // High-frequency event; keep invalidation minimal — only the task
-      // detail view (which shows session/heartbeat state) needs to refresh.
-      queryClient.invalidateQueries({ queryKey: ['task'] })
-    } else if (event.type.startsWith('agent.')) {
-      // Agent registration, session start/stop and Q&A threads all move the
-      // agents list and the open agent card; the session rows behind
-      // `session_alive` move with them.
-      queryClient.invalidateQueries({ queryKey: ['agents'] })
-      queryClient.invalidateQueries({ queryKey: ['agent'] })
-      queryClient.invalidateQueries({ queryKey: ['sessions'] })
-    } else if (event.type.startsWith('repo.clone_')) {
-      queryClient.invalidateQueries({ queryKey: ['repos'] })
-    } else if (event.type.startsWith('pr.')) {
-      // PR state changes (phase 4): re-fetch the sessions carrying pr_*
-      // fields plus the task/board views that surface PR badges.
-      queryClient.invalidateQueries({ queryKey: ['sessions'] })
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      queryClient.invalidateQueries({ queryKey: ['task'] })
+  const pending = new Map<string, string[]>()
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const flush = () => {
+    timer = undefined
+    const keys = [...pending.values()]
+    pending.clear()
+    for (const queryKey of keys) {
+      queryClient.invalidateQueries({ queryKey }, { cancelRefetch: false })
     }
+  }
+
+  return (event: RocketEvent) => {
+    const keys = eventQueryKeys(event.type)
+    if (keys.length === 0) return
+    for (const key of keys) pending.set(JSON.stringify(key), key)
+    timer ??= setTimeout(flush, INVALIDATION_WINDOW_MS)
   }
 }
 

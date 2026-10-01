@@ -1,7 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { renderHook } from '@testing-library/react-native'
 import {
+  createInvalidationBatcher,
   emitDaemonEvent,
+  INVALIDATION_WINDOW_MS,
   keyMatches,
   parseEventType,
   subscribeDaemonEvents,
@@ -116,5 +118,53 @@ describe('daemon event fan-out', () => {
     mockSseHandlers!.onEvent('session.quiz_answer_unconfirmed', '{"session_id":"w1"}')
     off()
     expect(got).toEqual([['session.quiz_answer_unconfirmed', '{"session_id":"w1"}']])
+  })
+})
+
+// A burst of SSE events must not turn into a burst of requests: every event
+// used to cancel the in-flight fetch and send a new one, and the daemon —
+// which does not notice a client hanging up — kept running all of them.
+describe('createInvalidationBatcher', () => {
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => jest.useRealTimers())
+
+  it('collapses a burst into one invalidation, after the window', () => {
+    const qc = new QueryClient()
+    const spy = jest.spyOn(qc, 'invalidateQueries')
+    const push = createInvalidationBatcher(qc)
+    for (let i = 0; i < 50; i++) push(parseEventType('task.status_changed'))
+    expect(spy).not.toHaveBeenCalled()
+    jest.advanceTimersByTime(INVALIDATION_WINDOW_MS)
+    expect(spy).toHaveBeenCalledTimes(1)
+  })
+
+  it('invalidates the union of the burst, without cancelling an in-flight fetch', () => {
+    const qc = new QueryClient()
+    const spy = jest.spyOn(qc, 'invalidateQueries')
+    const push = createInvalidationBatcher(qc)
+    push(['tasks'])
+    push(['sessions'])
+    jest.advanceTimersByTime(INVALIDATION_WINDOW_MS)
+    const [filters, opts] = spy.mock.calls[0]
+    expect(opts).toEqual({ cancelRefetch: false })
+    const predicate = filters!.predicate!
+    const q = (key: unknown[]) => ({ queryKey: key }) as unknown as Parameters<typeof predicate>[0]
+    expect(predicate(q(['http://daemon', 'tasks']))).toBe(true)
+    expect(predicate(q(['http://daemon', 'sessions']))).toBe(true)
+    expect(predicate(q(['http://daemon', 'agents']))).toBe(false)
+  })
+
+  it('ignores events that touch nothing, and gives a later burst its own flush', () => {
+    const qc = new QueryClient()
+    const spy = jest.spyOn(qc, 'invalidateQueries')
+    const push = createInvalidationBatcher(qc)
+    push([])
+    jest.advanceTimersByTime(INVALIDATION_WINDOW_MS)
+    expect(spy).not.toHaveBeenCalled()
+    push(['tasks'])
+    jest.advanceTimersByTime(INVALIDATION_WINDOW_MS)
+    push(['tasks'])
+    jest.advanceTimersByTime(INVALIDATION_WINDOW_MS)
+    expect(spy).toHaveBeenCalledTimes(2)
   })
 })

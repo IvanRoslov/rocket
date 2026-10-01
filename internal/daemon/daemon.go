@@ -50,6 +50,10 @@ func Run(cfg *config.Config) error {
 		MaxBackups: 3,
 	}, nil))
 	slog.SetDefault(logger)
+	if err := captureStderr(cfg.LogPath()); err != nil {
+		// Not fatal: the daemon works without it, it just dies quieter.
+		slog.Warn("daemon: stderr stays where it was", "error", err)
+	}
 
 	st, err := store.Open(cfg.DBPath())
 	if err != nil {

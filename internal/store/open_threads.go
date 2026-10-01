@@ -60,6 +60,10 @@ func (s *Store) ListThreads(includeResolved bool) ([]OpenThread, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	// Release the connection before the follow-up queries: the pool is
+	// bounded, and holding one connection while asking for the next is how a
+	// bounded pool deadlocks.
+	rows.Close()
 	if len(out) == 0 {
 		return nil, nil
 	}
