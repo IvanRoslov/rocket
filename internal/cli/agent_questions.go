@@ -223,7 +223,7 @@ func newAgentCloseCmd(hidden bool) *cobra.Command {
 	}
 
 	usage := "usage: rocket agent " + name + " <role>/Q<n>|<question-id> \"<резолюция>\" | --file <path> | " +
-		"--choose <n> | --dismiss [\"<почему>\"] (ровно одно) [--to <id,...>] [--dry-run] [--join]"
+		"--choose <n> [\"<комментарий>\"] | --dismiss [\"<почему>\"] (ровно одно) [--to <id,...>] [--dry-run] [--join]"
 
 	cmd := &cobra.Command{
 		Use:    name + " <role>/Q<n>|<question-id> [\"<резолюция>\"]",

@@ -31,13 +31,16 @@ type threadInboxEntry struct {
 	AskedBy string `json:"asked_by"`
 	// Title is the thread's one-line heading — what a listing renders instead
 	// of a truncated body.
-	Title        string   `json:"title"`
-	Brief        string   `json:"brief"`
-	Body         string   `json:"body"`
-	Status       string   `json:"status"`
-	Resolution   string   `json:"resolution,omitempty"`
-	Type         string   `json:"type"`
-	Options      []string `json:"options,omitempty"`
+	Title      string   `json:"title"`
+	Brief      string   `json:"brief"`
+	Body       string   `json:"body"`
+	Status     string   `json:"status"`
+	Resolution string   `json:"resolution,omitempty"`
+	Type       string   `json:"type"`
+	Options    []string `json:"options,omitempty"`
+	// The recommendation and recorded answer of a brainstorm thread, and who
+	// answered any thread — the same fields as on questionResponse.
+	brainstormWire
 	Participants []string `json:"participants"`
 	Attention    []string `json:"attention"`
 	// WaitingOn is Attention under its original name, so a client written
@@ -96,6 +99,19 @@ func handleGetThreads(w http.ResponseWriter, r *http.Request, d Deps) {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
+	// Only an answered thread has an answerer, so only those are looked up —
+	// none at all in an open-only listing.
+	var answered []int64
+	for _, th := range threads {
+		if th.Question.Resolution == "answered" {
+			answered = append(answered, th.Question.ID)
+		}
+	}
+	answerAuthors, err := d.Store.AnswerAuthors(answered)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
 
 	// Task titles and orchestrator ids are looked up once per task, not once
 	// per thread: a busy task can easily carry a dozen threads.
@@ -146,21 +162,22 @@ func handleGetThreads(w http.ResponseWriter, r *http.Request, d Deps) {
 			updatedAt = th.LastMessage.CreatedAt
 		}
 		out = append(out, threadInboxEntry{
-			LocalRef:   threadLocalRef(subj, ordinals[q.ID]),
-			Kind:       kind,
-			TaskID:     q.TaskID,
-			RoleID:     q.RoleID,
-			Subject:    threadSubjectLabel(subj, title),
-			ID:         q.ID,
-			Ordinal:    ordinals[q.ID],
-			AskedBy:    wireParticipant(q.AskedBy),
-			Title:      q.Title,
-			Brief:      q.Brief,
-			Body:       q.Body,
-			Status:     q.Status,
-			Resolution: q.Resolution,
-			Type:       q.Type,
-			Options:    q.Options,
+			LocalRef:       threadLocalRef(subj, ordinals[q.ID]),
+			Kind:           kind,
+			TaskID:         q.TaskID,
+			RoleID:         q.RoleID,
+			Subject:        threadSubjectLabel(subj, title),
+			ID:             q.ID,
+			Ordinal:        ordinals[q.ID],
+			AskedBy:        wireParticipant(q.AskedBy),
+			Title:          q.Title,
+			Brief:          q.Brief,
+			Body:           q.Body,
+			Status:         q.Status,
+			Resolution:     q.Resolution,
+			Type:           q.Type,
+			Options:        q.Options,
+			brainstormWire: toBrainstormWire(q, answerAuthors[q.ID]),
 			// emptyIfNil on every list field without omitempty: a nil Go slice
 			// marshals to `null`, and these are documented as "always present,
 			// possibly empty" — the dashboard calls .filter() on `attention`

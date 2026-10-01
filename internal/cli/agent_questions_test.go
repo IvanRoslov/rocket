@@ -26,9 +26,9 @@ func TestAgentQuestionCommandUsageErrors(t *testing.T) {
 		{"answer without args", ctor(newAgentAnswerCmd), []string{}},
 		{"answer with invalid id", ctor(newAgentAnswerCmd), []string{"nope", "text"}},
 		{"answer without body or dismiss", ctor(newAgentAnswerCmd), []string{"7"}},
-		// --dismiss may carry a reason since task #1023; naming TWO resolutions
-		// at once is what stays ambiguous.
-		{"close with choose and body", ctor(newAgentCloseCmd0), []string{"7", "text", "--choose", "1"}},
+		// --dismiss may carry a reason since task #1023, and --choose a comment
+		// since task #4901; naming TWO resolutions at once is what stays
+		// ambiguous.
 		{"close with choose and dismiss", ctor(newAgentCloseCmd0), []string{"7", "--dismiss", "--choose", "1"}},
 	}
 

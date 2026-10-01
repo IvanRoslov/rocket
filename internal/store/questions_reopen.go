@@ -9,13 +9,17 @@ import "fmt"
 // the SAME thread instead of spawning a disconnected new question. The
 // answer text itself stays in the thread history as a message. An fyi thread
 // reopened this way becomes an ordinary decision thread — somebody did care
-// about the status note after all. Returns
+// about the status note after all. A brainstorm thread stays brainstorm, but
+// its recorded answer and outcome are cleared: the next answer computes them
+// afresh. Returns
 // ErrNotFound for an unknown id and ErrQuestionOpen if the question is not
 // resolved.
 func (s *Store) ReopenQuestion(id int64) error {
 	res, err := s.db.Exec(
 		`UPDATE questions SET status = 'open', resolution = '', resolved_at = NULL,
-		        type = 'decision'
+		        type = CASE WHEN type = 'fyi' THEN 'decision' ELSE type END,
+		        chosen_option = NULL, answer_comment = '', answer_source = '',
+		        outcome = '', outcome_overridden = 0
 		 WHERE id = ? AND status = 'resolved'`,
 		id,
 	)

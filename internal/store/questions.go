@@ -51,17 +51,31 @@ type Question struct {
 	Type string
 	// Options are the answer choices a client may render as buttons. Stored
 	// as a JSON array of strings; nil means the thread has none.
-	Options    []string
-	AskedAt    int64
-	ResolvedAt int64 // 0 = not resolved
+	Options []string
+	// RecommendedOption is the 1-based option the asker recommends on a
+	// brainstorm thread; 0 = none. The answer half — ChosenOption (0 = the
+	// human wrote their own text), AnswerComment, AnswerSource (ui|terminal),
+	// Outcome (accepted|corrected|wrong_turn) and OutcomeOverridden — is set
+	// when a brainstorm thread is answered and cleared when it is reopened.
+	RecommendedOption int
+	ChosenOption      int
+	AnswerComment     string
+	AnswerSource      string
+	Outcome           string
+	OutcomeOverridden bool
+	AskedAt           int64
+	ResolvedAt        int64 // 0 = not resolved
 }
 
 // Thread types. A decision thread waits for somebody's turn; an fyi thread is
 // a status note that is born resolved (resolution QuestionResolutionFYI) and
-// never lights a badge — a reply into it reopens it as a decision thread.
+// never lights a badge — a reply into it reopens it as a decision thread. A
+// brainstorm thread is a decision thread of an orchestrator's brainstorm that
+// also records the recommendation and how the human's answer related to it.
 const (
-	QuestionTypeDecision = "decision"
-	QuestionTypeFYI      = "fyi"
+	QuestionTypeDecision   = "decision"
+	QuestionTypeFYI        = "fyi"
+	QuestionTypeBrainstorm = "brainstorm"
 
 	QuestionResolutionFYI = "fyi"
 )
@@ -82,7 +96,7 @@ type QuestionMessage struct {
 
 // questionColumns is the column list every Question scan relies on; it must
 // stay in sync with scanQuestion.
-const questionColumns = `id, task_id, role_id, asked_by, title, brief, body, status, resolution, addressed_to, type, options, asked_at, resolved_at`
+const questionColumns = `id, task_id, role_id, asked_by, title, brief, body, status, resolution, addressed_to, type, options, recommended_option, chosen_option, answer_comment, answer_source, outcome, outcome_overridden, asked_at, resolved_at`
 
 // encodeOptions renders answer choices as the JSON stored in
 // questions.options. An empty list stores as "" rather than "[]", so a thread
@@ -159,11 +173,11 @@ func (s *Store) AddQuestion(q Question) (int64, error) {
 	}
 
 	res, err := s.db.Exec(
-		`INSERT INTO questions (task_id, role_id, asked_by, title, brief, body, status, resolution, addressed_to, type, options, asked_at, resolved_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO questions (task_id, role_id, asked_by, title, brief, body, status, resolution, addressed_to, type, options, recommended_option, asked_at, resolved_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nullIfZero(q.TaskID), nullIfEmpty(q.RoleID), q.AskedBy, q.Title, q.Brief, q.Body,
 		q.Status, nullIfEmpty(q.Resolution), encodeAddressedTo(q.AddressedTo),
-		q.Type, encodeOptions(q.Options),
+		q.Type, encodeOptions(q.Options), nullIfZero(int64(q.RecommendedOption)),
 		q.AskedAt, nullIfZero(q.ResolvedAt),
 	)
 	if err != nil {
@@ -338,11 +352,13 @@ func scanQuestion(row interface{ Scan(...any) error }) (Question, error) {
 	var q Question
 	var roleID, resolution, addressedTo sql.NullString
 	var qType, options sql.NullString
-	var taskID, resolvedAt sql.NullInt64
+	var taskID, resolvedAt, recommended, chosen sql.NullInt64
 
 	err := row.Scan(
 		&q.ID, &taskID, &roleID, &q.AskedBy, &q.Title, &q.Brief, &q.Body, &q.Status, &resolution,
-		&addressedTo, &qType, &options, &q.AskedAt, &resolvedAt,
+		&addressedTo, &qType, &options,
+		&recommended, &chosen, &q.AnswerComment, &q.AnswerSource, &q.Outcome, &q.OutcomeOverridden,
+		&q.AskedAt, &resolvedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Question{}, ErrNotFound
@@ -360,6 +376,8 @@ func scanQuestion(row interface{ Scan(...any) error }) (Question, error) {
 		q.Type = QuestionTypeDecision
 	}
 	q.Options = decodeOptions(options.String)
+	q.RecommendedOption = int(recommended.Int64)
+	q.ChosenOption = int(chosen.Int64)
 	q.ResolvedAt = resolvedAt.Int64
 
 	return q, nil

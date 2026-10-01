@@ -277,7 +277,9 @@ func enforceThreadGuard(
 
 // chooseOptionBody resolves a 1-based --choose index into the option's own
 // text, so a client never has to retype an answer the thread already offers.
-// choose == 0 means "no choice made" and leaves body as it is.
+// A body given along with the choice is the chooser's comment and follows the
+// option text after a blank line rather than being dropped. choose == 0 means
+// "no choice made" and leaves body as it is.
 func chooseOptionBody(w http.ResponseWriter, q store.Question, choose int, body string) (string, bool) {
 	if choose == 0 {
 		return body, true
@@ -287,7 +289,10 @@ func chooseOptionBody(w http.ResponseWriter, q store.Question, choose int, body 
 			fmt.Sprintf("choose must be between 1 and %d for this thread", len(q.Options)))
 		return "", false
 	}
-	return q.Options[choose-1], true
+	if body == "" {
+		return q.Options[choose-1], true
+	}
+	return q.Options[choose-1] + "\n\n" + body, true
 }
 
 // threadPrefix renders the frame every delivered thread entry carries, so a
