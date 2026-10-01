@@ -108,6 +108,19 @@ describe('SessionRail quiz badge', () => {
     expect(within(meta as HTMLElement).getByText('quiz')).toBeInTheDocument()
   })
 
+  it('labels a worker\'s pending permission prompt «Разрешение» instead of "quiz"', () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const orchestrator = sessions.find((s) => s.id === 's-quiz-demo-orch')!
+    const worker = sessions.find((s) => s.id === 's-perm-demo-worker')!
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionRail orchestrator={{ ...orchestrator, pending_quiz: undefined }} workers={[worker]} />
+      </QueryClientProvider>,
+    )
+    expect(screen.getByText('Разрешение')).toBeInTheDocument()
+    expect(screen.queryByText('quiz')).not.toBeInTheDocument()
+  })
+
   it('shows no "quiz" badge for an orchestrator with no pending_quiz', () => {
     const { orchestrator } = renderRail()
     expect(orchestrator.pending_quiz).toBeUndefined()

@@ -12,7 +12,7 @@ import { useEffect, useState } from 'react'
 import { Badge, type BadgeTone } from '../../components/Badge'
 import { Dot, type DotState } from '../../components/Dot'
 import { useKillSession, useRestoreSession } from '../../lib/queries'
-import type { Session } from '../../lib/types'
+import type { PendingQuiz, Session } from '../../lib/types'
 import { chatPagePath } from '../chat/ChatScreen'
 import { termPagePath } from '../term/TermScreen'
 import './SessionRail.css'
@@ -62,6 +62,15 @@ function prText(session: Session): { text: string; tone: string } {
   if (session.ci_state === 'failing') return { text: `PR #${session.pr_number} ✗`, tone: 'session-rail__pr--err' }
   if (session.ci_state === 'pending') return { text: `PR #${session.pr_number} ⏳`, tone: 'session-rail__pr--warn' }
   return { text: `PR #${session.pr_number}`, tone: 'session-rail__pr--neutral' }
+}
+
+/** «quiz» for an AskUserQuestion quiz, «Разрешение» for a TUI permission prompt (task #4881). */
+function QuizBadge({ quiz }: { quiz: PendingQuiz }) {
+  return quiz.source === 'permission' ? (
+    <Badge tone="warn">Разрешение</Badge>
+  ) : (
+    <Badge tone="indigo">quiz</Badge>
+  )
 }
 
 function useCopyAttach() {
@@ -114,7 +123,7 @@ export function SessionRail({ orchestrator, workers }: SessionRailProps) {
               {orchestrator.agent}
             </span>
             <div className="session-rail__spacer" />
-            {orchestrator.pending_quiz && <Badge tone="indigo">quiz</Badge>}
+            {orchestrator.pending_quiz && <QuizBadge quiz={orchestrator.pending_quiz} />}
             <Badge tone={badgeTone(orchestrator)}>{orchestrator.activity ?? orchestrator.state}</Badge>
           </div>
           <div className="session-rail__orch-actions">
@@ -168,7 +177,7 @@ export function SessionRail({ orchestrator, workers }: SessionRailProps) {
                 <span className="session-rail__agent" title={`agent: ${w.agent}`}>
                   {w.agent}
                 </span>
-                {w.pending_quiz && <Badge tone="indigo">quiz</Badge>}
+                {w.pending_quiz && <QuizBadge quiz={w.pending_quiz} />}
                 <Badge tone={badgeTone(w)}>{w.activity ?? w.state}</Badge>
                 <span className={`session-rail__pr ${pr.tone}`}>{pr.text}</span>
               </div>

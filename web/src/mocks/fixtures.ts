@@ -221,7 +221,48 @@ export const sessions: Session[] = [
       asked_at: NOW - MIN,
     },
   },
+  // A worker stopped on a Claude Code TUI permission dialog (task #4881):
+  // the daemon monitor publishes it as `pending_quiz` with
+  // `source:"permission"` — the card must be answerable even though a
+  // worker's chat has no composer.
+  {
+    id: 's-perm-demo-worker',
+    kind: 'worker',
+    project_id: 'billing',
+    repo_id: 'api',
+    feature_slug: 'quiz-demo',
+    parent_id: 's-quiz-demo-orch',
+    agent: 'claude',
+    branch: 'feature/quiz-demo-perm',
+    worktree_path: '/home/dev/.rocket/worktrees/quiz-demo-perm',
+    tmux_name: 'quiz-demo-perm',
+    state: 'running',
+    activity: 'waiting_input',
+    activity_ts: NOW - MIN,
+    created_at: NOW - DAY,
+    updated_at: NOW - MIN,
+    pending_quiz: {
+      source: 'permission',
+      questions: [
+        {
+          question: 'Do you want to make this edit to settings.json?\n\n.claude/settings.json\n+  "permissions": { "allow": ["Bash(make test)"] }',
+          header: 'Разрешение',
+          multi_select: false,
+          options: [
+            { label: 'Yes' },
+            { label: "Yes, and don't ask again this session" },
+            { label: 'No, and tell Claude what to do differently (esc)' },
+          ],
+        },
+      ],
+      raw: ' Edit file\n .claude/settings.json\n Do you want to make this edit to settings.json?\n ❯ 1. Yes\n   2. Yes, and don\'t ask again this session\n   3. No, and tell Claude what to do differently (esc)',
+      asked_at: NOW - MIN,
+    },
+  },
 ]
+
+/** Standalone export for permission-card tests. */
+export const permDemoPendingQuiz: PendingQuiz = sessions.find((s) => s.id === 's-perm-demo-worker')!.pending_quiz!
 
 /** Standalone export for tests that want to POST a live-quiz answer without cloning the whole session fixture. */
 export const quizDemoPendingQuiz: PendingQuiz = sessions.find((s) => s.id === 's-quiz-demo-orch')!.pending_quiz!
@@ -775,6 +816,35 @@ export const chatEntries: Record<string, ChatEntry[]> = {
         answers: { 'Какой линтер подключить?': 'ESLint' },
       },
     },
+  ],
+  // Resolved permission prompts merged into the feed by the daemon
+  // (`role:"permission"`, task #4881) — one answered from chat, one from
+  // the terminal.
+  's-perm-demo-worker': [
+    { role: 'assistant', text: 'Добавлю `make test` в allow-лист.', ts: NOW - 30 * MIN },
+    {
+      role: 'permission',
+      text: 'Do you want to run this command?',
+      ts: NOW - 25 * MIN,
+      permission: {
+        title: 'Do you want to run this command?',
+        context: 'make test',
+        answer_label: 'Yes',
+        answered_via: 'chat',
+      },
+    },
+    {
+      role: 'permission',
+      text: 'Do you want to make this edit to CLAUDE.md?',
+      ts: NOW - 10 * MIN,
+      permission: {
+        title: 'Do you want to make this edit to CLAUDE.md?',
+        context: '',
+        answer_label: '',
+        answered_via: 'terminal',
+      },
+    },
+    { role: 'assistant', text: 'Теперь правлю settings.json.', ts: NOW - 2 * MIN },
   ],
 }
 

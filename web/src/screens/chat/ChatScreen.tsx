@@ -556,6 +556,153 @@ function LiveQuizBubble({
   )
 }
 
+/**
+ * A resolved permission prompt from the daemon's log (`role:"permission"`,
+ * task #4881) — one compact line: «Разрешение: <title> → <answer>», or
+ * «… → отвечено в терминале» when the dialog closed without a chat answer.
+ */
+function PermissionEntryRow({ entry }: { entry: ChatEntry }) {
+  const p = entry.permission
+  const title = p?.title || entry.text
+  const viaTerminal = p?.answered_via === 'terminal'
+  const answer = viaTerminal ? 'отвечено в терминале' : p?.answer_label
+  return (
+    <div className="chat-screen__row">
+      <div className="chat-screen__permission-entry" data-testid="permission-entry">
+        <span>Разрешение: {title}</span>{' '}
+        {answer && (
+          <span
+            className={
+              viaTerminal
+                ? 'chat-screen__permission-entry-answer chat-screen__permission-entry-answer--terminal'
+                : 'chat-screen__permission-entry-answer'
+            }
+          >
+            → {answer}
+          </span>
+        )}
+        {entry.ts > 0 && <span className="chat-screen__when">{timeAgo(entry.ts)}</span>}
+      </div>
+    </div>
+  )
+}
+
+/** Splits a permission quiz's `question` (`"<Title>\n\n<Context>"`, context optional) into its parts. */
+export function splitPermissionQuestion(question: string): { title: string; context: string } {
+  const at = question.indexOf('\n\n')
+  if (at === -1) return { title: question.trim(), context: '' }
+  return { title: question.slice(0, at).trim(), context: question.slice(at + 2).replace(/\s+$/, '') }
+}
+
+const PERMISSION_ESC_INDEX = -1
+
+/**
+ * The live card for a Claude Code TUI permission dialog (`pending_quiz.source
+ * === "permission"`, task #4881): one tap on an option = the answer (the
+ * daemon presses that digit), no confirm step and no free-text row. With no
+ * parsed options it falls back to the raw pane + a single Esc button
+ * (`option_indices: [-1]`). Rendered for every session kind — a worker's
+ * agent can block on a permission too, even though its chat has no composer.
+ */
+function PermissionCard({
+  sessionId,
+  quiz,
+  unconfirmed,
+  onClearUnconfirmed,
+  onRefetch,
+}: {
+  sessionId: string
+  quiz: PendingQuiz
+  unconfirmed: boolean
+  onClearUnconfirmed: () => void
+  onRefetch: () => void
+}) {
+  const [sendState, setSendState] = useState<QuizSendState>('idle')
+  const [error, setError] = useState<string | undefined>(undefined)
+
+  // A new prompt (the agent moved on to another dialog) starts clean.
+  useEffect(() => {
+    setSendState('idle')
+    setError(undefined)
+  }, [quiz.asked_at])
+
+  // The answer keypress wasn't confirmed by the monitor: say so and let the
+  // user try again (the flag is consumed so a retry starts fresh).
+  useEffect(() => {
+    if (!unconfirmed) return
+    setError('Ответ не подтвердился')
+    setSendState('idle')
+    onClearUnconfirmed()
+  }, [unconfirmed, onClearUnconfirmed])
+
+  const q = quiz.questions[0]
+  const { title, context } = splitPermissionQuestion(q?.question ?? '')
+  const options = q?.options ?? []
+
+  async function answer(index: number) {
+    if (sendState === 'answering') return
+    setError(undefined)
+    setSendState('answering')
+    try {
+      await api.post(`/v1/sessions/${encodeURIComponent(sessionId)}/quiz/answer`, {
+        answers: [{ question_index: 0, option_indices: [index] }],
+      })
+      // Stay disabled — the card goes away once the monitor sees the
+      // dialog close (session.quiz_resolved -> refetch).
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409 && err.code === 'no_pending_quiz') {
+        onRefetch() // answered in the terminal meanwhile
+        return
+      }
+      if (err instanceof ApiError && err.status === 409 && err.code === 'quiz_answer_in_flight') {
+        return
+      }
+      if (err instanceof ApiError && err.status === 409 && err.code === 'prompt_changed') {
+        setError('Диалог изменился, обновляю…')
+        setSendState('idle')
+        onRefetch()
+        return
+      }
+      setError(err instanceof Error ? err.message : String(err))
+      setSendState('idle')
+    }
+  }
+
+  const disabled = sendState === 'answering'
+
+  return (
+    <div className="chat-screen__row">
+      <div className="chat-screen__bubble chat-screen__bubble--permission" data-testid="permission-card">
+        <div className="chat-screen__permission-badge">Разрешение</div>
+        <div className="chat-screen__permission-title">{title}</div>
+        {options.length > 0 ? (
+          <>
+            {context && <pre className="chat-screen__permission-pre">{context}</pre>}
+            <div className="chat-screen__permission-options">
+              {options.map((o, oi) => (
+                <button key={oi} type="button" disabled={disabled} onClick={() => answer(oi)}>
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <pre className="chat-screen__permission-pre">{quiz.raw || context}</pre>
+            <div className="chat-screen__permission-options">
+              <button type="button" disabled={disabled} onClick={() => answer(PERMISSION_ESC_INDEX)}>
+                Esc
+              </button>
+            </div>
+          </>
+        )}
+        {error && <div className="chat-screen__quiz-error">{error}</div>}
+        {disabled && <div className="chat-screen__quiz-sending">отправляется…</div>}
+      </div>
+    </div>
+  )
+}
+
 export function ChatScreen() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const navigate = useNavigate()
@@ -678,6 +825,7 @@ export function ChatScreen() {
   }
 
   const pendingQuiz = session?.pending_quiz
+  const isPermission = pendingQuiz?.source === 'permission'
   const readonly = readonlyReason(session)
   // Message delivery is paused daemon-side while a quiz is pending (docs/
   // 13-chat.md «Очередь сообщений во время квиза»), so the composer is
@@ -741,7 +889,7 @@ export function ChatScreen() {
       {copied && fullSession && (
         <div className="chat-screen__copied">copied: rocket attach {fullSession.tmux_name}</div>
       )}
-      {quizUnconfirmed && (
+      {quizUnconfirmed && !isPermission && (
         <div className="chat-screen__quiz-unconfirmed" onClick={clearQuizUnconfirmed}>
           не удалось подтвердить ответ — проверьте терминал
         </div>
@@ -762,6 +910,9 @@ export function ChatScreen() {
             return <QuizRoundBubble key={item.key} tool={item.tool} answer={item.answer} />
           }
           const { entry } = item
+          if (entry.role === 'permission') {
+            return <PermissionEntryRow key={item.key} entry={entry} />
+          }
           if (entry.role === 'tool') {
             return <ToolDigestLine key={item.key} entry={entry} />
           }
@@ -772,7 +923,16 @@ export function ChatScreen() {
           }
           return <EntryBubble key={item.key} entry={entry} />
         })}
-        {sessionId && pendingQuiz && (
+        {sessionId && pendingQuiz && isPermission && (
+          <PermissionCard
+            sessionId={sessionId}
+            quiz={pendingQuiz}
+            unconfirmed={quizUnconfirmed}
+            onClearUnconfirmed={clearQuizUnconfirmed}
+            onRefetch={refetch}
+          />
+        )}
+        {sessionId && pendingQuiz && !isPermission && (
           <LiveQuizBubble sessionId={sessionId} quiz={pendingQuiz} onRefetch={refetch} />
         )}
       </div>
@@ -801,7 +961,11 @@ export function ChatScreen() {
           </>
         ) : (
           <div className="chat-screen__readonly">
-            {pendingQuiz ? 'агент ждёт ответа на квиз' : (readonly ?? 'read-only')}
+            {isPermission
+              ? 'агент ждёт разрешения'
+              : pendingQuiz
+                ? 'агент ждёт ответа на квиз'
+                : (readonly ?? 'read-only')}
           </div>
         )}
       </div>

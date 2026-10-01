@@ -403,6 +403,92 @@
   color: var(--text-4);
 }
 
+/* ---------- Permission prompt (task #4881) — pending_quiz.source = "permission" ---------- */
+
+.chat-screen__bubble--permission {
+  max-width: 88%;
+  background: var(--warn-bg-2, #fffbeb);
+  border: 1.5px solid var(--warn-border-2, #fde68a);
+}
+.chat-screen__permission-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  margin-bottom: 6px;
+  border-radius: var(--radius-badge-sm);
+  background: var(--warn-text);
+  color: var(--surface);
+  font: 700 10px var(--font-mono);
+  letter-spacing: 0.04em;
+}
+.chat-screen__permission-title {
+  font: 600 13.5px var(--font-ui);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.chat-screen__permission-pre {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  max-height: 260px;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn-sm);
+  font: 12px/1.45 var(--font-mono);
+  color: var(--text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-screen__permission-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+.chat-screen__permission-options button {
+  min-height: 34px;
+  padding: 6px 12px;
+  text-align: left;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-btn-sm);
+  font: 500 13px var(--font-ui);
+  cursor: pointer;
+}
+.chat-screen__permission-options button:hover:not(:disabled) {
+  border-color: var(--warn);
+}
+.chat-screen__permission-options button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.chat-screen__bubble--permission .chat-screen__quiz-sending {
+  margin-top: 8px;
+}
+.chat-screen__permission-entry {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 88%;
+  padding: 5px 10px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn-sm);
+  font: 12px var(--font-ui);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.chat-screen__permission-entry-answer {
+  font-weight: 600;
+  color: var(--text);
+}
+.chat-screen__permission-entry-answer--terminal {
+  font-weight: 400;
+  font-style: italic;
+  color: var(--text-3);
+}
+
 .chat-screen__composer {
   display: flex;
   flex-wrap: wrap;
