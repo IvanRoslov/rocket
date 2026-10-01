@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -279,5 +280,74 @@ func TestPostInternalQuiz_InvalidPhaseIs400(t *testing.T) {
 	}
 	if body.Error.Code != "invalid_phase" {
 		t.Errorf("code = %q, want invalid_phase", body.Error.Code)
+	}
+}
+
+// TestPostInternalQuiz_ResolvedLeavesPermissionQuizAlone: the quiz hook's
+// Stop/PostToolUse "resolved" report fires at the end of every turn, but a
+// permission quiz (source "permission") is the monitor's — clearing it here
+// would leave its journal row open and the dialog missing from the chat
+// feed (seen live: answer in the terminal, the turn ends, Stop fires).
+func TestPostInternalQuiz_ResolvedLeavesPermissionQuizAlone(t *testing.T) {
+	d := quizTestDeps(t)
+	srv := newTestServer(t, d)
+	seedActivitySession(t, d.Store, "sess1")
+
+	perm := `{"questions":[{"question":"Do you want to proceed?","header":"Разрешение","multiSelect":false,"options":[]}],"asked_at":1,"source":"permission","permission":{"prompt_id":1,"title":"Do you want to proceed?","context":""}}`
+	if err := d.Store.SetPendingQuiz("sess1", perm); err != nil {
+		t.Fatalf("seed SetPendingQuiz: %v", err)
+	}
+
+	ch, cancel := d.Bus.Subscribe()
+	defer cancel()
+
+	resp := postJSON(t, srv.URL+"/v1/internal/quiz", map[string]any{
+		"session": "sess1",
+		"phase":   "resolved",
+		"payload": json.RawMessage(quizResolvedPayload),
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	if sess, _ := d.Store.GetSession("sess1"); sess.PendingQuiz != perm {
+		t.Errorf("PendingQuiz = %q, want the permission quiz untouched", sess.PendingQuiz)
+	}
+	select {
+	case ev := <-ch:
+		t.Fatalf("unexpected event published: %+v", ev)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// TestPostInternalQuiz_PendingOverPermissionClosesItsRow: an AskUserQuestion
+// quiz replacing a permission quiz means that dialog is gone; its journal
+// row is closed so it shows up in the chat feed instead of staying open.
+func TestPostInternalQuiz_PendingOverPermissionClosesItsRow(t *testing.T) {
+	d := quizTestDeps(t)
+	srv := newTestServer(t, d)
+	seedActivitySession(t, d.Store, "sess1")
+
+	id, _, err := d.Store.OpenPermissionPrompt("sess1", "Do you want to proceed?", "", "[]", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	perm := `{"questions":[],"asked_at":1,"source":"permission","permission":{"prompt_id":` + strconv.FormatInt(id, 10) + `,"title":"Do you want to proceed?","context":""}}`
+	_ = d.Store.SetPendingQuiz("sess1", perm)
+
+	resp := postJSON(t, srv.URL+"/v1/internal/quiz", map[string]any{
+		"session": "sess1",
+		"phase":   "pending",
+		"payload": json.RawMessage(quizPendingPayload),
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	rows, _ := d.Store.ListResolvedPermissionPrompts("sess1")
+	if len(rows) != 1 || rows[0].ID != id || rows[0].AnsweredVia != "terminal" {
+		t.Errorf("resolved rows = %+v, want row %d closed via terminal", rows, id)
 	}
 }

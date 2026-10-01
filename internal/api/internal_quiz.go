@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -55,8 +56,9 @@ type quizToolInput struct {
 // now>} as the session's pending quiz (overwriting any previous one) and
 // publishes session.quiz_asked.
 //
-// resolved: clears the pending quiz unconditionally (a PostToolUse fire is
-// authoritative regardless of tool_response.is_error). If the session had
+// resolved: clears the pending quiz (a PostToolUse fire is authoritative
+// regardless of tool_response.is_error) — unless it is a permission quiz,
+// which the monitor owns. If the session had
 // no pending quiz, this is a no-op: 200 with no event published — that
 // covers hook replay/duplicate delivery and matcher edge cases.
 func handlePostInternalQuiz(w http.ResponseWriter, r *http.Request, d Deps) {
@@ -120,23 +122,37 @@ func handlePostInternalQuiz(w http.ResponseWriter, r *http.Request, d Deps) {
 			return
 		}
 
+		// The quiz replaced a permission quiz: that dialog is gone, so close
+		// its journal row (the monitor no longer sees it as its own).
+		if q, ok := session.ParseQuiz(sess.PendingQuiz); ok && q.IsPermission() {
+			if err := d.Store.ResolvePermissionPrompt(q.Permission.PromptID, time.Now().Unix()); err != nil {
+				slog.Default().Warn("internal quiz: close replaced permission prompt", "session", req.Session, "error", err)
+			}
+		}
+
 		if d.Bus != nil {
 			d.Bus.Publish("session.quiz_asked", req.Session, map[string]any{})
 		}
 
 	case "resolved":
+		// A permission quiz is not the hooks' to close: the monitor reads
+		// it off the pane and closes it (with its journal row) when the
+		// dialog goes away. The Stop hook fires at the end of every turn,
+		// so clearing here would race the monitor and orphan the row.
+		if q, ok := session.ParseQuiz(sess.PendingQuiz); ok && q.IsPermission() {
+			break
+		}
 		hadPending := sess.PendingQuiz != ""
 
-		if err := d.Store.ClearPendingQuiz(req.Session); err != nil {
-			if errors.Is(err, store.ErrNotFound) {
-				writeErr(w, http.StatusNotFound, "session_not_found", "session not found")
-				return
-			}
+		// Compare-and-swap against what was read, so a permission quiz the
+		// monitor wrote in between is not wiped either.
+		cleared, err := d.Store.CompareAndSwapPendingQuiz(req.Session, sess.PendingQuiz, "")
+		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
 
-		if hadPending && d.Bus != nil {
+		if hadPending && cleared && d.Bus != nil {
 			d.Bus.Publish("session.quiz_resolved", req.Session, map[string]any{})
 		}
 	}

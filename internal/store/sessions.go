@@ -344,3 +344,23 @@ func nullIfZero(v int64) any {
 	}
 	return v
 }
+
+// CompareAndSwapPendingQuiz sets a session's pending quiz to newJSON only if
+// it currently equals oldJSON ("" meaning none, on either side), refreshing
+// updated_at. It reports whether the swap happened; a mismatch is not an
+// error. The monitor writes permission quizzes this way so it never
+// overwrites a hook quiz that landed between its read and its write.
+func (s *Store) CompareAndSwapPendingQuiz(id, oldJSON, newJSON string) (bool, error) {
+	res, err := s.db.Exec(
+		`UPDATE sessions SET pending_quiz = ?, updated_at = ? WHERE id = ? AND IFNULL(pending_quiz, '') = ?`,
+		nullIfEmpty(newJSON), time.Now().Unix(), id, oldJSON,
+	)
+	if err != nil {
+		return false, fmt.Errorf("swap pending quiz: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("swap pending quiz: rows affected: %w", err)
+	}
+	return n == 1, nil
+}

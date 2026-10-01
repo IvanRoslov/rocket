@@ -29,6 +29,22 @@ type PermissionPrompt struct {
 	Raw string
 }
 
+// PermissionCaptureLines is how many bottom pane rows are read to look for
+// a permission dialog. Every reader that compares dialogs (the monitor, and
+// the answer path's re-read right before the keypress) must capture this
+// same depth: when the dialog's top rule is cut off, Context falls back to
+// the rows nearest the title, so two depths can disagree about one dialog.
+// 40 rows hold the full header of every recon capture; 15 cut big diffs.
+const PermissionCaptureLines = 40
+
+// SameDialog reports whether p and q are the same dialog: same Title and
+// Context. Options and Raw are not part of the identity (the cursor moving
+// changes Raw). Context matters because consecutive Bash dialogs share the
+// title «Do you want to proceed?».
+func (p PermissionPrompt) SameDialog(q PermissionPrompt) bool {
+	return p.Title == q.Title && p.Context == q.Context
+}
+
 const (
 	// permissionRawRows bounds PermissionPrompt.Raw.
 	permissionRawRows = 20

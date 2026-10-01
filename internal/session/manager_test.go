@@ -37,6 +37,13 @@ type fakeRuntime struct {
 	listNames []string
 	sentKeys  []sentKey
 	sendErr   error
+
+	// captureOut, when set, is what Capture returns (default "fake
+	// output"); captureErr fails it; captureLines records each requested
+	// depth.
+	captureOut   string
+	captureErr   error
+	captureLines []int
 }
 
 func (f *fakeRuntime) Create(ctx context.Context, spec runtime.CreateSpec) (runtime.Handle, error) {
@@ -62,6 +69,15 @@ func (f *fakeRuntime) SendKeys(ctx context.Context, h runtime.Handle, key string
 }
 
 func (f *fakeRuntime) Capture(ctx context.Context, h runtime.Handle, lines int) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.captureLines = append(f.captureLines, lines)
+	if f.captureErr != nil {
+		return "", f.captureErr
+	}
+	if f.captureOut != "" {
+		return f.captureOut, nil
+	}
 	return "fake output", nil
 }
 

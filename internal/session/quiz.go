@@ -33,10 +33,16 @@ type QuizQuestion struct {
 }
 
 // Quiz is the full pending-quiz payload stored on Session.PendingQuiz:
-// {"questions":[...],"asked_at":<unix>}.
+// {"questions":[...],"asked_at":<unix>}. A quiz the monitor built from a
+// Claude Code permission dialog (see permission.go) also carries
+// source:"permission", the pane tail in raw, and its identity in permission;
+// a hook-driven AskUserQuestion quiz has none of them.
 type Quiz struct {
-	Questions []QuizQuestion `json:"questions"`
-	AskedAt   int64          `json:"asked_at"`
+	Questions  []QuizQuestion `json:"questions"`
+	AskedAt    int64          `json:"asked_at"`
+	Source     string         `json:"source,omitempty"`
+	Raw        string         `json:"raw,omitempty"`
+	Permission *PermissionRef `json:"permission,omitempty"`
 }
 
 // QuizAnswer is one answer in a POST /v1/sessions/{id}/quiz/answer request:
@@ -65,6 +71,7 @@ const (
 	keyDown    quizKeyKind = "down"
 	keyLiteral quizKeyKind = "literal"
 	keyEnter   quizKeyKind = "enter"
+	keyEscape  quizKeyKind = "escape"
 )
 
 // quizKeySettle is the pause after each keystroke, letting Claude Code's
@@ -219,6 +226,8 @@ func quizKeyName(s keyStep) string {
 		return "Down"
 	case keyEnter:
 		return "Enter"
+	case keyEscape:
+		return "Escape"
 	default:
 		return s.Value
 	}
@@ -273,7 +282,9 @@ func (m *Manager) sendQuizKeys(ctx context.Context, h runtime.Handle, steps []ke
 // human already answered in the terminal, or a stale/duplicate request),
 // "quiz_answer_in_flight" (409, a previous answer for this session's quiz
 // is still being typed by the injector — see quizInFlight), or
-// "quiz_answer_invalid" (400, answers fails validateQuizAnswers).
+// "quiz_answer_invalid" (400, answers fails validateQuizAnswers). A
+// permission quiz is answered by answerPermission instead, which adds
+// "invalid_answer" (400) and "prompt_changed" (409).
 func (m *Manager) AnswerQuiz(ctx context.Context, id string, answers []QuizAnswer) error {
 	sess, err := m.st.GetSession(id)
 	if err != nil {
@@ -292,6 +303,10 @@ func (m *Manager) AnswerQuiz(ctx context.Context, id string, answers []QuizAnswe
 		return fmt.Errorf("parse pending quiz for session %s: %w", id, err)
 	}
 
+	if quiz.IsPermission() {
+		return m.answerPermission(ctx, sess, quiz, answers)
+	}
+
 	steps, err := quizKeySequence(quiz, answers)
 	if err != nil {
 		return validationErr("quiz_answer_invalid", err.Error())
@@ -302,7 +317,7 @@ func (m *Manager) AnswerQuiz(ctx context.Context, id string, answers []QuizAnswe
 	}
 
 	h := runtime.Handle{Name: sess.TmuxName}
-	go m.runQuizAnswer(id, h, steps)
+	go m.runQuizAnswer(id, h, steps, nil, nil)
 
 	return nil
 }
@@ -353,7 +368,12 @@ func (m *Manager) clearQuizInFlight(id string) {
 // resolve), then waits for resolved or the unconfirmed timeout via
 // waitQuizResolved. clearQuizInFlight always runs before returning (see its
 // doc comment), satisfying AnswerQuiz's in-flight-guard contract.
-func (m *Manager) runQuizAnswer(id string, h runtime.Handle, steps []keyStep) {
+//
+// onSent, if non-nil, runs once every key was sent; onSendFail, if non-nil,
+// runs when the injection fails. The permission path uses them to record
+// when its keypress landed and to withdraw the journal's "answered from
+// chat" mark.
+func (m *Manager) runQuizAnswer(id string, h runtime.Handle, steps []keyStep, onSent, onSendFail func()) {
 	defer m.clearQuizInFlight(id)
 
 	ch, cancel := m.bus.Subscribe()
@@ -382,6 +402,11 @@ func (m *Manager) runQuizAnswer(id string, h runtime.Handle, steps []keyStep) {
 
 	if err := m.sendQuizKeys(context.Background(), h, steps, resolved); err != nil {
 		slog.Default().Warn("quiz answer: keystroke injection failed", "session", id, "error", err)
+		if onSendFail != nil {
+			onSendFail()
+		}
+	} else if onSent != nil {
+		onSent()
 	}
 
 	m.waitQuizResolved(id, resolved)

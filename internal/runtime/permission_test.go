@@ -253,3 +253,53 @@ func TestParsePermissionPromptRawIsPaneTail(t *testing.T) {
 		t.Errorf("Raw ends with %q, want the dialog footer", last)
 	}
 }
+
+// TestPermissionPromptSameDialog pins the dialog identity the monitor and
+// the answer path compare: Title plus Context. Two Bash dialogs share the
+// title «Do you want to proceed?» and differ only in Context.
+func TestPermissionPromptSameDialog(t *testing.T) {
+	rm, ok := ParsePermissionPrompt(fixture(t, "permission-bash-rm.pane"))
+	if !ok {
+		t.Fatal("bash-rm fixture not parsed")
+	}
+	outside, ok := ParsePermissionPrompt(fixture(t, "permission-bash-outside-cwd.pane"))
+	if !ok {
+		t.Fatal("bash-outside-cwd fixture not parsed")
+	}
+	if rm.Title != outside.Title {
+		t.Fatalf("fixtures no longer share a title: %q vs %q", rm.Title, outside.Title)
+	}
+	if rm.SameDialog(outside) {
+		t.Errorf("SameDialog = true for two Bash dialogs with different commands")
+	}
+
+	moved := rm
+	moved.Options = append([]string(nil), rm.Options...)
+	moved.Options[0] = "something else"
+	moved.Raw = "different raw"
+	if !rm.SameDialog(moved) {
+		t.Errorf("SameDialog = false for the same Title+Context with different Options/Raw")
+	}
+}
+
+// TestPermissionCaptureLinesHoldsWholeDialog checks the shared capture depth
+// is deep enough that a dialog read at that depth has the same identity as
+// the full pane — the condition that keeps the monitor's read and the
+// pre-press re-read from disagreeing.
+func TestPermissionCaptureLinesHoldsWholeDialog(t *testing.T) {
+	for _, fx := range []string{"permission-bash-multiline.pane", "permission-bash-rm.pane", "permission-edit-settings.pane", "permission-exit-plan.pane"} {
+		pane := fixture(t, fx)
+		full, ok := ParsePermissionPrompt(pane)
+		if !ok {
+			t.Fatalf("%s: not parsed", fx)
+		}
+		rows := strings.Split(strings.TrimRight(pane, "\n"), "\n")
+		if len(rows) > PermissionCaptureLines {
+			rows = rows[len(rows)-PermissionCaptureLines:]
+		}
+		cut, ok := ParsePermissionPrompt(strings.Join(rows, "\n"))
+		if !ok || !full.SameDialog(cut) {
+			t.Errorf("%s: dialog read at %d rows differs from the full pane (ok=%v)\nfull=%q\ncut=%q", fx, PermissionCaptureLines, ok, full.Context, cut.Context)
+		}
+	}
+}

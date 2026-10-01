@@ -22,6 +22,8 @@ import (
 type quizAnswerFakeRuntime struct {
 	mu   sync.Mutex
 	sent []string // "<key>" or "-l:<text>"
+	// pane is what Capture returns.
+	pane string
 }
 
 func (f *quizAnswerFakeRuntime) Create(ctx context.Context, spec runtime.CreateSpec) (runtime.Handle, error) {
@@ -41,7 +43,9 @@ func (f *quizAnswerFakeRuntime) SendKeys(ctx context.Context, h runtime.Handle, 
 	return nil
 }
 func (f *quizAnswerFakeRuntime) Capture(ctx context.Context, h runtime.Handle, lines int) (string, error) {
-	return "", nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pane, nil
 }
 func (f *quizAnswerFakeRuntime) Alive(ctx context.Context, h runtime.Handle) bool { return true }
 func (f *quizAnswerFakeRuntime) PinWindowSize(ctx context.Context, h runtime.Handle, clientCols, clientRows int) error {

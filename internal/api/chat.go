@@ -29,6 +29,20 @@ type chatEntryResponse struct {
 	// payload on the asking tool entry, the raw answers echo on the
 	// quiz_answer entry. See docs/13-chat.md «Квизы».
 	Quiz json.RawMessage `json:"quiz,omitempty"`
+	// Permission is present only on role "permission" entries: a resolved
+	// Claude Code permission dialog from the permission_prompts journal
+	// (the transcript says nothing about them). See docs/13-chat.md
+	// «Разрешения».
+	Permission *permissionEntryResponse `json:"permission,omitempty"`
+}
+
+// permissionEntryResponse is the permission field of a role "permission"
+// chat entry. AnsweredVia is "chat" or "terminal".
+type permissionEntryResponse struct {
+	Title       string `json:"title"`
+	Context     string `json:"context"`
+	AnswerLabel string `json:"answer_label"`
+	AnsweredVia string `json:"answered_via"`
 }
 
 func toChatEntryResponse(e agent.ChatEntry) chatEntryResponse {
@@ -80,7 +94,7 @@ func handleSessionChat(w http.ResponseWriter, r *http.Request, d Deps) {
 	}
 
 	q := r.URL.Query()
-	cursor := q.Get("cursor")
+	cursor, mark := splitChatCursor(q.Get("cursor"))
 	limit := defaultChatLimit
 	if v := q.Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -117,18 +131,16 @@ func handleSessionChat(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
-	if len(entries) > limit {
-		entries = entries[len(entries)-limit:]
+	permissions, err := d.Store.ListResolvedPermissionPrompts(sess.ID)
+	if err != nil {
+		slog.Warn("api: list permission prompts for chat", "session", sess.ID, "error", err)
+		permissions = nil
 	}
-
-	out := make([]chatEntryResponse, len(entries))
-	for i, e := range entries {
-		out[i] = toChatEntryResponse(e)
-	}
+	out, nextMark := mergePermissionEntries(entries, permissions, q.Get("cursor") == "", mark, limit)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"entries":     out,
-		"next_cursor": nextCursor,
+		"next_cursor": joinChatCursor(nextCursor, nextMark),
 		"session":     toSessionRef(sess),
 	})
 }
