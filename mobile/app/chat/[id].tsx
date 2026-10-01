@@ -15,6 +15,7 @@ import { useChatFeed } from '../../src/api/chat'
 import { useMessages, useSendMessage } from '../../src/api/queries'
 import type { ChatEntry, ClosedQuizEcho } from '../../src/api/types'
 import { Markdown } from '../../src/components/Markdown'
+import { ResolvedPermissionCard } from '../../src/components/PermissionCard'
 import { ClosedQuizCard, PendingQuizCard } from '../../src/components/QuizCard'
 import { useToast } from '../../src/components/Toast'
 import { BackButton, Badge, Dot, MonoText, PrimaryButton } from '../../src/components/ui'
@@ -61,6 +62,9 @@ function ToolGroupRow({ entries }: { entries: ChatEntry[] }) {
 }
 
 function EntryBubble({ entry }: { entry: ChatEntry }) {
+  if (entry.role === 'permission') {
+    return <ResolvedPermissionCard permission={entry.permission} fallback={entry.text} />
+  }
   if (entry.role === 'quiz_answer') {
     return <ClosedQuizCard echo={entry.quiz as ClosedQuizEcho | undefined} fallback={entry.text} />
   }
@@ -282,7 +286,13 @@ export default function ChatScreen() {
 
         {pendingQuiz ? (
           <ScrollView style={styles.quizHost} contentContainerStyle={{ padding: 12 }}>
-            <PendingQuizCard sessionId={id} quiz={pendingQuiz} />
+            {/* Keyed by the prompt, so a new dialog (a permission dialog the
+                agent moved past) starts with a fresh, unlocked card. */}
+            <PendingQuizCard
+              key={`${pendingQuiz.asked_at}:${pendingQuiz.questions[0]?.question ?? ''}`}
+              sessionId={id}
+              quiz={pendingQuiz}
+            />
           </ScrollView>
         ) : canWrite ? (
           <View style={styles.composer}>
