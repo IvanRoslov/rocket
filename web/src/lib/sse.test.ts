@@ -134,3 +134,17 @@ describe('useEventStream', () => {
     })
   })
 })
+
+describe('storm events (task #4901)', () => {
+  it('listens to the doc, gate and outcome events the Brainstorm tab refreshes on', () => {
+    for (const type of [
+      'task.doc_put',
+      'task.gate_requested',
+      'task.gate_decided',
+      'task.gate_superseded',
+      'task.question_outcome_set',
+    ]) {
+      expect(EVENT_TYPES).toContain(type)
+    }
+  })
+})

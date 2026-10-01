@@ -51,6 +51,10 @@
   color: var(--neutral-text);
   background: var(--neutral-bg);
 }
+.docs-tab__kind--warn {
+  color: var(--warn-text);
+  background: var(--warn-bg);
+}
 
 .docs-tab__title {
   font: 600 14px var(--font-ui);

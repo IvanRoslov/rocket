@@ -16,6 +16,7 @@ const KIND_TONE: Record<TaskDocKind, string> = {
   plan: 'docs-tab__kind--review',
   report: 'docs-tab__kind--ok',
   doc: 'docs-tab__kind--neutral',
+  problem: 'docs-tab__kind--warn',
 }
 
 function excerpt(body: string, max = 160): string {

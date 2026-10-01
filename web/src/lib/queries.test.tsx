@@ -7,7 +7,7 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { setupServer } from 'msw/node'
 import type { ReactNode } from 'react'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { handlers } from '../mocks/handlers'
 import {
   useAgentInbox,
@@ -28,6 +28,12 @@ import {
   useMilestonesBoard,
   useTask,
   useTasksBoard,
+  useBrainstormStats,
+  useDecideGate,
+  useSetOutcome,
+  useTaskBrainstormStats,
+  useTaskGates,
+  wireInvalidation,
 } from './queries'
 
 const server = setupServer(...handlers)
@@ -353,5 +359,91 @@ describe('unified thread actions', () => {
     result.current.mutate({ target: { kind: 'role', id: 'sre' }, body: 'heads up', type: 'fyi' })
     await waitFor(() => expect(role).toHaveLength(1))
     expect(role[0]).toEqual({ body: 'heads up', type: 'fyi' })
+  })
+})
+
+describe('brainstorm (task #4901)', () => {
+  it('useAnswerQuestion sends a storm comment next to `choose`, and only when there is one', async () => {
+    const bodies: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/questions/:id/answer', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 3 })
+      }),
+    )
+    const { result } = renderHook(() => useAnswerQuestion(), { wrapper })
+
+    result.current.mutate({ id: 3, choose: 2, body: 'но без кэша', taskId: 12 })
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ choose: 2, body: 'но без кэша' })
+
+    result.current.mutate({ id: 3, choose: 1, body: '   ', taskId: 12 })
+    await waitFor(() => expect(bodies).toHaveLength(2))
+    expect(bodies[1]).toEqual({ choose: 1 })
+  })
+
+  it('useAnswerThread carries the same optional comment with `choose`', async () => {
+    const bodies: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/questions/:id/answer', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        return HttpResponse.json({ id: 41 })
+      }),
+    )
+    const { result } = renderHook(() => useAnswerThread(), { wrapper })
+    result.current.mutate({ ref: { id: 41, kind: 'task', taskId: 40 }, choose: 1, body: 'ок' })
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ choose: 1, body: 'ок' })
+  })
+
+  it('useTaskGates unwraps {gates} newest first', async () => {
+    const { result } = renderHook(() => useTaskGates(17), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data?.map((g) => g.status)).toEqual(['pending', 'changes'])
+  })
+
+  it('useDecideGate posts the decision and comment', async () => {
+    const bodies: Record<string, unknown>[] = []
+    server.use(
+      http.post('/v1/gates/:id/decide', async ({ request, params }) => {
+        bodies.push({ id: params.id, ...((await request.json()) as Record<string, unknown>) })
+        return HttpResponse.json({ id: 2 })
+      }),
+    )
+    const { result } = renderHook(() => useDecideGate(), { wrapper })
+    result.current.mutate({ gateId: 2, taskId: 40, decision: 'changes', comment: 'добавь метрику' })
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ id: '2', decision: 'changes', comment: 'добавь метрику' })
+  })
+
+  it('useSetOutcome patches the outcome of a task thread', async () => {
+    const bodies: Record<string, unknown>[] = []
+    server.use(
+      http.patch('/v1/questions/:id/outcome', async ({ request, params }) => {
+        bodies.push({ id: params.id, ...((await request.json()) as Record<string, unknown>) })
+        return HttpResponse.json({ id: 40 })
+      }),
+    )
+    const { result } = renderHook(() => useSetOutcome(), { wrapper })
+    result.current.mutate({ id: 40, taskId: 40, outcome: 'corrected' })
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ id: '40', outcome: 'corrected' })
+  })
+
+  it('useTaskBrainstormStats and useBrainstormStats read the stats endpoints', async () => {
+    const one = renderHook(() => useTaskBrainstormStats(17), { wrapper })
+    await waitFor(() => expect(one.result.current.isSuccess).toBe(true))
+    expect(one.result.current.data?.task_id).toBe(17)
+
+    const all = renderHook(() => useBrainstormStats(), { wrapper })
+    await waitFor(() => expect(all.result.current.isSuccess).toBe(true))
+    expect(all.result.current.data?.storms.length).toBeGreaterThan(0)
+  })
+
+  it('task.* events refresh the brainstorm metric', () => {
+    const queryClient = new QueryClient()
+    const spy = vi.spyOn(queryClient, 'invalidateQueries')
+    wireInvalidation(queryClient)({ id: 1, ts: 1, type: 'task.question_outcome_set' })
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['stats'] })
   })
 })

@@ -18,6 +18,9 @@ import type {
   AgentInboxMessage,
   AgentKinds,
   AgentQuestion,
+  BrainstormOutcome,
+  BrainstormStats,
+  BrainstormStorm,
   GithubIssue,
   GithubRepo,
   GlobalQuestion,
@@ -33,6 +36,7 @@ import type {
   Task,
   TaskDetail,
   TaskDoc,
+  TaskGate,
   TaskLogEntry,
   TaskStatus,
   ThreadInboxEntry,
@@ -562,6 +566,40 @@ function withTo<T extends object>(payload: T, to?: string[]): T & { to?: string[
   return to && to.length > 0 ? { ...payload, to } : payload
 }
 
+/**
+ * The three ways to close a thread: a written answer (which may carry
+ * addressees), a `dismiss`, or a 1-based `choose` into `options`. A storm
+ * thread (task #4901) may send the human's comment as `body` next to `choose`.
+ */
+type AnswerShape =
+  | { body: string; dismiss?: never; choose?: never }
+  | { dismiss: true; body?: never; choose?: never }
+  | { choose: number; body?: string; dismiss?: never }
+
+/**
+ * Builds the answer body. Both a dismiss and a picked option resolve the
+ * thread outright, so nobody is left to respond and an addressee list would
+ * be meaningless. `choose` is a 1-based index into `options`; the daemon
+ * substitutes the option's own text (chooseOptionBody in
+ * internal/api/threads.go) and records a body sent with it as the storm
+ * comment — so a blank comment stays off the wire.
+ */
+function answerPayload({
+  body,
+  dismiss,
+  choose,
+  to,
+}: {
+  body?: string
+  dismiss?: boolean
+  choose?: number
+  to?: string[]
+}): object {
+  if (dismiss) return { dismiss: true }
+  if (choose) return body && body.trim() ? { choose, body } : { choose }
+  return withTo({ body }, to)
+}
+
 /** `POST /v1/questions/{id}/reply` `{body}` -> bare questionResponse (201). Open questions only. */
 export function useReplyQuestion(): UseMutationResult<
   Question,
@@ -588,24 +626,12 @@ export function useReplyQuestion(): UseMutationResult<
 export function useAnswerQuestion(): UseMutationResult<
   Question,
   Error,
-  { id: number; taskId: number; to?: string[] } & (
-    | { body: string; dismiss?: never; choose?: never }
-    | { dismiss: true; body?: never; choose?: never }
-    | { choose: number; body?: never; dismiss?: never }
-  )
+  { id: number; taskId: number; to?: string[] } & AnswerShape
 > {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ id, body, dismiss, choose, to }) =>
-      api.post<Question>(
-        `/v1/questions/${id}/answer`,
-        // Both a dismiss and a picked option resolve the thread outright, so
-        // nobody is left to respond and an addressee list would be
-        // meaningless. `choose` is a 1-based index into `options`; the daemon
-        // substitutes the option's own text (chooseOptionBody in
-        // internal/api/threads.go), so no body travels with it.
-        dismiss ? { dismiss: true } : choose ? { choose } : withTo({ body }, to),
-      ),
+      api.post<Question>(`/v1/questions/${id}/answer`, answerPayload({ body, dismiss, choose, to })),
     onSuccess: (_data, { taskId }) => {
       queryClient.invalidateQueries({ queryKey: ['task', taskId, 'questions'] })
       queryClient.invalidateQueries({ queryKey: ['task', taskId] })
@@ -670,7 +696,11 @@ export function useCreateProject(): UseMutationResult<
  * masked token plus `login` (present only when a non-empty token was
  * accepted and validated against GitHub).
  */
-export function useUpdateSettings(): UseMutationResult<Settings, Error, { github_token: string }> {
+export function useUpdateSettings(): UseMutationResult<
+  Settings,
+  Error,
+  { github_token?: string; orchestrator_brainstorm_custom?: boolean }
+> {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (payload) => api.put<Settings>('/v1/settings', payload),
@@ -1009,20 +1039,14 @@ function invalidateThread(queryClient: QueryClient, ref: ThreadRef): void {
 export function useAnswerThread(): UseMutationResult<
   unknown,
   Error,
-  { ref: ThreadRef; to?: string[] } & (
-    | { body: string; dismiss?: never; choose?: never }
-    | { dismiss: true; body?: never; choose?: never }
-    | { choose: number; body?: never; dismiss?: never }
-  )
+  { ref: ThreadRef; to?: string[] } & AnswerShape
 > {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ ref, body, dismiss, choose, to }) => {
       const path =
         ref.kind === 'task' ? `/v1/questions/${ref.id}/answer` : `/v1/agent-questions/${ref.id}/answer`
-      // Dismiss and choose both close the thread outright, so neither carries
-      // addressees — see useAnswerQuestion for the whole story.
-      return api.post(path, dismiss ? { dismiss: true } : choose ? { choose } : withTo({ body }, to))
+      return api.post(path, answerPayload({ body, dismiss, choose, to }))
     },
     onSuccess: (_data, { ref }) => invalidateThread(queryClient, ref),
   })
@@ -1079,6 +1103,80 @@ export function useAskThread(): UseMutationResult<
 }
 
 // ---------------------------------------------------------------------------
+// Storm: gate, outcome, metric (task #4901)
+// ---------------------------------------------------------------------------
+
+/** `GET /v1/tasks/{id}/gates` — the task's storm exit gates, newest first. */
+export function useTaskGates(id: number | undefined): UseQueryResult<TaskGate[]> {
+  return useQuery({
+    queryKey: ['task', id, 'gates'],
+    queryFn: async () => {
+      const res = await api.get<{ gates: TaskGate[] }>(`/v1/tasks/${id}/gates`)
+      return res.gates
+    },
+    enabled: id !== undefined,
+  })
+}
+
+/** `GET /v1/tasks/{id}/brainstorm/stats` — one `storms[]` row for the Brainstorm tab. */
+export function useTaskBrainstormStats(id: number | undefined): UseQueryResult<BrainstormStorm> {
+  return useQuery({
+    queryKey: ['task', id, 'brainstorm-stats'],
+    queryFn: () => api.get<BrainstormStorm>(`/v1/tasks/${id}/brainstorm/stats`),
+    enabled: id !== undefined,
+    retry: false,
+  })
+}
+
+/** `GET /v1/stats/brainstorm?weeks=N` — the storm metric screen. */
+export function useBrainstormStats(weeks?: number): UseQueryResult<BrainstormStats> {
+  return useQuery({
+    queryKey: ['stats', 'brainstorm', weeks ?? null],
+    queryFn: () => api.get<BrainstormStats>(`/v1/stats/brainstorm${weeks ? `?weeks=${weeks}` : ''}`),
+    retry: false,
+  })
+}
+
+/**
+ * `POST /v1/gates/{id}/decide` `{decision, comment}` — the human's Go or
+ * "needs changes". 409 when the gate was superseded by a newer spec or is
+ * already decided; callers show that and refetch.
+ */
+export function useDecideGate(): UseMutationResult<
+  TaskGate,
+  Error,
+  { gateId: number; taskId: number; decision: 'go' | 'changes'; comment?: string }
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ gateId, decision, comment }) =>
+      api.post<TaskGate>(`/v1/gates/${gateId}/decide`, { decision, comment: comment ?? '' }),
+    // Settled, not success: a 409 means the gate list we showed is stale.
+    onSettled: (_data, _err, { taskId }) => {
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['stats'] })
+    },
+  })
+}
+
+/** `PATCH /v1/questions/{id}/outcome` `{outcome}` — the human corrects a storm answer's outcome. */
+export function useSetOutcome(): UseMutationResult<
+  Question,
+  Error,
+  { id: number; taskId: number; outcome: BrainstormOutcome }
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, outcome }) => api.patch<Question>(`/v1/questions/${id}/outcome`, { outcome }),
+    onSuccess: (_data, { id, taskId }) => {
+      invalidateThread(queryClient, { id, kind: 'task', taskId })
+      queryClient.invalidateQueries({ queryKey: ['stats'] })
+    },
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Live invalidation
 // ---------------------------------------------------------------------------
 
@@ -1106,6 +1204,8 @@ export function wireInvalidation(queryClient: QueryClient) {
       queryClient.invalidateQueries({ queryKey: ['task'] })
       queryClient.invalidateQueries({ queryKey: ['questions'] })
       queryClient.invalidateQueries({ queryKey: ['threads'] })
+      // Answers, outcome overrides and gate decisions all move the storm metric.
+      queryClient.invalidateQueries({ queryKey: ['stats'] })
     } else if (event.type.startsWith('milestone.')) {
       // `milestone.quiet` (subtask #1032) flips the quiet flag the milestone
       // cards render, on both the board and the holder's agent card.
