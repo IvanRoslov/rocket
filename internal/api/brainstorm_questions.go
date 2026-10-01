@@ -7,6 +7,8 @@
 package api
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -85,4 +87,145 @@ func validateRecommend(w http.ResponseWriter, threadType string, options []strin
 	}
 	writeErr(w, http.StatusBadRequest, "bad_request", msg)
 	return false
+}
+
+// registerBrainstormQuestionRoutes wires the brainstorm-only thread routes.
+func registerBrainstormQuestionRoutes(mux *http.ServeMux, d Deps) {
+	mux.HandleFunc("POST /v1/questions/{id}/brainstorm-record", func(w http.ResponseWriter, r *http.Request) {
+		handlePostBrainstormRecord(w, r, d)
+	})
+	mux.HandleFunc("PATCH /v1/questions/{id}/outcome", func(w http.ResponseWriter, r *http.Request) {
+		handlePatchQuestionOutcome(w, r, d)
+	})
+}
+
+type postBrainstormRecordRequest struct {
+	// Choose is the option the human picked (1-based, 0 = none); Body is the
+	// human's words, verbatim — the comment to the choice, or the whole answer.
+	Choose int    `json:"choose"`
+	Body   string `json:"body"`
+}
+
+// handlePostBrainstormRecord serves POST /v1/questions/{id}/brainstorm-record
+// {choose?, body?}: the orchestrator writes down the answer the human gave in
+// its terminal. It is the one exception to "agents do not close threads" —
+// the agent records the human's answer, not its own — so it is held tight:
+// only the orchestrator of the thread's task (403 for anybody else, the human
+// included: the human answers directly), only a brainstorm thread (400), only
+// an open one (409).
+//
+// The answer is the human's: the entry is authored "human", the thread
+// records answer_source=terminal, and the outcome follows the same rule as a
+// click in a client. It is delivered to the other participants as any answer
+// is, except the orchestrator that recorded it, which already knows.
+func handlePostBrainstormRecord(w http.ResponseWriter, r *http.Request, d Deps) {
+	id, ok := parseQuestionID(w, r)
+	if !ok {
+		return
+	}
+	q, ok := getQuestionOr404(w, d, id)
+	if !ok {
+		return
+	}
+	caller, err := callerSession(r, d.Store)
+	if writeCallerErr(w, err) {
+		return
+	}
+	task, ok := getTaskOr404(w, d, q.TaskID)
+	if !ok {
+		return
+	}
+	subj := threadSubject{TaskID: task.ID, Counterpart: task.SessionID}
+	if !callerIsCounterpart(caller, subj) {
+		writeErr(w, http.StatusForbidden, "forbidden",
+			"only the orchestrator of this task may record the human's terminal answer")
+		return
+	}
+	if q.Type != store.QuestionTypeBrainstorm {
+		writeErr(w, http.StatusBadRequest, "not_brainstorm",
+			"only a brainstorm thread takes a recorded terminal answer; this one is "+q.Type)
+		return
+	}
+	if q.Status != "open" {
+		writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
+		return
+	}
+
+	var req postBrainstormRecordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+	body, ok := chooseOptionBody(w, q, req.Choose, req.Body)
+	if !ok {
+		return
+	}
+	if body == "" {
+		writeErr(w, http.StatusBadRequest, "empty_body", "choose an option or give the human's text")
+		return
+	}
+
+	if _, err := d.Store.ResolveBrainstormQuestion(id, store.BrainstormAnswer{
+		ChosenOption: req.Choose, Comment: req.Body, Source: store.AnswerSourceTerminal,
+	}); err != nil {
+		if errors.Is(err, store.ErrQuestionResolved) {
+			writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	if _, err := d.Store.AddQuestionMessage(store.QuestionMessage{
+		QuestionID: id, Author: store.ParticipantHuman, Kind: "answer", Body: body,
+	}); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	ordinal, err := d.Store.QuestionOrdinal(q)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	participants, err := d.Store.ListParticipants(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	recipients := make([]string, 0, len(participants))
+	for _, p := range participants {
+		if !sameParticipant(p, caller.ID) {
+			recipients = append(recipients, p)
+		}
+	}
+	if err := participantFanOut(d, subj, ordinal, "answer", store.ParticipantHuman, body, recipients); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	if err := d.Store.ClearAttention(id); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	d.Bus.Publish("task.question_resolved", callerLabel(caller), map[string]any{
+		"task_id": task.ID, "question_id": id, "resolution": "answered",
+		"answer_source": store.AnswerSourceTerminal,
+	})
+
+	updated, ok := getQuestionOr404(w, d, id)
+	if !ok {
+		return
+	}
+	resp, err := buildQuestionResponse(d, caller, updated)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	resp.Echo = threadEcho(subj, ordinal, q.Body, task.Title)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// handlePatchQuestionOutcome is defined with the override (Task 4).
+func handlePatchQuestionOutcome(w http.ResponseWriter, r *http.Request, d Deps) {
+	writeErr(w, http.StatusNotImplemented, "not_implemented", "not implemented")
 }

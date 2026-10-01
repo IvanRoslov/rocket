@@ -268,3 +268,197 @@ func TestGetThreads_CarriesBrainstormFields(t *testing.T) {
 		t.Fatalf("inbox entry = %+v", e.brainstormWire)
 	}
 }
+
+func recordURL(srv *httptest.Server, id int64) string {
+	return srv.URL + "/v1/questions/" + itoa(id) + "/brainstorm-record"
+}
+
+// TestBrainstormRecord_OrchestratorRecordsHumanAnswer: the orchestrator writes
+// down what the human said in its terminal. The answer is the human's, marked
+// as coming from the terminal; it reaches every other participant but is not
+// echoed back to the orchestrator that recorded it.
+func TestBrainstormRecord_OrchestratorRecordsHumanAnswer(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+	setupQuestionAgent(t, d)
+	q := askBrainstorm(t, srv, taskID)
+	if err := d.Store.AddParticipants(q.ID, "cto"); err != nil {
+		t.Fatalf("AddParticipants: %v", err)
+	}
+	before, err := d.Store.ListMessages("orch-1", 50)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+
+	resp := postJSONWithHeader(t, recordURL(srv, q.ID), "orch-1",
+		map[string]any{"choose": 2, "body": "да, но без кэша"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("record = %d, want 200", resp.StatusCode)
+	}
+	got := decodeQuestion(t, resp)
+	if got.Status != "resolved" || got.Resolution != "answered" {
+		t.Fatalf("status/resolution = %q/%q", got.Status, got.Resolution)
+	}
+	if !eqIntPtr(got.ChosenOption, intPtr(2)) || got.AnswerComment != "да, но без кэша" ||
+		got.AnswerSource != store.AnswerSourceTerminal || got.Outcome != store.OutcomeAccepted {
+		t.Fatalf("answer fields = %+v", got.brainstormWire)
+	}
+	if got.AnsweredBy != "human" {
+		t.Fatalf("answered_by = %q, want human", got.AnsweredBy)
+	}
+	if m := lastMessage(t, got); m.Kind != "answer" || m.Author != "human" || m.Body != "B\n\nда, но без кэша" {
+		t.Fatalf("answer message = %+v", m)
+	}
+	if !strings.Contains(got.Echo, itoa(taskID)+"/Q1") {
+		t.Errorf("echo = %q, want the thread ref", got.Echo)
+	}
+	if len(got.WaitingOn) != 0 {
+		t.Errorf("waiting_on = %v, want empty", got.WaitingOn)
+	}
+
+	after, err := d.Store.ListMessages("orch-1", 50)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Errorf("orchestrator got its own record back: %d -> %d messages", len(before), len(after))
+	}
+	inbox, err := d.Store.ListInboxMessages("cto", store.InboxUnread, 0)
+	if err != nil {
+		t.Fatalf("ListInboxMessages: %v", err)
+	}
+	if len(inbox) == 0 || !strings.Contains(inbox[len(inbox)-1].Body, "да, но без кэша") {
+		t.Errorf("cto inbox = %+v, want the recorded answer", inbox)
+	}
+}
+
+func TestBrainstormRecord_OwnTextIsWrongTurn(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+	q := askBrainstorm(t, srv, taskID)
+
+	resp := postJSONWithHeader(t, recordURL(srv, q.ID), "orch-1", map[string]any{"body": "давай сначала про деньги"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("record = %d, want 200", resp.StatusCode)
+	}
+	got := decodeQuestion(t, resp)
+	if got.ChosenOption != nil || got.Outcome != store.OutcomeWrongTurn {
+		t.Fatalf("chosen/outcome = %v/%q, want null/wrong_turn", got.ChosenOption, got.Outcome)
+	}
+}
+
+func TestBrainstormRecord_Forbidden(t *testing.T) {
+	cases := []struct {
+		name   string
+		caller string
+		setup  func(t *testing.T, d Deps, taskID int64)
+	}{
+		{"human", "", nil},
+		{"worker of the same feature", "worker-1", func(t *testing.T, d Deps, taskID int64) {
+			addTestSession(t, d, "worker-1", "worker", "proj1")
+			if _, err := d.Store.AddTask(store.Task{Title: "sub", ProjectID: "proj1", ParentID: taskID, SessionID: "worker-1"}); err != nil {
+				t.Fatalf("AddTask: %v", err)
+			}
+		}},
+		{"orchestrator of another task", "orch-2", func(t *testing.T, d Deps, taskID int64) {
+			addTestSession(t, d, "orch-2", "orchestrator", "proj1")
+			if _, err := d.Store.AddTask(store.Task{Title: "other", ProjectID: "proj1", SessionID: "orch-2"}); err != nil {
+				t.Fatalf("AddTask: %v", err)
+			}
+		}},
+		{"persistent agent", "cto", func(t *testing.T, d Deps, taskID int64) {
+			setupQuestionAgent(t, d)
+			addLiveAgentSession(t, d, "cto")
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			d := questionsTestDeps(t)
+			srv := newTestServer(t, d)
+			taskID := setupQuestionTask(t, d)
+			if c.setup != nil {
+				c.setup(t, d, taskID)
+			}
+			q := askBrainstorm(t, srv, taskID)
+
+			var resp *http.Response
+			if c.caller == "" {
+				resp = postJSON(t, recordURL(srv, q.ID), map[string]any{"choose": 1})
+			} else {
+				resp = postJSONWithHeader(t, recordURL(srv, q.ID), c.caller, map[string]any{"choose": 1, "join": true})
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403", resp.StatusCode)
+			}
+			if stored, _ := d.Store.GetQuestion(q.ID); stored.Status != "open" {
+				t.Fatalf("thread status = %q, want still open", stored.Status)
+			}
+		})
+	}
+}
+
+func TestBrainstormRecord_NotBrainstorm(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+	resp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1",
+		map[string]any{"body": "Q", "options": []string{"A", "B"}})
+	q := decodeQuestion(t, resp)
+	resp.Body.Close()
+
+	rec := postJSONWithHeader(t, recordURL(srv, q.ID), "orch-1", map[string]any{"choose": 1})
+	defer rec.Body.Close()
+	if rec.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.StatusCode)
+	}
+	if eb := decodeErr(t, rec); eb.Error.Code != "not_brainstorm" {
+		t.Errorf("code = %q, want not_brainstorm", eb.Error.Code)
+	}
+}
+
+func TestBrainstormRecord_AlreadyResolved(t *testing.T) {
+	d := questionsTestDeps(t)
+	srv := newTestServer(t, d)
+	taskID := setupQuestionTask(t, d)
+	q := askBrainstorm(t, srv, taskID)
+
+	first := postJSON(t, srv.URL+"/v1/questions/"+itoa(q.ID)+"/answer", map[string]any{"choose": 2})
+	first.Body.Close()
+
+	rec := postJSONWithHeader(t, recordURL(srv, q.ID), "orch-1", map[string]any{"choose": 1})
+	defer rec.Body.Close()
+	if rec.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.StatusCode)
+	}
+	if stored, _ := d.Store.GetQuestion(q.ID); stored.ChosenOption != 2 || stored.AnswerSource != store.AnswerSourceUI {
+		t.Fatalf("the earlier answer was overwritten: %+v", stored)
+	}
+}
+
+func TestBrainstormRecord_BadInput(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload map[string]any
+	}{
+		{"empty", map[string]any{}},
+		{"choose out of range", map[string]any{"choose": 4}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			d := questionsTestDeps(t)
+			srv := newTestServer(t, d)
+			taskID := setupQuestionTask(t, d)
+			q := askBrainstorm(t, srv, taskID)
+			rec := postJSONWithHeader(t, recordURL(srv, q.ID), "orch-1", c.payload)
+			defer rec.Body.Close()
+			if rec.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", rec.StatusCode)
+			}
+		})
+	}
+}

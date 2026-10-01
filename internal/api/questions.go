@@ -200,6 +200,7 @@ func registerQuestionRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("POST /v1/questions/{id}/answer", func(w http.ResponseWriter, r *http.Request) {
 		handlePostQuestionAnswer(w, r, d)
 	})
+	registerBrainstormQuestionRoutes(mux, d)
 }
 
 // globalQuestionResponse is one entry of GET /v1/questions: a full question
