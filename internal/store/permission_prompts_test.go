@@ -207,3 +207,57 @@ func TestCompareAndSwapPendingQuiz(t *testing.T) {
 		t.Fatalf("pending = %q, want empty", got.PendingQuiz)
 	}
 }
+
+func TestMarkPermissionPromptSentAndGet(t *testing.T) {
+	s := openTestStore(t)
+	mustSetup(t, s)
+	addPermissionTestSession(t, s, "s1")
+
+	id, _, _ := s.OpenPermissionPrompt("s1", "T?", "c", `["Yes"]`, 100)
+	r, err := s.GetPermissionPrompt(id)
+	if err != nil || r.SentAt != 0 || r.Title != "T?" || r.ResolvedAt != 0 {
+		t.Fatalf("fresh row = %+v err=%v", r, err)
+	}
+	if err := s.MarkPermissionPromptSent(id, 150); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := s.GetPermissionPrompt(id); r.SentAt != 150 {
+		t.Errorf("sent_at = %d, want 150", r.SentAt)
+	}
+	if _, err := s.GetPermissionPrompt(9999); err != ErrNotFound {
+		t.Errorf("missing row err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestResolveOpenPermissionPrompts(t *testing.T) {
+	s := openTestStore(t)
+	mustSetup(t, s)
+	addPermissionTestSession(t, s, "s1")
+	addPermissionTestSession(t, s, "s2")
+
+	a, _, _ := s.OpenPermissionPrompt("s1", "A?", "", `[]`, 100)
+	o, _, _ := s.OpenPermissionPrompt("s2", "O?", "", `[]`, 100)
+	if err := s.ResolveOpenPermissionPrompts("s1", 200); err != nil {
+		t.Fatal(err)
+	}
+	if r := getPermissionRow(t, s, a); r.ResolvedAt != 200 || r.AnsweredVia != "terminal" {
+		t.Errorf("s1 row = %+v, want closed via terminal at 200", r)
+	}
+	if r := getPermissionRow(t, s, o); r.ResolvedAt != 0 {
+		t.Errorf("s2 row closed: %+v", r)
+	}
+}
+
+func TestDeletePermissionPrompt(t *testing.T) {
+	s := openTestStore(t)
+	mustSetup(t, s)
+	addPermissionTestSession(t, s, "s1")
+
+	id, _, _ := s.OpenPermissionPrompt("s1", "A?", "", `[]`, 100)
+	if err := s.DeletePermissionPrompt(id); err != nil {
+		t.Fatal(err)
+	}
+	if n := countPermissionRows(t, s, "s1"); n != 0 {
+		t.Errorf("rows = %d after delete, want 0", n)
+	}
+}

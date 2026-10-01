@@ -22,6 +22,8 @@ type PermissionPromptRow struct {
 	// AnsweredVia is "chat" (answered through the API) or "terminal"
 	// (the dialog went away without one); empty while open.
 	AnsweredVia string
+	// SentAt is when an API answer's keypress was actually sent (0: never).
+	SentAt int64
 }
 
 // resolveVia is the answered_via a row gets when it is closed: chat when an
@@ -107,7 +109,7 @@ func (s *Store) ResolvePermissionPrompt(id int64, resolvedAt int64) error {
 // has at most one open row at a time).
 func (s *Store) ListResolvedPermissionPrompts(sessionID string) ([]PermissionPromptRow, error) {
 	rows, err := s.db.Query(
-		`SELECT id, session_id, title, context, options_json, asked_at, resolved_at, answer_label, answered_via
+		`SELECT `+permissionPromptColumns+`
 		 FROM permission_prompts WHERE session_id = ? AND resolved_at IS NOT NULL ORDER BY id`,
 		sessionID,
 	)
@@ -118,11 +120,61 @@ func (s *Store) ListResolvedPermissionPrompts(sessionID string) ([]PermissionPro
 
 	var out []PermissionPromptRow
 	for rows.Next() {
-		var r PermissionPromptRow
-		if err := rows.Scan(&r.ID, &r.SessionID, &r.Title, &r.Context, &r.OptionsJSON, &r.AskedAt, &r.ResolvedAt, &r.AnswerLabel, &r.AnsweredVia); err != nil {
-			return nil, fmt.Errorf("scan permission prompt: %w", err)
+		r, err := scanPermissionPrompt(rows)
+		if err != nil {
+			return nil, err
 		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+const permissionPromptColumns = `id, session_id, title, context, options_json, asked_at, IFNULL(resolved_at, 0), answer_label, answered_via, sent_at`
+
+func scanPermissionPrompt(sc interface{ Scan(...any) error }) (PermissionPromptRow, error) {
+	var r PermissionPromptRow
+	if err := sc.Scan(&r.ID, &r.SessionID, &r.Title, &r.Context, &r.OptionsJSON, &r.AskedAt, &r.ResolvedAt, &r.AnswerLabel, &r.AnsweredVia, &r.SentAt); err != nil {
+		return PermissionPromptRow{}, fmt.Errorf("scan permission prompt: %w", err)
+	}
+	return r, nil
+}
+
+// GetPermissionPrompt returns row id, or ErrNotFound.
+func (s *Store) GetPermissionPrompt(id int64) (PermissionPromptRow, error) {
+	r, err := scanPermissionPrompt(s.db.QueryRow(`SELECT `+permissionPromptColumns+` FROM permission_prompts WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return PermissionPromptRow{}, ErrNotFound
+	}
+	return r, err
+}
+
+// MarkPermissionPromptSent records when an API answer's keypress for row id
+// was actually sent. The monitor uses it to tell a dialog that is still
+// open from an identical one Claude asked right after the answer.
+func (s *Store) MarkPermissionPromptSent(id int64, sentAt int64) error {
+	if _, err := s.db.Exec(`UPDATE permission_prompts SET sent_at = ? WHERE id = ? AND resolved_at IS NULL`, sentAt, id); err != nil {
+		return fmt.Errorf("mark permission prompt sent: %w", err)
+	}
+	return nil
+}
+
+// ResolveOpenPermissionPrompts closes every open row of sessionID — for a
+// session that went to a terminal state with a dialog still journalled.
+func (s *Store) ResolveOpenPermissionPrompts(sessionID string, resolvedAt int64) error {
+	if _, err := s.db.Exec(
+		`UPDATE permission_prompts SET resolved_at = ?, answered_via = `+resolveVia+` WHERE session_id = ? AND resolved_at IS NULL`,
+		resolvedAt, sessionID,
+	); err != nil {
+		return fmt.Errorf("resolve open permission prompts: %w", err)
+	}
+	return nil
+}
+
+// DeletePermissionPrompt removes row id — a row the monitor opened but
+// could not attach to the session's pending quiz.
+func (s *Store) DeletePermissionPrompt(id int64) error {
+	if _, err := s.db.Exec(`DELETE FROM permission_prompts WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete permission prompt: %w", err)
+	}
+	return nil
 }
