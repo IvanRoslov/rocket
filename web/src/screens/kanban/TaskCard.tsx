@@ -2,6 +2,7 @@ import type { DragEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge, type BadgeTone } from '../../components/Badge'
 import { Dot, type DotState } from '../../components/Dot'
+import type { TaskStorm } from '../../lib/storm'
 import type { Session, Task } from '../../lib/types'
 import './kanban.css'
 
@@ -16,6 +17,12 @@ export interface TaskCardProps {
   onDragStart: (e: DragEvent<HTMLDivElement>) => void
   onDragEnd: () => void
   onStart: () => void
+  /**
+   * The task's open storm questions, from the inbox. They are answered in the
+   * Brainstorm tab and count once per task (task #4901, spec v2 §3.1), so the
+   * card shows one marker for them and keeps them out of its question counts.
+   */
+  storm?: TaskStorm
 }
 
 /**
@@ -69,6 +76,7 @@ export function TaskCard({
   onDragStart,
   onDragEnd,
   onStart,
+  storm,
 }: TaskCardProps) {
   // Orchestrator liveness: the task's own session (if it has one) is the
   // orchestrator; its workers are sessions whose parent_id points back to it.
@@ -78,6 +86,9 @@ export function TaskCard({
   const orchestrator = task.session_id ? sessions?.find((s) => s.id === task.session_id) : undefined
   const workerSessions = orchestrator ? (sessions?.filter((s) => s.parent_id === orchestrator.id) ?? []) : []
   const workers = workerSessions.length
+  // The board's counts include storm questions; the storm has its own marker.
+  const awaiting = Math.max(0, task.questions_awaiting_user - (storm?.onYou ?? 0))
+  const openPlain = Math.max(0, task.open_questions - (storm?.open ?? 0))
   const { openCount, mergedCount, ci } = prSummary(workerSessions)
   const draggable = task.status !== 'cancelled'
 
@@ -127,13 +138,19 @@ export function TaskCard({
         </div>
       )}
 
-      {task.questions_awaiting_user > 0 ? (
+      {storm && storm.onYou > 0 && (
         <div className="kanban-card__questions">
-          <Badge tone="warn">? {task.questions_awaiting_user} awaiting you</Badge>
+          <Badge tone="warn">Storm waiting</Badge>
         </div>
-      ) : task.open_questions > 0 ? (
+      )}
+
+      {awaiting > 0 ? (
         <div className="kanban-card__questions">
-          <Badge tone="neutral">? {task.open_questions} open</Badge>
+          <Badge tone="warn">? {awaiting} awaiting you</Badge>
+        </div>
+      ) : openPlain > 0 ? (
+        <div className="kanban-card__questions">
+          <Badge tone="neutral">? {openPlain} open</Badge>
         </div>
       ) : null}
 

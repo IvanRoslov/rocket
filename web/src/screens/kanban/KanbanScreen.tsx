@@ -1,8 +1,9 @@
-import { useState, type DragEvent } from 'react'
+import { useMemo, useState, type DragEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { SearchInput } from '../../components/SearchInput'
-import { useMoveTask, useProjects, useSessions, useTasksBoard, type TaskBoard } from '../../lib/queries'
+import { useMoveTask, useProjects, useSessions, useTasksBoard, useThreads, type TaskBoard } from '../../lib/queries'
+import { stormsByTask } from '../../lib/storm'
 import type { Task, TaskStatus } from '../../lib/types'
 import { Column } from './Column'
 import { NewTaskModal } from './NewTaskModal'
@@ -57,6 +58,9 @@ export function KanbanScreen() {
   const queryClient = useQueryClient()
   const { data: projects } = useProjects()
   const { data: board } = useTasksBoard(projectId)
+  // The inbox (shared with the nav badge) tells which open questions are storm ones.
+  const { data: threads } = useThreads()
+  const storms = useMemo(() => stormsByTask(threads ?? []), [threads])
   // `all: true` — a task card's PR badges need to see done workers (merged
   // PRs) too, not just live spawning/running ones. No session rail lives on
   // this screen, so unlike TaskScreen there's no live-only view to protect.
@@ -170,6 +174,7 @@ export function KanbanScreen() {
                     setDragOverStatus(null)
                   }}
                   onStart={() => setStartingTaskId(task.id)}
+                  storm={storms.get(task.id)}
                 />
               ))}
             </Column>

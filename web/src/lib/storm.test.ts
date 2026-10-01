@@ -1,4 +1,4 @@
-import { inboxCount, isStorm, stormGroups, stormHref, stormLabel } from './storm'
+import { inboxCount, isStorm, stormGroups, stormHref, stormLabel, stormMatches, stormsByTask } from './storm'
 import type { ThreadInboxEntry } from './types'
 
 let nextId = 1
@@ -89,4 +89,28 @@ test('inboxCount counts every task storm as one item', () => {
 test('isStorm', () => {
   expect(isStorm({ type: 'brainstorm' })).toBe(true)
   expect(isStorm({ type: 'decision' })).toBe(false)
+})
+
+test('stormHref falls back to the milestone route without a project', () => {
+  expect(stormHref({ taskId: 17, count: 1, stale: false, updatedAt: 0 })).toBe('/milestones/17')
+})
+
+test('stormMatches searches the task id and title', () => {
+  const g = { taskId: 31, taskTitle: 'Ledger rewrite', count: 1, stale: false, updatedAt: 0 }
+  expect(stormMatches(g, '')).toBe(true)
+  expect(stormMatches(g, 'ledger')).toBe(true)
+  expect(stormMatches(g, '#31')).toBe(true)
+  expect(stormMatches(g, 'storm')).toBe(true)
+  expect(stormMatches(g, 'billing')).toBe(false)
+})
+
+test('stormsByTask counts open storm questions per task, and those on you', () => {
+  const byTask = stormsByTask([
+    thread({ type: 'brainstorm', task_id: 5 }),
+    thread({ type: 'brainstorm', task_id: 5, your_turn: false }),
+    thread({ type: 'brainstorm', task_id: 5, status: 'resolved', your_turn: false }),
+    thread({ type: 'decision', task_id: 5 }),
+  ])
+  expect(byTask.get(5)).toEqual({ open: 2, onYou: 1 })
+  expect(byTask.get(6)).toBeUndefined()
 })

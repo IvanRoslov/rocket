@@ -5,7 +5,7 @@
 // on that thread, so there is exactly one place where a thread gets answered.
 
 import { timeAgo } from '../../lib/format'
-import type { StormGroup } from '../../lib/storm'
+import { stormMatches, type StormGroup } from '../../lib/storm'
 import { questionTitle } from '../../lib/thread'
 import type { ThreadInboxEntry } from '../../lib/types'
 import { StormRows } from './StormRows'
@@ -36,8 +36,18 @@ export interface BrowseModeProps {
 
 export function BrowseMode(props: BrowseModeProps) {
   const groups = browseGroups(props.threads, props.filter, props.query)
-  const counts = browseCounts(props.threads, props.query)
-  const shown = groups.reduce((n, g) => n + g.rows.length, 0)
+  // A storm row is one open item on you, so it counts — and filters — like a
+  // thread waiting on you: in Your turn, All open and Everything, never Closed.
+  const storms = props.storms.filter((g) => stormMatches(g, props.query))
+  const stormsShown = props.filter === 'closed' ? [] : storms
+  const threadCounts = browseCounts(props.threads, props.query)
+  const counts: Record<BrowseFilter, number> = {
+    mine: threadCounts.mine + storms.length,
+    open: threadCounts.open + storms.length,
+    closed: threadCounts.closed,
+    all: threadCounts.all + storms.length,
+  }
+  const shown = groups.reduce((n, g) => n + g.rows.length, stormsShown.length)
 
   return (
     <div className="q__browse">
@@ -67,15 +77,15 @@ export function BrowseMode(props: BrowseModeProps) {
 
       <div className="q__browse-body q__scroll">
         <div className="q__browse-inner">
-          {props.filter !== 'closed' && props.storms.length > 0 && (
+          {stormsShown.length > 0 && (
             <div className="q__group">
               <div className="q__group-head">
                 <span className="q__group-label q__group-label--turn">Storms</span>
-                <span className="q__count">{props.storms.length}</span>
+                <span className="q__count">{stormsShown.length}</span>
                 <span className="q__group-sub">answered in the task’s Brainstorm tab</span>
               </div>
               <div className="q__rows">
-                <StormRows storms={props.storms} className="q__qrow q__qrow--storm" />
+                <StormRows storms={stormsShown} className="q__qrow q__qrow--storm" />
               </div>
             </div>
           )}
@@ -131,7 +141,7 @@ export function BrowseMode(props: BrowseModeProps) {
             </div>
           ))}
 
-          {groups.length === 0 && (
+          {shown === 0 && (
             <div className="q__empty">
               <div className="q__empty-title">Nothing matches</div>
               <div className="q__empty-text">Clear the search or switch a filter.</div>
