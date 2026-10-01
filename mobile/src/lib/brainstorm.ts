@@ -6,9 +6,9 @@ import type { BrainstormFields, BrainstormOutcome, GateStatus, TaskDoc, TaskDocK
 export const OUTCOMES: BrainstormOutcome[] = ['accepted', 'corrected', 'wrong_turn']
 
 export const OUTCOME_LABEL: Record<BrainstormOutcome, string> = {
-  accepted: 'принято',
-  corrected: 'поправлено',
-  wrong_turn: 'ушли не туда',
+  accepted: 'Accepted',
+  corrected: 'Corrected',
+  wrong_turn: 'Wrong turn',
 }
 
 export function isBrainstorm(t: { type?: string }): boolean {
@@ -37,14 +37,14 @@ export function pendingGate(gates: TaskGate[]): TaskGate | undefined {
 }
 
 const GATE_STATUS_LABEL: Record<Exclude<GateStatus, 'changes'>, string> = {
-  pending: 'ждёт решения',
+  pending: 'Awaiting decision',
   go: 'Go',
-  superseded: 'снят: спека обновилась',
+  superseded: 'Superseded by a newer spec',
 }
 
-/** One line of the gate history: "v1 — правки «…»", "v2 — Go". */
+/** One line of the gate history: "v1 — Needs changes: “…”", "v2 — Go". */
 export function gateHistoryLabel(g: TaskGate): string {
-  const what = g.status === 'changes' ? `правки «${g.comment}»` : GATE_STATUS_LABEL[g.status]
+  const what = g.status === 'changes' ? `Needs changes: “${g.comment}”` : GATE_STATUS_LABEL[g.status]
   return `v${g.spec_version} — ${what}`
 }
 

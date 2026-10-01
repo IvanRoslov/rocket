@@ -26,8 +26,8 @@ const q = (p: Partial<Question>): Question => ({
 })
 
 describe('OUTCOME_LABEL', () => {
-  it('names every outcome in Russian', () => {
-    expect(OUTCOMES.map((o) => OUTCOME_LABEL[o])).toEqual(['принято', 'поправлено', 'ушли не туда'])
+  it('names every outcome', () => {
+    expect(OUTCOMES.map((o) => OUTCOME_LABEL[o])).toEqual(['Accepted', 'Corrected', 'Wrong turn'])
   })
 })
 
@@ -86,11 +86,11 @@ describe('pendingGate', () => {
 describe('gateHistoryLabel', () => {
   it('describes each status', () => {
     expect(gateHistoryLabel(gate({ spec_version: 1, status: 'changes', comment: 'уточни метрику' }))).toBe(
-      'v1 — правки «уточни метрику»',
+      'v1 — Needs changes: “уточни метрику”',
     )
     expect(gateHistoryLabel(gate({ spec_version: 2, status: 'go' }))).toBe('v2 — Go')
-    expect(gateHistoryLabel(gate({ spec_version: 3, status: 'superseded' }))).toBe('v3 — снят: спека обновилась')
-    expect(gateHistoryLabel(gate({ spec_version: 4, status: 'pending' }))).toBe('v4 — ждёт решения')
+    expect(gateHistoryLabel(gate({ spec_version: 3, status: 'superseded' }))).toBe('v3 — Superseded by a newer spec')
+    expect(gateHistoryLabel(gate({ spec_version: 4, status: 'pending' }))).toBe('v4 — Awaiting decision')
   })
 })
 
