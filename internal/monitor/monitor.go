@@ -23,6 +23,7 @@ import (
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/runtime"
+	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -117,6 +118,9 @@ type Monitor struct {
 	// inputWaitMiss counts consecutive sweeps that saw no prompt on the
 	// pane of a session claiming waiting_input — see correctStaleInputWait.
 	inputWaitMiss map[string]int
+	// permMiss counts consecutive sweeps that saw no permission dialog on
+	// the pane of a session holding a permission quiz — see pollPermission.
+	permMiss map[string]int
 }
 
 // New builds a Monitor. resolveAgent is typically agent.Get.
@@ -134,6 +138,7 @@ func New(st *store.Store, b *bus.Bus, rt runtime.Runtime, cfg *config.Config, re
 		quizMiss:     make(map[string]int),
 
 		inputWaitMiss: make(map[string]int),
+		permMiss:      make(map[string]int),
 	}
 }
 
@@ -235,6 +240,7 @@ func (m *Monitor) sweep(ctx context.Context) {
 		m.pollSession(ctx, sess, liveSet, err == nil)
 		m.pollChat(ctx, sess)
 		m.pollQuiz(ctx, sess)
+		m.pollPermission(ctx, sess)
 	}
 
 	// Prune stale entries from cache, push and chat maps whose sessions no
@@ -265,6 +271,11 @@ func (m *Monitor) sweep(ctx context.Context) {
 			delete(m.inputWaitMiss, id)
 		}
 	}
+	for id := range m.permMiss {
+		if !sessionIDs[id] {
+			delete(m.permMiss, id)
+		}
+	}
 	m.mu.Unlock()
 }
 
@@ -290,8 +301,11 @@ const quizMissThreshold = 2
 // open (runtime.LooksLikeQuizWidget), so quizMissThreshold consecutive
 // sweeps without it mean the quiz is closed — clear pending and publish
 // session.quiz_resolved, exactly as the resolved hook would.
+//
+// A permission quiz (source "permission") is not an AskUserQuestion widget
+// and is left to pollPermission.
 func (m *Monitor) pollQuiz(ctx context.Context, sess store.Session) {
-	if sess.PendingQuiz == "" {
+	if q, ok := session.ParseQuiz(sess.PendingQuiz); sess.PendingQuiz == "" || (ok && q.IsPermission()) {
 		m.mu.Lock()
 		delete(m.quizMiss, sess.ID)
 		m.mu.Unlock()
