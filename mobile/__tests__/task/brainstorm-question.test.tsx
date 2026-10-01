@@ -182,6 +182,15 @@ describe('brainstorm QuestionCard — answered', () => {
     })
   })
 
+  it('reports a rejected outcome change instead of silently reverting', async () => {
+    mockFetch(409)
+    await renderCard(ANSWERED)
+    await fireEvent.press(screen.getByTestId('outcome-change'))
+    await fireEvent.press(await screen.findByText('Mark as Corrected'))
+    await waitFor(() => expect(screen.getByText('nope')).toBeTruthy())
+    expect(screen.getByText('Accepted with comment')).toBeTruthy()
+  })
+
   it('shows no outcome for a dismissed storm thread', async () => {
     mockFetch()
     await renderCard({ ...ANSWERED, resolution: 'dismissed', outcome: '', chosen_option: null, answer_comment: '' })
