@@ -5,8 +5,10 @@
 // on that thread, so there is exactly one place where a thread gets answered.
 
 import { timeAgo } from '../../lib/format'
+import type { StormGroup } from '../../lib/storm'
 import { questionTitle } from '../../lib/thread'
 import type { ThreadInboxEntry } from '../../lib/types'
+import { StormRows } from './StormRows'
 import { browseCounts, browseGroups, statusChip, type BrowseFilter } from './model'
 
 const FILTERS: { key: BrowseFilter; label: string }[] = [
@@ -23,6 +25,8 @@ function shortAge(ts: number): string {
 
 export interface BrowseModeProps {
   threads: ThreadInboxEntry[]
+  /** Task storms on you — rows linking to the Brainstorm tab, never threads. */
+  storms: StormGroup[]
   query: string
   onQuery: (value: string) => void
   filter: BrowseFilter
@@ -63,6 +67,18 @@ export function BrowseMode(props: BrowseModeProps) {
 
       <div className="q__browse-body q__scroll">
         <div className="q__browse-inner">
+          {props.filter !== 'closed' && props.storms.length > 0 && (
+            <div className="q__group">
+              <div className="q__group-head">
+                <span className="q__group-label q__group-label--turn">Storms</span>
+                <span className="q__count">{props.storms.length}</span>
+                <span className="q__group-sub">answered in the task’s Brainstorm tab</span>
+              </div>
+              <div className="q__rows">
+                <StormRows storms={props.storms} className="q__qrow q__qrow--storm" />
+              </div>
+            </div>
+          )}
           {groups.map((g) => (
             <div key={g.label} className="q__group">
               <div className="q__group-head">

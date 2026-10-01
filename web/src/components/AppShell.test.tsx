@@ -112,10 +112,10 @@ test('the Questions tab counts the threads whose turn is yours', async () => {
     http.get('/v1/threads', () =>
       HttpResponse.json({
         threads: [
-          { id: 1, kind: 'task', task_id: 12, local_ref: '12/Q1', ordinal: 1, your_turn: true, whose_turn: 'orchestrator', attention: ['human'], messages: [] },
-          { id: 2, kind: 'task', task_id: 12, local_ref: '12/Q2', ordinal: 2, your_turn: true, whose_turn: '', attention: ['human'], messages: [] },
-          { id: 3, kind: 'task', task_id: 12, local_ref: '12/Q3', ordinal: 3, your_turn: false, whose_turn: 'user', attention: ['cto'], messages: [] },
-          { id: 4, kind: 'role', role_id: 'sre', local_ref: 'sre/Q1', ordinal: 1, your_turn: true, whose_turn: 'user', attention: ['human'], messages: [] },
+          { id: 1, kind: 'task', task_id: 12, local_ref: '12/Q1', ordinal: 1, status: 'open', your_turn: true, whose_turn: 'orchestrator', attention: ['human'], messages: [] },
+          { id: 2, kind: 'task', task_id: 12, local_ref: '12/Q2', ordinal: 2, status: 'open', your_turn: true, whose_turn: '', attention: ['human'], messages: [] },
+          { id: 3, kind: 'task', task_id: 12, local_ref: '12/Q3', ordinal: 3, status: 'open', your_turn: false, whose_turn: 'user', attention: ['cto'], messages: [] },
+          { id: 4, kind: 'role', role_id: 'sre', local_ref: 'sre/Q1', ordinal: 1, status: 'open', your_turn: true, whose_turn: 'user', attention: ['human'], messages: [] },
         ],
       }),
     ),
@@ -124,6 +124,34 @@ test('the Questions tab counts the threads whose turn is yours', async () => {
 
   const questions = await screen.findByRole('link', { name: /Questions/ })
   // Two task threads plus the role thread — three, not two.
+  await waitFor(() => expect(questions).toHaveTextContent('3'))
+})
+
+// Storm questions (task #4901, spec v2 §3.1) live in the Brainstorm tab; the
+// inbox shows one row per task for them, and the badge counts that row once.
+test('a task storm counts as one item in the Questions badge', async () => {
+  const storm = (id: number, taskId: number, yours = true) => ({
+    id, kind: 'task', task_id: taskId, local_ref: `${taskId}/Q${id}`, ordinal: id, type: 'brainstorm', status: 'open',
+    your_turn: yours, attention: [yours ? 'human' : 'orch'], messages: [],
+  })
+  server.use(
+    http.get('/v1/threads', () =>
+      HttpResponse.json({
+        threads: [
+          { id: 1, kind: 'task', task_id: 12, local_ref: '12/Q1', ordinal: 1, status: 'open', your_turn: true, attention: ['human'], messages: [] },
+          storm(2, 17),
+          storm(3, 17),
+          storm(4, 17),
+          storm(5, 18),
+          storm(6, 19, false),
+        ],
+      }),
+    ),
+  )
+  renderShell()
+
+  const questions = await screen.findByRole('link', { name: /Questions/ })
+  // One decision thread + storm #17 + storm #18.
   await waitFor(() => expect(questions).toHaveTextContent('3'))
 })
 

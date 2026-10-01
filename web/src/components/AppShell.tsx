@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useParams, useLocation } from 'react-router-dom'
 import { fetchAuthStatus, onUnauthorized } from '../lib/auth'
 import { useLastProjectId } from '../lib/lastProject'
 import { useThreads } from '../lib/queries'
+import { inboxCount } from '../lib/storm'
 import { ProjectSwitcher } from './ProjectSwitcher'
 
 const navLinkStyle = ({ isActive }: { isActive: boolean }): CSSProperties => ({
@@ -41,7 +42,9 @@ export function AppShell() {
   // only task threads, so a role thread waiting on the human never reached
   // this badge. `your_turn` is the caller-relative field; `whose_turn` cannot
   // distinguish "waiting on you" from "waiting on another participant".
-  const awaitingCount = (threads ?? []).filter((t) => t.your_turn).length
+  // A task's storm counts once: its questions are one row in the inbox
+  // (task #4901, spec v2 §3.1).
+  const awaitingCount = inboxCount(threads ?? [])
 
   return (
     <div style={{ minHeight: '100vh' }}>
