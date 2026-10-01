@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"fmt"
 	"time"
 )
@@ -99,4 +100,28 @@ func (s *Store) SetQuestionOutcome(id int64, outcome string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// AnswerAuthors maps every question that has an answer entry to the author of
+// its latest one — who closed the thread with a decision, as opposed to who
+// dismissed it. One query for all threads, so a listing need not read every
+// thread's messages to name its answerer.
+func (s *Store) AnswerAuthors() (map[int64]string, error) {
+	rows, err := s.db.Query(
+		`SELECT question_id, author FROM question_messages WHERE kind = 'answer' ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("query answer authors: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[int64]string{}
+	for rows.Next() {
+		var qid int64
+		var author sql.NullString
+		if err := rows.Scan(&qid, &author); err != nil {
+			return nil, fmt.Errorf("scan answer author: %w", err)
+		}
+		out[qid] = canonicalParticipant(author.String)
+	}
+	return out, rows.Err()
 }

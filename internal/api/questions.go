@@ -77,11 +77,15 @@ type questionResponse struct {
 	WaitingOn []string `json:"waiting_on"`
 	YourTurn  bool     `json:"your_turn"`
 	WhoseTurn string   `json:"whose_turn,omitempty"`
-	// Type is decision|fyi; Options are the answer choices a client renders as
-	// buttons; LocalRef is the one user-facing thread id, e.g. "1023/Q2".
+	// Type is decision|fyi|brainstorm; Options are the answer choices a
+	// client renders as buttons; LocalRef is the one user-facing thread id,
+	// e.g. "1023/Q2".
 	Type     string   `json:"type"`
 	Options  []string `json:"options,omitempty"`
 	LocalRef string   `json:"local_ref"`
+	// The recommendation and the recorded answer of a brainstorm thread, and
+	// who answered any thread (brainstorm_questions.go).
+	brainstormWire
 	// Stale flags an open decision thread nobody has moved for longer than
 	// question_stale_after (task #1023 §«Устаревание тредов»). Derived on
 	// every read, never stored; absent on healthy threads.
@@ -129,27 +133,28 @@ func buildQuestionResponse(d Deps, caller *store.Session, q store.Question) (que
 		return questionResponse{}, err
 	}
 	return questionResponse{
-		ID:           q.ID,
-		TaskID:       q.TaskID,
-		Ordinal:      ordinal,
-		AskedBy:      wireParticipant(q.AskedBy),
-		Title:        q.Title,
-		Brief:        q.Brief,
-		Body:         q.Body,
-		Status:       q.Status,
-		Resolution:   q.Resolution,
-		Participants: participants,
-		Attention:    attention,
-		WaitingOn:    attention,
-		YourTurn:     contains(attention, callerParticipant(caller)),
-		WhoseTurn:    whoseTurnCompat(attention, "orchestrator"),
-		Type:         q.Type,
-		Options:      q.Options,
-		LocalRef:     threadLocalRef(threadSubject{TaskID: q.TaskID}, ordinal),
-		Stale:        threadStale(d, q, lastOf(msgs), attention),
-		AskedAt:      q.AskedAt,
-		ResolvedAt:   q.ResolvedAt,
-		Messages:     msgOut,
+		ID:             q.ID,
+		TaskID:         q.TaskID,
+		Ordinal:        ordinal,
+		AskedBy:        wireParticipant(q.AskedBy),
+		Title:          q.Title,
+		Brief:          q.Brief,
+		Body:           q.Body,
+		Status:         q.Status,
+		Resolution:     q.Resolution,
+		Participants:   participants,
+		Attention:      attention,
+		WaitingOn:      attention,
+		YourTurn:       contains(attention, callerParticipant(caller)),
+		WhoseTurn:      whoseTurnCompat(attention, "orchestrator"),
+		Type:           q.Type,
+		Options:        q.Options,
+		brainstormWire: toBrainstormWire(q, latestAnswerAuthor(msgs)),
+		LocalRef:       threadLocalRef(threadSubject{TaskID: q.TaskID}, ordinal),
+		Stale:          threadStale(d, q, lastOf(msgs), attention),
+		AskedAt:        q.AskedAt,
+		ResolvedAt:     q.ResolvedAt,
+		Messages:       msgOut,
 	}, nil
 }
 
@@ -161,11 +166,11 @@ func normalizeThreadType(w http.ResponseWriter, t string) (string, bool) {
 	switch t {
 	case "":
 		return store.QuestionTypeDecision, true
-	case store.QuestionTypeDecision, store.QuestionTypeFYI:
+	case store.QuestionTypeDecision, store.QuestionTypeFYI, store.QuestionTypeBrainstorm:
 		return t, true
 	default:
 		writeErr(w, http.StatusBadRequest, "bad_request",
-			"type must be \"decision\" or \"fyi\"")
+			"type must be \"decision\", \"fyi\" or \"brainstorm\"")
 		return "", false
 	}
 }
@@ -333,9 +338,12 @@ type postQuestionRequest struct {
 	// To narrows who is expected to respond. Its ids join the thread as
 	// participants and are stored as the message's addressed_to.
 	To []string `json:"to"`
-	// Type is decision (default) or fyi; Options are answer choices.
-	Type    string   `json:"type"`
-	Options []string `json:"options"`
+	// Type is decision (default), fyi or brainstorm; Options are answer
+	// choices. Recommend is the 1-based option a brainstorm thread recommends —
+	// required there when it has options, refused anywhere else.
+	Type      string   `json:"type"`
+	Options   []string `json:"options"`
+	Recommend int      `json:"recommend"`
 }
 
 // handlePostTaskQuestions serves POST /v1/tasks/{id}/questions
@@ -387,6 +395,9 @@ func handlePostTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 	if !ok {
 		return
 	}
+	if !validateRecommend(w, threadType, req.Options, req.Recommend) {
+		return
+	}
 
 	// An fyi thread is a status note: it is born resolved, so it never waits
 	// on anybody and never lights a badge. A reply into it reopens it as an
@@ -398,9 +409,10 @@ func handlePostTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 		Brief:   req.Brief,
 		Body:    withContext(req.Body, req.Context),
 		// --to seeds the attention set of the new thread.
-		AddressedTo: req.To,
-		Type:        threadType,
-		Options:     req.Options,
+		AddressedTo:       req.To,
+		Type:              threadType,
+		Options:           req.Options,
+		RecommendedOption: req.Recommend,
 	}
 	if threadType == store.QuestionTypeFYI {
 		newQ.Status = "resolved"
@@ -716,6 +728,9 @@ func handlePostQuestionAnswer(w http.ResponseWriter, r *http.Request, d Deps) {
 		writeErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
 		return
 	}
+	// The human's own words, before the chosen option's text is put in front
+	// of them: on a brainstorm thread they are recorded as the comment.
+	comment := req.Body
 	req.Body, ok = chooseOptionBody(w, q, req.Choose, req.Body)
 	if !ok {
 		return
@@ -759,7 +774,16 @@ func handlePostQuestionAnswer(w http.ResponseWriter, r *http.Request, d Deps) {
 
 	// Resolve first — if it fails with already-resolved, return 409 immediately.
 	// Only after successful resolve do we add the message, deliver, and publish event.
-	if err := d.Store.ResolveQuestion(id, resolution); err != nil {
+	// An answered brainstorm thread records the choice, the comment and the
+	// outcome in the same statement that resolves it.
+	if q.Type == store.QuestionTypeBrainstorm && !req.Dismiss {
+		_, err = d.Store.ResolveBrainstormQuestion(id, store.BrainstormAnswer{
+			ChosenOption: req.Choose, Comment: comment, Source: store.AnswerSourceUI,
+		})
+	} else {
+		err = d.Store.ResolveQuestion(id, resolution)
+	}
+	if err != nil {
 		if errors.Is(err, store.ErrQuestionResolved) {
 			writeErr(w, http.StatusConflict, "question_resolved", "question is already resolved")
 			return

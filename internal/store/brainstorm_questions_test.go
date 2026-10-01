@@ -183,3 +183,33 @@ func TestReopenFYIStillBecomesDecision(t *testing.T) {
 		t.Fatalf("type = %q, want decision", q.Type)
 	}
 }
+
+func TestAnswerAuthors(t *testing.T) {
+	s := openTestStore(t)
+	taskID := mustAddQuestionTask(t, s)
+	a := addBrainstorm(t, s, taskID)
+	b := addBrainstorm(t, s, taskID)
+	c := addBrainstorm(t, s, taskID)
+	for _, m := range []QuestionMessage{
+		{QuestionID: a, Author: "orch", Kind: "reply", Body: "r"},
+		{QuestionID: a, Author: "", Kind: "answer", Body: "x"},
+		{QuestionID: a, Author: "orch", Kind: "reply", Body: "принял"},
+		{QuestionID: b, Author: "cto", Kind: "answer", Body: "y"},
+		{QuestionID: c, Author: "human", Kind: "dismiss", Body: "не нужно"},
+	} {
+		if _, err := s.AddQuestionMessage(m); err != nil {
+			t.Fatalf("AddQuestionMessage: %v", err)
+		}
+	}
+
+	got, err := s.AnswerAuthors()
+	if err != nil {
+		t.Fatalf("AnswerAuthors: %v", err)
+	}
+	if got[a] != ParticipantHuman || got[b] != "cto" {
+		t.Fatalf("authors = %v, want a=human b=cto", got)
+	}
+	if _, ok := got[c]; ok {
+		t.Fatalf("a dismissal is not an answer: %v", got)
+	}
+}

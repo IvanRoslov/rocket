@@ -274,6 +274,13 @@ func handlePostAgentQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 	if !ok {
 		return
 	}
+	// A brainstorm belongs to a task's orchestrator: its recommendation and
+	// outcome feed the task's brainstorm, which a role thread has none of.
+	if threadType == store.QuestionTypeBrainstorm {
+		writeErr(w, http.StatusBadRequest, "bad_request",
+			"a brainstorm thread can only be opened on a task")
+		return
+	}
 	newQ := store.AgentQuestion{
 		RoleID:      a.ID,
 		AskedBy:     callerAuthor(caller),
