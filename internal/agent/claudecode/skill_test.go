@@ -80,3 +80,9 @@ func TestSetupWorkspaceCustomSkillIsGitIgnored(t *testing.T) {
 		t.Errorf("skill files show up in git status:\n%s", out)
 	}
 }
+
+func TestClaudeCodeShipsBrainstormSkill(t *testing.T) {
+	if !agent.ShipsBrainstormSkill(New()) {
+		t.Error("claude-code must report that it ships the orchestrator brainstorm skill")
+	}
+}

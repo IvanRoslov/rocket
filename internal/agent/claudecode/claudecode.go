@@ -78,6 +78,10 @@ func (c *ClaudeCode) SetupWorkspace(spec agent.LaunchSpec) error {
 	return nil
 }
 
+// ShipsBrainstormSkill reports that claude-code lays rocket's own
+// orchestrator-brainstorming skill into orchestrator worktrees.
+func (c *ClaudeCode) ShipsBrainstormSkill() bool { return true }
+
 // orchestratorSkillRelDir is where rocket's own brainstorm skill lives in an
 // orchestrator's worktree: project-level skills, so the global ~/.claude is
 // never touched.

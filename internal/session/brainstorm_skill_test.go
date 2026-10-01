@@ -40,6 +40,7 @@ func TestSpawnOrchestratorFallsBackToSetting(t *testing.T) {
 	if err := st.SetSetting(store.SettingOrchestratorBrainstormCustom, "true"); err != nil {
 		t.Fatal(err)
 	}
+	testFakeAgent.shipsSkill = true
 	task := store.Task{ID: 42, Title: "Add login page", ProjectID: "proj1"}
 
 	if _, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake"); err != nil {
@@ -51,9 +52,10 @@ func TestSpawnOrchestratorFallsBackToSetting(t *testing.T) {
 	}
 }
 
-func restoreOrchestratorWithTaskSkill(t *testing.T, taskSkill, setting string) string {
+func restoreOrchestratorWithTaskSkill(t *testing.T, taskSkill, setting string, shipsSkill bool) string {
 	t.Helper()
 	m, st, _, _, _ := testManager(t)
+	testFakeAgent.shipsSkill = shipsSkill
 	seedProjectRepo(t, st, "proj1", "repo1")
 	sess := seedRunningSession(t, st, "orch1")
 	sess.Kind = "orchestrator"
@@ -81,13 +83,38 @@ func restoreOrchestratorWithTaskSkill(t *testing.T, taskSkill, setting string) s
 
 // Flipping the toggle mid-storm must not switch a running task's skill.
 func TestRestoreKeepsTaskBrainstormSkill(t *testing.T) {
-	if got := restoreOrchestratorWithTaskSkill(t, prompts.StockBrainstormSkill, "true"); got != prompts.StockBrainstormSkill {
+	if got := restoreOrchestratorWithTaskSkill(t, prompts.StockBrainstormSkill, "true", true); got != prompts.StockBrainstormSkill {
 		t.Errorf("restored BrainstormSkill = %q, want stored %q", got, prompts.StockBrainstormSkill)
 	}
 }
 
 func TestRestoreOldTaskFallsBackToSetting(t *testing.T) {
-	if got := restoreOrchestratorWithTaskSkill(t, "", "true"); got != prompts.CustomBrainstormSkill {
+	if got := restoreOrchestratorWithTaskSkill(t, "", "true", true); got != prompts.CustomBrainstormSkill {
 		t.Errorf("restored BrainstormSkill = %q, want setting's %q", got, prompts.CustomBrainstormSkill)
+	}
+}
+
+// An agent that does not lay out the custom skill (codex) never gets it named,
+// whatever the setting says.
+func TestBrainstormSkillFallbackIgnoresToggleForNonShippingAgent(t *testing.T) {
+	if got := restoreOrchestratorWithTaskSkill(t, "", "true", false); got != prompts.StockBrainstormSkill {
+		t.Errorf("restored BrainstormSkill = %q, want %q", got, prompts.StockBrainstormSkill)
+	}
+
+	m, st, _, _, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	proj, err := st.GetProject("proj1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSetting(store.SettingOrchestratorBrainstormCustom, "true"); err != nil {
+		t.Fatal(err)
+	}
+	task := store.Task{ID: 42, Title: "Add login page", ProjectID: "proj1"}
+	if _, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake"); err != nil {
+		t.Fatalf("SpawnOrchestrator: %v", err)
+	}
+	if got := testFakeAgent.setupCalls[len(testFakeAgent.setupCalls)-1].BrainstormSkill; got != prompts.StockBrainstormSkill {
+		t.Errorf("spawned BrainstormSkill = %q, want %q", got, prompts.StockBrainstormSkill)
 	}
 }

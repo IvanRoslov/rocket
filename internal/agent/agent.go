@@ -57,6 +57,21 @@ type LaunchSpec struct {
 	BrainstormSkill string
 }
 
+// BrainstormSkillShipper is implemented by agents that lay rocket's own
+// orchestrator-brainstorming skill into an orchestrator's worktree (see
+// LaunchSpec.BrainstormSkill). Only for them may an orchestrator's prompt
+// name that skill; every other agent gets superpowers:brainstorming.
+type BrainstormSkillShipper interface {
+	ShipsBrainstormSkill() bool
+}
+
+// ShipsBrainstormSkill reports whether a lays out the custom orchestrator
+// brainstorm skill.
+func ShipsBrainstormSkill(a Agent) bool {
+	s, ok := a.(BrainstormSkillShipper)
+	return ok && s.ShipsBrainstormSkill()
+}
+
 // Agent represents an AI coding agent that can be launched with a given spec.
 type Agent interface {
 	// Name returns the name of the agent (e.g., "claude-code").

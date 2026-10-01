@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/prompts"
 	"github.com/IvanRoslov/rocket/internal/session"
@@ -990,22 +991,30 @@ func handlePostTaskStart(w http.ResponseWriter, r *http.Request, d Deps) {
 
 	// The brainstorm skill is fixed at start from the setting as it is now;
 	// flipping the setting later never changes a started task (restore and
-	// the brainstorm metric read it back from the task).
+	// the brainstorm metric read it back from the task). The custom skill is
+	// only named for an agent that lays it out (claude-code) — a codex
+	// orchestrator would be pointed at a skill that is not there. It is
+	// stored before spawning, so no running orchestrator ever has an empty
+	// stored skill; a failed spawn leaves the task in backlog and the next
+	// start overwrites it.
 	custom, err := d.Store.OrchestratorBrainstormCustom()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	task.BrainstormSkill = prompts.BrainstormSkill(custom)
+	ships := false
+	if ag, err := agent.Get(agentName); err == nil {
+		ships = agent.ShipsBrainstormSkill(ag)
+	}
+	task.BrainstormSkill = prompts.BrainstormSkill(custom && ships)
+	if err := d.Store.SetTaskBrainstormSkill(task.ID, task.BrainstormSkill); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
 
 	sess, err := d.Manager.SpawnOrchestrator(r.Context(), task, project, agentName)
 	if err != nil {
 		writeManagerErr(w, err)
-		return
-	}
-
-	if err := d.Store.SetTaskBrainstormSkill(task.ID, task.BrainstormSkill); err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 
