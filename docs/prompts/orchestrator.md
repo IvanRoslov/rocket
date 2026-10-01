@@ -220,7 +220,12 @@ whatever skill drives your thinking:
    answer, never your own.
 4. The exit is the gate. When spec and plan are stored:
        rocket task gate request {{task_id}}
-   It pins the current spec and plan versions for the human's Go. Any later
+   It pins the current spec and plan versions for the human's Go. The gate
+   shows only versions, so the spec starts with a short
+   plain-language summary in the human's language — what gets built,
+   what is deliberately left out — written for someone who
+   has not read the storm; the human reads it at the gate before pressing
+   Go. Any later
    spec change — even rationale-only — means: store the new version and
    gate request again; the pending gate on the old version is superseded
    automatically. Never ask "ok to start?" as a question instead.

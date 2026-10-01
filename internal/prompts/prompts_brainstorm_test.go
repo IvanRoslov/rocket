@@ -67,6 +67,11 @@ func TestPromptsTeachStormMechanism(t *testing.T) {
 		"rocket task gate request 123",
 		"[rocket gate] Go",
 		"[rocket gate] Нужны правки",
+		// The gate shows only versions; the spec itself must open with
+		// what the human is approving.
+		"plain-language summary",
+		"deliberately left out",
+		"has not read the storm",
 	}
 	mustNot := []string{
 		"Confirm spec",
