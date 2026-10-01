@@ -479,6 +479,7 @@ describe('ChatScreen permission prompt', () => {
       'Yes',
       "Yes, and don't ask again this session",
       'No, and tell Claude what to do differently (esc)',
+      'Esc',
     ])
     expect(within(card).queryByRole('textbox')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Ответить' })).not.toBeInTheDocument()
@@ -495,6 +496,23 @@ describe('ChatScreen permission prompt', () => {
       expect(lastQuizAnswerBody).toEqual({ answers: [{ question_index: 0, option_indices: [1] }] }),
     )
     for (const b of within(permCard()).getAllByRole('button')) expect(b).toBeDisabled()
+  })
+
+  it('always offers a secondary Esc after the options that posts [-1] and is disabled in flight', async () => {
+    const user = userEvent.setup()
+    renderPage(PERM)
+    await screen.findByText(TITLE)
+    const buttons = within(permCard()).getAllByRole('button')
+    const esc = buttons[buttons.length - 1]
+    expect(esc).toHaveTextContent(/^Esc$/)
+    expect(esc).toHaveClass('chat-screen__permission-esc')
+
+    await user.click(esc)
+    await waitFor(() =>
+      expect(lastQuizAnswerBody).toEqual({ answers: [{ question_index: 0, option_indices: [-1] }] }),
+    )
+    expect(within(permCard()).getByRole('button', { name: 'Esc' })).toBeDisabled()
+    expect(within(permCard()).getByRole('button', { name: 'Yes' })).toBeDisabled()
   })
 
   it('empty options fall back to the raw pane and a single Esc button posting [-1]', async () => {

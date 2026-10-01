@@ -462,6 +462,20 @@
   opacity: 0.5;
   cursor: default;
 }
+/* Secondary: a quiet, compact Esc under the real options. */
+.chat-screen__permission-options .chat-screen__permission-esc {
+  align-self: flex-start;
+  min-height: 28px;
+  padding: 3px 10px;
+  background: transparent;
+  color: var(--text-3);
+  border-color: var(--border);
+  font: 12px var(--font-mono);
+}
+.chat-screen__permission-options .chat-screen__permission-esc:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-hover);
+}
 .chat-screen__bubble--permission .chat-screen__quiz-sending {
   margin-top: 8px;
 }
