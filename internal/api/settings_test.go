@@ -69,7 +69,7 @@ func TestGetSettingsMaskingTable(t *testing.T) {
 			if resp.StatusCode != http.StatusOK {
 				t.Fatalf("status = %d, want 200", resp.StatusCode)
 			}
-			var body map[string]string
+			var body map[string]any
 			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 				t.Fatalf("decode: %v", err)
 			}
@@ -112,7 +112,7 @@ func TestPutSettingsValidTokenStoresAndReturnsLogin(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	var body map[string]string
+	var body map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestPutSettingsEmptyTokenDeletes(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	var body map[string]string
+	var body map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
