@@ -261,7 +261,10 @@ func TestTaskBrainstormStats(t *testing.T) {
 	storm := f.task("Storm", "orchestrator-brainstorming")
 	f.answer(f.ask(storm, w40), 2, "ok", "human", w40)
 	f.answer(f.ask(storm, w40), 2, "", "cto", w40)
+	f.answer(f.ask(storm, w40), 2, "  \n\t", "human", w40) // whitespace is no comment
+	// Go gates inserted out of order: the storm exited at the first Go.
 	f.gate(storm, "go", w40, ptrTime(w40))
+	f.gate(storm, "go", w40, ptrTime(w40.Add(time.Hour)))
 	other := f.task("Other", "superpowers:brainstorming")
 	f.answer(f.ask(other, w40), 1, "", "human", w40)
 
@@ -271,10 +274,13 @@ func TestTaskBrainstormStats(t *testing.T) {
 	}
 	goAt := w40.Unix()
 	want := BrainstormStorm{TaskID: storm, Title: "Storm", ProjectID: "billing", Skill: "orchestrator-brainstorming",
-		BrainstormCounts: BrainstormCounts{Questions: 2, Answered: 1, Accepted: 1, AcceptedWithComment: 1},
-		GoAt:             &goAt, LastActivity: w40.Unix()}
+		BrainstormCounts: BrainstormCounts{Questions: 3, Answered: 2, Accepted: 2, AcceptedWithComment: 1},
+		GoAt:             &goAt, LastActivity: w40.Add(time.Hour).Unix()}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("storm:\n got %+v\nwant %+v", got, want)
+	}
+	if got.GoAt == nil || *got.GoAt != goAt {
+		t.Errorf("go_at = %v, want the first Go %d", got.GoAt, goAt)
 	}
 
 	quiet := f.task("Quiet", "")

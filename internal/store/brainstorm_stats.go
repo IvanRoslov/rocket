@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -104,7 +105,7 @@ func (c *BrainstormCounts) count(q stormQuestion) {
 	switch q.outcome {
 	case OutcomeAccepted:
 		c.Accepted++
-		if q.comment != "" {
+		if strings.TrimSpace(q.comment) != "" {
 			c.AcceptedWithComment++
 		}
 	case OutcomeCorrected:
@@ -189,19 +190,61 @@ func stormSkill(t Task) string {
 	return t.BrainstormSkill
 }
 
+// stormTaskBatch caps how many task ids stormTasks binds into one query, well
+// under SQLite's host-parameter limit.
+const stormTaskBatch = 500
+
+// stormTasks loads the storm-relevant fields of the tasks named in ids, in a
+// few batched queries rather than one per storm.
+func (s *Store) stormTasks(ids []int64) (map[int64]Task, error) {
+	out := make(map[int64]Task, len(ids))
+	for start := 0; start < len(ids); start += stormTaskBatch {
+		batch := ids[start:min(start+stormTaskBatch, len(ids))]
+		args := make([]any, len(batch))
+		for i, id := range batch {
+			args[i] = id
+		}
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")
+		rows, err := s.db.Query(`SELECT id, title, project_id, brainstorm_skill FROM tasks
+			WHERE id IN (`+placeholders+`)`, args...)
+		if err != nil {
+			return nil, fmt.Errorf("query storm tasks: %w", err)
+		}
+		for rows.Next() {
+			var t Task
+			if err := rows.Scan(&t.ID, &t.Title, &t.ProjectID, &t.BrainstormSkill); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan storm task: %w", err)
+			}
+			out[t.ID] = t
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// newStorm is the empty storm of task t.
+func newStorm(t Task) *BrainstormStorm {
+	return &BrainstormStorm{TaskID: t.ID, Title: t.Title, ProjectID: t.ProjectID, Skill: stormSkill(t)}
+}
+
 // buildStorms folds questions and gates into one storm per task that has
-// any of them.
-func (s *Store) buildStorms(qs []stormQuestion, gs []stormGate) (map[int64]*BrainstormStorm, error) {
+// any of them; tasks holds every task they reference.
+func buildStorms(qs []stormQuestion, gs []stormGate, tasks map[int64]Task) (map[int64]*BrainstormStorm, error) {
 	storms := map[int64]*BrainstormStorm{}
 	storm := func(taskID int64) (*BrainstormStorm, error) {
 		if st, ok := storms[taskID]; ok {
 			return st, nil
 		}
-		t, err := s.GetTask(taskID)
-		if err != nil {
-			return nil, fmt.Errorf("get storm task %d: %w", taskID, err)
+		t, ok := tasks[taskID]
+		if !ok {
+			return nil, fmt.Errorf("storm task %d: %w", taskID, ErrNotFound)
 		}
-		st := &BrainstormStorm{TaskID: t.ID, Title: t.Title, ProjectID: t.ProjectID, Skill: stormSkill(t)}
+		st := newStorm(t)
 		storms[taskID] = st
 		return st, nil
 	}
@@ -225,7 +268,8 @@ func (s *Store) buildStorms(qs []stormQuestion, gs []stormGate) (map[int64]*Brai
 		case "changes":
 			st.SpecChanges++
 		case "go":
-			if g.decidedAt.Valid {
+			// The storm exited at its first Go.
+			if g.decidedAt.Valid && (st.GoAt == nil || g.decidedAt.Int64 < *st.GoAt) {
 				v := g.decidedAt.Int64
 				st.GoAt = &v
 			}
@@ -243,7 +287,25 @@ func (s *Store) BrainstormStats(now time.Time, weeks int) (BrainstormStats, erro
 	if err != nil {
 		return BrainstormStats{}, err
 	}
-	storms, err := s.buildStorms(qs, gs)
+	seen := map[int64]bool{}
+	var ids []int64
+	for _, q := range qs {
+		if !seen[q.taskID] {
+			seen[q.taskID] = true
+			ids = append(ids, q.taskID)
+		}
+	}
+	for _, g := range gs {
+		if !seen[g.taskID] {
+			seen[g.taskID] = true
+			ids = append(ids, g.taskID)
+		}
+	}
+	tasks, err := s.stormTasks(ids)
+	if err != nil {
+		return BrainstormStats{}, err
+	}
+	storms, err := buildStorms(qs, gs, tasks)
 	if err != nil {
 		return BrainstormStats{}, err
 	}
@@ -308,12 +370,12 @@ func (s *Store) TaskBrainstormStats(taskID int64) (BrainstormStorm, error) {
 	if err != nil {
 		return BrainstormStorm{}, err
 	}
-	storms, err := s.buildStorms(qs, gs)
+	storms, err := buildStorms(qs, gs, map[int64]Task{t.ID: t})
 	if err != nil {
 		return BrainstormStorm{}, err
 	}
 	if st, ok := storms[taskID]; ok {
 		return *st, nil
 	}
-	return BrainstormStorm{TaskID: t.ID, Title: t.Title, ProjectID: t.ProjectID, Skill: stormSkill(t)}, nil
+	return *newStorm(t), nil
 }

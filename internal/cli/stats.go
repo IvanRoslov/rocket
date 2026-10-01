@@ -120,14 +120,14 @@ func renderBrainstormStats(s brainstormStats, weeks int) string {
 		return b.String()
 	}
 	tw := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "ЗАДАЧА\tСКИЛЛ\tВОПРОСОВ\tПРИНЯТО\tС КОММЕНТАРИЕМ\tПОПРАВЛЕНО\tНЕ ТУДА\tПРАВОК СПЕКИ\tGO\tНАЗВАНИЕ")
+	fmt.Fprintln(tw, "ЗАДАЧА\tСКИЛЛ\tВОПРОСОВ\tОТВЕЧЕНО\tПРИНЯТО\tС КОММЕНТАРИЕМ\tПОПРАВЛЕНО\tНЕ ТУДА\tПРАВОК СПЕКИ\tGO\tНАЗВАНИЕ")
 	for _, st := range s.Storms {
 		goAt := "—"
 		if st.GoAt != nil {
 			goAt = time.Unix(*st.GoAt, 0).Local().Format("2006-01-02 15:04")
 		}
-		fmt.Fprintf(tw, "#%d\t%s\t%d\t%s\t%d\t%d\t%d\t%d\t%s\t%s\n", st.TaskID, st.Skill, st.Questions,
-			acceptedShare(st.Accepted, st.Answered), st.AcceptedWithComment, st.Corrected, st.WrongTurn,
+		fmt.Fprintf(tw, "#%d\t%s\t%d\t%d\t%s\t%d\t%d\t%d\t%d\t%s\t%s\n", st.TaskID, st.Skill, st.Questions,
+			st.Answered, acceptedShare(st.Accepted, st.Answered), st.AcceptedWithComment, st.Corrected, st.WrongTurn,
 			st.SpecChanges, goAt, st.Title)
 	}
 	_ = tw.Flush()

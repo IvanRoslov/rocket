@@ -92,6 +92,12 @@ func TestRenderBrainstormStats(t *testing.T) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
 	}
+	if !strings.Contains(out, "ЗАДАЧА  СКИЛЛ                       ВОПРОСОВ  ОТВЕЧЕНО  ПРИНЯТО") {
+		t.Errorf("storms table must show ОТВЕЧЕНО next to ПРИНЯТО:\n%s", out)
+	}
+	if !strings.Contains(out, "#4901   orchestrator-brainstorming  5         5         3 (60%)") {
+		t.Errorf("storm row must show answered before accepted share:\n%s", out)
+	}
 	var stormLine string
 	for _, l := range lines {
 		if strings.HasPrefix(l, "#4950") {
