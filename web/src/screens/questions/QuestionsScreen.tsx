@@ -16,6 +16,7 @@
 // the decision instead of dropping it.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   useAnswerThread,
   useAskThread,
@@ -23,13 +24,14 @@ import {
   useThreads,
   type ThreadRef,
 } from '../../lib/queries'
-import { isStorm, stormGroups } from '../../lib/storm'
+import { isStorm, stormGroups, stormHref } from '../../lib/storm'
 import type { ThreadInboxEntry } from '../../lib/types'
 import { AskComposer } from './AskComposer'
 import { BrowseMode } from './BrowseMode'
 import { createDeferredQueue } from './deferred'
 import { FocusMode } from './FocusMode'
 import { queueOf, type BrowseFilter } from './model'
+import { StormCard } from './StormRows'
 import { ThreadCard } from './ThreadCard'
 import { useThreadDetail } from './useThreadDetail'
 import './questions.css'
@@ -79,7 +81,15 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
   const ask = useAskThread()
 
   const [mode, setMode] = useState<Mode>('focus')
-  const [currentId, setCurrentId] = useState<number>()
+  // The rail's cursor is a thread or a task storm, never both: picking one
+  // clears the other.
+  const [threadId, setThreadId] = useState<number>()
+  const [stormId, setStormId] = useState<number>()
+  function setCurrentId(id: number | undefined) {
+    setStormId(undefined)
+    setThreadId(id)
+  }
+  const navigate = useNavigate()
   const [later, setLater] = useState<ReadonlySet<number>>(new Set())
   // Threads the human has acted on whose API call has not fired yet: the
   // screen must show them closed at once, or the undo window would look like
@@ -150,7 +160,10 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
   const waitingOnAgents = rows.filter((t) => t.status === 'open' && !t.your_turn).length
   const notes = rows.filter((t) => t.type === 'fyi').length
   const staleCount = mine.filter((t) => t.stale).length
-  const current = rows.find((t) => t.id === currentId) ?? queue[0]
+  const pickedStorm = stormId === undefined ? undefined : storms.find((g) => g.taskId === stormId)
+  const current = pickedStorm ? undefined : (rows.find((t) => t.id === threadId) ?? queue[0])
+  // With no thread left on you, the pane holds the first storm row.
+  const currentStorm = pickedStorm ?? (current ? undefined : storms[0])
   const detail = useThreadDetail(current)
 
   // A thread that arrives on your turn while you are looking at the page is
@@ -177,11 +190,21 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
     setCurrentId(next?.id)
   }
 
+  // J/K walk the rail as it is drawn: storm rows first, then the queue.
   function step(delta: number) {
-    if (!current) return
-    const i = queue.findIndex((t) => t.id === current.id)
-    const next = queue[Math.min(queue.length - 1, Math.max(0, i + delta))]
-    if (next) setCurrentId(next.id)
+    const rail = [
+      ...storms.map((g) => ({ storm: g.taskId })),
+      ...queue.map((t) => ({ thread: t.id })),
+    ]
+    const i = rail.findIndex((r) =>
+      'storm' in r ? r.storm === currentStorm?.taskId : r.thread === current?.id,
+    )
+    const next = rail[Math.min(rail.length - 1, Math.max(0, i + delta))]
+    if (!next) return
+    if ('storm' in next) {
+      setThreadId(undefined)
+      setStormId(next.storm)
+    } else setCurrentId(next.thread)
   }
 
   function select(id: number) {
@@ -298,7 +321,7 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
         runUndo()
         return
       }
-      if (mode !== 'focus' || !current) return
+      if (mode !== 'focus' || (!current && !currentStorm)) return
       if (k === 'j') {
         e.preventDefault()
         step(1)
@@ -309,7 +332,15 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
         step(-1)
         return
       }
-      if (current.status !== 'open') return
+      // A storm is answered in its Brainstorm tab: Enter or a number goes there.
+      if (currentStorm) {
+        if (k === 'enter' || /^[1-9]$/.test(k)) {
+          e.preventDefault()
+          navigate(stormHref(currentStorm))
+        }
+        return
+      }
+      if (!current || current.status !== 'open') return
       if (/^[1-9]$/.test(k)) {
         e.preventDefault()
         choose(current, Number(k) - 1)
@@ -344,7 +375,9 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
   const total = onYou + cleared
   const progress = total > 0 ? Math.round((cleared / total) * 100) : 100
 
-  const card = current ? (
+  const card = currentStorm ? (
+    <StormCard storm={currentStorm} />
+  ) : current ? (
     <ThreadCard
       key={current.id}
       entry={current}
@@ -426,6 +459,7 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
           queue={queue}
           storms={storms}
           currentId={current?.id}
+          currentStormId={currentStorm?.taskId}
           onSelect={select}
           waitingOnAgents={waitingOnAgents}
           notes={notes}

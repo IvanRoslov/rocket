@@ -22,6 +22,8 @@ export interface FocusModeProps {
   /** One row per task storm on you; each links to the task's Brainstorm tab. */
   storms: StormGroup[]
   currentId?: number
+  /** The task whose storm row is picked, if the cursor is on one. */
+  currentStormId?: number
   onSelect: (id: number) => void
   waitingOnAgents: number
   notes: number
@@ -42,7 +44,11 @@ export function FocusMode(props: FocusModeProps) {
           <span className="q__eyebrow">Queue · your turn</span>
           <span className="q__count">{queue.length + storms.length}</span>
         </div>
-        <StormRows storms={storms} className="q__qrow q__qrow--storm" />
+        <StormRows
+          storms={storms}
+          currentTaskId={props.currentStormId}
+          className="q__qrow q__qrow--storm"
+        />
         {queue.map((t) => {
           const on = t.id === props.currentId
           const options = t.options?.length ?? 0

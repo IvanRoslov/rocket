@@ -58,9 +58,41 @@ export function stormLabel(g: StormGroup): string {
   return `Storm #${g.taskId}${title}: ${g.count} ${g.count === 1 ? 'question' : 'questions'} waiting`
 }
 
-/** The task screen, landed on its Brainstorm tab. */
+/**
+ * The task screen, landed on its Brainstorm tab. A task without a project is
+ * a milestone, reached at /milestones/:id — it has no Brainstorm tab, but a
+ * `/p//tasks/N` link would land nowhere at all.
+ */
 export function stormHref(g: StormGroup): string {
-  return `/p/${g.projectId ?? ''}/tasks/${g.taskId}?tab=brainstorm`
+  if (!g.projectId) return `/milestones/${g.taskId}`
+  return `/p/${g.projectId}/tasks/${g.taskId}?tab=brainstorm`
+}
+
+/** The inbox search over a storm row: what its label says — "Storm #N", the task title. */
+export function stormMatches(g: StormGroup, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  return `storm #${g.taskId} ${g.taskTitle ?? ''}`.toLowerCase().includes(q)
+}
+
+export interface TaskStorm {
+  /** Open storm questions, whoever has the turn. */
+  open: number
+  /** Of those, the ones on your turn. */
+  onYou: number
+}
+
+/** Open storm questions per task id — what a task card subtracts from its question counts. */
+export function stormsByTask(threads: ThreadInboxEntry[]): Map<number, TaskStorm> {
+  const byTask = new Map<number, TaskStorm>()
+  for (const t of threads) {
+    if (!isStorm(t) || t.status !== 'open' || t.task_id === undefined) continue
+    const s = byTask.get(t.task_id) ?? { open: 0, onYou: 0 }
+    s.open++
+    if (t.your_turn) s.onYou++
+    byTask.set(t.task_id, s)
+  }
+  return byTask
 }
 
 /** What the inbox badge shows: threads on your turn, each task's storm counted once. */
