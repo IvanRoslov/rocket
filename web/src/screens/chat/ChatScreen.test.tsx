@@ -17,7 +17,9 @@ import {
   resetChatEntries,
   resetQuizAnswerSpy,
   resetSessions,
+  setSessionPendingQuiz,
 } from '../../mocks/handlers'
+import { permDemoPendingQuiz } from '../../mocks/fixtures'
 import { ChatScreen, chatPagePath } from './ChatScreen'
 
 class MockEventSource {
@@ -454,6 +456,136 @@ describe('ChatScreen live quiz', () => {
     await screen.findByText('Какую стратегию мержа выбрать?')
     expect(screen.queryByLabelText('Message the orchestrator')).not.toBeInTheDocument()
     expect(screen.getByText('агент ждёт ответа на квиз')).toBeInTheDocument()
+  })
+})
+
+describe('ChatScreen permission prompt', () => {
+  const PERM = 's-perm-demo-worker'
+  const TITLE = 'Do you want to make this edit to settings.json?'
+
+  function permCard() {
+    return screen.getByTestId('permission-card')
+  }
+
+  it('renders badge, title, monospace context and one button per option — no free-text, no submit', async () => {
+    renderPage(PERM)
+    expect(await screen.findByText(TITLE)).toBeInTheDocument()
+    const card = permCard()
+    expect(within(card).getByText('Разрешение')).toBeInTheDocument()
+    const ctx = card.querySelector('pre')
+    expect(ctx?.textContent).toContain('.claude/settings.json')
+    expect(ctx?.textContent).not.toContain(TITLE)
+    expect(within(card).getAllByRole('button').map((b) => b.textContent)).toEqual([
+      'Yes',
+      "Yes, and don't ask again this session",
+      'No, and tell Claude what to do differently (esc)',
+    ])
+    expect(within(card).queryByRole('textbox')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Ответить' })).not.toBeInTheDocument()
+    expect(screen.queryByText('quiz')).not.toBeInTheDocument()
+  })
+
+  it('one tap posts the option index and disables every button while in flight', async () => {
+    const user = userEvent.setup()
+    renderPage(PERM)
+    await screen.findByText(TITLE)
+
+    await user.click(screen.getByRole('button', { name: "Yes, and don't ask again this session" }))
+    await waitFor(() =>
+      expect(lastQuizAnswerBody).toEqual({ answers: [{ question_index: 0, option_indices: [1] }] }),
+    )
+    for (const b of within(permCard()).getAllByRole('button')) expect(b).toBeDisabled()
+  })
+
+  it('empty options fall back to the raw pane and a single Esc button posting [-1]', async () => {
+    setSessionPendingQuiz(PERM, {
+      ...permDemoPendingQuiz,
+      questions: [{ ...permDemoPendingQuiz.questions[0], options: [] }],
+      raw: 'some unparsed dialog\n❯ weird selector',
+    })
+    const user = userEvent.setup()
+    renderPage(PERM)
+    await screen.findByText(TITLE)
+    const card = permCard()
+    expect(within(card).getByText(/some unparsed dialog/).tagName).toBe('PRE')
+    const buttons = within(card).getAllByRole('button')
+    expect(buttons.map((b) => b.textContent)).toEqual(['Esc'])
+
+    await user.click(buttons[0])
+    await waitFor(() =>
+      expect(lastQuizAnswerBody).toEqual({ answers: [{ question_index: 0, option_indices: [-1] }] }),
+    )
+  })
+
+  it('a title without context renders no context block', async () => {
+    setSessionPendingQuiz(PERM, {
+      ...permDemoPendingQuiz,
+      questions: [{ ...permDemoPendingQuiz.questions[0], question: 'Do you want to proceed?' }],
+    })
+    renderPage(PERM)
+    await screen.findByText('Do you want to proceed?')
+    expect(permCard().querySelector('pre')).toBeNull()
+  })
+
+  it('409 prompt_changed shows "Диалог изменился, обновляю…", refetches and re-enables the buttons', async () => {
+    let chatGets = 0
+    server.events.on('request:start', ({ request }) => {
+      if (request.method === 'GET' && request.url.includes(`/v1/sessions/${PERM}/chat`)) chatGets++
+    })
+    server.use(
+      http.post('/v1/sessions/:id/quiz/answer', () =>
+        HttpResponse.json({ error: { code: 'prompt_changed', message: 'prompt changed' } }, { status: 409 }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderPage(PERM)
+    await screen.findByText(TITLE)
+    const before = chatGets
+
+    await user.click(screen.getByRole('button', { name: 'Yes' }))
+    expect(await within(permCard()).findByText('Диалог изменился, обновляю…')).toBeInTheDocument()
+    await waitFor(() => expect(chatGets).toBeGreaterThan(before))
+    expect(screen.getByRole('button', { name: 'Yes' })).toBeEnabled()
+    server.events.removeAllListeners()
+  })
+
+  it('409 no_pending_quiz refetches silently without an error', async () => {
+    server.use(
+      http.post('/v1/sessions/:id/quiz/answer', () =>
+        HttpResponse.json({ error: { code: 'no_pending_quiz', message: 'none' } }, { status: 409 }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderPage(PERM)
+    await screen.findByText(TITLE)
+    setSessionPendingQuiz(PERM, undefined)
+    await user.click(screen.getByRole('button', { name: 'Yes' }))
+    await waitFor(() => expect(screen.queryByTestId('permission-card')).not.toBeInTheDocument())
+    expect(screen.queryByText('none')).not.toBeInTheDocument()
+  })
+
+  it('SSE quiz_answer_unconfirmed shows "Ответ не подтвердился" in the card and allows a retry', async () => {
+    const user = userEvent.setup()
+    renderPage(PERM)
+    await screen.findByText(TITLE)
+    await user.click(screen.getByRole('button', { name: 'Yes' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Yes' })).toBeDisabled())
+
+    const es = MockEventSource.instances[0]
+    es.emit('session.quiz_answer_unconfirmed', { type: 'session.quiz_answer_unconfirmed', session_id: PERM })
+
+    expect(await within(permCard()).findByText('Ответ не подтвердился')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Yes' })).toBeEnabled()
+    // The generic quiz banner is not duplicated for a permission prompt.
+    expect(screen.queryByText('не удалось подтвердить ответ — проверьте терминал')).not.toBeInTheDocument()
+  })
+
+  it('is shown and clickable for a worker, whose composer stays hidden', async () => {
+    renderPage(PERM)
+    await screen.findByText(TITLE)
+    expect(screen.queryByLabelText('Message the orchestrator')).not.toBeInTheDocument()
+    expect(screen.getByText('агент ждёт разрешения')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Yes' })).toBeEnabled()
   })
 })
 

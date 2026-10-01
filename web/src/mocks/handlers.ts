@@ -13,6 +13,7 @@ import type {
   Agent,
   AgentInboxMessage,
   ChatEntry,
+  PendingQuiz,
   Project,
   Question,
   QuestionMessage,
@@ -82,6 +83,11 @@ export function resetSessions(): void {
 // these should call `resetAgents()` in `afterEach`.
 let agentsState: Agent[] = agents.map((a) => ({ ...a }))
 let agentInboxState: AgentInboxMessage[] = agentInbox.map((m) => ({ ...m }))
+
+/** Overrides a session's `pending_quiz` (undefined clears it) — reset via `resetSessions()`. */
+export function setSessionPendingQuiz(id: string, quiz: PendingQuiz | undefined): void {
+  sessionsState = sessionsState.map((s) => (s.id === id ? { ...s, pending_quiz: quiz } : s))
+}
 
 export function resetAgents(): void {
   agentsState = agents.map((a) => ({ ...a }))
