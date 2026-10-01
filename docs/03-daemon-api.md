@@ -75,8 +75,8 @@ CLI: `rocket pair [--web]`, `rocket devices ls|revoke <id>` — см. [04-cli.md
 
 | Метод | Путь | Описание |
 |---|---|---|
-| GET | `/v1/settings` | Настройки (секреты замаскированы) |
-| PUT | `/v1/settings` | `{github_token?: "..."}` — валидирует токен запросом к GitHub |
+| GET | `/v1/settings` | `{github_token, orchestrator_brainstorm_custom}`: токен замаскирован, переключатель — bool (по умолчанию `false`) |
+| PUT | `/v1/settings` | `{github_token?: "...", orchestrator_brainstorm_custom?: bool}` — применяются только присланные поля (переключатель не трогает токен); пустой токен удаляет его, непустой валидируется запросом к GitHub (до записи переключателя). Пустое тело `{}` — `400 bad_request`. Ответ — обе настройки (+ `login` при валидации токена) |
 | GET | `/v1/github/repos?q=` | Репозитории, доступные токену (для UI выбора), с кэшем |
 | GET | `/v1/github/issues` | Issues репозитория (PR отфильтрованы) — для создания тасков из issue, см. `docs/09-github.md` |
 
@@ -152,7 +152,7 @@ tmux рендерит окно ровно в **одном** размере; пр
 | POST | `/v1/tasks` | `{title, description?, project, parent_id?, milestone?}`. Человек и постоянный агент (`kind='agent'`) создают любые задачи (`created_by` = `user`/`agent`); оркестратор — только подзадачи своей задачи (иначе `403 agents may only create subtasks` / `parent task does not belong to caller`); воркер — `403 workers may not create tasks`. `milestone: true` создаёт майлстон — корневую задачу вне проектов: вместе с `project` это `400 milestone_with_project`, вместе с `parent_id` — `400 milestone_with_parent` |
 | GET | `/v1/tasks/{id}` | Карточка: поля + подзадачи + привязанная сессия (с `tmux_name` и attach-командой) |
 | PATCH | `/v1/tasks/{id}` | `{status?, title?, description?}` — ручной move и правки. В майлстон пишут только человек и его держатель; `status=review` требует дока или не-`status`-записи журнала от держателя (иначе `422 milestone_empty`), `done`/`cancelled` доступны только человеку (`403 human_only`) |
-| POST | `/v1/tasks/{id}/start` | Создать оркестратора и назначить на задачу (`{agent?}`); задача → `brainstorm` (в `in_progress` её двигает первый `POST /v1/sessions`). Только человек или постоянный агент; остальным `403 only the human user or a registered agent may start a task`. На майлстоне — `403 milestone_not_startable`: его берут через `/take` |
+| POST | `/v1/tasks/{id}/start` | Создать оркестратора и назначить на задачу (`{agent?}`); задача → `brainstorm` (в `in_progress` её двигает первый `POST /v1/sessions`). Запоминает в задаче `brainstorm_skill` по текущей настройке `orchestrator_brainstorm_custom` (`orchestrator-brainstorming` или `superpowers:brainstorming`); в ответах задачи поле есть всегда, `""` — задача стартовала до появления поля. Только человек или постоянный агент; остальным `403 only the human user or a registered agent may start a task`. На майлстоне — `403 milestone_not_startable`: его берут через `/take` |
 | POST | `/v1/tasks/{id}/take` | Майлстон: постоянный агент берёт **не взятый** майлстон (id держателя — из сессии вызывающего, тела нет). Только `kind='agent'` — иначе `403 agent_only`; не майлстон — `403 not_a_milestone`; занят другим — `409 already_taken`; свой же — `200` без изменений. Пишет `task_log` (`kind=status`) и публикует `task.assigned` |
 | POST | `/v1/tasks/{id}/assign` | Майлстон: человек вручает его агенту (`{agent_id}`) или снимает (`{none: true}`) — ровно одно из двух, иначе `400 bad_request`. Только человек (вызов от сессии — `403 human_only`); не майлстон — `403 not_a_milestone`; неизвестный агент — `400 agent_not_found`. Назначенному агенту уходит уведомление (живому в сессию, иначе в инбокс), плюс `task_log` и `task.assigned` |
 | POST | `/v1/tasks/{id}/cancel` | Отмена; каскадно убивает сессии задачи. У майлстона — только человек (`403 human_only`) |
