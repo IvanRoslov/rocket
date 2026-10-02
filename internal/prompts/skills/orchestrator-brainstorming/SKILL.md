@@ -35,6 +35,28 @@ When the request already supplies the purpose and constraints, reflect
 that understanding instead of asking the same questions again. Keep the
 note concise; its accuracy and the opportunity to correct it matter.
 
+## Context Before Questions
+
+Before your first question to anyone, read what already exists:
+
+1. Read the root of the fact tree of the task's repo — `INDEX.md` at the
+   repo root — in full. Read it from your worktree or from origin, never
+   from a possibly stale local mirror.
+2. If the task touches the platform, also read the platform root
+   `INDEX.md` of `lepsto/platform` in full (from origin, e.g.
+   `gh api repos/lepsto/platform/contents/INDEX.md`).
+3. Descend only the branches that touch the task: each fact links one
+   level down; follow a link while it is relevant, stop when it is not.
+4. If the repo has no `INDEX.md`, use its documentation entry point
+   instead (CLAUDE.md, README, the docs index, then the code) and
+   descend the same way. Never skip this step.
+5. In the problem statement, add a short list "what already exists on
+   this topic": one line per fact, each with a link to its source. If
+   there was no fact tree, say so and name the sources you used.
+
+Only then ask. A question whose answer is in those facts is not a
+question — use the fact, and cite it.
+
 <HARD-GATE>
 Before taking any implementation action, including invoking an
 implementation skill, writing product code, scaffolding, installing
@@ -120,22 +142,27 @@ your path and complete them in order.
 5. **Report findings** — a recommendation; label anything built as throwaway
 
 **Bounded:**
-1. **Explore project context** — check files, docs, recent commits
+1. **Explore project context** — start with Context Before Questions (fact tree first); check files, docs, recent commits
 2. **Ask clarifying questions** — one at a time, the ones that matter
 3. **Present short design in chat** — approach, files touched, testing
 4. **Get approval** — STOP and wait for an explicit yes; presenting the design and starting in the same breath is skipping the gate
 5. **Implement** — proceed with the normal development workflow (TDD applies); no plan document
 
 **Architectural:**
-1. **Explore project context** — check files, docs, recent commits
+1. **Explore project context** — start with Context Before Questions (fact tree first); check files, docs, recent commits
 2. **Offer the visual companion just-in-time** — NOT upfront. The first time a question would genuinely be clearer shown than described, offer it then (its own message); on approval its browser tab opens for you. If no visual question ever arises, never offer it. See the Visual Companion section below.
 3. **Ask clarifying questions** — one at a time, understand purpose/constraints/success criteria
 4. **Propose 2-3 approaches** — with trade-offs and your recommendation
 5. **Present design** — in sections scaled to their complexity, get user approval after each section
-6. **Write design doc** — save to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and commit
-7. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
-8. **User reviews written spec** — ask user to review the spec file before proceeding
-9. **Transition to implementation** — invoke writing-plans skill to create implementation plan
+6. **Run scenarios** — take 2-3 concrete scenarios (a real user, a real
+   input, an edge case) and walk each through the proposed design step
+   by step; note where the design does not cope. Fix the design or record
+   the gap. The spec gets a "Scenarios" section with each walk-through and
+   its gaps.
+7. **Write design doc** — save to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and commit
+8. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
+9. **User reviews written spec** — ask user to review the spec file before proceeding
+10. **Transition to implementation** — invoke writing-plans skill to create implementation plan
 
 ## Process Flow
 
@@ -153,6 +180,7 @@ digraph brainstorming {
     "Propose 2-3 approaches" [shape=box];
     "Present design sections" [shape=box];
     "User approves design?" [shape=diamond];
+    "Run scenarios" [shape=box];
     "Write design doc" [shape=box];
     "Spec self-review\n(fix inline)" [shape=box];
     "User reviews spec?" [shape=diamond];
@@ -173,7 +201,8 @@ digraph brainstorming {
     "Propose 2-3 approaches" -> "Present design sections";
     "Present design sections" -> "User approves design?";
     "User approves design?" -> "Present design sections" [label="no, revise"];
-    "User approves design?" -> "Write design doc" [label="yes"];
+    "User approves design?" -> "Run scenarios" [label="yes"];
+    "Run scenarios" -> "Write design doc";
     "Write design doc" -> "Spec self-review\n(fix inline)";
     "Spec self-review\n(fix inline)" -> "User reviews spec?";
     "User reviews spec?" -> "Write design doc" [label="changes requested"];
@@ -240,6 +269,7 @@ is the whole process.
 
 - Write the validated design (spec) to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`
   - (User preferences for spec location override this default)
+- The spec includes a "Scenarios" section: 2-3 concrete walk-throughs, step by step, and where the design does not cope.
 - Use elements-of-style:writing-clearly-and-concisely skill if available
 - Commit the design document to git
 
