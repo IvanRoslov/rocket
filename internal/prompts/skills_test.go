@@ -17,6 +17,29 @@ func TestBrainstormSkillName(t *testing.T) {
 	}
 }
 
+func TestBrainstormSkillRecord(t *testing.T) {
+	if got := BrainstormSkillRecord(true); got != "orchestrator-brainstorming@1.1" {
+		t.Errorf("BrainstormSkillRecord(true) = %q", got)
+	}
+	if got := BrainstormSkillRecord(false); got != "superpowers:brainstorming" {
+		t.Errorf("BrainstormSkillRecord(false) = %q", got)
+	}
+}
+
+func TestSkillName(t *testing.T) {
+	for in, want := range map[string]string{
+		"orchestrator-brainstorming@1.1": "orchestrator-brainstorming",
+		"orchestrator-brainstorming@1.0": "orchestrator-brainstorming",
+		"orchestrator-brainstorming":     "orchestrator-brainstorming",
+		"superpowers:brainstorming":      "superpowers:brainstorming",
+		"":                               "",
+	} {
+		if got := SkillName(in); got != want {
+			t.Errorf("SkillName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // The shipped copy is the measurement baseline: renamed, nothing else.
 func TestOrchestratorSkillIsRenamedCopy(t *testing.T) {
 	skill, err := orchestratorSkillFS.ReadFile(orchestratorSkillRoot + "/SKILL.md")
