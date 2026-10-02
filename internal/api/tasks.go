@@ -1054,7 +1054,7 @@ func handlePostTaskStart(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
-	sess, err := d.Manager.SpawnOrchestrator(r.Context(), task, project, agentName)
+	sess, err := d.Manager.SpawnOrchestrator(r.Context(), task, project, agentName, session.LaunchProfile{})
 	if err != nil {
 		writeManagerErr(w, err)
 		return

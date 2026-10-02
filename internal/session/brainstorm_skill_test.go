@@ -21,7 +21,7 @@ func TestSpawnOrchestratorUsesTaskBrainstormSkill(t *testing.T) {
 	}
 	task := store.Task{ID: 42, Title: "Add login page", ProjectID: "proj1", BrainstormSkill: prompts.CustomBrainstormSkill}
 
-	if _, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake"); err != nil {
+	if _, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake", LaunchProfile{}); err != nil {
 		t.Fatalf("SpawnOrchestrator: %v", err)
 	}
 	spec := testFakeAgent.setupCalls[len(testFakeAgent.setupCalls)-1]
@@ -43,7 +43,7 @@ func TestSpawnOrchestratorFallsBackToSetting(t *testing.T) {
 	testFakeAgent.shipsSkill = true
 	task := store.Task{ID: 42, Title: "Add login page", ProjectID: "proj1"}
 
-	if _, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake"); err != nil {
+	if _, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake", LaunchProfile{}); err != nil {
 		t.Fatalf("SpawnOrchestrator: %v", err)
 	}
 	spec := testFakeAgent.setupCalls[len(testFakeAgent.setupCalls)-1]
@@ -111,7 +111,7 @@ func TestBrainstormSkillFallbackIgnoresToggleForNonShippingAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	task := store.Task{ID: 42, Title: "Add login page", ProjectID: "proj1"}
-	if _, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake"); err != nil {
+	if _, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake", LaunchProfile{}); err != nil {
 		t.Fatalf("SpawnOrchestrator: %v", err)
 	}
 	if got := testFakeAgent.setupCalls[len(testFakeAgent.setupCalls)-1].BrainstormSkill; got != prompts.StockBrainstormSkill {
