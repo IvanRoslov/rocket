@@ -27,6 +27,35 @@ func TestParseControlPing(t *testing.T) {
 	}
 }
 
+func TestParseControlScroll(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		frame string
+		lines int
+	}{
+		{"up", `{"type":"scroll","lines":-3}`, -3},
+		{"zero", `{"type":"scroll","lines":0}`, 0},
+		{"missing lines", `{"type":"scroll"}`, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, ok := parseControl([]byte(tc.frame))
+			if !ok || c.Type != "scroll" || c.Lines != tc.lines {
+				t.Fatalf("parseControl(%s) = %+v, %v; want scroll lines=%d", tc.frame, c, ok, tc.lines)
+			}
+		})
+	}
+}
+
+func TestClampScroll(t *testing.T) {
+	for _, tc := range []struct{ in, want int }{
+		{-5000, -1000}, {5000, 1000}, {-3, -3}, {7, 7}, {0, 0},
+	} {
+		if got := clampScroll(tc.in); got != tc.want {
+			t.Errorf("clampScroll(%d) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestParseControlGarbage(t *testing.T) {
 	if _, ok := parseControl([]byte(`not json`)); ok {
 		t.Fatalf("expected ok=false for garbage")

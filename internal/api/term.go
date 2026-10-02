@@ -61,11 +61,13 @@ func registerTermRoutes(mux *http.ServeMux, d Deps) {
 }
 
 // termControl is the JSON shape of a client->server text control frame:
-// {"type":"resize","cols":N,"rows":N} or {"type":"ping"}.
+// {"type":"resize","cols":N,"rows":N}, {"type":"scroll","lines":N},
+// or {"type":"ping"}.
 type termControl struct {
-	Type string `json:"type"`
-	Cols int    `json:"cols"`
-	Rows int    `json:"rows"`
+	Type  string `json:"type"`
+	Cols  int    `json:"cols"`
+	Rows  int    `json:"rows"`
+	Lines int    `json:"lines"`
 }
 
 // parseControl decodes a text WS frame into a termControl. It returns
@@ -76,11 +78,23 @@ func parseControl(data []byte) (termControl, bool) {
 		return termControl{}, false
 	}
 	switch c.Type {
-	case "resize", "ping":
+	case "resize", "ping", "scroll":
 		return c, true
 	default:
 		return termControl{}, false
 	}
+}
+
+const maxScrollLines = 1000
+
+func clampScroll(n int) int {
+	if n > maxScrollLines {
+		return maxScrollLines
+	}
+	if n < -maxScrollLines {
+		return -maxScrollLines
+	}
+	return n
 }
 
 // maxTermDim bounds resize control frames: PTY dimensions outside
