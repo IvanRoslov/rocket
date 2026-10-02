@@ -48,12 +48,20 @@ type Deps struct {
 	// registry). NewHandler fills a fresh one when nil; Serve shares one
 	// between the routes and the TCP middleware.
 	Auth *AuthRuntime
+
+	// Catalogs caches each agent's model catalog (GET /v1/model-catalog,
+	// per-model effort checks, import-catalog). NewHandler fills a fresh one
+	// in front of the real agents when nil.
+	Catalogs *CatalogCache
 }
 
 // NewHandler builds the routed http.Handler for rocket's API.
 func NewHandler(d Deps) http.Handler {
 	if d.Auth == nil {
 		d.Auth = NewAuthRuntime()
+	}
+	if d.Catalogs == nil {
+		d.Catalogs = NewCatalogCache(fetchAgentCatalog)
 	}
 	mux := http.NewServeMux()
 
@@ -96,6 +104,7 @@ func NewHandler(d Deps) http.Handler {
 	registerAgentRoutes(mux, d)
 	registerAgentKindRoutes(mux, d)
 	registerModelProfileRoutes(mux, d)
+	registerModelCatalogRoutes(mux, d)
 	registerAttachmentRoutes(mux, d)
 	registerSettingsRoutes(mux, d)
 	registerAuthRoutes(mux, d)
