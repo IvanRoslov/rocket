@@ -294,6 +294,43 @@ describe('ModelsSection', () => {
     )
   })
 
+  it('saving a profile whose stored effort the model no longer takes sends an empty effort', async () => {
+    server.use(
+      http.get('/v1/model-profiles', () =>
+        HttpResponse.json({
+          profiles: [
+            {
+              name: 'old-haiku',
+              agent: 'claude-code',
+              model: 'claude-haiku-4-5-20251001',
+              effort: 'low',
+              description: 'Old',
+              enabled: true,
+              position: 0,
+            },
+          ],
+        }),
+      ),
+      http.patch('/v1/model-profiles/:name', async ({ request }) => HttpResponse.json(await request.json())),
+    )
+    const bodies = captureBodies('patch', '/v1/model-profiles/')
+    const user = userEvent.setup()
+    renderSection()
+    await screen.findByRole('row', { name: /^old-haiku\b/ })
+
+    await user.click(within(row('old-haiku')).getByRole('button', { name: 'Edit' }))
+    const dialog = screen.getByRole('dialog')
+    await waitFor(() => expect(within(dialog).getByLabelText('Effort')).toBeDisabled())
+    await user.type(within(dialog).getByLabelText('Good for'), ' and fast')
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() =>
+      expect(bodies).toEqual([
+        { agent: 'claude-code', model: 'claude-haiku-4-5-20251001', effort: '', description: 'Old and fast' },
+      ]),
+    )
+  })
+
   it('shows the server error inside the editor (profile_exists)', async () => {
     const user = userEvent.setup()
     renderSection()
@@ -388,6 +425,50 @@ describe('ModelsSection', () => {
     await waitFor(() => expect(urls).toEqual(['', '?refresh=1']))
   })
 
+  it('a failed catalog load says so and offers Refresh', async () => {
+    let fail = true
+    server.use(
+      http.get('/v1/model-catalog', () =>
+        fail
+          ? HttpResponse.json({ error: { code: 'internal_error', message: 'boom' } }, { status: 500 })
+          : HttpResponse.json({
+              agents: [{ agent: 'codex', source: 'cli', fetched_at: null, warning: '', models: [] }],
+            }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderSection()
+    expect(await screen.findByText(/Couldn’t load the model list/)).toBeInTheDocument()
+
+    fail = false
+    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    expect(await screen.findByText('Model list for codex: from Codex CLI')).toBeInTheDocument()
+    expect(screen.queryByText(/Couldn’t load the model list/)).not.toBeInTheDocument()
+  })
+
+  it('an import that skips models for another reason lists them', async () => {
+    server.use(
+      http.post('/v1/model-profiles/import-catalog', () =>
+        HttpResponse.json({
+          created: [],
+          skipped: [
+            { model: 'claude-opus-5-5', reason: 'profile claude-opus-5-5 already uses it' },
+            { model: 'weird/id', reason: 'cannot derive a valid profile name' },
+          ],
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderSection()
+    await screen.findByRole('row', { name: /^codex\b/ })
+
+    await user.click(screen.getByRole('button', { name: 'Add profiles for all models' }))
+    const status = await screen.findByRole('status')
+    expect(status).toHaveTextContent(/^No new models\. Skipped/)
+    expect(status).toHaveTextContent('Skipped: weird/id (cannot derive a valid profile name)')
+    expect(status).not.toHaveTextContent('claude-opus-5-5')
+  })
+
   it('imports the main catalog models as disabled profiles and lists them', async () => {
     const bodies = captureBodies('post', '/v1/model-profiles/import-catalog')
     const user = userEvent.setup()
@@ -417,7 +498,7 @@ describe('ModelsSection', () => {
 
     await user.click(screen.getByRole('button', { name: 'Add profiles for all models' }))
     await waitFor(() =>
-      expect(screen.getByRole('status')).toHaveTextContent('No new models'),
+      expect(screen.getByRole('status')).toHaveTextContent('No new models — every model already has a profile.'),
     )
     expect(bodies).toEqual([{ include_legacy: true }, { include_legacy: true }])
   })

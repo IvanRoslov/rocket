@@ -89,7 +89,11 @@ function ProfileModal({ profile, kinds, catalogs, onClose }: ProfileModalProps) 
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    const fields = { agent, model: model.trim(), effort, description: description.trim() }
+    // The select shows '' for an effort the model does not take (a stored
+    // one from before the catalog, or any effort on Haiku); send what it shows,
+    // or the daemon refuses the save with bad_effort.
+    const sentEffort = effortDisabled || !efforts.includes(effort) ? '' : effort
+    const fields = { agent, model: model.trim(), effort: sentEffort, description: description.trim() }
     if (profile) update.mutate({ name: profile.name, ...fields }, { onSuccess: onClose })
     else create.mutate({ name: name.trim(), ...fields }, { onSuccess: onClose })
   }
@@ -173,7 +177,7 @@ function ProfileModal({ profile, kinds, catalogs, onClose }: ProfileModalProps) 
         <select
           id="profile-effort"
           className="settings-field__input settings-models__input"
-          value={effortDisabled ? '' : effort}
+          value={effortDisabled || !efforts.includes(effort) ? '' : effort}
           disabled={effortDisabled}
           onChange={(e) => setEffort(e.target.value)}
         >
@@ -251,10 +255,13 @@ function DefaultSelect({ id, label, value, profiles, disabled, onChange }: Defau
 }
 
 /** Where each agent's model list came from, and why it fell back if it did. */
-function CatalogSources({ catalogs }: { catalogs: AgentCatalog[] }) {
+function CatalogSources({ catalogs, loadError }: { catalogs: AgentCatalog[]; loadError?: Error | null }) {
   const refresh = useRefreshModelCatalog()
   return (
     <div className="settings-models__sources">
+      {loadError && catalogs.length === 0 && (
+        <p className="settings-error">Couldn’t load the model list: {loadError.message}</p>
+      )}
       {catalogs.map((c) => (
         <p key={c.agent} className="settings-field__hint">
           <span>{`Model list for ${c.agent}: ${catalogSourceText(c)}`}</span>
@@ -273,9 +280,20 @@ function CatalogSources({ catalogs }: { catalogs: AgentCatalog[] }) {
   )
 }
 
+// The daemon's reason for a model some profile already covers; those skips
+// are the expected outcome of a repeat import, not worth listing.
+const ALREADY_USED = / already uses it$/
+
 function importSummary(r: ImportCatalogResult): string {
-  if (r.created.length === 0) return 'No new models — every model already has a profile'
-  return `Created: ${r.created.length} (${r.created.join(', ')}). The profiles are disabled — enable the ones you want.`
+  const odd = r.skipped.filter((s) => !ALREADY_USED.test(s.reason))
+  const created =
+    r.created.length > 0
+      ? `Created: ${r.created.length} (${r.created.join(', ')}). The profiles are disabled — enable the ones you want.`
+      : odd.length > 0
+        ? 'No new models.'
+        : 'No new models — every model already has a profile.'
+  if (odd.length === 0) return created
+  return `${created} Skipped: ${odd.map((s) => `${s.model} (${s.reason})`).join(', ')}.`
 }
 
 /** One click: a disabled profile for every catalog model no profile uses yet. */
@@ -431,7 +449,7 @@ export function ModelsSection() {
             {profileErrorText(rowError)}
           </p>
         )}
-        {catalogs.length > 0 && <CatalogSources catalogs={catalogs} />}
+        {(catalogs.length > 0 || catalog.isError) && <CatalogSources catalogs={catalogs} loadError={catalog.error} />}
       </div>
 
       <ImportCatalog />
