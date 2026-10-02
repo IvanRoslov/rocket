@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -797,6 +798,64 @@ func (t *tmuxRuntime) UnpinWindowSize(ctx context.Context, h Handle) error {
 		return fmt.Errorf("restore window-size for %q: %w", h.Name, err)
 	}
 	return nil
+}
+
+// ScrollHistory moves the pane's viewport without sending input to the
+// foreground program. copy-mode -e returns to the live pane on reaching
+// the bottom, so a later downward scroll outside copy-mode is a no-op.
+func (t *tmuxRuntime) ScrollHistory(ctx context.Context, h Handle, lines int) error {
+	if err := validateName(h.Name); err != nil {
+		return err
+	}
+	target := paneTarget(h.Name)
+	switch {
+	case lines < 0:
+		if _, _, err := runTmux(ctx, "copy-mode", "-e", "-t", target); err != nil {
+			return fmt.Errorf("enter copy-mode for %q: %w", h.Name, err)
+		}
+		if _, _, err := runTmux(ctx, "send-keys", "-X", "-N", strconv.Itoa(-lines), "-t", target, "scroll-up"); err != nil {
+			return fmt.Errorf("scroll up for %q: %w", h.Name, err)
+		}
+	case lines > 0:
+		inMode, err := t.paneInMode(ctx, target)
+		if err != nil {
+			return err
+		}
+		if !inMode {
+			return nil
+		}
+		if _, _, err := runTmux(ctx, "send-keys", "-X", "-N", strconv.Itoa(lines), "-t", target, "scroll-down"); err != nil {
+			return fmt.Errorf("scroll down for %q: %w", h.Name, err)
+		}
+	}
+	return nil
+}
+
+// ExitHistory returns the pane to its live display before the next input.
+func (t *tmuxRuntime) ExitHistory(ctx context.Context, h Handle) error {
+	if err := validateName(h.Name); err != nil {
+		return err
+	}
+	target := paneTarget(h.Name)
+	inMode, err := t.paneInMode(ctx, target)
+	if err != nil {
+		return err
+	}
+	if !inMode {
+		return nil
+	}
+	if _, _, err := runTmux(ctx, "send-keys", "-X", "-t", target, "cancel"); err != nil {
+		return fmt.Errorf("exit copy-mode for %q: %w", h.Name, err)
+	}
+	return nil
+}
+
+func (t *tmuxRuntime) paneInMode(ctx context.Context, target string) (bool, error) {
+	out, _, err := runTmux(ctx, "display-message", "-p", "-t", target, "#{pane_in_mode}")
+	if err != nil {
+		return false, fmt.Errorf("query copy-mode for %q: %w", target, err)
+	}
+	return strings.TrimSpace(out) == "1", nil
 }
 
 func (t *tmuxRuntime) AttachCommand(h Handle) []string {

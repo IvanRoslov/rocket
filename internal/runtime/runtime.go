@@ -83,6 +83,11 @@ type Runtime interface {
 	// automatic window sizing driven by attached clients. Unpinning a
 	// session that was never pinned is not an error.
 	UnpinWindowSize(ctx context.Context, h Handle) error
+	// ScrollHistory moves the pane's history viewport. Negative lines move
+	// toward older output; positive lines move toward the live bottom.
+	ScrollHistory(ctx context.Context, h Handle, lines int) error
+	// ExitHistory leaves copy-mode if the pane is viewing history.
+	ExitHistory(ctx context.Context, h Handle) error
 	// List returns the names of all currently live sessions, for
 	// reconciliation against rocket's own bookkeeping.
 	List(ctx context.Context) ([]string, error)
