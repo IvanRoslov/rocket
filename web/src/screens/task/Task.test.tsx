@@ -153,6 +153,19 @@ describe('TaskScreen', () => {
     })
   })
 
+  it('the Overview of a feature task shows its model profiles panel', async () => {
+    renderTask()
+    const panel = await screen.findByRole('region', { name: 'Модели' })
+    expect(within(panel).getByText('claude-opus')).toBeInTheDocument()
+  })
+
+  it('a subtask has no model profiles panel — the allowlist lives on the feature', async () => {
+    renderTask('billing', 13)
+    await screen.findByRole('tab', { name: /Overview/ })
+    await userEvent.click(screen.getByRole('tab', { name: /Overview/ }))
+    expect(screen.queryByRole('region', { name: 'Модели' })).not.toBeInTheDocument()
+  })
+
   it('switches tabs on click', async () => {
     renderTask()
     expect(await screen.findByText('Billing v2')).toBeInTheDocument()

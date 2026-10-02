@@ -8,6 +8,7 @@ import { Markdown } from '../../components/Markdown'
 import { Link } from 'react-router-dom'
 import { useUpdateTask } from '../../lib/queries'
 import type { Session, Task, TaskDoc, TaskStatus } from '../../lib/types'
+import { TaskModelsPanel } from './TaskModelsPanel'
 import './OverviewTab.css'
 
 export interface OverviewTabProps {
@@ -145,6 +146,9 @@ export function OverviewTab({ task, subtasks, sessions, docs, taskPath }: Overvi
           )}
         </>
       )}
+
+      {/* A milestone is a persistent agent's work: no orchestrator profile, no workers. */}
+      {task.parent_id === undefined && !task.milestone && <TaskModelsPanel task={task} />}
 
       {task.parent_id === undefined && (
         <>
