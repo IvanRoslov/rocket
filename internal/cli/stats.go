@@ -18,6 +18,17 @@ const maxStatsWeeks = 520
 type brainstormWeekRow struct {
 	Week                string `json:"week"`
 	Skill               string `json:"skill"`
+	AnsweredBy          string `json:"answered_by"`
+	Answered            int    `json:"answered"`
+	Accepted            int    `json:"accepted"`
+	AcceptedWithComment int    `json:"accepted_with_comment"`
+	Corrected           int    `json:"corrected"`
+	WrongTurn           int    `json:"wrong_turn"`
+}
+
+// brainstormAnswererRow mirrors internal/api.brainstormAnswererResponse.
+type brainstormAnswererRow struct {
+	AnsweredBy          string `json:"answered_by"`
 	Answered            int    `json:"answered"`
 	Accepted            int    `json:"accepted"`
 	AcceptedWithComment int    `json:"accepted_with_comment"`
@@ -27,18 +38,22 @@ type brainstormWeekRow struct {
 
 // brainstormStormRow mirrors internal/api.brainstormStormResponse.
 type brainstormStormRow struct {
-	TaskID              int64  `json:"task_id"`
-	Title               string `json:"title"`
-	ProjectID           string `json:"project_id"`
-	Skill               string `json:"skill"`
-	Questions           int    `json:"questions"`
-	Answered            int    `json:"answered"`
-	Accepted            int    `json:"accepted"`
-	AcceptedWithComment int    `json:"accepted_with_comment"`
-	Corrected           int    `json:"corrected"`
-	WrongTurn           int    `json:"wrong_turn"`
-	SpecChanges         int    `json:"spec_changes"`
-	GoAt                *int64 `json:"go_at"`
+	TaskID              int64                   `json:"task_id"`
+	Title               string                  `json:"title"`
+	ProjectID           string                  `json:"project_id"`
+	Skill               string                  `json:"skill"`
+	Questions           int                     `json:"questions"`
+	Answered            int                     `json:"answered"`
+	Accepted            int                     `json:"accepted"`
+	AcceptedWithComment int                     `json:"accepted_with_comment"`
+	Corrected           int                     `json:"corrected"`
+	WrongTurn           int                     `json:"wrong_turn"`
+	AnsweredBy          []string                `json:"answered_by"`
+	ByAnswerer          []brainstormAnswererRow `json:"by_answerer"`
+	SpecChanges         int                     `json:"spec_changes"`
+	FirstTryGo          bool                    `json:"first_try_go"`
+	HasGate             bool                    `json:"has_gate"`
+	GoAt                *int64                  `json:"go_at"`
 }
 
 // brainstormStats mirrors internal/api.brainstormStatsResponse.
@@ -98,6 +113,42 @@ func acceptedShare(accepted, answered int) string {
 	return fmt.Sprintf("%d (%.0f%%)", accepted, pct)
 }
 
+// participantLabel names a metric participant: the human is «Иван», an
+// agent its id verbatim.
+func participantLabel(id string) string {
+	if id == "" || id == "human" {
+		return "Иван"
+	}
+	return id
+}
+
+// stormWho names who stormed: participants in first-answer order joined with
+// " + ", "—" when nobody answered.
+func stormWho(ids []string) string {
+	if len(ids) == 0 {
+		return "—"
+	}
+	labels := make([]string, len(ids))
+	for i, id := range ids {
+		labels[i] = participantLabel(id)
+	}
+	return strings.Join(labels, " + ")
+}
+
+// gateState is how the human received the storm's spec gate.
+func gateState(goAt *int64, specChanges int, hasGate bool) string {
+	switch {
+	case goAt != nil && specChanges == 0:
+		return "Go с 1-го раза"
+	case goAt != nil:
+		return fmt.Sprintf("Go после %d правок", specChanges)
+	case hasGate:
+		return fmt.Sprintf("ждёт Go (правок: %d)", specChanges)
+	default:
+		return "—"
+	}
+}
+
 // renderBrainstormStats renders the weekly summary and the storms table.
 func renderBrainstormStats(s brainstormStats, weeks int) string {
 	var b strings.Builder
@@ -106,9 +157,9 @@ func renderBrainstormStats(s brainstormStats, weeks int) string {
 		b.WriteString("  ответов на вопросы шторма нет\n")
 	} else {
 		tw := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(tw, "НЕДЕЛЯ\tСКИЛЛ\tОТВЕЧЕНО\tПРИНЯТО\tС КОММЕНТАРИЕМ\tПОПРАВЛЕНО\tНЕ ТУДА")
+		fmt.Fprintln(tw, "НЕДЕЛЯ\tСКИЛЛ\tКТО\tОТВЕЧЕНО\tПРИНЯТО\tС КОММЕНТАРИЕМ\tПОПРАВЛЕНО\tНЕ ТУДА")
 		for _, w := range s.Weeks {
-			fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%d\t%d\t%d\n", w.Week, w.Skill, w.Answered,
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%d\t%d\t%d\n", w.Week, w.Skill, participantLabel(w.AnsweredBy), w.Answered,
 				acceptedShare(w.Accepted, w.Answered), w.AcceptedWithComment, w.Corrected, w.WrongTurn)
 		}
 		_ = tw.Flush()
@@ -120,15 +171,16 @@ func renderBrainstormStats(s brainstormStats, weeks int) string {
 		return b.String()
 	}
 	tw := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "ЗАДАЧА\tСКИЛЛ\tВОПРОСОВ\tОТВЕЧЕНО\tПРИНЯТО\tС КОММЕНТАРИЕМ\tПОПРАВЛЕНО\tНЕ ТУДА\tПРАВОК СПЕКИ\tGO\tНАЗВАНИЕ")
+	fmt.Fprintln(tw, "ЗАДАЧА\tСКИЛЛ\tКТО ШТОРМИЛ\tВОПРОСОВ\tОТВЕЧЕНО\tПРИНЯТО\tС КОММЕНТАРИЕМ\tПОПРАВЛЕНО\tНЕ ТУДА\tПРАВОК ДО GO\tГЕЙТ\tGO\tНАЗВАНИЕ")
 	for _, st := range s.Storms {
 		goAt := "—"
 		if st.GoAt != nil {
 			goAt = time.Unix(*st.GoAt, 0).Local().Format("2006-01-02 15:04")
 		}
-		fmt.Fprintf(tw, "#%d\t%s\t%d\t%d\t%s\t%d\t%d\t%d\t%d\t%s\t%s\n", st.TaskID, st.Skill, st.Questions,
-			st.Answered, acceptedShare(st.Accepted, st.Answered), st.AcceptedWithComment, st.Corrected, st.WrongTurn,
-			st.SpecChanges, goAt, st.Title)
+		fmt.Fprintf(tw, "#%d\t%s\t%s\t%d\t%d\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%s\n", st.TaskID, st.Skill,
+			stormWho(st.AnsweredBy), st.Questions, st.Answered, acceptedShare(st.Accepted, st.Answered),
+			st.AcceptedWithComment, st.Corrected, st.WrongTurn, st.SpecChanges,
+			gateState(st.GoAt, st.SpecChanges, st.HasGate), goAt, st.Title)
 	}
 	_ = tw.Flush()
 	return b.String()
