@@ -27,6 +27,28 @@ func BrainstormSkill(custom bool) string {
 	return StockBrainstormSkill
 }
 
+// CustomBrainstormSkillVersion is the version of the embedded
+// orchestrator-brainstorming skill (see its README). A task stores the skill
+// it started with as "<name>@<version>" so the brainstorm metric can tell
+// versions apart; bump it with every change to the skill's meaning.
+const CustomBrainstormSkillVersion = "1.1"
+
+// BrainstormSkillRecord is the value a task stores in brainstorm_skill when
+// it starts: the custom skill with its version, the stock skill as is.
+func BrainstormSkillRecord(custom bool) string {
+	if custom {
+		return CustomBrainstormSkill + "@" + CustomBrainstormSkillVersion
+	}
+	return StockBrainstormSkill
+}
+
+// SkillName strips the "@version" suffix of a stored brainstorm_skill,
+// leaving the skill name a prompt names and an agent lays out.
+func SkillName(record string) string {
+	name, _, _ := strings.Cut(record, "@")
+	return name
+}
+
 const orchestratorSkillRoot = "skills/" + CustomBrainstormSkill
 
 //go:embed all:skills/orchestrator-brainstorming

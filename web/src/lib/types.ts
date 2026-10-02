@@ -46,6 +46,14 @@ export interface Session {
    * and the `session` ref of `GET /v1/sessions/{id}/chat` alike.
    */
   pending_quiz?: PendingQuiz
+  /**
+   * Model-profile snapshot taken at launch (task #5026): the profile name,
+   * its model and effort. Omitted when empty — a session launched without a
+   * profile, or with the agent's default model/effort.
+   */
+  profile?: string
+  model?: string
+  effort?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -344,10 +352,19 @@ export interface Task {
   quiet?: boolean
   /**
    * The storm skill remembered when the task was started (task #4901):
-   * `orchestrator-brainstorming` or `superpowers:brainstorming`; `""` on
+   * `orchestrator-brainstorming@<version>` (task #5027) or
+   * `superpowers:brainstorming`; `""` on
    * tasks started before the field existed, absent on an older daemon.
    */
   brainstorm_skill?: string
+  /**
+   * Worker profile allowlist of a feature task (task #5026): `[]` means every
+   * enabled profile. Names may outlive their profile — the daemon simply stops
+   * matching them. Absent on an older daemon.
+   */
+  allowed_profiles?: string[]
+  /** The profile the orchestrator was started with; `""` when none. */
+  orchestrator_profile?: string
 }
 
 /**
@@ -622,6 +639,9 @@ export interface Settings {
    * instead of `superpowers:brainstorming` (task #4901). Absent on an older daemon.
    */
   orchestrator_brainstorm_custom?: boolean
+  /** Default model profiles (task #5026): a profile name, `""` when unset. */
+  default_orchestrator_profile?: string
+  default_worker_profile?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -811,6 +831,8 @@ export interface AgentKind {
   name: string
   available: boolean
   error?: string
+  /** Reasoning-effort levels a model profile of this agent may use (task #5026). */
+  efforts?: string[]
 }
 
 /** `GET /v1/agent-kinds` — the registry plus the daemon's default agent, so a
@@ -818,4 +840,30 @@ export interface AgentKind {
 export interface AgentKinds {
   kinds: AgentKind[]
   default: string
+}
+
+// ---------------------------------------------------------------------------
+// Model profiles — internal/api/model_profiles.go (task #5026)
+// ---------------------------------------------------------------------------
+
+/** A registry entry. Empty `model`/`effort` = the agent's default. */
+export interface ModelProfile {
+  name: string
+  agent: string
+  model: string
+  effort: string
+  /** What the profile is good for — shown to orchestrators. */
+  description: string
+  /** Global switch: a disabled profile is offered to nobody. */
+  enabled: boolean
+  position: number
+}
+
+/** The fields a human sets when creating or editing a profile. */
+export interface ModelProfileInput {
+  name: string
+  agent: string
+  model: string
+  effort: string
+  description: string
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/client"
+	"github.com/IvanRoslov/rocket/internal/threadtext"
 	"github.com/spf13/cobra"
 )
 
@@ -235,6 +236,7 @@ func newTaskCmd() *cobra.Command {
 	cmd.AddCommand(newTaskCloseCmd(false))
 	cmd.AddCommand(newTaskAnswerCmd())
 	cmd.AddCommand(newTaskBrainstormCmd())
+	cmd.AddCommand(newTaskModelsCmd())
 	return cmd
 }
 
@@ -246,14 +248,14 @@ type taskStartResponse struct {
 }
 
 func newTaskStartCmd() *cobra.Command {
-	var agentName string
+	var agentName, profile, allow string
 
 	cmd := &cobra.Command{
 		Use:   "start <id>",
 		Short: "Запустить оркестратора для задачи",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return &usageError{message: "usage: rocket task start <id> [--agent <name>]"}
+				return &usageError{message: "usage: rocket task start <id> [--profile <name>] [--allow p1,p2] [--agent <name>]"}
 			}
 
 			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
@@ -265,15 +267,12 @@ func newTaskStartCmd() *cobra.Command {
 				return err
 			}
 
-			var reqBody map[string]any
-			if agentName != "" {
-				reqBody = map[string]any{"agent": agentName}
-			}
+			reqBody := startRequestBody(agentName, profile, allow)
 
 			path := apiPath("v1", "tasks", args[0], "start")
 			var resp taskStartResponse
 			if err := c.Post(path, reqBody, &resp); err != nil {
-				return err
+				return explainHumanOnly(err)
 			}
 
 			if flags.JSON {
@@ -287,7 +286,28 @@ func newTaskStartCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&agentName, "agent", "", "имя агента (по умолчанию — из конфига)")
+	cmd.Flags().StringVar(&profile, "profile", "", "профиль модели оркестратора (rocket models ls; по умолчанию — глобальный)")
+	cmd.Flags().StringVar(&allow, "allow", "", "разрешить воркерам задачи только эти профили (через запятую)")
 	return cmd
+}
+
+// startRequestBody is the POST /v1/tasks/{id}/start body: nil when nothing
+// was chosen (the daemon applies its defaults), else only the given fields.
+func startRequestBody(agentName, profile, allow string) map[string]any {
+	body := map[string]any{}
+	if agentName != "" {
+		body["agent"] = agentName
+	}
+	if profile != "" {
+		body["profile"] = profile
+	}
+	if names := parseProfileList(allow); len(names) > 0 {
+		body["allowed_profiles"] = names
+	}
+	if len(body) == 0 {
+		return nil
+	}
+	return body
 }
 
 // needsProjectDefault reports whether `rocket task add` must resolve a
@@ -1220,16 +1240,21 @@ func threadStatusLabel(status, threadType string) string {
 }
 
 // renderThreadOptions writes the answer choices, numbered exactly as
-// "close --choose <n>" indexes them.
-func renderThreadOptions(sb *strings.Builder, options []string) {
-	if len(options) == 0 {
-		return
+// "close --choose <n>" indexes them, with the recommended one (1-based, 0 =
+// none) marked — the same line an agent participant is delivered.
+func renderThreadOptions(sb *strings.Builder, options []string, recommended int) {
+	if line := threadtext.OptionsLine(options, recommended); line != "" {
+		fmt.Fprintf(sb, "  %s\n", line)
 	}
-	parts := make([]string, len(options))
-	for i, o := range options {
-		parts[i] = fmt.Sprintf("%d) %s", i+1, o)
+}
+
+// recommendedOf reads a thread's recommended option off the wire: absent
+// (an older daemon, or not a brainstorm thread) is 0, none.
+func recommendedOf(p *int) int {
+	if p == nil {
+		return 0
 	}
-	fmt.Fprintf(sb, "  варианты: %s\n", strings.Join(parts, "  "))
+	return *p
 }
 
 // renderParticipantsLine writes the thread's participant line, omitted when
@@ -1274,7 +1299,7 @@ func renderQuestions(taskID int64, qs []questionRow) string {
 		if q.Context != "" {
 			fmt.Fprintf(&sb, "  context: %s\n", q.Context)
 		}
-		renderThreadOptions(&sb, q.Options)
+		renderThreadOptions(&sb, q.Options, recommendedOf(q.RecommendedOption))
 		renderParticipantsLine(&sb, q.Participants)
 		for _, m := range q.Messages {
 			renderThreadMessage(&sb, m)

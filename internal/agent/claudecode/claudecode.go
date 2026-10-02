@@ -93,7 +93,7 @@ const orchestratorSkillRelDir = ".claude/skills/" + prompts.CustomBrainstormSkil
 // carry the same description, so a stray copy could be picked instead of
 // superpowers:brainstorming and blur the per-skill brainstorm metric.
 func syncOrchestratorSkill(spec agent.LaunchSpec) error {
-	if spec.BrainstormSkill == prompts.CustomBrainstormSkill {
+	if prompts.SkillName(spec.BrainstormSkill) == prompts.CustomBrainstormSkill {
 		return prompts.WriteOrchestratorSkill(filepath.Join(spec.WorktreePath, ".claude", "skills"))
 	}
 	return os.RemoveAll(filepath.Join(spec.WorktreePath, filepath.FromSlash(orchestratorSkillRelDir)))
@@ -699,6 +699,10 @@ func (c *ClaudeCode) LaunchCommand(spec agent.LaunchSpec) []string {
 		cmd = append(cmd, "--model", spec.Model)
 	}
 
+	if spec.Effort != "" {
+		cmd = append(cmd, "--effort", spec.Effort)
+	}
+
 	if spec.PermissionMode != "" {
 		cmd = append(cmd, "--permission-mode", spec.PermissionMode)
 	}
@@ -708,6 +712,11 @@ func (c *ClaudeCode) LaunchCommand(spec agent.LaunchSpec) []string {
 	}
 
 	return cmd
+}
+
+// Efforts returns the levels `claude --effort` accepts (claude --help).
+func (c *ClaudeCode) Efforts() []string {
+	return []string{"low", "medium", "high", "xhigh", "max"}
 }
 
 // Env returns environment variables for the agent.

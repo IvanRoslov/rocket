@@ -116,6 +116,7 @@ func (sessFakeWorkspaceErrorOnCreate) List() ([]workspace.Entry, error) { return
 type sessFakeAgent struct{}
 
 func (sessFakeAgent) Name() string                                 { return "fake" }
+func (sessFakeAgent) Efforts() []string                            { return nil }
 func (sessFakeAgent) Available() error                             { return nil }
 func (sessFakeAgent) SetupWorkspace(spec agent.LaunchSpec) error   { return nil }
 func (sessFakeAgent) LaunchCommand(spec agent.LaunchSpec) []string { return []string{"fake-agent"} }
@@ -149,6 +150,7 @@ func sessionsTestDeps(t *testing.T) Deps {
 	b := bus.New(st)
 	cfg := &config.Config{Home: dir, DefaultAgent: "fake"}
 	mgr := session.NewManager(st, b, sessFakeRuntime{}, sessFakeWorkspace{}, cfg)
+	seedFakeProfile(t, st)
 
 	d := testDeps(t, nil)
 	d.Store = st
@@ -172,6 +174,7 @@ func sessionsTestDepsWithErrorRuntime(t *testing.T) Deps {
 	b := bus.New(st)
 	cfg := &config.Config{Home: dir, DefaultAgent: "fake"}
 	mgr := session.NewManager(st, b, sessFakeRuntimeErrorOnCreate{}, sessFakeWorkspace{}, cfg)
+	seedFakeProfile(t, st)
 
 	d := testDeps(t, nil)
 	d.Store = st
@@ -195,6 +198,7 @@ func sessionsTestDepsWithErrorWorkspace(t *testing.T) Deps {
 	b := bus.New(st)
 	cfg := &config.Config{Home: dir, DefaultAgent: "fake"}
 	mgr := session.NewManager(st, b, sessFakeRuntime{}, sessFakeWorkspaceErrorOnCreate{}, cfg)
+	seedFakeProfile(t, st)
 
 	d := testDeps(t, nil)
 	d.Store = st
@@ -202,6 +206,16 @@ func sessionsTestDepsWithErrorWorkspace(t *testing.T) Deps {
 	d.Cfg = cfg
 	d.Manager = mgr
 	return d
+}
+
+// seedFakeProfile gives the registry one profile for the fake agent: a
+// worker spawn needs an allowed profile (task #5026), and the daemon's
+// starter profiles are not seeded in tests.
+func seedFakeProfile(t *testing.T, st *store.Store) {
+	t.Helper()
+	if err := st.CreateModelProfile(store.ModelProfile{Name: "fake", Agent: "fake", Enabled: true}); err != nil {
+		t.Fatalf("seed profile: %v", err)
+	}
 }
 
 // postJSONWithHeader is postJSON plus an optional X-Rocket-Session header

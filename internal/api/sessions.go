@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/IvanRoslov/rocket/internal/modelpolicy"
 	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
@@ -31,8 +33,13 @@ type sessionResponse struct {
 	PRNumber     int    `json:"pr_number,omitempty"`
 	PRState      string `json:"pr_state,omitempty"`
 	CIState      string `json:"ci_state,omitempty"`
-	CreatedAt    int64  `json:"created_at"`
-	UpdatedAt    int64  `json:"updated_at"`
+	// Profile, Model and Effort are the model-profile snapshot the session
+	// was launched with (task #5026); empty for legacy launches.
+	Profile   string `json:"profile,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Effort    string `json:"effort,omitempty"`
+	CreatedAt int64  `json:"created_at"`
+	UpdatedAt int64  `json:"updated_at"`
 
 	// PendingQuiz is the session's currently pending AskUserQuestion quiz
 	// (see internal/api's internal_quiz.go), nil when there is none.
@@ -63,6 +70,9 @@ func toSessionResponse(s store.Session, threshold time.Duration) sessionResponse
 		PRNumber:     s.PRNumber,
 		PRState:      s.PRState,
 		CIState:      s.CIState,
+		Profile:      s.Profile,
+		Model:        s.Model,
+		Effort:       s.Effort,
 		CreatedAt:    s.CreatedAt,
 		UpdatedAt:    s.UpdatedAt,
 		PendingQuiz:  parseQuizResponse(s.PendingQuiz),
@@ -102,6 +112,9 @@ type postSessionRequest struct {
 	Prompt    string `json:"prompt"`
 	Agent     string `json:"agent"`
 	SubtaskID int64  `json:"subtask_id"`
+	// Profile names the model profile to launch with (task #5026); resolved
+	// with Agent by modelpolicy.ResolveWorker against the feature task.
+	Profile string `json:"profile"`
 }
 
 // isSpawningOrchestrator reports whether caller is a live orchestrator
@@ -189,6 +202,19 @@ func handlePostSession(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
+	// The profile is resolved before any subtask is created, so a refused
+	// spawn leaves nothing behind. root is the caller's feature task: its
+	// allowlist is the human's restriction on every worker of the feature.
+	in, err := policyInputs(d, &root)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	prof, err := modelpolicy.ResolveWorker(in, req.Profile, req.Agent)
+	if writePolicyErr(w, err) {
+		return
+	}
+
 	var sub store.Task
 	autoCreated := false
 	if req.SubtaskID != 0 {
@@ -244,10 +270,11 @@ func handlePostSession(w http.ResponseWriter, r *http.Request, d Deps) {
 		Task:      req.Task,
 		Feature:   feature,
 		Prompt:    req.Prompt,
-		AgentName: req.Agent,
+		AgentName: prof.Agent,
 		Kind:      "worker",
 		ParentID:  caller.ID,
 		SubtaskID: sub.ID,
+		Profile:   session.LaunchProfile{Name: prof.Name, Model: prof.Model, Effort: prof.Effort},
 	})
 	if err != nil {
 		if autoCreated {
@@ -304,6 +331,10 @@ func handlePostSession(w http.ResponseWriter, r *http.Request, d Deps) {
 		"branch":        sess.Branch,
 		"worktree_path": sess.WorktreePath,
 		"subtask_id":    sub.ID,
+		"agent":         sess.Agent,
+		"profile":       sess.Profile,
+		"model":         sess.Model,
+		"effort":        sess.Effort,
 	})
 }
 
@@ -473,6 +504,38 @@ func handleSessionAttach(w http.ResponseWriter, r *http.Request, d Deps) {
 
 // writeManagerErr maps a session.ValidationError to its HTTP status/code,
 // falling back to 500 internal_error for anything else.
+// writePolicyErr answers a modelpolicy refusal as 400 with the policy's own
+// code; any other non-nil error is a 500. Returns true if it wrote a
+// response.
+func writePolicyErr(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return false
+	}
+	var pe *modelpolicy.PolicyError
+	if errors.As(err, &pe) {
+		writeErr(w, http.StatusBadRequest, pe.Code, policyErrDetail(pe))
+		return true
+	}
+	writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+	return true
+}
+
+// policyErrDetail is the message of a policy refusal: the detail only,
+// since clients print "<code>: <message>" and PolicyError.Error() already
+// leads with the code.
+func policyErrDetail(pe *modelpolicy.PolicyError) string {
+	switch {
+	case pe.Msg != "":
+		return pe.Msg
+	case len(pe.Allowed) > 0:
+		return "allowed: " + strings.Join(pe.Allowed, ", ")
+	case pe.Code == modelpolicy.CodeNoneAllowed:
+		return "no model profile is allowed for this task; ask the human"
+	default:
+		return pe.Code
+	}
+}
+
 func writeManagerErr(w http.ResponseWriter, err error) {
 	var verr *session.ValidationError
 	if errors.As(err, &verr) {

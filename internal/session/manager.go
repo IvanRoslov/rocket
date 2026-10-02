@@ -59,6 +59,17 @@ type SpawnReq struct {
 	Kind      string
 	ParentID  string
 	SubtaskID int64
+	// Profile is the model profile the API resolved for this worker; the
+	// zero value launches with the agent's own defaults.
+	Profile LaunchProfile
+}
+
+// LaunchProfile is the resolved model profile a launch runs with (task
+// #5026). Spawn and SpawnOrchestrator pass Model/Effort to the agent and
+// store all three as the session's snapshot, which Restore relaunches from.
+// The zero value is a legacy launch: no profile, agent defaults.
+type LaunchProfile struct {
+	Name, Model, Effort string
 }
 
 // Manager owns session lifecycle: spawn, kill, restore.
@@ -373,6 +384,9 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 			TmuxName:    id,
 			State:       "spawning",
 			Prompt:      req.Prompt,
+			Profile:     req.Profile.Name,
+			Model:       req.Profile.Model,
+			Effort:      req.Profile.Effort,
 		}
 
 		if err := m.st.AddSession(sess); err != nil {
@@ -415,6 +429,8 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 		WorktreePath: wtRes.Path,
 		FirstMessage: req.Prompt,
 		SocketPath:   m.cfg.SocketPath(),
+		Model:        req.Profile.Model,
+		Effort:       req.Profile.Effort,
 	}
 
 	if req.ParentID != "" {
@@ -500,7 +516,7 @@ func slugFromTitle(title string) string {
 // its branch is "orch/<slug>", its repo is the project's main repo, and its
 // system/first-message prompts are rendered from the orchestrator/kickoff
 // templates instead of taking a caller-supplied prompt.
-func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, project store.Project, agentName string) (store.Session, error) {
+func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, project store.Project, agentName string, prof LaunchProfile) (store.Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -550,6 +566,9 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 			Branch:      "orch/" + slug,
 			TmuxName:    id,
 			State:       "spawning",
+			Profile:     prof.Name,
+			Model:       prof.Model,
+			Effort:      prof.Effort,
 		}
 
 		if err := m.st.AddSession(sess); err != nil {
@@ -589,7 +608,7 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 		return store.Session{}, err
 	}
 
-	brainstormSkill := m.brainstormSkill(task, ag)
+	brainstormSkill := prompts.SkillName(m.brainstormSkill(task, ag))
 
 	sysPrompt, err := prompts.Render(m.cfg.Home, "orchestrator", prompts.Vars{
 		"brainstorm_skill": brainstormSkill,
@@ -631,6 +650,8 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 		FirstMessage:    kickoff,
 		SocketPath:      m.cfg.SocketPath(),
 		BrainstormSkill: brainstormSkill,
+		Model:           prof.Model,
+		Effort:          prof.Effort,
 	}
 
 	if err := ag.SetupWorkspace(spec); err != nil {
@@ -661,8 +682,34 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 	return sess, nil
 }
 
+// noteSkillUpgrade records in the task log that a restored orchestrator
+// gets the current text of the custom brainstorm skill although its task
+// started on an older version. The binary carries one copy of the skill, and
+// the task's label stays as it was, so the metric keeps the storm under the
+// version it started with. Best effort: a failed write never fails restore.
+func (m *Manager) noteSkillUpgrade(task store.Task) {
+	rec := task.BrainstormSkill
+	if prompts.SkillName(rec) != prompts.CustomBrainstormSkill {
+		return
+	}
+	_, v, ok := strings.Cut(rec, "@")
+	if !ok || v == prompts.CustomBrainstormSkillVersion {
+		return
+	}
+	if _, err := m.st.AddTaskLog(store.TaskLogEntry{
+		TaskID: task.ID,
+		Kind:   "note",
+		Author: "rocket",
+		Body: fmt.Sprintf("скилл шторма обновлён %s %s→%s при restore (метка задачи не меняется)",
+			prompts.CustomBrainstormSkill, v, prompts.CustomBrainstormSkillVersion),
+	}); err != nil {
+		slog.Warn("session: restore skill-version note failed", "task", task.ID, "error", err)
+	}
+}
+
 // brainstormSkill returns the brainstorm skill task's orchestrator runs with:
-// the one recorded when the task was started, or — for a task started before
+// the one recorded when the task was started (custom skill with its
+// "@version"; callers take prompts.SkillName of it), or — for a task started before
 // that was recorded — whatever the orchestrator_brainstorm_custom setting
 // says now, and the custom skill only for an agent that lays it out. An
 // unreadable setting falls back to the stock skill.
@@ -893,6 +940,10 @@ func (m *Manager) Restore(ctx context.Context, id string) error {
 		WorktreePath: path,
 		FirstMessage: "",
 		SocketPath:   m.cfg.SocketPath(),
+		// The snapshot, not the policy: a session that was launched may be
+		// restored even if its profile has since been disabled or deleted.
+		Model:  sess.Model,
+		Effort: sess.Effort,
 	}
 
 	m.fillRestorePrompt(&spec, ag, sess, repo, path)
@@ -955,7 +1006,8 @@ func (m *Manager) fillRestorePrompt(spec *agent.LaunchSpec, ag agent.Agent, sess
 		if err != nil {
 			return
 		}
-		brainstormSkill := m.brainstormSkill(task, ag)
+		brainstormSkill := prompts.SkillName(m.brainstormSkill(task, ag))
+		m.noteSkillUpgrade(task)
 		sysPrompt, err := prompts.Render(m.cfg.Home, "orchestrator", prompts.Vars{
 			"brainstorm_skill": brainstormSkill,
 			"feature_slug":     sess.FeatureSlug,

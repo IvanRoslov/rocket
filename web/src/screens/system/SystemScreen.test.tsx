@@ -214,4 +214,13 @@ describe('SystemScreen', () => {
     const checkbox = within(modal).getByRole('checkbox') as HTMLInputElement
     expect(checkbox.checked).toBe(false)
   })
+
+  it('shows a session’s model profile next to its agent, nothing extra for a legacy session', async () => {
+    renderScreen()
+
+    const orch = (await screen.findByText('billing-v2-orch')).closest('[data-testid="session-row"]') as HTMLElement
+    expect(within(orch).getByText('claude-opus (opus, high)')).toBeInTheDocument()
+    const worker = screen.getByText('billing-v2-w1').closest('[data-testid="session-row"]') as HTMLElement
+    expect(worker.querySelector('.session-card__model')).toBeNull()
+  })
 })

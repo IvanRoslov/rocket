@@ -15,6 +15,7 @@ import (
 
 	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/config"
+	"github.com/IvanRoslov/rocket/internal/modelpolicy"
 	"github.com/IvanRoslov/rocket/internal/prompts"
 	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -55,9 +56,14 @@ type taskResponse struct {
 	Milestone    bool   `json:"milestone,omitempty"`
 	AssignedRole string `json:"assigned_role,omitempty"`
 	// BrainstormSkill is the brainstorm skill the orchestrator was started
-	// with (orchestrator-brainstorming | superpowers:brainstorming); "" for
+	// with (orchestrator-brainstorming@<version> | superpowers:brainstorming); "" for
 	// tasks never started or started before it was recorded.
 	BrainstormSkill string `json:"brainstorm_skill"`
+	// AllowedProfiles is the feature task's worker profile allowlist (task
+	// #5026); [] means every enabled profile. OrchestratorProfile is the
+	// profile its orchestrator was started with ("" if none).
+	AllowedProfiles     []string `json:"allowed_profiles"`
+	OrchestratorProfile string   `json:"orchestrator_profile"`
 	// Open-question annotations (docs/superpowers/specs/2026-07-21-questions-
 	// visibility-design.md §1): populated by list/board/detail handlers from
 	// one taskQuestionCounts(d) aggregate, not per-task queries.
@@ -79,6 +85,10 @@ type taskResponse struct {
 }
 
 func toTaskResponse(t store.Task) taskResponse {
+	allowed := t.AllowedProfiles
+	if allowed == nil {
+		allowed = []string{}
+	}
 	return taskResponse{
 		ID:              t.ID,
 		ParentID:        t.ParentID,
@@ -96,6 +106,9 @@ func toTaskResponse(t store.Task) taskResponse {
 		Milestone:       t.Milestone,
 		AssignedRole:    t.AssignedRole,
 		BrainstormSkill: t.BrainstormSkill,
+
+		AllowedProfiles:     allowed,
+		OrchestratorProfile: t.OrchestratorProfile,
 	}
 }
 
@@ -601,6 +614,9 @@ type patchTaskRequest struct {
 	Status      *string `json:"status"`
 	Title       *string `json:"title"`
 	Description *string `json:"description"`
+	// AllowedProfiles replaces the worker profile allowlist; [] clears it.
+	// Human-only: an agent session gets 403 human_only.
+	AllowedProfiles *[]string `json:"allowed_profiles"`
 }
 
 // patchTaskResponse is the JSON shape of PATCH /v1/tasks/{id}. CleanedUp is
@@ -709,6 +725,26 @@ func handlePatchTask(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
+	// The allowlist is checked before anything is applied, so a rejected
+	// one never leaves a half-done PATCH behind.
+	if req.AllowedProfiles != nil {
+		if caller != nil {
+			writeErr(w, http.StatusForbidden, "human_only",
+				"only the human sets a task's allowed_profiles; agent session "+caller.ID+" may not")
+			return
+		}
+		missing, err := unknownProfiles(d.Store, *req.AllowedProfiles)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		if len(missing) > 0 {
+			writeErr(w, http.StatusBadRequest, "profile_not_found",
+				"unknown profiles: "+strings.Join(missing, ", "))
+			return
+		}
+	}
+
 	if req.Status != nil && *req.Status == "cancelled" {
 		writeErr(w, http.StatusBadRequest, "use_cancel", "use POST /v1/tasks/{id}/cancel (rocket task cancel) to cancel — it also stops sessions")
 		return
@@ -772,6 +808,13 @@ func handlePatchTask(w http.ResponseWriter, r *http.Request, d Deps) {
 			task.Description = *req.Description
 		}
 		if err := d.Store.UpdateTask(task); err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+	}
+
+	if req.AllowedProfiles != nil {
+		if err := d.Store.SetTaskAllowedProfiles(task.ID, *req.AllowedProfiles); err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
@@ -907,6 +950,12 @@ func isSessionTerminal(state string) bool {
 
 type postTaskStartRequest struct {
 	Agent string `json:"agent"`
+	// Profile names the orchestrator's model profile (task #5026); empty
+	// takes default_orchestrator_profile.
+	Profile string `json:"profile"`
+	// AllowedProfiles, when present, sets the task's worker allowlist at
+	// start. Human-only, like PATCH.
+	AllowedProfiles *[]string `json:"allowed_profiles"`
 }
 
 // handlePostTaskStart spawns an orchestrator for a root, backlog task,
@@ -984,14 +1033,62 @@ func handlePostTaskStart(w http.ResponseWriter, r *http.Request, d Deps) {
 		writeErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
 		return
 	}
+
+	if req.AllowedProfiles != nil {
+		if caller != nil {
+			writeErr(w, http.StatusForbidden, "human_only",
+				"only the human sets a task's allowed_profiles; agent session "+caller.ID+" may not")
+			return
+		}
+		missing, err := unknownProfiles(d.Store, *req.AllowedProfiles)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		if len(missing) > 0 {
+			writeErr(w, http.StatusBadRequest, "profile_not_found",
+				"unknown profiles: "+strings.Join(missing, ", "))
+			return
+		}
+	}
+
+	// The task allowlist never applies to the orchestrator itself — the
+	// human picks it — so the policy sees no task here. ok=false is the
+	// legacy launch: no profile fits (an empty registry), start anyway.
+	in, err := policyInputs(d, nil)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	resolved, ok, err := modelpolicy.ResolveOrchestrator(in, req.Profile, req.Agent)
+	if writePolicyErr(w, err) {
+		return
+	}
 	agentName := req.Agent
+	var prof session.LaunchProfile
+	if ok {
+		agentName = resolved.Agent
+		prof = session.LaunchProfile{Name: resolved.Name, Model: resolved.Model, Effort: resolved.Effort}
+	}
 	if agentName == "" {
 		agentName = d.Cfg.DefaultAgent
+	}
+
+	// Stored before spawning: the orchestrator's first `rocket models ls`
+	// must already see the narrowed list. A failed spawn leaves the task in
+	// backlog with the allowlist the human asked for — harmless.
+	if req.AllowedProfiles != nil {
+		if err := d.Store.SetTaskAllowedProfiles(task.ID, *req.AllowedProfiles); err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
 	}
 
 	// The brainstorm skill is fixed at start from the setting as it is now;
 	// flipping the setting later never changes a started task (restore and
 	// the brainstorm metric read it back from the task). The custom skill is
+	// stored with its version ("orchestrator-brainstorming@1.1") so the
+	// metric tells versions apart; prompts and agents get the bare name. It is
 	// only named for an agent that lays it out (claude-code) — a codex
 	// orchestrator would be pointed at a skill that is not there. It is
 	// stored before spawning, so no running orchestrator ever has an empty
@@ -1006,13 +1103,13 @@ func handlePostTaskStart(w http.ResponseWriter, r *http.Request, d Deps) {
 	if ag, err := agent.Get(agentName); err == nil {
 		ships = agent.ShipsBrainstormSkill(ag)
 	}
-	task.BrainstormSkill = prompts.BrainstormSkill(custom && ships)
+	task.BrainstormSkill = prompts.BrainstormSkillRecord(custom && ships)
 	if err := d.Store.SetTaskBrainstormSkill(task.ID, task.BrainstormSkill); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 
-	sess, err := d.Manager.SpawnOrchestrator(r.Context(), task, project, agentName)
+	sess, err := d.Manager.SpawnOrchestrator(r.Context(), task, project, agentName, prof)
 	if err != nil {
 		writeManagerErr(w, err)
 		return
@@ -1021,6 +1118,10 @@ func handlePostTaskStart(w http.ResponseWriter, r *http.Request, d Deps) {
 	task.FeatureSlug = sess.FeatureSlug
 	task.SessionID = sess.ID
 	if err := d.Store.UpdateTask(task); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	if err := d.Store.SetTaskOrchestratorProfile(task.ID, prof.Name); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}

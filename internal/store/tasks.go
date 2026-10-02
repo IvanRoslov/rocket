@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -58,10 +59,18 @@ type Task struct {
 	// AssignedRole is the id of the persistent agent holding the milestone,
 	// empty when nobody has taken it. Only milestones ever carry it.
 	AssignedRole string
-	// BrainstormSkill is the brainstorm skill the task's orchestrator prompt
-	// names, fixed when the task is started (task #4901); empty for tasks
+	// BrainstormSkill is the brainstorm skill the task's orchestrator started
+	// with, fixed when the task is started (task #4901): the custom skill
+	// with its version ("orchestrator-brainstorming@1.1", task #5027) or the
+	// stock one; the prompt names prompts.SkillName of it. Empty for tasks
 	// started before it was recorded.
 	BrainstormSkill string
+	// AllowedProfiles narrows the model profiles this feature task's workers
+	// may be spawned with (task #5026); nil means every enabled profile.
+	AllowedProfiles []string
+	// OrchestratorProfile is the profile the task's orchestrator was started
+	// with; empty for tasks never started with one.
+	OrchestratorProfile string
 }
 
 // TaskFilter narrows the results of ListTasks. Empty Project/Status mean "no
@@ -84,7 +93,7 @@ type TaskFilter struct {
 // scanTask reads them.
 const taskColumns = `id, parent_id, title, description, project_id, repo_id, status, feature_slug,
 	session_id, created_by, created_at, updated_at, completed_at, milestone, assigned_role,
-	brainstorm_skill`
+	brainstorm_skill, allowed_profiles, orchestrator_profile`
 
 // AddTask inserts a new task. Status defaults to "backlog" and CreatedBy
 // defaults to "user" when empty. CreatedAt/UpdatedAt default to now. Returns
@@ -250,6 +259,43 @@ func (s *Store) SetTaskBrainstormSkill(id int64, skill string) error {
 	return checkRowsAffected(res)
 }
 
+// SetTaskAllowedProfiles replaces the task's worker profile allowlist,
+// refreshing updated_at. An empty (or nil) names clears it, meaning "every
+// enabled profile". Names are stored as given; whether they exist is the
+// caller's check. Returns ErrNotFound if the task doesn't exist.
+func (s *Store) SetTaskAllowedProfiles(taskID int64, names []string) error {
+	value := ""
+	if len(names) > 0 {
+		b, err := json.Marshal(names)
+		if err != nil {
+			return fmt.Errorf("encode allowed profiles: %w", err)
+		}
+		value = string(b)
+	}
+	res, err := s.db.Exec(
+		`UPDATE tasks SET allowed_profiles = ?, updated_at = ? WHERE id = ?`,
+		value, time.Now().Unix(), taskID,
+	)
+	if err != nil {
+		return fmt.Errorf("set task allowed profiles: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
+// SetTaskOrchestratorProfile records the profile the task's orchestrator
+// runs with, refreshing updated_at. Returns ErrNotFound if the task doesn't
+// exist.
+func (s *Store) SetTaskOrchestratorProfile(taskID int64, name string) error {
+	res, err := s.db.Exec(
+		`UPDATE tasks SET orchestrator_profile = ?, updated_at = ? WHERE id = ?`,
+		name, time.Now().Unix(), taskID,
+	)
+	if err != nil {
+		return fmt.Errorf("set task orchestrator profile: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
 // SetTaskAssignedRole sets (or, with an empty role, clears) the persistent
 // agent holding a milestone, refreshing updated_at. Returns ErrNotFound if the
 // task doesn't exist.
@@ -269,11 +315,12 @@ func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	var parentID, completedAt sql.NullInt64
 	var repoID, featureSlug, sessionID, assignedRole sql.NullString
 	var milestone int
+	var allowedProfiles string
 
 	err := row.Scan(
 		&t.ID, &parentID, &t.Title, &t.Description, &t.ProjectID, &repoID, &t.Status, &featureSlug,
 		&sessionID, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt, &completedAt, &milestone, &assignedRole,
-		&t.BrainstormSkill,
+		&t.BrainstormSkill, &allowedProfiles, &t.OrchestratorProfile,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Task{}, ErrNotFound
@@ -289,6 +336,14 @@ func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	t.CompletedAt = completedAt.Int64
 	t.Milestone = milestone != 0
 	t.AssignedRole = assignedRole.String
+	if allowedProfiles != "" {
+		if err := json.Unmarshal([]byte(allowedProfiles), &t.AllowedProfiles); err != nil {
+			return Task{}, fmt.Errorf("decode allowed profiles of task %d: %w", t.ID, err)
+		}
+		if len(t.AllowedProfiles) == 0 {
+			t.AllowedProfiles = nil
+		}
+	}
 
 	return t, nil
 }

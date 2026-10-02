@@ -20,7 +20,7 @@ func TestPostTaskStartRecordsBrainstormSkill(t *testing.T) {
 	}{
 		{"unset", "", "superpowers:brainstorming"},
 		{"off", "false", "superpowers:brainstorming"},
-		{"on", "true", "orchestrator-brainstorming"},
+		{"on", "true", "orchestrator-brainstorming@1.1"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -138,8 +138,8 @@ func TestPostTaskStartCustomSkillOnlyForShippingAgent(t *testing.T) {
 	if code != http.StatusCreated {
 		t.Fatalf("start status = %d", code)
 	}
-	if task.BrainstormSkill != "orchestrator-brainstorming" {
-		t.Errorf("shipping agent: brainstorm_skill = %q, want orchestrator-brainstorming", task.BrainstormSkill)
+	if task.BrainstormSkill != "orchestrator-brainstorming@1.1" {
+		t.Errorf("shipping agent: brainstorm_skill = %q, want orchestrator-brainstorming@1.1", task.BrainstormSkill)
 	}
 
 	task, code = startWithAgent(t, "fake", "true")
@@ -158,7 +158,7 @@ func TestPostTaskStartStoresSkillBeforeSpawn(t *testing.T) {
 	if code == http.StatusCreated {
 		t.Fatalf("start with an unavailable agent succeeded")
 	}
-	if task.BrainstormSkill != "orchestrator-brainstorming" {
-		t.Errorf("brainstorm_skill after failed spawn = %q, want it stored before spawning", task.BrainstormSkill)
+	if task.BrainstormSkill != "orchestrator-brainstorming@1.1" {
+		t.Errorf("brainstorm_skill after failed spawn = %q, want orchestrator-brainstorming@1.1 stored before spawning", task.BrainstormSkill)
 	}
 }

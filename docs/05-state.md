@@ -103,7 +103,9 @@ composer_busy_deadline: 10m # сколько доставку держат, по
 
 ```sql
 CREATE TABLE settings (
-  key   TEXT PRIMARY KEY,   -- 'github_token', 'orchestrator_brainstorm_custom' ("true"/"false", нет строки = выкл.)
+  key   TEXT PRIMARY KEY,   -- 'github_token', 'orchestrator_brainstorm_custom' ("true"/"false", нет строки = выкл.),
+                            -- 'default_orchestrator_profile', 'default_worker_profile' (имя профиля; '' = не задан),
+                            -- 'model_profiles_seeded' (отметка: стартовые профили уже созданы, повторно не сидируются)
   value TEXT NOT NULL
 );
 
@@ -147,6 +149,9 @@ CREATE TABLE sessions (  -- продолжение схемы
   ci_state      TEXT,                      -- pending|passing|failing
   pr_checked_at INTEGER,                   -- unix последнего УСПЕШНОГО опроса GitHub (NULL = не опрашивали)
   prompt        TEXT,                      -- исходный бриф
+  profile       TEXT NOT NULL DEFAULT '',  -- снимок профиля модели на момент запуска (миграция 0021); '' — запуск без профиля
+  model         TEXT NOT NULL DEFAULT '',  --   модель снимка ('' — модель агента по умолчанию)
+  effort        TEXT NOT NULL DEFAULT '',  --   усилие снимка ('' — по умолчанию); restore поднимает сессию именно с ними
   created_at    INTEGER NOT NULL,
   updated_at    INTEGER NOT NULL
 );
@@ -175,7 +180,12 @@ CREATE TABLE tasks (
   milestone    INTEGER NOT NULL DEFAULT 0,     -- 1 = майлстон: корневая задача вне проектов (project_id = '')
   assigned_role TEXT,                          -- id постоянного агента, взявшего майлстон; NULL/'' — не взят
   brainstorm_skill TEXT NOT NULL DEFAULT '',   -- скилл шторма оркестратора, фиксируется при start (миграция 0020):
-                                               -- orchestrator-brainstorming | superpowers:brainstorming; '' — стартовала раньше
+                                               -- orchestrator-brainstorming@<версия> (сейчас @1.1; стартовавшие до #5027 —
+                                               -- @1.0, миграция 0022) | superpowers:brainstorming; '' — стартовала раньше.
+                                               -- Промпт и worktree получают имя без @версии
+  allowed_profiles TEXT NOT NULL DEFAULT '',   -- JSON-массив имён профилей, разрешённых воркерам фичи (миграция 0021);
+                                               -- ''/[] — все включённые. Меняет только человек
+  orchestrator_profile TEXT NOT NULL DEFAULT '', -- профиль, с которым стартовал оркестратор; '' — без профиля
   created_by   TEXT NOT NULL DEFAULT 'user',   -- user|orchestrator|agent
   created_at   INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL,
@@ -185,6 +195,21 @@ CREATE TABLE tasks (
 -- пуст»: project_id объявлен NOT NULL ещё в 0001, у майлстона он '' (та же конвенция,
 -- что у agents.project_id), а '' от NULL здесь не отличить. Ровно одно из session_id
 -- (оркестратор фичи) и assigned_role (агент майлстона) может быть непустым.
+
+CREATE TABLE model_profiles (                  -- реестр профилей запуска (миграция 0021)
+  name        TEXT PRIMARY KEY,                -- [a-z0-9][a-z0-9-]{0,39}
+  agent       TEXT NOT NULL,                   -- claude-code | codex
+  model       TEXT NOT NULL DEFAULT '',        -- '' = модель агента по умолчанию
+  effort      TEXT NOT NULL DEFAULT '',        -- '' = по умолчанию; иначе из Agent.Efforts()
+  description TEXT NOT NULL DEFAULT '',        -- «для чего подходит» — это читает оркестратор
+  enabled     INTEGER NOT NULL DEFAULT 1,      -- глобальное разрешение
+  position    INTEGER NOT NULL DEFAULT 0,      -- порядок в списках
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+-- Пустой реестр при первом старте демона заполняется стартовыми профилями
+-- (claude-opus, claude-sonnet, codex) ровно один раз — см. 'model_profiles_seeded'.
+-- Какой профиль получает запуск, решает internal/modelpolicy — см. 10-agents.md, «Профили моделей».
 
 CREATE TABLE task_docs (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

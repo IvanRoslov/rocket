@@ -14,6 +14,7 @@ import { Card } from '../../components/Card'
 import { Modal } from '../../components/Modal'
 import { api } from '../../lib/api'
 import { formatBytes, formatUptime } from '../../lib/format'
+import { sessionModelLabel } from '../../lib/profiles'
 import { useKillSession, useSessions, useSystem, useSystemCleanup } from '../../lib/queries'
 import type { Message, Session, TmuxEntry } from '../../lib/types'
 import { chatPagePath } from '../chat/ChatScreen'
@@ -237,6 +238,9 @@ export function SystemScreen() {
               </div>
               <div className="session-card__row2">
                 <span className="session-card__agent">{row.agent}</span>
+                {row.session && sessionModelLabel(row.session) && (
+                  <span className="session-card__model">{sessionModelLabel(row.session)}</span>
+                )}
                 <Badge tone={stateBadgeTone(row.state)}>{row.state}</Badge>
               </div>
               <div className="session-card__row3">

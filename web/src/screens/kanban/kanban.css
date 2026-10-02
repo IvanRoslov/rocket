@@ -367,3 +367,42 @@
   font: 11.5px var(--font-ui);
   color: var(--text-3);
 }
+
+/* ---------- StartModal model profile (task #5026) ---------- */
+
+.kanban-modal-form__profile {
+  font: 12.5px var(--font-ui);
+  color: var(--text-2);
+  line-height: 1.4;
+  padding: 8px 11px;
+  border-radius: var(--radius-btn-sm);
+  background: var(--surface-4);
+}
+
+.kanban-modal-form__profile-meta,
+.kanban-modal-form__check-meta {
+  font: 11.5px var(--font-mono);
+  color: var(--text-3);
+}
+
+.kanban-modal-form__group {
+  border: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kanban-modal-form__check {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font: 13px var(--font-ui);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.kanban-modal-form__check-name {
+  font-family: var(--font-mono);
+}

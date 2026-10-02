@@ -1,10 +1,11 @@
-/* Categorical slots 1–3 of the dataviz reference palette, validated on the
-   light surface (CVD ΔE ≥ 9). Slot 3 sits under 3:1 contrast, so every bar
+/* Categorical slots 1–4 of the dataviz reference palette, validated on the
+   light surface (CVD ΔE ≥ 9). Slots 3 and 4 sit under 3:1 contrast, so every bar
    carries its value as text and the table repeats the numbers. */
 .bm {
   --viz-series-1: #2a78d6;
   --viz-series-2: #eb6834;
   --viz-series-3: #1baf7a;
+  --viz-series-4: #eda100;
   max-width: 1080px;
   margin: 0 auto;
   padding: 28px 24px 48px;

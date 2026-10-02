@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"testing"
 
 	_ "github.com/IvanRoslov/rocket/internal/agent/claudecode" // registers "claude-code"
@@ -49,6 +50,31 @@ func TestGetAgentKinds(t *testing.T) {
 		}
 		if k.Available && k.Error != "" {
 			t.Errorf("kind %q is available but carries error %q", want, k.Error)
+		}
+	}
+}
+
+// Each kind carries its effort levels for the profile form; an agent with no
+// effort knob still sends an array, never null.
+func TestGetAgentKindsEfforts(t *testing.T) {
+	d, _ := systemTestDeps(t, &systemFakeRuntime{})
+	srv := newTestServer(t, d)
+
+	_, body := mpDo(t, srv.URL, "GET", "/v1/agent-kinds", "", nil)
+	efforts := map[string]any{}
+	for _, k := range body["kinds"].([]any) {
+		m := k.(map[string]any)
+		efforts[m["name"].(string)] = m["efforts"]
+	}
+	if got, want := efforts["claude-code"], []any{"low", "medium", "high", "xhigh", "max"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("claude-code efforts = %v, want %v", got, want)
+	}
+	if got, want := efforts["codex"], []any{"minimal", "low", "medium", "high", "xhigh"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("codex efforts = %v, want %v", got, want)
+	}
+	for name, e := range efforts {
+		if e == nil {
+			t.Errorf("%s efforts = null, want an array", name)
 		}
 	}
 }

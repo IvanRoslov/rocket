@@ -17,27 +17,58 @@ type Agent interface {
 type LaunchSpec struct {
     SessionID, Kind, ParentID, ProjectID, RepoID, Feature string
     WorktreePath, SystemPrompt, FirstMessage      string
-    Model, PermissionMode                          string
+    Model, Effort, PermissionMode                  string
 }
 ```
 
-Выбор агента: `--agent` при spawn/up → `defaults.agent` конфига. Общая часть детекции (жив ли процесс на TTY pane) — в мониторе, не в адаптерах.
+Адаптер ещё отдаёт `Efforts() []string` — допустимые уровни усилия (claude-code: `low, medium, high, xhigh, max`; codex: `minimal, low, medium, high, xhigh`). Пустые `Model`/`Effort` — флаг не передаётся, агент работает со своими умолчаниями. Модель адаптер не проверяет: неверное имя проявится при запуске CLI.
+
+Выбор агента, модели и усилия — через профиль модели (см. «Профили моделей» ниже); `--agent` при spawn/up/start остаётся для обратной совместимости, а запуск без профиля (пустой реестр) берёт `defaults.agent` конфига. Общая часть детекции (жив ли процесс на TTY pane) — в мониторе, не в адаптерах.
 
 ## Адаптер claude-code (основной)
 
-- **Launch:** `claude --dangerously-skip-permissions --settings '{"crossSessionInbound":"accept"}' --append-system-prompt "$(cat <prompt-file>)" [-–model X] -- "<first message>"` — позиционный аргумент авто-сабмитит первый ход, оставляя интерактивный режим.
+- **Launch:** `claude --dangerously-skip-permissions --settings '{"crossSessionInbound":"accept"}' --append-system-prompt "$(cat <prompt-file>)" [--model X] [--effort E] -- "<first message>"` — позиционный аргумент авто-сабмитит первый ход, оставляя интерактивный режим.
 - **`--settings`:** инлайновый JSON на сессию. `crossSessionInbound: "accept"` нужен, чтобы входящие cross-session сообщения (через них rocket доставляет очередь) сразу попадали агенту. Без явного `accept` сессия с обойдёнными правами (а это все воркеры) *придерживает* сообщение до подтверждения человеком — и оно молча протухает. Настройка идёт именно флагом, а не через `.claude/settings.local.json` в worktree: repo-уровень может только *ужесточать* `crossSessionInbound`, поэтому `accept` оттуда был бы проигнорирован.
 - **Env:** `CLAUDECODE=""` (анти-nesting) + стандартные ROCKET_*. Ни spawn-env, ни командная строка не выставляют `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_TELEMETRY`, `DO_NOT_TRACK`, `DISABLE_GROWTHBOOK`: они выключают вычисление feature-флагов, а cross-session messaging живёт за флагом — inbox сессии просто не поднимется (на это есть тесты).
 - **SetupWorkspace:** идемпотентный upsert `.claude/settings.json` в worktree — hook-скрипт активности (`SessionStart/Stop/PreToolUse/PostToolUse/Notification/...` → `POST /v1/internal/activity` через `curl --unix-socket`).
-- **Скилл шторма оркестратора:** rocket встраивает в бинарь свой скилл `orchestrator-brainstorming` — копию `superpowers:brainstorming` из superpowers 6.4.1 (`internal/prompts/skills/orchestrator-brainstorming/`, источник и лицензия — в его README/LICENSE). Адаптер заявляет это через `agent.BrainstormSkillShipper` (`ShipsBrainstormSkill() bool`; есть только у claude-code — только для него старт задачи и выбирает этот скилл). `SetupWorkspace` для **оркестратора**, чья задача стартовала с этим скиллом (`LaunchSpec.BrainstormSkill`), каждый раз перезаписывает `<worktree>/.claude/skills/orchestrator-brainstorming/` (`scripts/*.sh` — исполняемые) и добавляет путь в `.git/info/exclude`; со штатным скиллом каталог удаляется — у обоих одинаковое описание, и лишняя копия могла бы подхватиться вместо штатного и смешать ряды метрики. Глобальный `~/.claude` не трогается, воркеры скилл не получают, codex — тоже (скиллы у него вырезаются).
+- **Скилл шторма оркестратора:** rocket встраивает в бинарь свой скилл `orchestrator-brainstorming` — копию `superpowers:brainstorming` из superpowers 6.4.1 (`internal/prompts/skills/orchestrator-brainstorming/`, источник и лицензия — в его README/LICENSE). Адаптер заявляет это через `agent.BrainstormSkillShipper` (`ShipsBrainstormSkill() bool`; есть только у claude-code — только для него старт задачи и выбирает этот скилл). `SetupWorkspace` для **оркестратора**, чья задача стартовала с этим скиллом (`LaunchSpec.BrainstormSkill` — имя без `@версии`: задача хранит `orchestrator-brainstorming@1.1`, менеджер сессий отрезает версию через `prompts.SkillName`, адаптер на всякий случай сравнивает так же), каждый раз перезаписывает `<worktree>/.claude/skills/orchestrator-brainstorming/` (`scripts/*.sh` — исполняемые) и добавляет путь в `.git/info/exclude`; со штатным скиллом каталог удаляется — у обоих одинаковое описание, и лишняя копия могла бы подхватиться вместо штатного и смешать ряды метрики. Глобальный `~/.claude` не трогается, воркеры скилл не получают, codex — тоже (скиллы у него вырезаются).
 - **Superpowers:** промпты rocket ([prompts/](../docs/prompts/)) требуют от агентов навыков плагина Superpowers (brainstorming, writing-plans, TDD, systematic-debugging, verification-before-completion). Для claude-code это предусловие: `rocket doctor` проверяет, что плагин установлен, и предупреждает, если нет. Для агентов без поддержки skills секции про Superpowers из промптов вырезаются адаптером (шаблоны помечают их условным блоком `{{#if skills}}`).
 - **Activity:** нативный JSONL-транскрипт `~/.claude/projects/<путь-как-slug>/*.jsonl`: тип последней записи + mtime → active/ready/idle/blocked; push-hooks дают waiting_input.
 
 ## Адаптер codex
 
-- **Launch:** `codex --sandbox danger-full-access [-m X] "<first message>"`; системный промпт — через `AGENTS.md`-механику или флаг (уточнить при реализации по актуальной версии codex CLI).
+- **Launch:** `codex --sandbox danger-full-access [-m X] [-c model_reasoning_effort=E] "<first message>"`; системный промпт — через `AGENTS.md`-механику или флаг (уточнить при реализации по актуальной версии codex CLI).
 - **Activity:** сессионные JSONL codex в `~/.codex/sessions/` (аналогичный принцип: mtime + последняя запись); минимум — процесс жив/мёртв + пороги по mtime.
 - Уточнение деталей — задача фазы 5; интерфейс рассчитан на то, что адаптер знает только свои источники.
+
+## Профили моделей
+
+Профиль — запись реестра `model_profiles` (схема — в [05-state.md](05-state.md)): имя, агент, модель, усилие, описание «для чего подходит», флаг `enabled`. Реестр ведёт **только человек** — дашборд (Настройки → «Модели») или CLI:
+
+```
+rocket models ls [--all]          # из сессии агента: разрешённые его фиче (* — профиль по умолчанию);
+                                  # человек: реестр с пометкой дефолтов; --all — и выключенные
+rocket models add <name> --agent A [--model M] [--effort E] [--description D]
+rocket models edit <name> [--model M] [--effort E] [--description D] [--enable|--disable] [--position N]
+rocket models rm <name>           # 409 profile_in_use, пока профиль — дефолт
+rocket models default --orchestrator <name> | --worker <name>
+
+rocket spawn ... --profile <name>                   # профиль воркера
+rocket task start <id> --profile <name> [--allow p1,p2]
+rocket up "..." --profile <name>
+rocket task models <id> [--allow p1,p2 | --clear]   # посмотреть/сузить allowlist задачи
+```
+
+`add/edit/rm/default`, `task models --allow/--clear` и `allowed_profiles` в `task start` из сессии агента получают 403 `human_only`: иначе оркестратор мог бы расширить себе выбор.
+
+**Политика** (`internal/modelpolicy`, чистые функции; через неё проходит каждый запуск, кроме restore):
+
+- `Allowed(task)` — включённые профили ∩ allowlist фичи (`tasks.allowed_profiles`, пусто = все), по `position, name`. Allowlist, все имена которого исчезли из реестра, даёт пустой список, а не «все».
+- **Воркер** (`POST /v1/sessions`): allowlist берётся с фичи вызывающего оркестратора. `--profile P` — P должен быть в `Allowed` (иначе `profile_not_allowed: allowed: a, b`; несуществующий — `profile_not_found`); только `--agent A` — первый разрешённый профиль агента A; ничего — `default_worker_profile`, если разрешён, иначе первый разрешённый; пустой `Allowed` — `no_profiles_allowed`; профиль и агент не совпадают — `bad_request`. Политика проверяется до создания подзадачи — отказ ничего не оставляет.
+- **Оркестратор** (`POST /v1/tasks/{id}/start`): allowlist на него не распространяется, проверяется только `enabled`. Без выбора — `default_orchestrator_profile`, затем первый включённый профиль агента `defaults.agent`; если нет и такого — запуск как раньше, без модели (старт задачи не ломается на пустом реестре). Выбор пишется в `tasks.orchestrator_profile`; скилл шторма выбирается по **агенту** профиля. `allowed_profiles` из тела старта сохраняется до спавна — первый же `rocket models ls` оркестратора видит суженный список.
+- **Снимок.** Сессия хранит `profile/model/effort` на момент запуска; правка или удаление профиля запущенные сессии не трогает. `rocket restore` поднимает сессию из снимка, даже если профиль с тех пор выключен или удалён.
+
+`rocket status` показывает профиль у оркестратора и колонку `PROFILE` у воркеров.
 
 ## Добавление нового агента
 

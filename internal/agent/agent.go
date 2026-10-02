@@ -38,16 +38,19 @@ type ChatEntry struct {
 
 // LaunchSpec contains all configuration needed to launch an agent.
 type LaunchSpec struct {
-	SessionID      string
-	Kind           string
-	ParentID       string
-	ProjectID      string
-	RepoID         string
-	Feature        string
-	WorktreePath   string
-	SystemPrompt   string
-	FirstMessage   string
-	Model          string
+	SessionID    string
+	Kind         string
+	ParentID     string
+	ProjectID    string
+	RepoID       string
+	Feature      string
+	WorktreePath string
+	SystemPrompt string
+	FirstMessage string
+	Model        string
+	// Effort is the reasoning-effort level to launch with, one of the
+	// agent's Efforts(); empty means the agent's default and passes no flag.
+	Effort         string
 	PermissionMode string
 	SocketPath     string
 	// BrainstormSkill is the brainstorm skill an orchestrator's prompt names
@@ -83,6 +86,10 @@ type Agent interface {
 	// SetupWorkspace prepares the workspace for agent launch.
 	// In phase 1, this writes the system prompt to a file if provided.
 	SetupWorkspace(spec LaunchSpec) error
+
+	// Efforts returns the reasoning-effort levels LaunchSpec.Effort may take
+	// for this agent, in increasing order; nil if the agent has no such knob.
+	Efforts() []string
 
 	// LaunchCommand returns the command and arguments needed to launch the agent.
 	LaunchCommand(spec LaunchSpec) []string

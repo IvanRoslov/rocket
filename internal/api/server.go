@@ -95,6 +95,7 @@ func NewHandler(d Deps) http.Handler {
 	registerThreadInboxRoutes(mux, d)
 	registerAgentRoutes(mux, d)
 	registerAgentKindRoutes(mux, d)
+	registerModelProfileRoutes(mux, d)
 	registerAttachmentRoutes(mux, d)
 	registerSettingsRoutes(mux, d)
 	registerAuthRoutes(mux, d)

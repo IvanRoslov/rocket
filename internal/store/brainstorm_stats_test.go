@@ -130,6 +130,11 @@ func (f statsFixture) gate(taskID int64, status string, requested time.Time, dec
 
 func ptrTime(t time.Time) *time.Time { return &t }
 
+// wk is the weekly row of one answerer.
+func wk(week, skill, answeredBy string, c BrainstormAnswers) BrainstormWeek {
+	return BrainstormWeek{Week: week, Skill: skill, AnsweredBy: answeredBy, BrainstormAnswers: c}
+}
+
 func TestBrainstormStats(t *testing.T) {
 	f := newStatsFixture(t)
 	now := at(2026, 10, 1, 12, 0) // Thursday, 2026-W40
@@ -143,7 +148,7 @@ func TestBrainstormStats(t *testing.T) {
 	f.answer(f.ask(a, w40), 2, "", "human", w40)               // accepted, W40
 	f.answer(f.ask(a, w40), 3, "лучше C", "human", w40start)   // corrected, W40 (boundary)
 	f.answer(f.ask(a, w40), 0, "ни то ни другое", "", w40)     // wrong turn, legacy "" author = human
-	f.answer(f.ask(a, w40), 2, "", "cto", w40)                 // persistent agent: excluded from the metric
+	f.answer(f.ask(a, w40), 2, "", "cto", w40)                 // persistent agent: counts under its own id
 	overridden := f.ask(a, w40)
 	f.answer(overridden, 2, "", "human", w40) // accepted, overridden to corrected
 	if err := f.s.SetQuestionOutcome(overridden, OutcomeCorrected); err != nil {
@@ -187,17 +192,28 @@ func TestBrainstormStats(t *testing.T) {
 	goAt := at(2026, 9, 30, 15, 0).Unix()
 	stormA := BrainstormStorm{TaskID: a, Title: "Storm A", ProjectID: "billing", Skill: "orchestrator-brainstorming",
 		// The overridden answer counts as corrected, not accepted.
-		BrainstormCounts: BrainstormCounts{Questions: 9, Answered: 5, Accepted: 2, AcceptedWithComment: 1,
-			Corrected: 2, WrongTurn: 1, SpecChanges: 1},
-		GoAt: &goAt, LastActivity: at(2026, 9, 30, 15, 0).Unix()}
+		BrainstormCounts: BrainstormCounts{Questions: 9, SpecChanges: 1, BrainstormAnswers: BrainstormAnswers{
+			Answered: 6, Accepted: 3, AcceptedWithComment: 1, Corrected: 2, WrongTurn: 1}},
+		// The legacy "" author is the human, never a participant of its own.
+		AnsweredBy: []string{"human", "cto"},
+		ByAnswerer: []BrainstormAnswererCounts{
+			{AnsweredBy: "human", BrainstormAnswers: BrainstormAnswers{Answered: 5, Accepted: 2, AcceptedWithComment: 1, Corrected: 2, WrongTurn: 1}},
+			{AnsweredBy: "cto", BrainstormAnswers: BrainstormAnswers{Answered: 1, Accepted: 1}},
+		},
+		HasGate: true, GoAt: &goAt, LastActivity: at(2026, 9, 30, 15, 0).Unix()}
 	stormB := BrainstormStorm{TaskID: b, Title: "Storm B", ProjectID: "billing", Skill: SkillUnknown,
-		BrainstormCounts: BrainstormCounts{Questions: 1, Answered: 1, Accepted: 1},
+		BrainstormCounts: BrainstormCounts{Questions: 1, BrainstormAnswers: BrainstormAnswers{Answered: 1, Accepted: 1}},
+		AnsweredBy:       []string{"human"},
+		ByAnswerer:       []BrainstormAnswererCounts{{AnsweredBy: "human", BrainstormAnswers: BrainstormAnswers{Answered: 1, Accepted: 1}}},
 		LastActivity:     at(2026, 9, 30, 9, 0).Unix()}
 	stormC := BrainstormStorm{TaskID: c, Title: "Storm C", ProjectID: "billing", Skill: "superpowers:brainstorming",
 		BrainstormCounts: BrainstormCounts{SpecChanges: 1},
-		LastActivity:     at(2026, 10, 1, 9, 0).Unix()}
+		AnsweredBy:       []string{}, ByAnswerer: []BrainstormAnswererCounts{},
+		HasGate: true, LastActivity: at(2026, 10, 1, 9, 0).Unix()}
 	stormD := BrainstormStorm{TaskID: d, Title: "Storm D", ProjectID: "billing", Skill: "superpowers:brainstorming",
-		BrainstormCounts: BrainstormCounts{Questions: 1, Answered: 1, Accepted: 0, Corrected: 1},
+		BrainstormCounts: BrainstormCounts{Questions: 1, BrainstormAnswers: BrainstormAnswers{Answered: 1, Corrected: 1}},
+		AnsweredBy:       []string{"human"},
+		ByAnswerer:       []BrainstormAnswererCounts{{AnsweredBy: "human", BrainstormAnswers: BrainstormAnswers{Answered: 1, Corrected: 1}}},
 		LastActivity:     at(2026, 9, 1, 11, 0).Unix()}
 
 	tests := []struct {
@@ -210,8 +226,9 @@ func TestBrainstormStats(t *testing.T) {
 			name:  "one week",
 			weeks: 1,
 			want: []BrainstormWeek{
-				{Week: "2026-W40", Skill: "orchestrator-brainstorming", Answered: 4, Accepted: 1, Corrected: 2, WrongTurn: 1},
-				{Week: "2026-W40", Skill: SkillUnknown, Answered: 1, Accepted: 1},
+				wk("2026-W40", "orchestrator-brainstorming", "human", BrainstormAnswers{Answered: 4, Accepted: 1, Corrected: 2, WrongTurn: 1}),
+				wk("2026-W40", "orchestrator-brainstorming", "cto", BrainstormAnswers{Answered: 1, Accepted: 1}),
+				wk("2026-W40", SkillUnknown, "human", BrainstormAnswers{Answered: 1, Accepted: 1}),
 			},
 			storms: []BrainstormStorm{stormC, stormA, stormB},
 		},
@@ -219,10 +236,11 @@ func TestBrainstormStats(t *testing.T) {
 			name:  "twelve weeks",
 			weeks: 12,
 			want: []BrainstormWeek{
-				{Week: "2026-W36", Skill: "superpowers:brainstorming", Answered: 1, Corrected: 1},
-				{Week: "2026-W39", Skill: "orchestrator-brainstorming", Answered: 1, Accepted: 1, AcceptedWithComment: 1},
-				{Week: "2026-W40", Skill: "orchestrator-brainstorming", Answered: 4, Accepted: 1, Corrected: 2, WrongTurn: 1},
-				{Week: "2026-W40", Skill: SkillUnknown, Answered: 1, Accepted: 1},
+				wk("2026-W36", "superpowers:brainstorming", "human", BrainstormAnswers{Answered: 1, Corrected: 1}),
+				wk("2026-W39", "orchestrator-brainstorming", "human", BrainstormAnswers{Answered: 1, Accepted: 1, AcceptedWithComment: 1}),
+				wk("2026-W40", "orchestrator-brainstorming", "human", BrainstormAnswers{Answered: 4, Accepted: 1, Corrected: 2, WrongTurn: 1}),
+				wk("2026-W40", "orchestrator-brainstorming", "cto", BrainstormAnswers{Answered: 1, Accepted: 1}),
+				wk("2026-W40", SkillUnknown, "human", BrainstormAnswers{Answered: 1, Accepted: 1}),
 			},
 			storms: []BrainstormStorm{stormC, stormA, stormB, stormD},
 		},
@@ -274,8 +292,14 @@ func TestTaskBrainstormStats(t *testing.T) {
 	}
 	goAt := w40.Unix()
 	want := BrainstormStorm{TaskID: storm, Title: "Storm", ProjectID: "billing", Skill: "orchestrator-brainstorming",
-		BrainstormCounts: BrainstormCounts{Questions: 3, Answered: 2, Accepted: 2, AcceptedWithComment: 1},
-		GoAt:             &goAt, LastActivity: w40.Add(time.Hour).Unix()}
+		BrainstormCounts: BrainstormCounts{Questions: 3, BrainstormAnswers: BrainstormAnswers{Answered: 3, Accepted: 3, AcceptedWithComment: 1}},
+		// Same resolved_at: first-answer order falls back to the question id.
+		AnsweredBy: []string{"human", "cto"},
+		ByAnswerer: []BrainstormAnswererCounts{
+			{AnsweredBy: "human", BrainstormAnswers: BrainstormAnswers{Answered: 2, Accepted: 2, AcceptedWithComment: 1}},
+			{AnsweredBy: "cto", BrainstormAnswers: BrainstormAnswers{Answered: 1, Accepted: 1}},
+		},
+		FirstTryGo: true, HasGate: true, GoAt: &goAt, LastActivity: w40.Add(time.Hour).Unix()}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("storm:\n got %+v\nwant %+v", got, want)
 	}
@@ -288,11 +312,209 @@ func TestTaskBrainstormStats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TaskBrainstormStats quiet: %v", err)
 	}
-	if want := (BrainstormStorm{TaskID: quiet, Title: "Quiet", ProjectID: "billing", Skill: SkillUnknown}); !reflect.DeepEqual(got, want) {
+	if want := (BrainstormStorm{TaskID: quiet, Title: "Quiet", ProjectID: "billing", Skill: SkillUnknown,
+		AnsweredBy: []string{}, ByAnswerer: []BrainstormAnswererCounts{}}); !reflect.DeepEqual(got, want) {
 		t.Errorf("quiet task:\n got %+v\nwant %+v", got, want)
 	}
 
 	if _, err := f.s.TaskBrainstormStats(99999); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown task: err = %v, want ErrNotFound", err)
+	}
+}
+
+// storm is TaskBrainstormStats of taskID or a fatal error.
+func (f statsFixture) storm(taskID int64) BrainstormStorm {
+	f.t.Helper()
+	st, err := f.s.TaskBrainstormStats(taskID)
+	if err != nil {
+		f.t.Fatalf("TaskBrainstormStats: %v", err)
+	}
+	return st
+}
+
+func TestStormAgentAnswersCount(t *testing.T) {
+	f := newStatsFixture(t)
+	now := at(2026, 10, 1, 12, 0)
+	w40 := at(2026, 9, 29, 10, 0)
+	task := f.task("Agent storm", "orchestrator-brainstorming")
+	for i := 0; i < 3; i++ {
+		f.answer(f.ask(task, w40), 2, "", "cto", w40)
+	}
+
+	st := f.storm(task)
+	if st.Answered != 3 || st.Accepted != 3 {
+		t.Errorf("storm counters = %+v, want 3 answered, 3 accepted", st.BrainstormAnswers)
+	}
+	if want := []string{"cto"}; !reflect.DeepEqual(st.AnsweredBy, want) {
+		t.Errorf("AnsweredBy = %v, want %v", st.AnsweredBy, want)
+	}
+	wantBy := []BrainstormAnswererCounts{{AnsweredBy: "cto", BrainstormAnswers: BrainstormAnswers{Answered: 3, Accepted: 3}}}
+	if !reflect.DeepEqual(st.ByAnswerer, wantBy) {
+		t.Errorf("ByAnswerer = %+v, want %+v", st.ByAnswerer, wantBy)
+	}
+
+	got, err := f.s.BrainstormStats(now, 1)
+	if err != nil {
+		t.Fatalf("BrainstormStats: %v", err)
+	}
+	wantWeeks := []BrainstormWeek{wk("2026-W40", "orchestrator-brainstorming", "cto", BrainstormAnswers{Answered: 3, Accepted: 3})}
+	if !reflect.DeepEqual(got.Weeks, wantWeeks) {
+		t.Errorf("weeks:\n got %+v\nwant %+v", got.Weeks, wantWeeks)
+	}
+}
+
+func TestStormMixedAnswerers(t *testing.T) {
+	f := newStatsFixture(t)
+	now := at(2026, 10, 1, 12, 0)
+	t1, t2, t3 := at(2026, 9, 29, 10, 0), at(2026, 9, 29, 11, 0), at(2026, 9, 29, 12, 0)
+	task := f.task("Mixed", "orchestrator-brainstorming")
+	// Asked in reverse so the question ids disagree with the answer order:
+	// first-answer order must follow resolved_at, not the id.
+	q3, q2, q1 := f.ask(task, t1), f.ask(task, t1), f.ask(task, t1)
+	f.answer(q1, 2, "", "human", t1)        // accepted
+	f.answer(q2, 3, "", "cto", t2)          // corrected
+	f.answer(q3, 0, "не туда", "human", t3) // wrong turn
+
+	st := f.storm(task)
+	if want := []string{"human", "cto"}; !reflect.DeepEqual(st.AnsweredBy, want) {
+		t.Errorf("AnsweredBy = %v, want %v", st.AnsweredBy, want)
+	}
+	wantBy := []BrainstormAnswererCounts{
+		{AnsweredBy: "human", BrainstormAnswers: BrainstormAnswers{Answered: 2, Accepted: 1, WrongTurn: 1}},
+		{AnsweredBy: "cto", BrainstormAnswers: BrainstormAnswers{Answered: 1, Corrected: 1}},
+	}
+	if !reflect.DeepEqual(st.ByAnswerer, wantBy) {
+		t.Errorf("ByAnswerer = %+v, want %+v", st.ByAnswerer, wantBy)
+	}
+	if want := (BrainstormAnswers{Answered: 3, Accepted: 1, Corrected: 1, WrongTurn: 1}); st.BrainstormAnswers != want {
+		t.Errorf("storm totals = %+v, want %+v", st.BrainstormAnswers, want)
+	}
+
+	got, err := f.s.BrainstormStats(now, 1)
+	if err != nil {
+		t.Fatalf("BrainstormStats: %v", err)
+	}
+	wantWeeks := []BrainstormWeek{
+		wk("2026-W40", "orchestrator-brainstorming", "human", BrainstormAnswers{Answered: 2, Accepted: 1, WrongTurn: 1}),
+		wk("2026-W40", "orchestrator-brainstorming", "cto", BrainstormAnswers{Answered: 1, Corrected: 1}),
+	}
+	if !reflect.DeepEqual(got.Weeks, wantWeeks) {
+		t.Errorf("weeks:\n got %+v\nwant %+v", got.Weeks, wantWeeks)
+	}
+}
+
+// TestStormWeeksOrderHumanFirst pins the weekly sort inside one week and
+// skill: the human first, then the agents by id.
+func TestStormWeeksOrderHumanFirst(t *testing.T) {
+	f := newStatsFixture(t)
+	w40 := at(2026, 9, 29, 10, 0)
+	task := f.task("Order", "orchestrator-brainstorming")
+	f.answer(f.ask(task, w40), 2, "", "cto", w40)
+	f.answer(f.ask(task, w40), 2, "", "architect", w40)
+	f.answer(f.ask(task, w40), 2, "", "human", w40)
+
+	got, err := f.s.BrainstormStats(at(2026, 10, 1, 12, 0), 1)
+	if err != nil {
+		t.Fatalf("BrainstormStats: %v", err)
+	}
+	var order []string
+	for _, w := range got.Weeks {
+		order = append(order, w.AnsweredBy)
+	}
+	if want := []string{"human", "architect", "cto"}; !reflect.DeepEqual(order, want) {
+		t.Errorf("weekly answerers = %v, want %v", order, want)
+	}
+}
+
+// TestStormWeeksSplitBySkillVersion pins that versions of the custom skill
+// are separate rows of the metric (task #5027): grouping is by the stored
+// value, version included.
+func TestStormWeeksSplitBySkillVersion(t *testing.T) {
+	f := newStatsFixture(t)
+	w40 := at(2026, 9, 29, 10, 0)
+	old := f.task("Old", "orchestrator-brainstorming@1.0")
+	cur := f.task("New", "orchestrator-brainstorming@1.1")
+	f.answer(f.ask(old, w40), 2, "", "human", w40)
+	f.answer(f.ask(cur, w40), 2, "", "human", w40)
+
+	got, err := f.s.BrainstormStats(at(2026, 10, 1, 12, 0), 1)
+	if err != nil {
+		t.Fatalf("BrainstormStats: %v", err)
+	}
+	var skills []string
+	for _, w := range got.Weeks {
+		skills = append(skills, w.Skill)
+	}
+	if want := []string{"orchestrator-brainstorming@1.0", "orchestrator-brainstorming@1.1"}; !reflect.DeepEqual(skills, want) {
+		t.Errorf("weekly skills = %v, want %v", skills, want)
+	}
+}
+
+func TestStormSpecChangesBeforeGo(t *testing.T) {
+	base := at(2026, 9, 29, 10, 0)
+	tm := func(min int) time.Time { return base.Add(time.Duration(min) * time.Minute) }
+
+	t.Run("changes after go do not count", func(t *testing.T) {
+		f := newStatsFixture(t)
+		task := f.task("Gate", "orchestrator-brainstorming")
+		f.gate(task, "changes", tm(10), ptrTime(tm(10)))
+		// The later change is inserted before the Go: the first Go is only
+		// known once all gates are folded.
+		f.gate(task, "changes", tm(30), ptrTime(tm(30)))
+		f.gate(task, "go", tm(20), ptrTime(tm(20)))
+		st := f.storm(task)
+		if st.SpecChanges != 1 || st.GoAt == nil || *st.GoAt != tm(20).Unix() || st.FirstTryGo || !st.HasGate {
+			t.Errorf("got SpecChanges=%d GoAt=%v FirstTryGo=%v HasGate=%v, want 1, %d, false, true",
+				st.SpecChanges, st.GoAt, st.FirstTryGo, st.HasGate, tm(20).Unix())
+		}
+	})
+	t.Run("go on the first try stays so after later changes", func(t *testing.T) {
+		f := newStatsFixture(t)
+		task := f.task("Gate", "orchestrator-brainstorming")
+		f.gate(task, "go", tm(20), ptrTime(tm(20)))
+		f.gate(task, "changes", tm(30), ptrTime(tm(30)))
+		st := f.storm(task)
+		if st.SpecChanges != 0 || !st.FirstTryGo || !st.HasGate {
+			t.Errorf("got SpecChanges=%d FirstTryGo=%v HasGate=%v, want 0, true, true", st.SpecChanges, st.FirstTryGo, st.HasGate)
+		}
+	})
+}
+
+func TestStormSupersededIsNotAChange(t *testing.T) {
+	f := newStatsFixture(t)
+	base := at(2026, 9, 29, 10, 0)
+	task := f.task("Superseded", "orchestrator-brainstorming")
+	f.gate(task, "superseded", base, ptrTime(base.Add(10*time.Minute)))
+	f.gate(task, "go", base.Add(15*time.Minute), ptrTime(base.Add(20*time.Minute)))
+	st := f.storm(task)
+	if st.SpecChanges != 0 || !st.FirstTryGo || !st.HasGate {
+		t.Errorf("got SpecChanges=%d FirstTryGo=%v HasGate=%v, want 0, true, true", st.SpecChanges, st.FirstTryGo, st.HasGate)
+	}
+}
+
+func TestStormNoGoCountsAllChanges(t *testing.T) {
+	f := newStatsFixture(t)
+	base := at(2026, 9, 29, 10, 0)
+	task := f.task("No go", "orchestrator-brainstorming")
+	f.gate(task, "changes", base, ptrTime(base.Add(10*time.Minute)))
+	f.gate(task, "changes", base, ptrTime(base.Add(20*time.Minute)))
+	f.gate(task, "pending", base.Add(30*time.Minute), nil)
+	st := f.storm(task)
+	if st.SpecChanges != 2 || st.GoAt != nil || st.FirstTryGo || !st.HasGate {
+		t.Errorf("got SpecChanges=%d GoAt=%v FirstTryGo=%v HasGate=%v, want 2, nil, false, true",
+			st.SpecChanges, st.GoAt, st.FirstTryGo, st.HasGate)
+	}
+}
+
+func TestStormQuestionsWithoutAnswers(t *testing.T) {
+	f := newStatsFixture(t)
+	task := f.task("Open", "orchestrator-brainstorming")
+	f.ask(task, at(2026, 9, 29, 10, 0))
+	st := f.storm(task)
+	if st.AnsweredBy == nil || st.ByAnswerer == nil || len(st.AnsweredBy) != 0 || len(st.ByAnswerer) != 0 {
+		t.Errorf("AnsweredBy=%#v ByAnswerer=%#v, want non-nil empty slices", st.AnsweredBy, st.ByAnswerer)
+	}
+	if st.HasGate || st.FirstTryGo {
+		t.Errorf("HasGate=%v FirstTryGo=%v, want false, false", st.HasGate, st.FirstTryGo)
 	}
 }

@@ -211,7 +211,7 @@ func TestSpawnOrchestratorSyncsMirror(t *testing.T) {
 	}
 	task := store.Task{ID: 42, Title: "Ship the thing", ProjectID: "proj1"}
 
-	if _, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake"); err != nil {
+	if _, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake", LaunchProfile{}); err != nil {
 		t.Fatalf("SpawnOrchestrator: %v", err)
 	}
 

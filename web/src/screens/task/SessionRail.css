@@ -258,3 +258,13 @@
   color: var(--fg-muted, #8b8b8b);
   white-space: nowrap;
 }
+
+/* Model-profile snapshot (task #5026), e.g. "claude-opus (opus, high)". */
+.session-rail__model {
+  font: 11px var(--font-mono);
+  color: var(--fg-muted, #8b8b8b);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}

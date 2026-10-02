@@ -180,6 +180,14 @@
   font: 12px var(--font-mono);
   color: var(--text-3);
 }
+.session-card__model {
+  font: 11.5px var(--font-mono);
+  color: var(--text-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
 .session-card__row3 {
   display: flex;
   flex-wrap: wrap;

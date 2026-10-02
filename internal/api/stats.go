@@ -8,8 +8,9 @@ import (
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
-// Brainstorm quality metric (task #4901, spec §4): read-only, open to any
-// caller. The numbers are computed by store.BrainstormStats on every read.
+// Brainstorm quality metric (task #4901, spec §4; task #5019): read-only,
+// open to any caller. The numbers are computed by store.BrainstormStats on
+// every read; every answer counts under its author, "human" or an agent id.
 
 const (
 	defaultStatsWeeks = 12
@@ -19,6 +20,17 @@ const (
 type brainstormWeekResponse struct {
 	Week                string `json:"week"`
 	Skill               string `json:"skill"`
+	AnsweredBy          string `json:"answered_by"`
+	Answered            int    `json:"answered"`
+	Accepted            int    `json:"accepted"`
+	AcceptedWithComment int    `json:"accepted_with_comment"`
+	Corrected           int    `json:"corrected"`
+	WrongTurn           int    `json:"wrong_turn"`
+}
+
+// brainstormAnswererResponse is one answerer's share of a storm's answers.
+type brainstormAnswererResponse struct {
+	AnsweredBy          string `json:"answered_by"`
 	Answered            int    `json:"answered"`
 	Accepted            int    `json:"accepted"`
 	AcceptedWithComment int    `json:"accepted_with_comment"`
@@ -27,19 +39,25 @@ type brainstormWeekResponse struct {
 }
 
 // brainstormStormResponse is one storm; go_at is unix seconds, null before Go.
+// answered_by and by_answerer are arrays, empty when nothing is answered;
+// spec_changes counts the "changes" gates before the first Go.
 type brainstormStormResponse struct {
-	TaskID              int64  `json:"task_id"`
-	Title               string `json:"title"`
-	ProjectID           string `json:"project_id"`
-	Skill               string `json:"skill"`
-	Questions           int    `json:"questions"`
-	Answered            int    `json:"answered"`
-	Accepted            int    `json:"accepted"`
-	AcceptedWithComment int    `json:"accepted_with_comment"`
-	Corrected           int    `json:"corrected"`
-	WrongTurn           int    `json:"wrong_turn"`
-	SpecChanges         int    `json:"spec_changes"`
-	GoAt                *int64 `json:"go_at"`
+	TaskID              int64                        `json:"task_id"`
+	Title               string                       `json:"title"`
+	ProjectID           string                       `json:"project_id"`
+	Skill               string                       `json:"skill"`
+	Questions           int                          `json:"questions"`
+	Answered            int                          `json:"answered"`
+	Accepted            int                          `json:"accepted"`
+	AcceptedWithComment int                          `json:"accepted_with_comment"`
+	Corrected           int                          `json:"corrected"`
+	WrongTurn           int                          `json:"wrong_turn"`
+	AnsweredBy          []string                     `json:"answered_by"`
+	ByAnswerer          []brainstormAnswererResponse `json:"by_answerer"`
+	SpecChanges         int                          `json:"spec_changes"`
+	FirstTryGo          bool                         `json:"first_try_go"`
+	HasGate             bool                         `json:"has_gate"`
+	GoAt                *int64                       `json:"go_at"`
 }
 
 type brainstormStatsResponse struct {
@@ -48,6 +66,19 @@ type brainstormStatsResponse struct {
 }
 
 func toBrainstormStormResponse(s store.BrainstormStorm) brainstormStormResponse {
+	answeredBy := make([]string, len(s.AnsweredBy))
+	copy(answeredBy, s.AnsweredBy)
+	byAnswerer := make([]brainstormAnswererResponse, len(s.ByAnswerer))
+	for i, a := range s.ByAnswerer {
+		byAnswerer[i] = brainstormAnswererResponse{
+			AnsweredBy:          a.AnsweredBy,
+			Answered:            a.Answered,
+			Accepted:            a.Accepted,
+			AcceptedWithComment: a.AcceptedWithComment,
+			Corrected:           a.Corrected,
+			WrongTurn:           a.WrongTurn,
+		}
+	}
 	return brainstormStormResponse{
 		TaskID:              s.TaskID,
 		Title:               s.Title,
@@ -59,7 +90,11 @@ func toBrainstormStormResponse(s store.BrainstormStorm) brainstormStormResponse 
 		AcceptedWithComment: s.AcceptedWithComment,
 		Corrected:           s.Corrected,
 		WrongTurn:           s.WrongTurn,
+		AnsweredBy:          answeredBy,
+		ByAnswerer:          byAnswerer,
 		SpecChanges:         s.SpecChanges,
+		FirstTryGo:          s.FirstTryGo,
+		HasGate:             s.HasGate,
 		GoAt:                s.GoAt,
 	}
 }
@@ -99,6 +134,7 @@ func handleBrainstormStats(w http.ResponseWriter, r *http.Request, d Deps) {
 		out.Weeks[i] = brainstormWeekResponse{
 			Week:                wk.Week,
 			Skill:               wk.Skill,
+			AnsweredBy:          wk.AnsweredBy,
 			Answered:            wk.Answered,
 			Accepted:            wk.Accepted,
 			AcceptedWithComment: wk.AcceptedWithComment,

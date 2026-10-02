@@ -291,11 +291,22 @@ func (c *Codex) LaunchCommand(spec agent.LaunchSpec) []string {
 		cmd = append(cmd, "-m", spec.Model)
 	}
 
+	if spec.Effort != "" {
+		cmd = append(cmd, "-c", "model_reasoning_effort="+spec.Effort)
+	}
+
 	if spec.FirstMessage != "" {
 		cmd = append(cmd, "--", spec.FirstMessage)
 	}
 
 	return cmd
+}
+
+// Efforts returns the model_reasoning_effort levels rocket offers for codex.
+// codex-cli 0.157.0 also knows "none"; it is left out on purpose — a profile
+// that turns reasoning off is not a choice worth offering an orchestrator.
+func (c *Codex) Efforts() []string {
+	return []string{"minimal", "low", "medium", "high", "xhigh"}
 }
 
 // Env returns environment variables for the agent. Same ROCKET_* keys as
