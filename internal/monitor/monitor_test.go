@@ -86,6 +86,7 @@ type statResult struct {
 }
 
 func (f *fakeAgent) Name() string                                 { return "fake-mon" }
+func (f *fakeAgent) Efforts() []string                            { return nil }
 func (f *fakeAgent) Available() error                             { return nil }
 func (f *fakeAgent) SetupWorkspace(spec agent.LaunchSpec) error   { return nil }
 func (f *fakeAgent) LaunchCommand(spec agent.LaunchSpec) []string { return nil }

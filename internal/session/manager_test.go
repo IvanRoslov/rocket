@@ -208,7 +208,8 @@ type fakeAgent struct {
 
 func (a *fakeAgent) ShipsBrainstormSkill() bool { return a.shipsSkill }
 
-func (a *fakeAgent) Name() string { return "fake" }
+func (a *fakeAgent) Name() string      { return "fake" }
+func (a *fakeAgent) Efforts() []string { return nil }
 
 func (a *fakeAgent) Available() error { return a.availableErr }
 
