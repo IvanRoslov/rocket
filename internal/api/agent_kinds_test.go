@@ -69,7 +69,7 @@ func TestGetAgentKindsEfforts(t *testing.T) {
 	if got, want := efforts["claude-code"], []any{"low", "medium", "high", "xhigh", "max"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("claude-code efforts = %v, want %v", got, want)
 	}
-	if got, want := efforts["codex"], []any{"minimal", "low", "medium", "high", "xhigh"}; !reflect.DeepEqual(got, want) {
+	if got, want := efforts["codex"], []any{"minimal", "low", "medium", "high", "xhigh", "max", "ultra"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("codex efforts = %v, want %v", got, want)
 	}
 	for name, e := range efforts {

@@ -226,14 +226,39 @@ func (req modelProfileRequest) apply(p *store.ModelProfile) {
 }
 
 // validateProfileAgent checks that p's agent is registered and its effort
-// is one of that agent's levels. Returns true if it wrote a response.
-func validateProfileAgent(w http.ResponseWriter, p store.ModelProfile) bool {
+// fits its model: a model found in the agent's catalog allows exactly its
+// own levels (none when it has no effort knob); any other model — an alias
+// like "opus", a custom id, or none — allows the agent's Efforts(). The
+// catalog is consulted only when both model and effort are set. Returns
+// true if it wrote a response.
+func validateProfileAgent(w http.ResponseWriter, r *http.Request, d Deps, p store.ModelProfile) bool {
 	ag, err := agent.Get(p.Agent)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "agent_unavailable", "unknown agent "+p.Agent)
 		return true
 	}
-	if p.Effort != "" && !slices.Contains(ag.Efforts(), p.Effort) {
+	if p.Effort == "" {
+		return false
+	}
+	if p.Model != "" {
+		for _, m := range d.Catalogs.Get(r.Context(), p.Agent, false).Models {
+			if m.ID != p.Model {
+				continue
+			}
+			if len(m.Efforts) == 0 {
+				writeErr(w, http.StatusBadRequest, "bad_effort",
+					"model "+p.Model+" has no effort setting; leave effort empty")
+				return true
+			}
+			if !slices.Contains(m.Efforts, p.Effort) {
+				writeErr(w, http.StatusBadRequest, "bad_effort",
+					"effort "+p.Effort+" is not one of model "+p.Model+"'s: "+strings.Join(m.Efforts, ", "))
+				return true
+			}
+			return false
+		}
+	}
+	if !slices.Contains(ag.Efforts(), p.Effort) {
 		writeErr(w, http.StatusBadRequest, "bad_effort",
 			"effort "+p.Effort+" is not one of "+p.Agent+"'s: "+strings.Join(ag.Efforts(), ", "))
 		return true
@@ -267,7 +292,7 @@ func handlePostModelProfile(w http.ResponseWriter, r *http.Request, d Deps) {
 		}
 	}
 	req.apply(&p)
-	if validateProfileAgent(w, p) {
+	if validateProfileAgent(w, r, d, p) {
 		return
 	}
 	if err := d.Store.CreateModelProfile(p); err != nil {
@@ -305,8 +330,13 @@ func handlePatchModelProfile(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 	req.apply(&p)
-	if validateProfileAgent(w, p) {
-		return
+	// Only a change to what launches is re-validated: toggling, moving or
+	// re-describing a profile must work even if its effort predates the
+	// current catalog (a v1 profile, or a level the agent since dropped).
+	if req.Agent != nil || req.Model != nil || req.Effort != nil {
+		if validateProfileAgent(w, r, d, p) {
+			return
+		}
 	}
 	if err := d.Store.UpdateModelProfile(p); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())

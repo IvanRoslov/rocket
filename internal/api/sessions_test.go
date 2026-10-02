@@ -127,6 +127,10 @@ func (sessFakeAgent) Activity(ctx context.Context, ref agent.ActivityRef) (activ
 func (sessFakeAgent) TranscriptTail(ctx context.Context, ref agent.ActivityRef, cursor string) ([]agent.ChatEntry, string, error) {
 	return nil, "", agent.ErrNoSignal
 }
+func (sessFakeAgent) Catalog(ctx context.Context) (agent.Catalog, error) {
+	return agent.Catalog{}, nil
+}
+
 func (sessFakeAgent) TranscriptStat(ctx context.Context, ref agent.ActivityRef) (int64, int64, error) {
 	return 0, 0, agent.ErrNoSignal
 }

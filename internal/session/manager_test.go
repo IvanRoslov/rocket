@@ -241,6 +241,10 @@ func (a *fakeAgent) TranscriptTail(ctx context.Context, ref agent.ActivityRef, c
 	return nil, "", agent.ErrNoSignal
 }
 
+func (a *fakeAgent) Catalog(ctx context.Context) (agent.Catalog, error) {
+	return agent.Catalog{}, nil
+}
+
 func (a *fakeAgent) TranscriptStat(ctx context.Context, ref agent.ActivityRef) (int64, int64, error) {
 	return 0, 0, agent.ErrNoSignal
 }

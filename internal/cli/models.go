@@ -62,6 +62,8 @@ func newModelsCmdWith(dial func() (modelsClient, error)) *cobra.Command {
 	cmd.AddCommand(newModelsEditCmd(dial))
 	cmd.AddCommand(newModelsRmCmd(dial))
 	cmd.AddCommand(newModelsDefaultCmd(dial))
+	cmd.AddCommand(newModelsCatalogCmd(dial))
+	cmd.AddCommand(newModelsImportCmd(dial))
 	return cmd
 }
 

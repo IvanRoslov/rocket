@@ -16,7 +16,7 @@ import (
 
 // recordedRequest is one request a fake daemon saw.
 type recordedRequest struct {
-	Method, Path string
+	Method, Path string // Path carries "?query" when the request had one
 	Body         map[string]any
 }
 
@@ -32,7 +32,7 @@ func fakeDaemon(t *testing.T, replies map[string]any) (*[]recordedRequest, http.
 	t.Helper()
 	var seen []recordedRequest
 	return &seen, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rec := recordedRequest{Method: r.Method, Path: r.URL.Path}
+		rec := recordedRequest{Method: r.Method, Path: r.URL.RequestURI()}
 		raw, _ := io.ReadAll(r.Body)
 		if len(raw) > 0 {
 			_ = json.Unmarshal(raw, &rec.Body)

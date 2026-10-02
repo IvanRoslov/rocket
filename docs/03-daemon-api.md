@@ -204,6 +204,8 @@ tmux рендерит окно ровно в **одном** размере; пр
 | Метод | Путь | Описание |
 |---|---|---|
 | GET | `/v1/agent-kinds` | Реализации агентов, которыми демон умеет запускать сессии: `{kinds:[{name, available, error?}], default}`. `available` — доступен ли исполняемый файл на машине демона; `default` — `default_agent` из конфига. Питает выбор оркестратора в UI (Start ▸) |
+| GET | `/v1/model-catalog[?agent=A][&refresh=1]` | Каталог моделей агентов: `{agents:[{agent, source: cli\|cache\|builtin, fetched_at, warning, models:[{id, name, description, main, efforts, default_effort}]}]}`. Кэш демона 10 мин, `refresh=1` перечитывает. Неизвестный агент — 400 `agent_unavailable`. Доступно и сессиям-агентам |
+| POST | `/v1/model-profiles/import-catalog` | Тело `{agent?, include_legacy?}`: выключенные профили для моделей каталога без профиля → `{created:[names], skipped:[{model, reason}]}`. Только человек (403 `human_only`) |
 | GET | `/v1/agents` | Список агентов; фильтр `?project=`; у элемента `session_alive` (жива ли tmux-сессия `<id>`), `unread` (непрочитанных в инбоксе), `open_questions` и `awaiting_user` (открытые треды и из них ждущие человека) |
 | POST | `/v1/agents` | `{id, description?, project?, dir?, command?}` → 201. `id` — `^[a-z0-9-]+$`, он же имя tmux-сессии; `project` проверяется, только если непустой |
 | GET | `/v1/agents/{id}` | Карточка агента; `milestones` — майлстоны, которые он держит (`{id, title, status}`, старые первыми), см. [12-tasks.md](12-tasks.md) |

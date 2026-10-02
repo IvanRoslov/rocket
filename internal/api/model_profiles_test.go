@@ -156,7 +156,7 @@ func TestCreateModelProfileValidation(t *testing.T) {
 		{"empty name", map[string]any{"name": "", "agent": "codex"}, 400, "bad_request"},
 		{"name too long", map[string]any{"name": strings.Repeat("a", 41), "agent": "codex"}, 400, "bad_request"},
 		{"unknown agent", map[string]any{"name": "x", "agent": "gemini"}, 400, "agent_unavailable"},
-		{"bad effort", map[string]any{"name": "x", "agent": "codex", "effort": "max"}, 400, "bad_effort"},
+		{"bad effort", map[string]any{"name": "x", "agent": "codex", "effort": "turbo"}, 400, "bad_effort"},
 		{"duplicate", map[string]any{"name": "codex", "agent": "codex"}, 409, "profile_exists"},
 	}
 	for _, tc := range cases {
@@ -167,7 +167,7 @@ func TestCreateModelProfileValidation(t *testing.T) {
 			}
 		})
 	}
-	if _, body := mpDo(t, f.url, "POST", "/v1/model-profiles", "", map[string]any{"name": "x", "agent": "codex", "effort": "max"}); !strings.Contains(errMessage(body), "minimal") {
+	if _, body := mpDo(t, f.url, "POST", "/v1/model-profiles", "", map[string]any{"name": "x", "agent": "codex", "effort": "turbo"}); !strings.Contains(errMessage(body), "minimal") {
 		t.Errorf("bad_effort message should list allowed efforts: %q", errMessage(body))
 	}
 }
@@ -182,8 +182,9 @@ func TestPatchModelProfile(t *testing.T) {
 	if body["effort"] != "max" || body["enabled"] != false || body["position"] != float64(9) || body["model"] != "sonnet" {
 		t.Errorf("patched = %v", body)
 	}
-	// Switching agent re-validates the kept effort against the new agent.
-	status, body = mpDo(t, f.url, "PATCH", "/v1/model-profiles/claude-sonnet", "", map[string]any{"agent": "codex"})
+	// Switching agent re-validates the kept effort against the new agent's
+	// model (gpt-5.5 tops out at xhigh).
+	status, body = mpDo(t, f.url, "PATCH", "/v1/model-profiles/claude-sonnet", "", map[string]any{"agent": "codex", "model": "gpt-5.5"})
 	if status != 400 || errCode(body) != "bad_effort" {
 		t.Errorf("agent switch with stale effort = %d %v", status, body)
 	}
