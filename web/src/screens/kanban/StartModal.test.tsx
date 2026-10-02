@@ -47,26 +47,26 @@ function captureStart() {
 test('offers the enabled profiles, defaulting to the global orchestrator profile', async () => {
   renderModal()
 
-  const select = await screen.findByLabelText('Профиль')
+  const select = await screen.findByLabelText('Profile')
   await waitFor(() => expect(within(select).getByRole('option', { name: 'claude-sonnet' })).toBeInTheDocument())
 
-  expect(within(select).getByRole('option', { name: 'По умолчанию (claude-opus)' })).toBeInTheDocument()
+  expect(within(select).getByRole('option', { name: 'Default (claude-opus)' })).toBeInTheDocument()
   expect(within(select).queryByRole('option', { name: /claude-haiku/ })).not.toBeInTheDocument()
   // codex's binary is missing on the fixture machine
   expect(within(select).getByRole('option', { name: /^codex/ })).toBeDisabled()
   // the default's description shows until something else is picked
-  expect(within(screen.getByRole('note', { name: 'Выбранный профиль' })).getByText(/Сложные задачи/)).toBeInTheDocument()
+  expect(within(screen.getByRole('note', { name: 'Selected profile' })).getByText(/Сложные задачи/)).toBeInTheDocument()
 })
 
 test('shows the picked profile’s description', async () => {
   const user = userEvent.setup()
   renderModal()
-  const select = await screen.findByLabelText('Профиль')
+  const select = await screen.findByLabelText('Profile')
   await waitFor(() => expect(within(select).getByRole('option', { name: 'claude-sonnet' })).toBeInTheDocument())
 
   await user.selectOptions(select, 'claude-sonnet')
 
-  const note = screen.getByRole('note', { name: 'Выбранный профиль' })
+  const note = screen.getByRole('note', { name: 'Selected profile' })
   expect(within(note).getByText(/Обычная разработка/)).toBeInTheDocument()
   expect(within(note).getByText('claude-code · sonnet')).toBeInTheDocument()
 })
@@ -75,11 +75,11 @@ test('sends the picked profile and the worker allowlist', async () => {
   const seen = captureStart()
   const user = userEvent.setup()
   renderModal()
-  const select = await screen.findByLabelText('Профиль')
+  const select = await screen.findByLabelText('Profile')
   await waitFor(() => expect(within(select).getByRole('option', { name: 'claude-sonnet' })).toBeInTheDocument())
 
   await user.selectOptions(select, 'claude-sonnet')
-  const allow = screen.getByRole('group', { name: 'Разрешённые модели для воркеров' })
+  const allow = screen.getByRole('group', { name: 'Models allowed for workers' })
   expect(within(allow).queryByRole('checkbox', { name: /claude-haiku/ })).not.toBeInTheDocument()
   await user.click(within(allow).getByRole('checkbox', { name: /claude-sonnet/ }))
   await user.click(within(allow).getByRole('checkbox', { name: /codex/ }))
@@ -88,7 +88,7 @@ test('sends the picked profile and the worker allowlist', async () => {
   await waitFor(() =>
     expect(seen).toHaveBeenCalledWith({ profile: 'claude-sonnet', allowed_profiles: ['claude-sonnet', 'codex'] }),
   )
-  expect(screen.getByRole('button', { name: 'Отмена' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
 })
 
 test('keeping the defaults still sends the (empty) allowlist, so a stale one cannot linger', async () => {
@@ -96,7 +96,7 @@ test('keeping the defaults still sends the (empty) allowlist, so a stale one can
   const user = userEvent.setup()
   renderModal()
 
-  const select = await screen.findByLabelText('Профиль')
+  const select = await screen.findByLabelText('Profile')
   await waitFor(() => expect(within(select).getByRole('option', { name: 'claude-sonnet' })).toBeInTheDocument())
   await user.click(screen.getByRole('button', { name: 'Start ▸' }))
 
@@ -118,7 +118,7 @@ test('starts from the allowlist already set on the backlog task', async () => {
   )
   renderModal()
 
-  const allow = await screen.findByRole('group', { name: 'Разрешённые модели для воркеров' })
+  const allow = await screen.findByRole('group', { name: 'Models allowed for workers' })
   await waitFor(() => expect(within(allow).getByRole('checkbox', { name: /codex/ })).toBeChecked())
   expect(within(allow).getByRole('checkbox', { name: /claude-sonnet/ })).not.toBeChecked()
 
@@ -141,11 +141,11 @@ test('a disabled default profile is not offered as the default; the fallback is 
   )
   renderModal()
 
-  const select = await screen.findByLabelText('Профиль')
-  await waitFor(() => expect(within(select).getByRole('option', { name: 'По умолчанию (claude-sonnet)' })).toBeInTheDocument())
+  const select = await screen.findByLabelText('Profile')
+  await waitFor(() => expect(within(select).getByRole('option', { name: 'Default (claude-sonnet)' })).toBeInTheDocument())
   expect(within(select).queryByRole('option', { name: /claude-opus/ })).not.toBeInTheDocument()
-  expect(screen.getByText('Профиль по умолчанию claude-opus выключен — оркестратор получит claude-sonnet.')).toBeInTheDocument()
-  expect(within(screen.getByRole('note', { name: 'Выбранный профиль' })).getByText('Обычное')).toBeInTheDocument()
+  expect(screen.getByText('Default profile claude-opus is disabled — the orchestrator gets claude-sonnet.')).toBeInTheDocument()
+  expect(within(screen.getByRole('note', { name: 'Selected profile' })).getByText('Обычное')).toBeInTheDocument()
 })
 
 test('an empty registry falls back to picking the agent', async () => {
@@ -154,12 +154,12 @@ test('an empty registry falls back to picking the agent', async () => {
   const user = userEvent.setup()
   renderModal()
 
-  const select = await screen.findByLabelText('Агент')
+  const select = await screen.findByLabelText('Agent')
   await waitFor(() => expect(within(select).getByRole('option', { name: 'claude-code' })).toBeInTheDocument())
-  expect(within(select).getByRole('option', { name: 'По умолчанию (claude-code)' })).toBeInTheDocument()
-  expect(within(select).getByRole('option', { name: 'codex — недоступен' })).toBeDisabled()
-  expect(screen.queryByLabelText('Профиль')).not.toBeInTheDocument()
-  expect(screen.queryByRole('group', { name: 'Разрешённые модели для воркеров' })).not.toBeInTheDocument()
+  expect(within(select).getByRole('option', { name: 'Default (claude-code)' })).toBeInTheDocument()
+  expect(within(select).getByRole('option', { name: 'codex — unavailable' })).toBeDisabled()
+  expect(screen.queryByLabelText('Profile')).not.toBeInTheDocument()
+  expect(screen.queryByRole('group', { name: 'Models allowed for workers' })).not.toBeInTheDocument()
 
   await user.selectOptions(select, 'claude-code')
   await user.click(screen.getByRole('button', { name: 'Start ▸' }))

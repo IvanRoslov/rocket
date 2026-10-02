@@ -1,4 +1,4 @@
-// «Модели» on a feature task's Overview (task #5026 spec «Дашборд (web)»):
+// «Models» on a feature task's Overview (task #5026 spec «Дашборд (web)»):
 // the profile its orchestrator was started with and the allowlist its
 // workers are spawned under. The allowlist is the human's to change at any
 // time — the daemon refuses it from agent sessions (403 human_only) — and a
@@ -44,25 +44,25 @@ export function TaskModelsPanel({ task }: TaskModelsPanelProps) {
   return (
     <section className="task-models" aria-labelledby={`task-models-${task.id}`}>
       <h3 className="overview-tab__heading" id={`task-models-${task.id}`}>
-        Модели
+        Models
       </h3>
       <div className="task-models__row">
-        <span className="task-models__key">Оркестратор</span>
+        <span className="task-models__key">Orchestrator</span>
         <span className="task-models__val task-models__mono">{task.orchestrator_profile || '—'}</span>
       </div>
       <div className="task-models__row">
         <span className="task-models__key" id={`task-models-allowed-${task.id}`}>
-          Воркерам разрешены
+          Allowed for workers
         </span>
         {allowed.length === 0 ? (
-          <span className="task-models__val">все включённые профили</span>
+          <span className="task-models__val">all enabled profiles</span>
         ) : (
           <ul className="task-models__chips" aria-labelledby={`task-models-allowed-${task.id}`}>
             {allowed.map((n) => (
               <li
                 key={n}
                 className={known(n) ? 'task-models__chip' : 'task-models__chip task-models__chip--gone'}
-                title={known(n) ? undefined : 'профиль удалён'}
+                title={known(n) ? undefined : 'profile deleted'}
               >
                 {n}
               </li>
@@ -71,7 +71,7 @@ export function TaskModelsPanel({ task }: TaskModelsPanelProps) {
         )}
         {!editing && (
           <button type="button" className="task-models__edit" onClick={startEdit} disabled={!profiles.isSuccess}>
-            Изменить список
+            Edit list
           </button>
         )}
       </div>
@@ -79,7 +79,7 @@ export function TaskModelsPanel({ task }: TaskModelsPanelProps) {
       {editing && (
         <div className="task-models__editor">
           <fieldset className="task-models__group">
-            <legend className="task-models__key">Разрешённые профили</legend>
+            <legend className="task-models__key">Allowed profiles</legend>
             {registry.map((p) => (
               <label key={p.name} className="task-models__check" title={p.description}>
                 <input
@@ -91,13 +91,13 @@ export function TaskModelsPanel({ task }: TaskModelsPanelProps) {
                 <span className="task-models__mono">{p.name}</span>
                 <span className="task-models__meta">
                   {profileSummary(p)}
-                  {!p.enabled && ' · выключен глобально'}
+                  {!p.enabled && ' · disabled globally'}
                 </span>
               </label>
             ))}
           </fieldset>
           <p className="task-models__hint">
-            Ничего не отмечено — все включённые профили. Изменение действует на следующие спавны воркеров.
+            Nothing checked — every enabled profile. The change applies to the next worker spawns.
           </p>
           {update.isError && (
             <p className="task-models__error" role="alert">
@@ -106,7 +106,7 @@ export function TaskModelsPanel({ task }: TaskModelsPanelProps) {
           )}
           <div className="task-models__actions">
             <button type="button" className="overview-tab__edit-save" onClick={save} disabled={update.isPending}>
-              Сохранить
+              Save
             </button>
             <button
               type="button"
@@ -114,7 +114,7 @@ export function TaskModelsPanel({ task }: TaskModelsPanelProps) {
               onClick={() => setEditing(false)}
               disabled={update.isPending}
             >
-              Отмена
+              Cancel
             </button>
           </div>
         </div>

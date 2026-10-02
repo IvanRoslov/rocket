@@ -1,4 +1,4 @@
-// Settings › Модели (task #5026 spec «Дашборд (web)»): the model-profile
+// Settings › Models (task #5026 spec «Дашборд (web)»): the model-profile
 // registry orchestrators pick workers from. Only the human edits it — the
 // daemon answers 403 human_only to agent sessions — so every change here is
 // a plain registry call. A profile snapshot is taken at launch, so editing or
@@ -23,8 +23,8 @@ import { catalogSourceText, effortsFor, findCatalogModel } from '../../lib/catal
 import { profileErrorText } from '../../lib/profiles'
 import type { AgentCatalog, AgentKind, ImportCatalogResult, ModelProfile } from '../../lib/types'
 
-const DEFAULT_LABEL = 'по умолчанию'
-/** The «Другая…» choice of the model picker: the model is typed by hand. */
+const DEFAULT_LABEL = 'default'
+/** The «Other…» choice of the model picker: the model is typed by hand. */
 const CUSTOM_MODEL = '__custom__'
 
 interface ProfileModalProps {
@@ -44,9 +44,9 @@ function ProfileModal({ profile, kinds, catalogs, onClose }: ProfileModalProps) 
   const [model, setModel] = useState(profile?.model ?? '')
   const [effort, setEffort] = useState(profile?.effort ?? '')
   const [description, setDescription] = useState(profile?.description ?? '')
-  // «Другая…» picked explicitly. A model missing from the agent's catalog
+  // «Other…» picked explicitly. A model missing from the agent's catalog
   // (a v1 alias like `opus`, or one left over from another agent) shows as
-  // «Другая…» on its own.
+  // «Other…» on its own.
   const [custom, setCustom] = useState(false)
   const mutation = profile ? update : create
 
@@ -95,10 +95,10 @@ function ProfileModal({ profile, kinds, catalogs, onClose }: ProfileModalProps) 
   }
 
   return (
-    <Modal title={profile ? `Профиль ${profile.name}` : 'Новый профиль'} onClose={onClose}>
+    <Modal title={profile ? `Profile ${profile.name}` : 'New profile'} onClose={onClose}>
       <form onSubmit={handleSubmit}>
         <label className="settings-field__label" htmlFor="profile-name">
-          Имя
+          Name
         </label>
         <input
           id="profile-name"
@@ -111,7 +111,7 @@ function ProfileModal({ profile, kinds, catalogs, onClose }: ProfileModalProps) 
         />
 
         <label className="settings-field__label settings-field__label--spaced" htmlFor="profile-agent">
-          Агент
+          Agent
         </label>
         <select
           id="profile-agent"
@@ -127,7 +127,7 @@ function ProfileModal({ profile, kinds, catalogs, onClose }: ProfileModalProps) 
         </select>
 
         <label className="settings-field__label settings-field__label--spaced" htmlFor="profile-model">
-          Модель
+          Model
         </label>
         <select
           id="profile-model"
@@ -137,7 +137,7 @@ function ProfileModal({ profile, kinds, catalogs, onClose }: ProfileModalProps) 
         >
           <option value="">{DEFAULT_LABEL}</option>
           {mainModels.length > 0 && (
-            <optgroup label="Основные">
+            <optgroup label="Main">
               {mainModels.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.description ? `${m.name} — ${m.description}` : m.name}
@@ -146,7 +146,7 @@ function ProfileModal({ profile, kinds, catalogs, onClose }: ProfileModalProps) 
             </optgroup>
           )}
           {previousModels.length > 0 && (
-            <optgroup label="Предыдущие">
+            <optgroup label="Previous">
               {previousModels.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.description ? `${m.name} — ${m.description}` : m.name}
@@ -154,21 +154,21 @@ function ProfileModal({ profile, kinds, catalogs, onClose }: ProfileModalProps) 
               ))}
             </optgroup>
           )}
-          <option value={CUSTOM_MODEL}>Другая…</option>
+          <option value={CUSTOM_MODEL}>Other…</option>
         </select>
         {isCustom && (
           <input
             className="settings-field__input settings-models__input settings-models__custom-model"
-            aria-label="Своя модель"
+            aria-label="Custom model"
             value={model}
             onChange={(e) => typeModel(e.target.value)}
-            placeholder="id модели, например claude-opus-5-5"
+            placeholder="model id, e.g. claude-opus-5-5"
             autoFocus={custom}
           />
         )}
 
         <label className="settings-field__label settings-field__label--spaced" htmlFor="profile-effort">
-          Усилие
+          Effort
         </label>
         <select
           id="profile-effort"
@@ -180,15 +180,15 @@ function ProfileModal({ profile, kinds, catalogs, onClose }: ProfileModalProps) 
           <option value="">{DEFAULT_LABEL}</option>
           {efforts.map((level) => (
             <option key={level} value={level}>
-              {level === defaultEffort ? `${level} — по умолчанию у модели` : level}
+              {level === defaultEffort ? `${level} — model default` : level}
             </option>
           ))}
         </select>
 
-        {effortDisabled && <p className="settings-field__hint">У этой модели нет настройки усилия.</p>}
+        {effortDisabled && <p className="settings-field__hint">This model has no effort setting.</p>}
 
         <label className="settings-field__label settings-field__label--spaced" htmlFor="profile-description">
-          Для чего подходит
+          Good for
         </label>
         <textarea
           id="profile-description"
@@ -196,7 +196,7 @@ function ProfileModal({ profile, kinds, catalogs, onClose }: ProfileModalProps) 
           rows={3}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="Оркестратор видит это описание, когда выбирает профиль воркеру"
+          placeholder="The orchestrator reads this when it picks a profile for a worker"
         />
 
         {mutation.isError && (
@@ -206,10 +206,10 @@ function ProfileModal({ profile, kinds, catalogs, onClose }: ProfileModalProps) 
         )}
         <div className="settings-modal__actions">
           <Button variant="secondary" onClick={onClose} disabled={mutation.isPending}>
-            Отмена
+            Cancel
           </Button>
           <Button variant="primary" type="submit" disabled={mutation.isPending || !agent || !name.trim()}>
-            {mutation.isPending ? 'Сохраняю…' : 'Сохранить'}
+            {mutation.isPending ? 'Saving…' : 'Save'}
           </Button>
         </div>
       </form>
@@ -239,10 +239,10 @@ function DefaultSelect({ id, label, value, profiles, disabled, onChange }: Defau
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
       >
-        <option value="">не задан</option>
+        <option value="">not set</option>
         {profiles.map((p) => (
           <option key={p.name} value={p.name}>
-            {p.enabled ? p.name : `${p.name} — выключен`}
+            {p.enabled ? p.name : `${p.name} — disabled`}
           </option>
         ))}
       </select>
@@ -257,16 +257,16 @@ function CatalogSources({ catalogs }: { catalogs: AgentCatalog[] }) {
     <div className="settings-models__sources">
       {catalogs.map((c) => (
         <p key={c.agent} className="settings-field__hint">
-          <span>{`Список моделей ${c.agent}: ${catalogSourceText(c)}`}</span>
+          <span>{`Model list for ${c.agent}: ${catalogSourceText(c)}`}</span>
           {c.warning && <span className="settings-models__warning"> — {c.warning}</span>}
         </p>
       ))}
       <Button variant="secondary" size="sm" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
-        {refresh.isPending ? 'Обновляю…' : 'Обновить'}
+        {refresh.isPending ? 'Refreshing…' : 'Refresh'}
       </Button>
       {refresh.isError && (
         <p className="settings-error" role="alert">
-          Не удалось обновить список моделей: {refresh.error.message}
+          Could not refresh the model list: {refresh.error.message}
         </p>
       )}
     </div>
@@ -274,8 +274,8 @@ function CatalogSources({ catalogs }: { catalogs: AgentCatalog[] }) {
 }
 
 function importSummary(r: ImportCatalogResult): string {
-  if (r.created.length === 0) return 'Новых моделей нет — профили для всех уже есть'
-  return `Создано: ${r.created.length} (${r.created.join(', ')}). Профили выключены — включите нужные.`
+  if (r.created.length === 0) return 'No new models — every model already has a profile'
+  return `Created: ${r.created.length} (${r.created.join(', ')}). The profiles are disabled — enable the ones you want.`
 }
 
 /** One click: a disabled profile for every catalog model no profile uses yet. */
@@ -290,16 +290,16 @@ function ImportCatalog() {
           onClick={() => importCatalog.mutate({ include_legacy: legacy })}
           disabled={importCatalog.isPending}
         >
-          {importCatalog.isPending ? 'Добавляю…' : 'Добавить профили для всех моделей'}
+          {importCatalog.isPending ? 'Adding…' : 'Add profiles for all models'}
         </Button>
         <label className="settings-toggle__row">
           <input type="checkbox" checked={legacy} onChange={(e) => setLegacy(e.target.checked)} />
-          включая предыдущие
+          include previous models
         </label>
       </div>
       <p className="settings-field__hint">
-        Профиль появится для каждой модели из каталога, у которой его ещё нет. Новые профили выключены — включите
-        нужные.
+        Adds a profile for every catalog model that has none yet. New profiles are disabled — enable the ones you
+        want.
       </p>
       {importCatalog.isSuccess && (
         <p className="settings-field__hint settings-models__import-result" role="status">
@@ -308,7 +308,7 @@ function ImportCatalog() {
       )}
       {importCatalog.isError && (
         <p className="settings-error" role="alert">
-          Не удалось добавить: {profileErrorText(importCatalog.error)}
+          Could not add profiles: {profileErrorText(importCatalog.error)}
         </p>
       )}
     </div>
@@ -337,7 +337,7 @@ export function ModelsSection() {
   }
 
   function handleDelete(p: ModelProfile) {
-    if (!window.confirm(`Удалить профиль ${p.name}? Запущенные сессии продолжат работать.`)) return
+    if (!window.confirm(`Delete profile ${p.name}? Running sessions keep working.`)) return
     // One error line for the table: the latest action's, never a stale one.
     updateProfile.reset()
     deleteProfile.mutate(p.name)
@@ -354,30 +354,30 @@ export function ModelsSection() {
     <section>
       <div className="settings-section__head settings-models__head">
         <div>
-          <h1 className="settings-section__title">Модели</h1>
+          <h1 className="settings-section__title">Models</h1>
           <p className="settings-section__subtitle">
-            Профили запуска: агент, модель и усилие. Оркестратор выбирает из включённых профилей, разрешённых задаче.
+            Launch profiles: agent, model and effort. The orchestrator picks from the enabled profiles the task allows.
           </p>
         </div>
         <Button variant="primary" onClick={() => setEditing(null)} disabled={kindList.length === 0}>
-          Добавить профиль
+          Add profile
         </Button>
       </div>
 
       <div className="settings-card">
-        {profiles.isError && <p className="settings-error">Не удалось загрузить профили: {profiles.error.message}</p>}
+        {profiles.isError && <p className="settings-error">Could not load profiles: {profiles.error.message}</p>}
         {profiles.isSuccess && list.length === 0 && (
-          <p className="settings-field__hint">Профилей нет — добавьте первый.</p>
+          <p className="settings-field__hint">No profiles yet — add the first one.</p>
         )}
         {list.length > 0 && (
           <table className="settings-models__table">
             <thead>
               <tr>
-                <th>Профиль</th>
-                <th>Агент</th>
-                <th>Модель</th>
-                <th>Усилие</th>
-                <th>Вкл.</th>
+                <th>Profile</th>
+                <th>Agent</th>
+                <th>Model</th>
+                <th>Effort</th>
+                <th>On</th>
                 <th />
               </tr>
             </thead>
@@ -401,7 +401,7 @@ export function ModelsSection() {
                     <td>
                       <input
                         type="checkbox"
-                        aria-label="Включён"
+                        aria-label="Enabled"
                         checked={enabled}
                         disabled={updateProfile.isPending}
                         onChange={(e) => handleToggle(p, e.target.checked)}
@@ -409,7 +409,7 @@ export function ModelsSection() {
                     </td>
                     <td className="settings-models__actions">
                       <Button variant="secondary" size="sm" onClick={() => setEditing(p)}>
-                        Изменить
+                        Edit
                       </Button>
                       <Button
                         variant="secondary"
@@ -417,7 +417,7 @@ export function ModelsSection() {
                         onClick={() => handleDelete(p)}
                         disabled={deleteProfile.isPending}
                       >
-                        Удалить
+                        Delete
                       </Button>
                     </td>
                   </tr>
@@ -439,7 +439,7 @@ export function ModelsSection() {
       <div className="settings-card settings-models__defaults">
         <DefaultSelect
           id="default-orchestrator-profile"
-          label="Профиль оркестратора по умолчанию"
+          label="Default orchestrator profile"
           value={defaultValue('default_orchestrator_profile')}
           profiles={list}
           disabled={settings.data === undefined || updateSettings.isPending}
@@ -447,19 +447,19 @@ export function ModelsSection() {
         />
         <DefaultSelect
           id="default-worker-profile"
-          label="Профиль воркера по умолчанию"
+          label="Default worker profile"
           value={defaultValue('default_worker_profile')}
           profiles={list}
           disabled={settings.data === undefined || updateSettings.isPending}
           onChange={(name) => updateSettings.mutate({ default_worker_profile: name })}
         />
         <p className="settings-field__hint">
-          Оркестратор получает свой профиль при старте задачи, если в окне «Старт» не выбран другой. Воркер — когда
-          оркестратор спавнит его без --profile.
+          The orchestrator gets its profile when a task starts, unless another one is picked in the Start dialog. A
+          worker gets its profile when the orchestrator spawns it without --profile.
         </p>
         {updateSettings.isError && (
           <p className="settings-error" role="alert">
-            Не удалось сохранить: {profileErrorText(updateSettings.error)}
+            Could not save: {profileErrorText(updateSettings.error)}
           </p>
         )}
       </div>

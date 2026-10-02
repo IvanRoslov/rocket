@@ -17,13 +17,13 @@ test('profileErrorText speaks Russian for the known codes, raw message otherwise
   const { ApiError } = await import('./api')
   const { profileErrorText } = await import('./profiles')
   expect(profileErrorText(new ApiError(409, 'profile_exists', 'profile x already exists'))).toBe(
-    'Профиль с таким именем уже есть',
+    'A profile with this name already exists',
   )
   expect(profileErrorText(new ApiError(409, 'profile_in_use', 'x is the default'))).toBe(
-    'Профиль выбран по умолчанию — сначала смените дефолт',
+    'This profile is a default — pick another default first',
   )
   expect(profileErrorText(new ApiError(400, 'bad_effort', 'effort y'))).toBe(
-    'Этот уровень усилия не поддерживается агентом',
+    'This effort level is not supported for this model',
   )
   expect(profileErrorText(new ApiError(400, 'bad_request', 'name must match'))).toBe('name must match')
   expect(profileErrorText(new Error('network down'))).toBe('network down')

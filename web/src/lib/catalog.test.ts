@@ -41,9 +41,9 @@ describe('findCatalogModel', () => {
 
 describe('catalogSourceText', () => {
   it('names where the list came from', () => {
-    expect(catalogSourceText({ ...claude, source: 'cache' })).toBe('из кэша Claude Code')
-    expect(catalogSourceText({ ...claude, agent: 'codex', source: 'cli' })).toBe('из Codex CLI')
-    expect(catalogSourceText({ ...claude, agent: 'codex', source: 'cache' })).toBe('из кэша Codex')
-    expect(catalogSourceText({ ...claude, source: 'builtin' })).toBe('встроенный')
+    expect(catalogSourceText({ ...claude, source: 'cache' })).toBe('from Claude Code cache')
+    expect(catalogSourceText({ ...claude, agent: 'codex', source: 'cli' })).toBe('from Codex CLI')
+    expect(catalogSourceText({ ...claude, agent: 'codex', source: 'cache' })).toBe('from Codex cache')
+    expect(catalogSourceText({ ...claude, source: 'builtin' })).toBe('built-in')
   })
 })

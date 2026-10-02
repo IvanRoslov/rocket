@@ -243,7 +243,7 @@ test('Start button on a backlog card opens the profile modal and posts /start', 
   await userEvent.click(screen.getByRole('button', { name: 'Start ▸' }))
 
   const dialog = await screen.findByRole('dialog')
-  const profile = within(dialog).getByLabelText('Профиль')
+  const profile = within(dialog).getByLabelText('Profile')
   await waitFor(() => expect(within(profile).getByRole('option', { name: 'claude-sonnet' })).toBeInTheDocument())
   await userEvent.selectOptions(profile, 'claude-sonnet')
   await userEvent.click(within(dialog).getByRole('button', { name: 'Start ▸' }))

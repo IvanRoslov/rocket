@@ -12,6 +12,8 @@
 
 ## Global Constraints
 
+- **Spec v3 (#123): dashboard copy is English**, including the v1 screens shipped in #116 (Settings › Models, StartModal, task Overview allowlist panel, `profileErrorText`). The Russian names below are descriptive; the shipped copy is «Main» / «Previous» / «Other…», «Model list for <agent>: from Codex CLI / from Claude Code cache / built-in», «Refresh», «Add profiles for all models», «include previous models», «Created: N (…)» / «No new models — …».
+
 - API: `GET /v1/model-catalog` → `{agents:[{agent, source, fetched_at, warning, models:[{id, name, description, main, efforts, default_effort}]}]}`; `efforts` is never null.
 - API: `POST /v1/model-profiles/import-catalog` `{agent?, include_legacy?}` → `{created:[string], skipped:[{model, reason}]}`; 403 `human_only`, 400 `agent_unavailable`.
 - Effort list: model found in its agent's catalog (exact id) → that model's `efforts`; empty list → effort select disabled, value `''`. Model not in catalog (alias, custom, empty) → agent's `efforts` from `/v1/agent-kinds`.

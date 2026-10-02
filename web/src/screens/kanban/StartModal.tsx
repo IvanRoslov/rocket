@@ -85,7 +85,7 @@ export function StartModal({ taskId, onClose }: StartModalProps) {
             />
             {choices.length > 0 && (
               <fieldset className="kanban-modal-form__group">
-                <legend className="kanban-modal-form__label">Разрешённые модели для воркеров</legend>
+                <legend className="kanban-modal-form__label">Models allowed for workers</legend>
                 {choices.map((p) => (
                   <label key={p.name} className="kanban-modal-form__check" title={p.description}>
                     <input
@@ -96,13 +96,13 @@ export function StartModal({ taskId, onClose }: StartModalProps) {
                     <span className="kanban-modal-form__check-name">{p.name}</span>
                     <span className="kanban-modal-form__check-meta">
                       {profileSummary(p)}
-                      {!p.enabled && ' · выключен глобально'}
+                      {!p.enabled && ' · disabled globally'}
                     </span>
                   </label>
                 ))}
                 <p className="kanban-modal-form__hint">
-                  Ничего не отмечено — воркерам доступны все включённые профили. Список можно поменять позже на
-                  экране задачи.
+                  Nothing checked — workers may use every enabled profile. You can change the list later on the task
+                  screen.
                 </p>
               </fieldset>
             )}
@@ -113,7 +113,7 @@ export function StartModal({ taskId, onClose }: StartModalProps) {
 
         <div className="kanban-modal-form__actions">
           <Button variant="secondary" type="button" onClick={onClose}>
-            Отмена
+            Cancel
           </Button>
           <Button variant="primary" type="submit" disabled={startTask.isPending || !ready}>
             Start ▸
@@ -151,7 +151,7 @@ function ProfilePicker({ profiles, kinds, defaultName, value, disabled, onChange
   return (
     <>
       <label className="kanban-modal-form__label" htmlFor="start-task-profile">
-        Профиль
+        Profile
       </label>
       <select
         id="start-task-profile"
@@ -161,13 +161,13 @@ function ProfilePicker({ profiles, kinds, defaultName, value, disabled, onChange
         onChange={(e) => onChange(e.target.value)}
         autoFocus
       >
-        <option value="">{fallback ? `По умолчанию (${fallback.name})` : 'По умолчанию'}</option>
+        <option value="">{fallback ? `Default (${fallback.name})` : 'Default'}</option>
         {enabled.map((p) => {
           const kind = kinds?.kinds.find((k) => k.name === p.agent)
           const unavailable = kind !== undefined && !kind.available
           return (
             <option key={p.name} value={p.name} disabled={unavailable} title={unavailable ? kind.error : undefined}>
-              {unavailable ? `${p.name} — ${p.agent} недоступен` : p.name}
+              {unavailable ? `${p.name} — ${p.agent} unavailable` : p.name}
             </option>
           )
         })}
@@ -175,18 +175,18 @@ function ProfilePicker({ profiles, kinds, defaultName, value, disabled, onChange
       {!value && defaultOff && (
         <p className="kanban-modal-form__hint">
           {fallback
-            ? `Профиль по умолчанию ${defaultName} выключен — оркестратор получит ${fallback.name}.`
-            : `Профиль по умолчанию ${defaultName} выключен — оркестратор запустится агентом по умолчанию.`}
+            ? `Default profile ${defaultName} is disabled — the orchestrator gets ${fallback.name}.`
+            : `Default profile ${defaultName} is disabled — the orchestrator starts with the default agent.`}
         </p>
       )}
       {effective ? (
-        <div className="kanban-modal-form__profile" role="note" aria-label="Выбранный профиль">
+        <div className="kanban-modal-form__profile" role="note" aria-label="Selected profile">
           <div className="kanban-modal-form__profile-meta">{profileSummary(effective)}</div>
           {effective.description && <div>{effective.description}</div>}
         </div>
       ) : (
         <p className="kanban-modal-form__hint">
-          Профиль запускает оркестратора. Воркерам профиль выбирает оркестратор.
+          The profile runs the orchestrator. The orchestrator picks profiles for workers.
         </p>
       )}
     </>
@@ -201,11 +201,11 @@ interface AgentPickerProps {
 
 /** The pre-profile picker: which agent runs the orchestrator (empty = daemon default). */
 function AgentPicker({ kinds, value, onChange }: AgentPickerProps) {
-  const defaultLabel = kinds?.default ? `По умолчанию (${kinds.default})` : 'Агент по умолчанию'
+  const defaultLabel = kinds?.default ? `Default (${kinds.default})` : 'Default agent'
   return (
     <>
       <label className="kanban-modal-form__label" htmlFor="start-task-agent">
-        Агент
+        Agent
       </label>
       <select
         id="start-task-agent"
@@ -217,12 +217,12 @@ function AgentPicker({ kinds, value, onChange }: AgentPickerProps) {
         <option value="">{defaultLabel}</option>
         {(kinds?.kinds ?? []).map((k) => (
           <option key={k.name} value={k.name} disabled={!k.available} title={k.error}>
-            {k.available ? k.name : `${k.name} — недоступен`}
+            {k.available ? k.name : `${k.name} — unavailable`}
           </option>
         ))}
       </select>
       <p className="kanban-modal-form__hint">
-        Реестр профилей пуст — оркестратор запустится выбранным агентом с моделью по умолчанию.
+        The profile registry is empty — the orchestrator starts with the chosen agent and its default model.
       </p>
     </>
   )
