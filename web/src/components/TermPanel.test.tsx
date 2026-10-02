@@ -274,9 +274,9 @@ function scrollFrames(socket: MockWebSocket): Array<{ type: string; lines: numbe
     .filter((frame) => frame.type === 'scroll')
 }
 
-function touchEvent(type: string, clientY: number): Event {
+function touchEvent(type: string, clientY: number, target: EventTarget = document.body): Event {
   const event = new Event(type, { bubbles: true, cancelable: true })
-  const touch = { identifier: 1, target: document.body, clientX: 0, clientY, pageX: 0, pageY: clientY }
+  const touch = { identifier: 1, target, clientX: 0, clientY, pageX: 0, pageY: clientY }
   const list = Object.assign([touch], { item: (index: number) => (index === 0 ? touch : null) })
   for (const key of ['touches', 'targetTouches', 'changedTouches']) {
     Object.defineProperty(event, key, { value: list })
@@ -432,8 +432,8 @@ describe('TermPanel', () => {
 
     expect(scrollFrames(socket)).toEqual([{ type: 'scroll', lines: -3 }])
     const binaryInput = socket.sent
-      .filter((data): data is Uint8Array => data instanceof Uint8Array)
-      .map((data) => new TextDecoder().decode(data))
+      .filter((data) => ArrayBuffer.isView(data))
+      .map((data) => new TextDecoder().decode(data as Uint8Array))
       .join('')
     expect(binaryInput).not.toMatch(/\x1b(?:\[|O)[AB]/)
   })
@@ -457,6 +457,47 @@ describe('TermPanel', () => {
 
     act(() => vi.advanceTimersByTime(16))
     expect(scrollFrames(socket)).toEqual([{ type: 'scroll', lines: -1 }])
+  })
+
+  it('sends pending scroll before paste input and does not replay it on the animation frame', () => {
+    render(<TermPanel sessionId="sess-1" />)
+    const socket = MockWebSocket.instances[0]
+    act(() => socket.triggerOpen())
+    const term = mountedTerm()
+    const paste = 'qg/' + 'x'.repeat(2048)
+
+    act(() => {
+      term.element!.querySelector('.xterm-screen')!.dispatchEvent(
+        new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -3, deltaMode: 1 })
+      )
+      term.paste(paste)
+      vi.advanceTimersByTime(16)
+    })
+
+    const nonResizeFrames = socket.sent.slice(1)
+    expect(nonResizeFrames).toHaveLength(2)
+    expect(typeof nonResizeFrames[0]).toBe('string')
+    expect(nonResizeFrames[0]).toBe(JSON.stringify({ type: 'scroll', lines: -3 }))
+    expect(ArrayBuffer.isView(nonResizeFrames[1])).toBe(true)
+    expect(new TextDecoder().decode(nonResizeFrames[1] as Uint8Array)).toBe(paste)
+  })
+
+  it('drops queued scroll if the app enables mouse tracking before the frame', async () => {
+    render(<TermPanel sessionId="sess-1" />)
+    const socket = MockWebSocket.instances[0]
+    act(() => socket.triggerOpen())
+    const term = mountedTerm()
+
+    act(() => {
+      term.element!.querySelector('.xterm-screen')!.dispatchEvent(
+        new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -3, deltaMode: 1 })
+      )
+    })
+    await writeTerm(term, '\x1b[?1003h')
+    expect(term.modes.mouseTrackingMode).toBe('any')
+    act(() => vi.advanceTimersByTime(16))
+
+    expect(scrollFrames(socket)).toEqual([])
   })
 
   it('reads mouse tracking mode again on each wheel event', async () => {
@@ -490,17 +531,22 @@ describe('TermPanel', () => {
     const { container } = render(<TermPanel sessionId="sess-1" />)
     const socket = MockWebSocket.instances[0]
     act(() => socket.triggerOpen())
-    const panel = container.querySelector('.term-panel__xterm')!
-    const move = touchEvent('touchmove', 40)
+    const screen = container.querySelector('.xterm-screen')!
+    const move = touchEvent('touchmove', 40, screen)
+    const documentMove = vi.fn()
+    document.addEventListener('touchmove', documentMove)
 
     act(() => {
-      panel.dispatchEvent(touchEvent('touchstart', 38))
-      panel.dispatchEvent(move)
+      screen.dispatchEvent(touchEvent('touchstart', 38, screen))
+      screen.dispatchEvent(move)
       vi.advanceTimersByTime(16)
     })
+    document.removeEventListener('touchmove', documentMove)
 
     expect(move.defaultPrevented).toBe(true)
+    expect(documentMove).not.toHaveBeenCalled()
     expect(scrollFrames(socket)).toEqual([{ type: 'scroll', lines: -2 }])
+    expect(socket.sent.some((data) => ArrayBuffer.isView(data))).toBe(false)
   })
 
   it('does not consume touch movement when the app owns the mouse', async () => {
@@ -508,16 +554,19 @@ describe('TermPanel', () => {
     const socket = MockWebSocket.instances[0]
     act(() => socket.triggerOpen())
     await writeTerm(mountedTerm(), '\x1b[?1003h')
-    const panel = container.querySelector('.term-panel__xterm')!
-    const move = touchEvent('touchmove', 38)
+    const screen = container.querySelector('.xterm-screen')!
+    const move = touchEvent('touchmove', 38, screen)
+    const documentMove = vi.fn()
+    document.addEventListener('touchmove', documentMove)
 
     act(() => {
-      panel.dispatchEvent(touchEvent('touchstart', 40))
-      panel.dispatchEvent(move)
+      screen.dispatchEvent(touchEvent('touchstart', 40, screen))
+      screen.dispatchEvent(move)
       vi.advanceTimersByTime(16)
     })
+    document.removeEventListener('touchmove', documentMove)
 
-    expect(move.defaultPrevented).toBe(false)
+    expect(documentMove).toHaveBeenCalledOnce()
     expect(scrollFrames(socket)).toEqual([])
   })
 

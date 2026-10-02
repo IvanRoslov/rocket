@@ -307,7 +307,7 @@ export function TermPanel({ sessionId, readonly, onResize, fontSize }: TermPanel
 
     const flushScroll = () => {
       scrollFrame = null
-      if (ws && ws.readyState === WebSocket.OPEN) {
+      if (!appOwnsMouse() && ws && ws.readyState === WebSocket.OPEN) {
         // A single gesture may contain many events; keep each frame within
         // the daemon's 1000-line control-frame limit without losing movement.
         while (pendingScroll !== 0) {
@@ -450,6 +450,10 @@ export function TermPanel({ sessionId, readonly, onResize, fontSize }: TermPanel
     if (!readonly) {
       term.onData((data) => {
         if (ws && ws.readyState === WebSocket.OPEN) {
+          // Keep scroll ahead of the first key or paste so the daemon can
+          // leave copy-mode before delivering that input to the program.
+          if (scrollFrame !== null) cancelAnimationFrame(scrollFrame)
+          flushScroll()
           ws.send(new TextEncoder().encode(data))
         }
       })
