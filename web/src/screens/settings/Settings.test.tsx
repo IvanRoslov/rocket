@@ -311,3 +311,13 @@ describe('SettingsScreen — Brainstorm cache', () => {
     server.events.removeAllListeners()
   })
 })
+
+describe('SettingsScreen — Модели', () => {
+  it('opens the model-profile registry from the nav', async () => {
+    const user = userEvent.setup()
+    renderScreen()
+    await gotoSection(user, 'Модели')
+    expect(await screen.findByRole('heading', { name: 'Модели' })).toBeInTheDocument()
+    expect(await screen.findByRole('row', { name: /^claude-opus\s/ })).toBeInTheDocument()
+  })
+})

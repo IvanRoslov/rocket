@@ -155,3 +155,26 @@ describe('SessionRail agent badges', () => {
     expect(within(claudeCard).getByText('claude-code')).toBeInTheDocument()
   })
 })
+
+describe('SessionRail model profile', () => {
+  it('shows the orchestrator’s profile snapshot next to its agent', () => {
+    renderRail()
+    const orch = document.querySelector<HTMLElement>('.session-rail__orch')!
+    expect(within(orch).getByText('claude-opus (opus, high)')).toBeInTheDocument()
+  })
+
+  it('shows a worker’s profile, and nothing for a worker launched without one', () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const workers = sessions.filter((s) => s.kind === 'worker')
+    const profiled = { ...workers[0], profile: 'codex' }
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionRail workers={[profiled, workers[1]]} />
+      </QueryClientProvider>,
+    )
+    const first = screen.getByText(profiled.tmux_name).closest<HTMLElement>('.session-rail__worker')!
+    expect(within(first).getByText('codex')).toHaveClass('session-rail__model')
+    const second = screen.getByText(workers[1].tmux_name).closest<HTMLElement>('.session-rail__worker')!
+    expect(second.querySelector('.session-rail__model')).toBeNull()
+  })
+})

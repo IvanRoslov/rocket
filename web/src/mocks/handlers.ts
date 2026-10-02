@@ -10,6 +10,7 @@ import type { Device, PairingCode } from '../lib/auth'
 import { isHuman } from '../lib/participants'
 import { slugify } from '../lib/slug'
 import type {
+  ModelProfile,
   Agent,
   AgentInboxMessage,
   BrainstormOutcome,
@@ -40,6 +41,7 @@ import {
   questions,
   repos,
   sessions,
+  modelProfiles,
   settings,
   stormDocs,
   stormGates,
@@ -59,6 +61,44 @@ let settingsState: Settings = { ...settings }
 
 export function resetSettings(): void {
   settingsState = { ...settings }
+}
+
+// Mutable copy of the model-profile registry (task #5026), written by
+// POST/PATCH/DELETE /v1/model-profiles. Mutating tests call
+// `resetModelProfiles()` in `afterEach`.
+let profilesState: ModelProfile[] = modelProfiles.map((p) => ({ ...p }))
+
+export function resetModelProfiles(): void {
+  profilesState = modelProfiles.map((p) => ({ ...p }))
+}
+
+// Mirrors Agent.Efforts() (internal/agent/claudecode, internal/agent/codex).
+const AGENT_EFFORTS: Record<string, string[]> = {
+  'claude-code': ['low', 'medium', 'high', 'xhigh', 'max'],
+  codex: ['minimal', 'low', 'medium', 'high'],
+}
+
+function profileError(status: number, code: string, message: string) {
+  return HttpResponse.json({ error: { code, message } }, { status })
+}
+
+// validateProfileAgent (internal/api/model_profiles.go).
+function badProfileAgent(p: ModelProfile) {
+  const efforts = AGENT_EFFORTS[p.agent]
+  if (!efforts) return profileError(400, 'agent_unavailable', `unknown agent ${p.agent}`)
+  if (p.effort && !efforts.includes(p.effort)) {
+    return profileError(400, 'bad_effort', `effort ${p.effort} is not one of ${p.agent}'s: ${efforts.join(', ')}`)
+  }
+  return null
+}
+
+function settingsBody() {
+  return {
+    github_token: maskToken(settingsState.github_token),
+    orchestrator_brainstorm_custom: settingsState.orchestrator_brainstorm_custom ?? false,
+    default_orchestrator_profile: settingsState.default_orchestrator_profile ?? '',
+    default_worker_profile: settingsState.default_worker_profile ?? '',
+  }
 }
 
 // Mutable copies of the repos/projects fixtures, written by
@@ -616,7 +656,22 @@ export const handlers = [
     if (!task) {
       return HttpResponse.json({ error: { code: 'not_found', message: `task ${id} not found` } }, { status: 404 })
     }
-    const body = (await request.json()) as { status?: TaskStatus; title?: string; description?: string }
+    const body = (await request.json()) as {
+      status?: TaskStatus
+      title?: string
+      description?: string
+      allowed_profiles?: string[]
+    }
+    if (body.allowed_profiles) {
+      const unknown = body.allowed_profiles.filter((n) => !profilesState.some((p) => p.name === n))
+      if (unknown.length > 0) {
+        return HttpResponse.json(
+          { error: { code: 'profile_not_found', message: `unknown profiles: ${unknown.join(', ')}` } },
+          { status: 400 },
+        )
+      }
+      task.allowed_profiles = body.allowed_profiles
+    }
     if (body.status === 'cancelled') {
       return HttpResponse.json(
         { error: { code: 'use_cancel', message: 'use POST /v1/tasks/{id}/cancel to cancel a task' } },
@@ -1042,30 +1097,42 @@ export const handlers = [
   // --------------------------------------------------------------------
 
   // GET always 200s; `login` is never present here (only on PUT).
-  http.get('/v1/settings', () =>
-    HttpResponse.json({
-      github_token: maskToken(settingsState.github_token),
-      orchestrator_brainstorm_custom: settingsState.orchestrator_brainstorm_custom ?? false,
-    }),
-  ),
+  http.get('/v1/settings', () => HttpResponse.json(settingsBody())),
 
   http.put('/v1/settings', async ({ request }) => {
-    const body = (await request.json()) as { github_token?: string; orchestrator_brainstorm_custom?: boolean }
+    const body = (await request.json()) as {
+      github_token?: string
+      orchestrator_brainstorm_custom?: boolean
+      default_orchestrator_profile?: string
+      default_worker_profile?: string
+    }
     // Only the fields present are applied (handlePutSettings): the storm
     // toggle alone never touches the token.
     if (body.github_token === undefined) {
-      if (body.orchestrator_brainstorm_custom === undefined) {
+      const defaults = [body.default_orchestrator_profile, body.default_worker_profile]
+      if (body.orchestrator_brainstorm_custom === undefined && defaults.every((d) => d === undefined)) {
         return HttpResponse.json({ error: { code: 'bad_request', message: 'nothing to update' } }, { status: 400 })
       }
-      settingsState = { ...settingsState, orchestrator_brainstorm_custom: body.orchestrator_brainstorm_custom }
-      return HttpResponse.json({
-        github_token: maskToken(settingsState.github_token),
-        orchestrator_brainstorm_custom: settingsState.orchestrator_brainstorm_custom,
-      })
+      for (const d of defaults) {
+        if (d && !profilesState.some((p) => p.name === d)) {
+          return profileError(400, 'profile_not_found', `no profile ${d}`)
+        }
+      }
+      settingsState = {
+        ...settingsState,
+        ...(body.orchestrator_brainstorm_custom !== undefined && {
+          orchestrator_brainstorm_custom: body.orchestrator_brainstorm_custom,
+        }),
+        ...(body.default_orchestrator_profile !== undefined && {
+          default_orchestrator_profile: body.default_orchestrator_profile,
+        }),
+        ...(body.default_worker_profile !== undefined && { default_worker_profile: body.default_worker_profile }),
+      }
+      return HttpResponse.json(settingsBody())
     }
     const token = body.github_token ?? ''
     if (token === '') {
-      settingsState = { github_token: '' }
+      settingsState = { ...settingsState, github_token: '' }
       return HttpResponse.json({ github_token: '' })
     }
     // Fixture stand-ins for GitHub's /user validation: a token starting
@@ -1083,7 +1150,7 @@ export const handlers = [
         { status: 502 },
       )
     }
-    settingsState = { github_token: token }
+    settingsState = { ...settingsState, github_token: token }
     return HttpResponse.json({ github_token: maskToken(token), login: 'acme-bot' })
   }),
 
@@ -1468,9 +1535,61 @@ export const handlers = [
     HttpResponse.json({
       default: 'claude-code',
       kinds: [
-        { name: 'claude-code', available: true },
-        { name: 'codex', available: false, error: 'codex not found in PATH' },
+        { name: 'claude-code', available: true, efforts: AGENT_EFFORTS['claude-code'] },
+        { name: 'codex', available: false, error: 'codex not found in PATH', efforts: AGENT_EFFORTS.codex },
       ],
     }),
   ),
+
+  // Model profiles — internal/api/model_profiles.go (task #5026).
+  http.get('/v1/model-profiles', () => HttpResponse.json({ profiles: profilesState })),
+
+  http.post('/v1/model-profiles', async ({ request }) => {
+    const body = (await request.json()) as Partial<ModelProfile>
+    if (!body.name || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(body.name)) {
+      return profileError(400, 'bad_request', 'name must match ^[a-z0-9][a-z0-9-]{0,39}$')
+    }
+    if (profilesState.some((p) => p.name === body.name)) {
+      return profileError(409, 'profile_exists', `profile ${body.name} already exists`)
+    }
+    const p: ModelProfile = {
+      name: body.name,
+      agent: body.agent ?? '',
+      model: body.model ?? '',
+      effort: body.effort ?? '',
+      description: body.description ?? '',
+      enabled: body.enabled ?? true,
+      position: body.position ?? Math.max(-1, ...profilesState.map((e) => e.position)) + 1,
+    }
+    const bad = badProfileAgent(p)
+    if (bad) return bad
+    profilesState = [...profilesState, p]
+    return HttpResponse.json(p, { status: 201 })
+  }),
+
+  http.patch('/v1/model-profiles/:name', async ({ params, request }) => {
+    const current = profilesState.find((p) => p.name === params.name)
+    if (!current) return profileError(404, 'profile_not_found', `no profile ${params.name}`)
+    const body = (await request.json()) as Partial<ModelProfile>
+    if (body.name !== undefined && body.name !== current.name) {
+      return profileError(400, 'bad_request', 'a profile cannot be renamed')
+    }
+    const next = { ...current, ...body }
+    const bad = badProfileAgent(next)
+    if (bad) return bad
+    profilesState = profilesState.map((p) => (p.name === current.name ? next : p))
+    return HttpResponse.json(next)
+  }),
+
+  http.delete('/v1/model-profiles/:name', ({ params }) => {
+    const name = String(params.name)
+    for (const key of ['default_orchestrator_profile', 'default_worker_profile'] as const) {
+      if (settingsState[key] === name) {
+        return profileError(409, 'profile_in_use', `profile ${name} is the ${key}; pick another default first`)
+      }
+    }
+    if (!profilesState.some((p) => p.name === name)) return profileError(404, 'profile_not_found', `no profile ${name}`)
+    profilesState = profilesState.filter((p) => p.name !== name)
+    return new HttpResponse(null, { status: 204 })
+  }),
 ]

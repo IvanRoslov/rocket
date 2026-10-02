@@ -225,7 +225,7 @@ test('search filters cards by title', async () => {
   expect(screen.queryByText('Billing v2')).not.toBeInTheDocument()
 })
 
-test('Start button on a backlog card opens the agent modal and posts /start', async () => {
+test('Start button on a backlog card opens the profile modal and posts /start', async () => {
   let capturedBody: unknown
   server.use(
     http.post('/v1/tasks/:id/start', async ({ request, params }) => {
@@ -243,10 +243,12 @@ test('Start button on a backlog card opens the agent modal and posts /start', as
   await userEvent.click(screen.getByRole('button', { name: 'Start ▸' }))
 
   const dialog = await screen.findByRole('dialog')
-  await userEvent.selectOptions(within(dialog).getByLabelText('Agent'), 'claude-code')
+  const profile = within(dialog).getByLabelText('Профиль')
+  await waitFor(() => expect(within(profile).getByRole('option', { name: 'claude-sonnet' })).toBeInTheDocument())
+  await userEvent.selectOptions(profile, 'claude-sonnet')
   await userEvent.click(within(dialog).getByRole('button', { name: 'Start ▸' }))
 
-  await waitFor(() => expect(capturedBody).toEqual({ agent: 'claude-code' }))
+  await waitFor(() => expect(capturedBody).toEqual({ profile: 'claude-sonnet', allowed_profiles: [] }))
 })
 
 test('drop handler calls PATCH with the target column status', async () => {

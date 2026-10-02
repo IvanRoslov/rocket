@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react'
 import { Badge, type BadgeTone } from '../../components/Badge'
 import { Dot, type DotState } from '../../components/Dot'
+import { sessionModelLabel } from '../../lib/profiles'
 import { useKillSession, useRestoreSession } from '../../lib/queries'
 import type { PendingQuiz, Session } from '../../lib/types'
 import { chatPagePath } from '../chat/ChatScreen'
@@ -62,6 +63,18 @@ function prText(session: Session): { text: string; tone: string } {
   if (session.ci_state === 'failing') return { text: `PR #${session.pr_number} ✗`, tone: 'session-rail__pr--err' }
   if (session.ci_state === 'pending') return { text: `PR #${session.pr_number} ⏳`, tone: 'session-rail__pr--warn' }
   return { text: `PR #${session.pr_number}`, tone: 'session-rail__pr--neutral' }
+}
+
+/** The session's model-profile snapshot (task #5026); nothing for a session
+ * launched without a profile. */
+function ModelLabel({ session }: { session: Session }) {
+  const label = sessionModelLabel(session)
+  if (!label) return null
+  return (
+    <span className="session-rail__model" title={`profile: ${label}`}>
+      {label}
+    </span>
+  )
 }
 
 /** «quiz» for an AskUserQuestion quiz, «Разрешение» for a TUI permission prompt (task #4881). */
@@ -122,6 +135,7 @@ export function SessionRail({ orchestrator, workers }: SessionRailProps) {
             <span className="session-rail__agent" title={`agent: ${orchestrator.agent}`}>
               {orchestrator.agent}
             </span>
+            <ModelLabel session={orchestrator} />
             <div className="session-rail__spacer" />
             {orchestrator.pending_quiz && <QuizBadge quiz={orchestrator.pending_quiz} />}
             <Badge tone={badgeTone(orchestrator)}>{orchestrator.activity ?? orchestrator.state}</Badge>
@@ -177,6 +191,7 @@ export function SessionRail({ orchestrator, workers }: SessionRailProps) {
                 <span className="session-rail__agent" title={`agent: ${w.agent}`}>
                   {w.agent}
                 </span>
+                <ModelLabel session={w} />
                 {w.pending_quiz && <QuizBadge quiz={w.pending_quiz} />}
                 <Badge tone={badgeTone(w)}>{w.activity ?? w.state}</Badge>
                 <span className={`session-rail__pr ${pr.tone}`}>{pr.text}</span>
