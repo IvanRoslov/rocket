@@ -1,57 +1,78 @@
 package store
 
 import (
+	"cmp"
 	"database/sql"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 )
 
-// Brainstorm quality metric (task #4901, spec §4): how often the human takes
-// the orchestrator's recommendation in a storm. Computed on the fly from the
-// brainstorm threads, the storm exit gates and the skill each task started
-// with — there is no aggregate table to keep in sync.
+// Brainstorm quality metric (task #4901, spec §4; task #5019): how often the
+// orchestrator's recommendation is taken in a storm. Every answer counts,
+// attributed to its author — the human or a persistent agent — so the two are
+// never summed into one figure. Computed on the fly from the brainstorm
+// threads, the storm exit gates and the skill each task started with — there
+// is no aggregate table to keep in sync.
 
 // SkillUnknown is the skill a storm is filed under when its task started
 // before tasks remembered their brainstorm skill.
 const SkillUnknown = "unknown"
 
-// BrainstormWeek is the metric of one ISO week for one brainstorm skill. Only
-// the human's answers count; Answered = Accepted + Corrected + WrongTurn.
-type BrainstormWeek struct {
-	Week                string // ISO week, "2026-W40"
-	Skill               string
+// BrainstormAnswers are the answer counters; Answered = Accepted + Corrected +
+// WrongTurn.
+type BrainstormAnswers struct {
 	Answered            int
 	Accepted            int
 	AcceptedWithComment int
 	Corrected           int
 	WrongTurn           int
+}
+
+// BrainstormWeek is the metric of one ISO week for one brainstorm skill and
+// one answerer: ParticipantHuman or a persistent agent's id.
+type BrainstormWeek struct {
+	Week       string // ISO week, "2026-W40"
+	Skill      string
+	AnsweredBy string
+	BrainstormAnswers
 }
 
 // BrainstormCounts are a storm's counters. Questions counts every brainstorm
-// thread of the task; the answer counters only those the human answered.
+// thread of the task; the answer counters every answered one, whoever
+// answered it.
 type BrainstormCounts struct {
-	Questions           int
-	Answered            int
-	Accepted            int
-	AcceptedWithComment int
-	Corrected           int
-	WrongTurn           int
-	SpecChanges         int // gates decided "changes"
+	Questions int
+	BrainstormAnswers
+	SpecChanges int // gates decided "changes" before the first Go
+}
+
+// BrainstormAnswererCounts are one answerer's share of a storm's answers.
+type BrainstormAnswererCounts struct {
+	AnsweredBy string
+	BrainstormAnswers
 }
 
 // BrainstormStorm is the metric of one task's storm over its whole life.
-// GoAt is when its gate got Go (nil before that); LastActivity is the latest
-// question or gate time, which orders storms and decides whether a storm
-// falls into a stats window.
+// AnsweredBy lists who answered, each once, in order of first answer, and
+// ByAnswerer splits the answer counters the same way; both are non-nil.
+// GoAt is when its gate got Go (nil before that); FirstTryGo is a Go without
+// spec changes before it; HasGate tells a storm whose gate was ever requested.
+// LastActivity is the latest question or gate time, which orders storms and
+// decides whether a storm falls into a stats window.
 type BrainstormStorm struct {
 	TaskID    int64
 	Title     string
 	ProjectID string
 	Skill     string
 	BrainstormCounts
+	AnsweredBy   []string
+	ByAnswerer   []BrainstormAnswererCounts
 	GoAt         *int64
+	FirstTryGo   bool
+	HasGate      bool
 	LastActivity int64
 }
 
@@ -80,6 +101,7 @@ func BrainstormWindowStart(now time.Time, weeks int) time.Time {
 
 // stormQuestion is one brainstorm thread as the metric reads it.
 type stormQuestion struct {
+	id           int64
 	taskID       int64
 	status       string
 	resolution   string
@@ -90,17 +112,17 @@ type stormQuestion struct {
 	answerAuthor sql.NullString // author of the latest answer entry
 }
 
-// humanAnswer reports whether q counts in the metric: answered with an
-// outcome, and the answer entry that closed it is the human's — a persistent
-// agent answering a storm question says nothing about the recommendation's
-// quality for the human.
-func (q stormQuestion) humanAnswer() bool {
-	return q.status == "resolved" && q.resolution == "answered" && q.outcome != "" &&
-		q.answerAuthor.Valid && IsHuman(q.answerAuthor.String)
+// answerer is the participant whose answer closed q, canonical ("" is the
+// human), and whether q counts in the metric at all: answered with an outcome.
+func (q stormQuestion) answerer() (string, bool) {
+	if q.status != "resolved" || q.resolution != "answered" || q.outcome == "" || !q.answerAuthor.Valid {
+		return "", false
+	}
+	return canonicalParticipant(q.answerAuthor.String), true
 }
 
 // count adds q's outcome to the answer counters.
-func (c *BrainstormCounts) count(q stormQuestion) {
+func (c *BrainstormAnswers) count(q stormQuestion) {
 	c.Answered++
 	switch q.outcome {
 	case OutcomeAccepted:
@@ -125,7 +147,7 @@ type stormGate struct {
 // loadStormData reads the brainstorm threads and the gates, of one task when
 // taskID != 0 or of all tasks.
 func (s *Store) loadStormData(taskID int64) ([]stormQuestion, []stormGate, error) {
-	qSQL := `SELECT q.task_id, q.status, COALESCE(q.resolution, ''), q.outcome, q.answer_comment,
+	qSQL := `SELECT q.id, q.task_id, q.status, COALESCE(q.resolution, ''), q.outcome, q.answer_comment,
 		       q.asked_at, COALESCE(q.resolved_at, 0),
 		       (SELECT m.author FROM question_messages m
 		         WHERE m.question_id = q.id AND m.kind = 'answer' ORDER BY m.id DESC LIMIT 1)
@@ -148,7 +170,7 @@ func (s *Store) loadStormData(taskID int64) ([]stormQuestion, []stormGate, error
 	var qs []stormQuestion
 	for rows.Next() {
 		var q stormQuestion
-		if err := rows.Scan(&q.taskID, &q.status, &q.resolution, &q.outcome, &q.comment,
+		if err := rows.Scan(&q.id, &q.taskID, &q.status, &q.resolution, &q.outcome, &q.comment,
 			&q.askedAt, &q.resolvedAt, &q.answerAuthor); err != nil {
 			rows.Close()
 			return nil, nil, fmt.Errorf("scan brainstorm question: %w", err)
@@ -229,7 +251,24 @@ func (s *Store) stormTasks(ids []int64) (map[int64]Task, error) {
 
 // newStorm is the empty storm of task t.
 func newStorm(t Task) *BrainstormStorm {
-	return &BrainstormStorm{TaskID: t.ID, Title: t.Title, ProjectID: t.ProjectID, Skill: stormSkill(t)}
+	return &BrainstormStorm{TaskID: t.ID, Title: t.Title, ProjectID: t.ProjectID, Skill: stormSkill(t),
+		AnsweredBy: []string{}, ByAnswerer: []BrainstormAnswererCounts{}}
+}
+
+// countAnswer adds q, answered by who, to the storm totals and to who's share,
+// appending who on its first answer.
+func (st *BrainstormStorm) countAnswer(q stormQuestion, who string) {
+	st.count(q)
+	for i := range st.ByAnswerer {
+		if st.ByAnswerer[i].AnsweredBy == who {
+			st.ByAnswerer[i].count(q)
+			return
+		}
+	}
+	c := BrainstormAnswererCounts{AnsweredBy: who}
+	c.count(q)
+	st.ByAnswerer = append(st.ByAnswerer, c)
+	st.AnsweredBy = append(st.AnsweredBy, who)
 }
 
 // buildStorms folds questions and gates into one storm per task that has
@@ -248,14 +287,20 @@ func buildStorms(qs []stormQuestion, gs []stormGate, tasks map[int64]Task) (map[
 		storms[taskID] = st
 		return st, nil
 	}
+	// Fold in answer order so AnsweredBy and ByAnswerer list each answerer
+	// at its first answer.
+	qs = slices.Clone(qs)
+	slices.SortStableFunc(qs, func(a, b stormQuestion) int {
+		return cmp.Or(cmp.Compare(a.resolvedAt, b.resolvedAt), cmp.Compare(a.id, b.id))
+	})
 	for _, q := range qs {
 		st, err := storm(q.taskID)
 		if err != nil {
 			return nil, err
 		}
 		st.Questions++
-		if q.humanAnswer() {
-			st.count(q)
+		if who, ok := q.answerer(); ok {
+			st.countAnswer(q, who)
 		}
 		st.LastActivity = max(st.LastActivity, q.askedAt, q.resolvedAt)
 	}
@@ -264,17 +309,25 @@ func buildStorms(qs []stormQuestion, gs []stormGate, tasks map[int64]Task) (map[
 		if err != nil {
 			return nil, err
 		}
-		switch g.status {
-		case "changes":
-			st.SpecChanges++
-		case "go":
-			// The storm exited at its first Go.
-			if g.decidedAt.Valid && (st.GoAt == nil || g.decidedAt.Int64 < *st.GoAt) {
-				v := g.decidedAt.Int64
-				st.GoAt = &v
-			}
+		st.HasGate = true
+		// The storm exited at its first Go.
+		if g.status == "go" && g.decidedAt.Valid && (st.GoAt == nil || g.decidedAt.Int64 < *st.GoAt) {
+			v := g.decidedAt.Int64
+			st.GoAt = &v
 		}
 		st.LastActivity = max(st.LastActivity, g.requestedAt, g.decidedAt.Int64)
+	}
+	// Spec changes count up to the first Go only, which is known once every
+	// gate is folded. A gate superseded by a new spec version is no change:
+	// only the human's explicit "changes" is.
+	for _, g := range gs {
+		st := storms[g.taskID]
+		if g.status == "changes" && (st.GoAt == nil || (g.decidedAt.Valid && g.decidedAt.Int64 < *st.GoAt)) {
+			st.SpecChanges++
+		}
+	}
+	for _, st := range storms {
+		st.FirstTryGo = st.GoAt != nil && st.SpecChanges == 0
 	}
 	return storms, nil
 }
@@ -312,25 +365,20 @@ func (s *Store) BrainstormStats(now time.Time, weeks int) (BrainstormStats, erro
 	start := BrainstormWindowStart(now, weeks).Unix()
 	loc := now.Location()
 
-	type weekKey struct{ week, skill string }
+	type weekKey struct{ week, skill, answeredBy string }
 	byWeek := map[weekKey]*BrainstormWeek{}
 	for _, q := range qs {
-		if !q.humanAnswer() || q.resolvedAt < start {
+		who, ok := q.answerer()
+		if !ok || q.resolvedAt < start {
 			continue
 		}
-		k := weekKey{ISOWeekLabel(time.Unix(q.resolvedAt, 0).In(loc)), storms[q.taskID].Skill}
+		k := weekKey{ISOWeekLabel(time.Unix(q.resolvedAt, 0).In(loc)), storms[q.taskID].Skill, who}
 		w, ok := byWeek[k]
 		if !ok {
-			w = &BrainstormWeek{Week: k.week, Skill: k.skill}
+			w = &BrainstormWeek{Week: k.week, Skill: k.skill, AnsweredBy: k.answeredBy}
 			byWeek[k] = w
 		}
-		c := BrainstormCounts{}
-		c.count(q)
-		w.Answered += c.Answered
-		w.Accepted += c.Accepted
-		w.AcceptedWithComment += c.AcceptedWithComment
-		w.Corrected += c.Corrected
-		w.WrongTurn += c.WrongTurn
+		w.count(q)
 	}
 
 	out := BrainstormStats{Weeks: []BrainstormWeek{}, Storms: []BrainstormStorm{}}
@@ -342,7 +390,14 @@ func (s *Store) BrainstormStats(now time.Time, weeks int) (BrainstormStats, erro
 		if a.Week != b.Week {
 			return a.Week < b.Week
 		}
-		return a.Skill < b.Skill
+		if a.Skill != b.Skill {
+			return a.Skill < b.Skill
+		}
+		// The human first, then the agents by id.
+		if (a.AnsweredBy == ParticipantHuman) != (b.AnsweredBy == ParticipantHuman) {
+			return a.AnsweredBy == ParticipantHuman
+		}
+		return a.AnsweredBy < b.AnsweredBy
 	})
 	for _, st := range storms {
 		if st.LastActivity >= start {
