@@ -6,11 +6,13 @@ import {
   docAt,
   exitState,
   gateHistoryLabel,
+  gateState,
   isBrainstorm,
   isRecommended,
   latestDoc,
   pendingGate,
   showBrainstormTab,
+  stormWho,
 } from './brainstorm'
 
 const doc = (p: Partial<TaskDoc>): TaskDoc => ({
@@ -157,5 +159,24 @@ describe('exitState', () => {
   it('reports Go when the newest gate passed', () => {
     const g = gate({ id: 5, status: 'go' })
     expect(exitState([g], 1)).toEqual({ kind: 'go', gate: g })
+  })
+})
+
+describe('who stormed (task #5019)', () => {
+  it.each<[string[], string]>([
+    [[], '—'],
+    [['cto'], 'cto'],
+    [['human', 'cto'], 'you + cto'],
+  ])('stormWho(%j) is %s', (ids, label) => {
+    expect(stormWho(ids)).toBe(label)
+  })
+
+  it.each<[{ go_at: number | null; spec_changes: number; has_gate: boolean }, string]>([
+    [{ go_at: 100, spec_changes: 0, has_gate: true }, 'Go first try'],
+    [{ go_at: 100, spec_changes: 2, has_gate: true }, 'Go after 2 changes'],
+    [{ go_at: null, spec_changes: 1, has_gate: true }, 'awaiting Go (changes: 1)'],
+    [{ go_at: null, spec_changes: 0, has_gate: false }, '—'],
+  ])('gateState(%j) is %s', (s, label) => {
+    expect(gateState(s)).toBe(label)
   })
 })

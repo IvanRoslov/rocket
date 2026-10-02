@@ -1,7 +1,9 @@
 // An answered storm question (task #4901 spec §3.1): the chosen option (or
 // "own answer"), the human's words, the outcome — which the human may correct
-// — and whether the orchestrator recorded the answer from its terminal.
+// — whether the orchestrator recorded the answer from its terminal, and which
+// agent answered when it was not the human (task #5019).
 
+import { isHuman } from '../lib/participants'
 import type { BrainstormFields, BrainstormOutcome } from '../lib/types'
 import './brainstorm.css'
 
@@ -57,6 +59,9 @@ export function BrainstormResult({ question, onOverride, busy, error }: Brainsto
           {outcomeLabel(outcome, comment)}
         </span>
         {question.outcome_overridden && <span className="brainstorm-result__note">changed by hand</span>}
+        {!isHuman(question.answered_by) && (
+          <span className="brainstorm-result__source">answered by {question.answered_by}</span>
+        )}
         {question.answer_source === 'terminal' && (
           <span className="brainstorm-result__source">From terminal</span>
         )}

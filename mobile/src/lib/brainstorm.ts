@@ -1,6 +1,7 @@
 // Pure rules behind the storm UI (task #4901, spec §3.1): outcome labels,
-// the recommendation star, the Problem doc and the exit gate. No React, so
-// they are unit-tested without rendering.
+// the recommendation star, the Problem doc, the exit gate, and who stormed
+// (task #5019). No React, so they are unit-tested without rendering.
+import { participantLabel } from './threads'
 import type { BrainstormFields, BrainstormOutcome, GateStatus, TaskDoc, TaskDocKind, TaskGate, TaskStatus } from '../api/types'
 
 export const OUTCOMES: BrainstormOutcome[] = ['accepted', 'corrected', 'wrong_turn']
@@ -103,4 +104,16 @@ export function exitState(gates: TaskGate[], specVersion: number | undefined): E
     return { kind: 'waiting_request' }
   }
   return { kind: 'waiting_spec' }
+}
+
+/** A storm's participants in first-answer order: "you + cto"; "—" with no answers (the web's wording). */
+export function stormWho(ids: string[]): string {
+  return ids.length === 0 ? '—' : ids.map((id) => participantLabel(id)).join(' + ')
+}
+
+/** How the human received the spec gate. Without `has_gate` "no gates" and "pending, 0 changes" look alike. */
+export function gateState(s: { go_at: number | null; spec_changes: number; has_gate: boolean }): string {
+  if (s.go_at !== null) return s.spec_changes === 0 ? 'Go first try' : `Go after ${s.spec_changes} changes`
+  if (s.has_gate) return `awaiting Go (changes: ${s.spec_changes})`
+  return '—'
 }

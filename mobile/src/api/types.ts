@@ -442,10 +442,28 @@ export interface BrainstormStorm {
   accepted_with_comment: number
   corrected: number
   wrong_turn: number
-  /** Gates decided as "changes". */
+  /** Participants who answered ("human" or an agent id), each once, in first-answer order; `[]` with none. */
+  answered_by: string[]
+  /** Per-participant counters in the same order; the totals above are their sum. */
+  by_answerer: BrainstormAnswerer[]
+  /** Gates decided as "changes" before the first Go (all of them without a Go). */
   spec_changes: number
+  /** `go_at != null && spec_changes == 0`. */
+  first_try_go: boolean
+  /** The task had at least one gate, in any status. */
+  has_gate: boolean
   /** Unix seconds of the Go; null while there is none. */
   go_at: number | null
+}
+
+/** One participant's answers within a storm. */
+export interface BrainstormAnswerer {
+  answered_by: string
+  answered: number
+  accepted: number
+  accepted_with_comment: number
+  corrected: number
+  wrong_turn: number
 }
 
 export interface GithubRepo {

@@ -677,11 +677,21 @@ export interface BrainstormCounts {
   wrong_turn: number
 }
 
-/** One ISO week of one storm skill. `skill` is `"unknown"` for tasks started without one. */
+/**
+ * One ISO week of one storm skill and one participant. `skill` is `"unknown"`
+ * for tasks started without one. Every answer counts, attributed to its author.
+ */
 export interface BrainstormWeek extends BrainstormCounts {
   /** ISO week, e.g. "2026-W40". */
   week: string
   skill: string
+  /** Who answered: "human" or an agent id ("cto"). */
+  answered_by: string
+}
+
+/** One participant's answers within a storm. */
+export interface BrainstormAnswerer extends BrainstormCounts {
+  answered_by: string
 }
 
 /** One task's storm — also the shape of `GET /v1/tasks/{id}/brainstorm/stats`. */
@@ -691,8 +701,16 @@ export interface BrainstormStorm extends BrainstormCounts {
   project_id: string
   skill: string
   questions: number
-  /** Gates decided `changes`. */
+  /** Participants who answered, each once, in first-answer order; `[]` with no answers. */
+  answered_by: string[]
+  /** Per-participant counters in the same order; the storm totals are their sum. */
+  by_answerer: BrainstormAnswerer[]
+  /** Gates decided `changes` before the first Go (all of them without a Go). */
   spec_changes: number
+  /** `go_at != null && spec_changes == 0`. */
+  first_try_go: boolean
+  /** The task had at least one gate, in any status. */
+  has_gate: boolean
   /** When the storm got its Go; null if not yet. */
   go_at: number | null
 }

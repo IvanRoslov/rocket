@@ -28,6 +28,13 @@
   font: 600 15px var(--font-ui);
   color: var(--text);
 }
+/* Participant switch above the chart: as wide as its options, not the page. */
+.bm .segmented {
+  align-self: flex-start;
+}
+.bm .segmented__option {
+  padding: 0 14px;
+}
 .bm-empty {
   font: 13.5px var(--font-ui);
   color: var(--text-4);
