@@ -629,6 +629,16 @@ export function useModelCatalog(): UseQueryResult<AgentCatalog[]> {
   })
 }
 
+/** `GET /v1/model-catalog?refresh=1` -> the catalogs refetched past the
+ * daemon's 10-minute cache; the result replaces `useModelCatalog`'s data. */
+export function useRefreshModelCatalog(): UseMutationResult<AgentCatalog[], Error, void> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.get<{ agents: AgentCatalog[] }>('/v1/model-catalog?refresh=1').then((r) => r.agents),
+    onSuccess: (agents) => queryClient.setQueryData(['model-catalog'], agents),
+  })
+}
+
 /** `POST /v1/model-profiles/import-catalog` -> a disabled profile for every
  * catalog model no profile uses yet (main only unless `include_legacy`). Human-only. */
 export function useImportCatalog(): UseMutationResult<ImportCatalogResult, Error, { include_legacy: boolean }> {

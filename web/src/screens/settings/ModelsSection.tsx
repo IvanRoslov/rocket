@@ -14,6 +14,7 @@ import {
   useImportCatalog,
   useModelCatalog,
   useModelProfiles,
+  useRefreshModelCatalog,
   useSettings,
   useUpdateModelProfile,
   useUpdateSettings,
@@ -53,6 +54,7 @@ function ProfileModal({ profile, kinds, catalogs, onClose }: ProfileModalProps) 
   const agentEfforts = (a: string) => kinds.find((k) => k.name === a)?.efforts ?? []
   const catalog = catalogOf(agent)
   const { efforts, disabled: effortDisabled } = effortsFor(agentEfforts(agent), catalog, model)
+  const defaultEffort = findCatalogModel(catalog, model)?.default_effort
   const isCustom = custom || (model !== '' && !findCatalogModel(catalog, model))
   const mainModels = catalog?.models.filter((m) => m.main) ?? []
   const previousModels = catalog?.models.filter((m) => !m.main) ?? []
@@ -178,7 +180,7 @@ function ProfileModal({ profile, kinds, catalogs, onClose }: ProfileModalProps) 
           <option value="">{DEFAULT_LABEL}</option>
           {efforts.map((level) => (
             <option key={level} value={level}>
-              {level}
+              {level === defaultEffort ? `${level} — по умолчанию у модели` : level}
             </option>
           ))}
         </select>
@@ -250,6 +252,7 @@ function DefaultSelect({ id, label, value, profiles, disabled, onChange }: Defau
 
 /** Where each agent's model list came from, and why it fell back if it did. */
 function CatalogSources({ catalogs }: { catalogs: AgentCatalog[] }) {
+  const refresh = useRefreshModelCatalog()
   return (
     <div className="settings-models__sources">
       {catalogs.map((c) => (
@@ -258,13 +261,21 @@ function CatalogSources({ catalogs }: { catalogs: AgentCatalog[] }) {
           {c.warning && <span className="settings-models__warning"> — {c.warning}</span>}
         </p>
       ))}
+      <Button variant="secondary" size="sm" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
+        {refresh.isPending ? 'Обновляю…' : 'Обновить'}
+      </Button>
+      {refresh.isError && (
+        <p className="settings-error" role="alert">
+          Не удалось обновить список моделей: {refresh.error.message}
+        </p>
+      )}
     </div>
   )
 }
 
 function importSummary(r: ImportCatalogResult): string {
   if (r.created.length === 0) return 'Новых моделей нет — профили для всех уже есть'
-  return `Создано выключенных профилей: ${r.created.length} — ${r.created.join(', ')}`
+  return `Создано: ${r.created.length} (${r.created.join(', ')}). Профили выключены — включите нужные.`
 }
 
 /** One click: a disabled profile for every catalog model no profile uses yet. */

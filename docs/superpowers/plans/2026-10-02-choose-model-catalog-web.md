@@ -73,8 +73,9 @@ Tests (each fails first): groups + «Другая…» options for claude-code; 
 
 **Files:** same as Task 2.
 
-- Under the table: per agent `Список моделей <agent>: <catalogSourceText>`; warning in `settings-field__hint settings-models__warning` next to it.
-- Import block: checkbox «включая предыдущие», button «Добавить профили для всех моделей» (disabled while pending). Result: «Создано выключенных профилей: N — a, b» or «Новых моделей нет — профили для всех уже есть»; error via `profileErrorText` in `role="alert"`. Profiles list refreshes via invalidation.
+- Under the table: per agent `Список моделей <agent>: <catalogSourceText>`; warning in `settings-models__warning` next to it; «Обновить» → `useRefreshModelCatalog()` (`GET /v1/model-catalog?refresh=1`, result written into `['model-catalog']`).
+- Effort options mark the model's `default_effort` as «<level> — по умолчанию у модели».
+- Import block: checkbox «включая предыдущие», button «Добавить профили для всех моделей» (disabled while pending). Result: «Создано: N (a, b). Профили выключены — включите нужные.» or «Новых моделей нет — профили для всех уже есть»; error via `profileErrorText` in `role="alert"`. Profiles list refreshes via invalidation.
 
 Tests: source line + warning rendered from fixture; import sends `{include_legacy:false}` then new rows appear disabled; with checkbox sends `{include_legacy:true}`; second import shows the «нет» message (RF 5); 403 shows an error.
 

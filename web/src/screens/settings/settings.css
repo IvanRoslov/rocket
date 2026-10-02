@@ -432,6 +432,9 @@
 .settings-models__sources .settings-field__hint {
   margin-top: 3px;
 }
+.settings-models__sources .btn {
+  margin-top: 8px;
+}
 .settings-models__warning {
   color: var(--warn-text);
 }

@@ -182,6 +182,7 @@ describe('ModelsSection', () => {
       'high',
       'max',
     ])
+    expect(within(effort).getByRole('option', { name: 'high — по умолчанию у модели' })).toBeInTheDocument()
     // Opus 4.6 has no description in the catalog: its name stands in.
     expect(within(dialog).getByLabelText('Для чего подходит')).toHaveValue('Opus 4.6')
 
@@ -373,6 +374,20 @@ describe('ModelsSection', () => {
     expect(screen.getByText(/executable file not found/)).toBeInTheDocument()
   })
 
+  it('«Обновить» asks the daemon to refetch the catalog', async () => {
+    const urls: string[] = []
+    server.events.on('request:start', ({ request }) => {
+      if (new URL(request.url).pathname === '/v1/model-catalog') urls.push(new URL(request.url).search)
+    })
+    const user = userEvent.setup()
+    renderSection()
+    await screen.findByText('Список моделей claude-code: из кэша Claude Code')
+
+    await user.click(screen.getByRole('button', { name: 'Обновить' }))
+
+    await waitFor(() => expect(urls).toEqual(['', '?refresh=1']))
+  })
+
   it('imports the main catalog models as disabled profiles and lists them', async () => {
     const bodies = captureBodies('post', '/v1/model-profiles/import-catalog')
     const user = userEvent.setup()
@@ -383,7 +398,7 @@ describe('ModelsSection', () => {
 
     await waitFor(() => expect(bodies).toEqual([{ include_legacy: false }]))
     expect(await screen.findByRole('status')).toHaveTextContent(
-      'Создано выключенных профилей: 5 — claude-opus-5-5, claude-sonnet-5-5, claude-haiku-4-5-20251001, codex-gpt-6-sol, codex-gpt-5-6-luna',
+      'Создано: 5 (claude-opus-5-5, claude-sonnet-5-5, claude-haiku-4-5-20251001, codex-gpt-6-sol, codex-gpt-5-6-luna)',
     )
     const added = await screen.findByRole('row', { name: /^claude-opus-5-5\b/ })
     expect(within(added).getByRole('checkbox', { name: 'Включён' })).not.toBeChecked()
@@ -402,7 +417,7 @@ describe('ModelsSection', () => {
 
     await user.click(screen.getByRole('button', { name: 'Добавить профили для всех моделей' }))
     await waitFor(() =>
-      expect(screen.getByRole('status')).toHaveTextContent('Новых моделей нет — профили для всех уже есть'),
+      expect(screen.getByRole('status')).toHaveTextContent('Новых моделей нет'),
     )
     expect(bodies).toEqual([{ include_legacy: true }, { include_legacy: true }])
   })
