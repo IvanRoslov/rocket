@@ -366,6 +366,61 @@ describe('ModelsSection', () => {
     await waitFor(() => expect(worker).toHaveValue('codex'))
   })
 
+  it('says where each agent’s model list came from, with the fallback warning', async () => {
+    renderSection()
+    expect(await screen.findByText('Список моделей claude-code: из кэша Claude Code')).toBeInTheDocument()
+    expect(screen.getByText('Список моделей codex: встроенный')).toBeInTheDocument()
+    expect(screen.getByText(/executable file not found/)).toBeInTheDocument()
+  })
+
+  it('imports the main catalog models as disabled profiles and lists them', async () => {
+    const bodies = captureBodies('post', '/v1/model-profiles/import-catalog')
+    const user = userEvent.setup()
+    renderSection()
+    await screen.findByRole('row', { name: /^codex\b/ })
+
+    await user.click(screen.getByRole('button', { name: 'Добавить профили для всех моделей' }))
+
+    await waitFor(() => expect(bodies).toEqual([{ include_legacy: false }]))
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Создано выключенных профилей: 5 — claude-opus-5-5, claude-sonnet-5-5, claude-haiku-4-5-20251001, codex-gpt-6-sol, codex-gpt-5-6-luna',
+    )
+    const added = await screen.findByRole('row', { name: /^claude-opus-5-5\b/ })
+    expect(within(added).getByRole('checkbox', { name: 'Включён' })).not.toBeChecked()
+    expect(screen.queryByRole('row', { name: /^claude-opus-4-6\b/ })).not.toBeInTheDocument()
+  })
+
+  it('«включая предыдущие» imports previous models too; a second run reports nothing new', async () => {
+    const bodies = captureBodies('post', '/v1/model-profiles/import-catalog')
+    const user = userEvent.setup()
+    renderSection()
+    await screen.findByRole('row', { name: /^codex\b/ })
+
+    await user.click(screen.getByRole('checkbox', { name: 'включая предыдущие' }))
+    await user.click(screen.getByRole('button', { name: 'Добавить профили для всех моделей' }))
+    expect(await screen.findByRole('row', { name: /^claude-opus-4-6\b/ })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Добавить профили для всех моделей' }))
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent('Новых моделей нет — профили для всех уже есть'),
+    )
+    expect(bodies).toEqual([{ include_legacy: true }, { include_legacy: true }])
+  })
+
+  it('shows an import failure in place', async () => {
+    server.use(
+      http.post('/v1/model-profiles/import-catalog', () =>
+        HttpResponse.json({ error: { code: 'human_only', message: 'only a human can do this' } }, { status: 403 }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderSection()
+    await screen.findByRole('row', { name: /^codex\b/ })
+
+    await user.click(screen.getByRole('button', { name: 'Добавить профили для всех моделей' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('only a human can do this')
+  })
+
   it('an empty registry invites adding the first profile', async () => {
     server.use(http.get('/v1/model-profiles', () => HttpResponse.json({ profiles: [] })))
     renderSection()

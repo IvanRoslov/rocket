@@ -11,15 +11,16 @@ import {
   useAgentKinds,
   useCreateModelProfile,
   useDeleteModelProfile,
+  useImportCatalog,
   useModelCatalog,
   useModelProfiles,
   useSettings,
   useUpdateModelProfile,
   useUpdateSettings,
 } from '../../lib/queries'
-import { effortsFor, findCatalogModel } from '../../lib/catalog'
+import { catalogSourceText, effortsFor, findCatalogModel } from '../../lib/catalog'
 import { profileErrorText } from '../../lib/profiles'
-import type { AgentCatalog, AgentKind, ModelProfile } from '../../lib/types'
+import type { AgentCatalog, AgentKind, ImportCatalogResult, ModelProfile } from '../../lib/types'
 
 const DEFAULT_LABEL = 'по умолчанию'
 /** The «Другая…» choice of the model picker: the model is typed by hand. */
@@ -247,6 +248,62 @@ function DefaultSelect({ id, label, value, profiles, disabled, onChange }: Defau
   )
 }
 
+/** Where each agent's model list came from, and why it fell back if it did. */
+function CatalogSources({ catalogs }: { catalogs: AgentCatalog[] }) {
+  return (
+    <div className="settings-models__sources">
+      {catalogs.map((c) => (
+        <p key={c.agent} className="settings-field__hint">
+          <span>{`Список моделей ${c.agent}: ${catalogSourceText(c)}`}</span>
+          {c.warning && <span className="settings-models__warning"> — {c.warning}</span>}
+        </p>
+      ))}
+    </div>
+  )
+}
+
+function importSummary(r: ImportCatalogResult): string {
+  if (r.created.length === 0) return 'Новых моделей нет — профили для всех уже есть'
+  return `Создано выключенных профилей: ${r.created.length} — ${r.created.join(', ')}`
+}
+
+/** One click: a disabled profile for every catalog model no profile uses yet. */
+function ImportCatalog() {
+  const importCatalog = useImportCatalog()
+  const [legacy, setLegacy] = useState(false)
+  return (
+    <div className="settings-card settings-models__import">
+      <div className="settings-models__import-row">
+        <Button
+          variant="secondary"
+          onClick={() => importCatalog.mutate({ include_legacy: legacy })}
+          disabled={importCatalog.isPending}
+        >
+          {importCatalog.isPending ? 'Добавляю…' : 'Добавить профили для всех моделей'}
+        </Button>
+        <label className="settings-toggle__row">
+          <input type="checkbox" checked={legacy} onChange={(e) => setLegacy(e.target.checked)} />
+          включая предыдущие
+        </label>
+      </div>
+      <p className="settings-field__hint">
+        Профиль появится для каждой модели из каталога, у которой его ещё нет. Новые профили выключены — включите
+        нужные.
+      </p>
+      {importCatalog.isSuccess && (
+        <p className="settings-field__hint settings-models__import-result" role="status">
+          {importSummary(importCatalog.data)}
+        </p>
+      )}
+      {importCatalog.isError && (
+        <p className="settings-error" role="alert">
+          Не удалось добавить: {profileErrorText(importCatalog.error)}
+        </p>
+      )}
+    </div>
+  )
+}
+
 export function ModelsSection() {
   const profiles = useModelProfiles()
   const kinds = useAgentKinds()
@@ -363,7 +420,10 @@ export function ModelsSection() {
             {profileErrorText(rowError)}
           </p>
         )}
+        {catalogs.length > 0 && <CatalogSources catalogs={catalogs} />}
       </div>
+
+      <ImportCatalog />
 
       <div className="settings-card settings-models__defaults">
         <DefaultSelect
