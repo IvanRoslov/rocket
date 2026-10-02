@@ -36,7 +36,7 @@ func TestLaunchCommandModelAndEffort(t *testing.T) {
 }
 
 func TestEfforts(t *testing.T) {
-	want := []string{"minimal", "low", "medium", "high", "xhigh"}
+	want := []string{"minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
 	if got := New().Efforts(); !reflect.DeepEqual(got, want) {
 		t.Errorf("Efforts = %v, want %v", got, want)
 	}

@@ -75,6 +75,33 @@ func ShipsBrainstormSkill(a Agent) bool {
 	return ok && s.ShipsBrainstormSkill()
 }
 
+// Catalog sources (Catalog.Source).
+const (
+	CatalogSourceCLI     = "cli"
+	CatalogSourceCache   = "cache"
+	CatalogSourceBuiltin = "builtin"
+)
+
+// Catalog is the list of models an agent offers and where it came from.
+type Catalog struct {
+	Source    string    // CatalogSourceCLI | CatalogSourceCache | CatalogSourceBuiltin
+	FetchedAt time.Time // when the source fetched it; zero for builtin
+	Warning   string    // why a better source was skipped; empty when all went well
+	Models    []CatalogModel
+}
+
+// CatalogModel is one model of an agent's catalog.
+type CatalogModel struct {
+	ID, Name, Description string
+	// Main marks a current model (codex: visibility=list; claude-code:
+	// section=main); the rest are previous generations.
+	Main bool
+	// Efforts are the levels LaunchSpec.Effort may take with this model, in
+	// increasing order; empty means the model has no effort knob.
+	Efforts       []string
+	DefaultEffort string
+}
+
 // Agent represents an AI coding agent that can be launched with a given spec.
 type Agent interface {
 	// Name returns the name of the agent (e.g., "claude-code").
@@ -90,6 +117,12 @@ type Agent interface {
 	// Efforts returns the reasoning-effort levels LaunchSpec.Effort may take
 	// for this agent, in increasing order; nil if the agent has no such knob.
 	Efforts() []string
+
+	// Catalog returns the models this agent offers, from the best source
+	// available (the agent's own CLI, its on-disk cache, or a builtin
+	// snapshot). A broken or missing source is not an error: the adapter
+	// falls back and explains why in Catalog.Warning.
+	Catalog(ctx context.Context) (Catalog, error)
 
 	// LaunchCommand returns the command and arguments needed to launch the agent.
 	LaunchCommand(spec LaunchSpec) []string

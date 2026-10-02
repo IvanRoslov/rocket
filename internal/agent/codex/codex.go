@@ -302,11 +302,14 @@ func (c *Codex) LaunchCommand(spec agent.LaunchSpec) []string {
 	return cmd
 }
 
-// Efforts returns the model_reasoning_effort levels rocket offers for codex.
+// Efforts returns the model_reasoning_effort levels rocket offers for codex
+// when the model is not in the catalog (an alias, a custom model, or none):
+// the union of every catalog model's levels plus "minimal". Models in the
+// catalog are checked against their own CatalogModel.Efforts instead.
 // codex-cli 0.157.0 also knows "none"; it is left out on purpose — a profile
 // that turns reasoning off is not a choice worth offering an orchestrator.
 func (c *Codex) Efforts() []string {
-	return []string{"minimal", "low", "medium", "high", "xhigh"}
+	return []string{"minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
 }
 
 // Env returns environment variables for the agent. Same ROCKET_* keys as
