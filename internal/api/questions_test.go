@@ -1372,3 +1372,49 @@ func TestReplyReopens(t *testing.T) {
 		})
 	}
 }
+
+// TestPostTaskQuestions_DeliveredTextCarriesOptions: an agent participant
+// reads the question only as delivered text, so the answer choices — and the
+// recommended one of a storm question — travel with it (task #5027). Without
+// options the delivered text stays the bare framed body.
+func TestPostTaskQuestions_DeliveredTextCarriesOptions(t *testing.T) {
+	cases := []struct {
+		name string
+		req  map[string]any
+		want string
+	}{
+		{"storm with recommendation",
+			map[string]any{"body": "Which schema?", "type": "brainstorm",
+				"options": []string{"A", "B"}, "recommend": 2, "to": []string{"cto"}},
+			"Which schema?\n\nварианты: 1) A  2) B ★ рекомендовано"},
+		{"decision with options",
+			map[string]any{"body": "Which schema?", "options": []string{"A", "B"}, "to": []string{"cto"}},
+			"Which schema?\n\nварианты: 1) A  2) B"},
+		{"no options",
+			map[string]any{"body": "Which schema?", "to": []string{"cto"}},
+			"Which schema?"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			d := questionsTestDeps(t)
+			srv := newTestServer(t, d)
+			taskID := setupQuestionTask(t, d)
+			setupQuestionAgent(t, d)
+
+			resp := postJSONWithHeader(t, srv.URL+"/v1/tasks/"+itoa(taskID)+"/questions", "orch-1", c.req)
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusCreated {
+				t.Fatalf("status = %d, want 201", resp.StatusCode)
+			}
+
+			inbox, err := d.Store.ListInboxMessages("cto", store.InboxUnread, 0)
+			if err != nil {
+				t.Fatalf("ListInboxMessages: %v", err)
+			}
+			want := "[#" + itoa(taskID) + "/Q1 question from orch-1] " + c.want
+			if len(inbox) != 1 || inbox[0].Body != want {
+				t.Fatalf("cto inbox = %+v, want single message %q", inbox, want)
+			}
+		})
+	}
+}

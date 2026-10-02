@@ -305,7 +305,7 @@ func renderAgentQuestions(role string, qs []agentQuestionRow) string {
 		if q.Context != "" {
 			fmt.Fprintf(&sb, "  context: %s\n", q.Context)
 		}
-		renderThreadOptions(&sb, q.Options)
+		renderThreadOptions(&sb, q.Options, 0)
 		renderParticipantsLine(&sb, q.Participants)
 		for _, m := range q.Messages {
 			renderThreadMessage(&sb, m)

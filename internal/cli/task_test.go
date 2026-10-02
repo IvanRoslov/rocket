@@ -1543,3 +1543,18 @@ func keysOf(m map[string]any) []string {
 	}
 	return out
 }
+
+// TestRenderQuestionsMarksRecommendedOption: a storm question shows which
+// option the asker recommends, so it is not hidden behind the dashboard
+// (task #5027).
+func TestRenderQuestionsMarksRecommendedOption(t *testing.T) {
+	rec := 1
+	qs := []questionRow{{
+		Ordinal: 1, LocalRef: "799/Q1", Status: "open", Type: "brainstorm", Body: "Which schema?",
+		Options: []string{"A", "B"}, RecommendedOption: &rec,
+	}}
+	out := renderQuestions(799, qs)
+	if !strings.Contains(out, "  варианты: 1) A ★ рекомендовано  2) B\n") {
+		t.Errorf("expected the recommended option marked, got: %q", out)
+	}
+}
