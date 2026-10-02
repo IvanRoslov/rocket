@@ -108,9 +108,9 @@ describe('Brainstorm tab — content', () => {
     expect(counter('Accepted')).toBe('1 (with comment 1)')
     expect(counter('Corrected')).toBe('0')
     expect(counter('Wrong turn')).toBe('0')
-    expect(counter('Правок до Go')).toBe('1')
-    expect(counter('Кто штормил')).toBe('Иван')
-    expect(counter('Гейт')).toBe('ждёт Go (правок: 1)')
+    expect(counter('Spec changes before Go')).toBe('1')
+    expect(counter('Who stormed')).toBe('you')
+    expect(counter('Gate')).toBe('awaiting Go (changes: 1)')
     expect(screen.queryByRole('list', { name: 'By participant' })).not.toBeInTheDocument()
   })
 
@@ -127,19 +127,19 @@ describe('Brainstorm tab — content', () => {
       ),
     )
     await openStorm()
-    await waitFor(() => expect(counter('Кто штормил')).toBe('cto'))
-    expect(counter('Гейт')).toBe('Go с 1-го раза')
+    await waitFor(() => expect(counter('Who stormed')).toBe('cto'))
+    expect(counter('Gate')).toBe('Go first try')
     expect(screen.queryByRole('list', { name: 'By participant' })).not.toBeInTheDocument()
   })
 
   it('splits the counters by participant in a mixed storm', async () => {
     renderTask(12, '?tab=brainstorm')
     const rows = await screen.findByRole('list', { name: 'By participant' })
-    expect(counter('Кто штормил')).toBe('Иван + cto')
-    expect(counter('Гейт')).toBe('Go с 1-го раза')
+    expect(counter('Who stormed')).toBe('you + cto')
+    expect(counter('Gate')).toBe('Go first try')
     const items = within(rows).getAllByRole('listitem').map((li) => li.textContent)
     expect(items).toEqual([
-      'Иван: answered 4 · accepted 2 (with comment 1) · corrected 1 · wrong turn 1',
+      'you: answered 4 · accepted 2 (with comment 1) · corrected 1 · wrong turn 1',
       'cto: answered 2 · accepted 1 (with comment 0) · corrected 1 · wrong turn 0',
     ])
   })
@@ -156,8 +156,8 @@ describe('Brainstorm tab — content', () => {
     )
     await openStorm()
     await waitFor(() => expect(counter('Questions')).toBe('1'))
-    expect(counter('Кто штормил')).toBe('—')
-    expect(counter('Гейт')).toBe('—')
+    expect(counter('Who stormed')).toBe('—')
+    expect(counter('Gate')).toBe('—')
   })
 
   it('shows dashes when the counters cannot be read', async () => {
@@ -168,8 +168,8 @@ describe('Brainstorm tab — content', () => {
     )
     await openStorm()
     await waitFor(() => expect(counter('Questions')).toBe('—'))
-    expect(counter('Кто штормил')).toBe('—')
-    expect(counter('Гейт')).toBe('—')
+    expect(counter('Who stormed')).toBe('—')
+    expect(counter('Gate')).toBe('—')
   })
 
   it('shows the latest problem doc, or says it is not written yet', async () => {

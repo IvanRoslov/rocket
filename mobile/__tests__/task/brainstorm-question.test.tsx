@@ -165,7 +165,7 @@ describe('brainstorm QuestionCard — answered', () => {
   it('names the agent who answered, and nobody for the human', async () => {
     mockFetch()
     await renderCard({ ...ANSWERED, answered_by: 'cto' })
-    expect(screen.getByText('ответил: cto')).toBeTruthy()
+    expect(screen.getByText('answered by cto')).toBeTruthy()
     await screen.rerender(
       <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 0, left: 0, right: 0, bottom: 0 } }}>
         <QueryClientProvider client={new QueryClient()}>
@@ -177,7 +177,7 @@ describe('brainstorm QuestionCard — answered', () => {
         </QueryClientProvider>
       </SafeAreaProvider>,
     )
-    expect(screen.queryByText(/ответил/)).toBeNull()
+    expect(screen.queryByText(/answered by/)).toBeNull()
   })
 
   it('marks an overridden outcome', async () => {

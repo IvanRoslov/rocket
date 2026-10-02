@@ -876,7 +876,7 @@ export const stormGates: TaskGate[] = [
 /**
  * `GET /v1/stats/brainstorm` fixture. Every answer counts under its author:
  * the human's weeks and cto's weeks are separate rows. Storms: #17 the human's
- * (pending gate after one round of changes), #12 mixed (Иван + cto, Go first
+ * (pending gate after one round of changes), #12 mixed (you + cto, Go first
  * try), #18 cto's alone (Go after two rounds of changes).
  */
 export const brainstormStats: BrainstormStats = {

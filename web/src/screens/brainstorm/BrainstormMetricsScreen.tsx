@@ -7,8 +7,8 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Segmented } from '../../components/Segmented'
-import { gateState, orderParticipants, participantLabel, stormWho } from '../../lib/brainstormWho'
-import { HUMAN } from '../../lib/participants'
+import { gateState, orderParticipants, stormWho } from '../../lib/brainstormWho'
+import { HUMAN, participantLabel } from '../../lib/participants'
 import { useBrainstormStats } from '../../lib/queries'
 import type { BrainstormStorm, BrainstormWeek } from '../../lib/types'
 import './brainstorm-metrics.css'
@@ -130,11 +130,11 @@ function StormsTable({ storms }: { storms: BrainstormStorm[] }) {
         <tr>
           <th>Task</th>
           <th>Skill</th>
-          <th>Кто штормил</th>
+          <th>Who stormed</th>
           <th>Questions</th>
           <th title="Accepted / with comment / Corrected / Wrong turn">Accepted / with comment / Corrected / Wrong turn</th>
-          <th>Правок до Go</th>
-          <th>Гейт</th>
+          <th>Spec changes before Go</th>
+          <th>Gate</th>
           <th>Go</th>
         </tr>
       </thead>

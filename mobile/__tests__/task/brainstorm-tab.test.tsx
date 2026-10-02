@@ -231,9 +231,9 @@ describe('Brainstorm tab', () => {
     expect(textOf(stat('corrected'))).toBe('1')
     expect(textOf(stat('wrong_turn'))).toBe('1')
     expect(textOf(stat('spec_changes'))).toBe('1')
-    expect(screen.getByText('Правок до Go')).toBeTruthy()
-    expect(textOf(screen.getByTestId('stat-who'))).toBe('Кто штормил: Иван')
-    expect(textOf(screen.getByTestId('stat-gate'))).toBe('Гейт: ждёт Go (правок: 1)')
+    expect(screen.getByText('Spec changes before Go')).toBeTruthy()
+    expect(textOf(screen.getByTestId('stat-who'))).toBe('Who stormed: you')
+    expect(textOf(screen.getByTestId('stat-gate'))).toBe('Gate: awaiting Go (changes: 1)')
     expect(screen.queryByTestId('by-answerer')).toBeNull()
   })
 
@@ -249,8 +249,8 @@ describe('Brainstorm tab', () => {
       },
     })
     await renderScreen()
-    await waitFor(() => expect(textOf(screen.getByTestId('stat-who'))).toBe('Кто штормил: cto'))
-    expect(textOf(screen.getByTestId('stat-gate'))).toBe('Гейт: Go с 1-го раза')
+    await waitFor(() => expect(textOf(screen.getByTestId('stat-who'))).toBe('Who stormed: cto'))
+    expect(textOf(screen.getByTestId('stat-gate'))).toBe('Gate: Go first try')
     expect(screen.queryByTestId('by-answerer')).toBeNull()
   })
 
@@ -266,10 +266,10 @@ describe('Brainstorm tab', () => {
       },
     })
     await renderScreen()
-    await waitFor(() => expect(textOf(screen.getByTestId('stat-who'))).toBe('Кто штормил: Иван + cto'))
+    await waitFor(() => expect(textOf(screen.getByTestId('stat-who'))).toBe('Who stormed: you + cto'))
     const rows = screen.getAllByTestId('by-answerer').map(textOf)
     expect(rows).toEqual([
-      'Иван: answered 3 · accepted 2 (with comment 2) · corrected 1 · wrong turn 0',
+      'you: answered 3 · accepted 2 (with comment 2) · corrected 1 · wrong turn 0',
       'cto: answered 1 · accepted 1 (with comment 0) · corrected 0 · wrong turn 1',
     ])
   })
@@ -279,8 +279,8 @@ describe('Brainstorm tab', () => {
       '/v1/tasks/12/brainstorm/stats': { ...STATS, answered_by: [], by_answerer: [], has_gate: false, spec_changes: 0 },
     })
     await renderScreen()
-    await waitFor(() => expect(textOf(screen.getByTestId('stat-who'))).toBe('Кто штормил: —'))
-    expect(textOf(screen.getByTestId('stat-gate'))).toBe('Гейт: —')
+    await waitFor(() => expect(textOf(screen.getByTestId('stat-who'))).toBe('Who stormed: —'))
+    expect(textOf(screen.getByTestId('stat-gate'))).toBe('Gate: —')
   })
 
   it('shows dashes when the counters cannot be loaded', async () => {

@@ -60,7 +60,7 @@ export function BrainstormResult({ question, onOverride, busy, error }: Brainsto
         </span>
         {question.outcome_overridden && <span className="brainstorm-result__note">changed by hand</span>}
         {!isHuman(question.answered_by) && (
-          <span className="brainstorm-result__source">ответил: {question.answered_by}</span>
+          <span className="brainstorm-result__source">answered by {question.answered_by}</span>
         )}
         {question.answer_source === 'terminal' && (
           <span className="brainstorm-result__source">From terminal</span>

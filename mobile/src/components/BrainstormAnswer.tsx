@@ -88,7 +88,7 @@ export function StormAnswerSummary({
         {q.answer_source === 'terminal' ? (
           <Badge label="From terminal" fg={colors.slateFg} bg={colors.slateBg} />
         ) : null}
-        {!isHuman(q.answered_by) ? <Text style={styles.meta}>{`ответил: ${q.answered_by}`}</Text> : null}
+        {!isHuman(q.answered_by) ? <Text style={styles.meta}>{`answered by ${q.answered_by}`}</Text> : null}
       </View>
       {/* Inline, not a sheet: correcting the score is a one-tap aside. */}
       {menu ? (

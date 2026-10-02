@@ -9,7 +9,8 @@ import { Markdown } from '../../components/Markdown'
 import { QuestionContent } from '../../components/QuestionContent'
 import { QuestionThread } from '../../components/QuestionThread'
 import { ApiError } from '../../lib/api'
-import { gateState, participantLabel, stormWho } from '../../lib/brainstormWho'
+import { gateState, stormWho } from '../../lib/brainstormWho'
+import { participantLabel } from '../../lib/participants'
 import { timeAgo } from '../../lib/format'
 import {
   useDecideGate,
@@ -55,10 +56,10 @@ function Counters({ stats }: { stats?: BrainstormStorm }) {
     ],
     ['Corrected', v(stats?.corrected)],
     ['Wrong turn', v(stats?.wrong_turn)],
-    ['Правок до Go', v(stats?.spec_changes)],
-    ['Кто штормил', stormWho(stats?.answered_by ?? [])],
+    ['Spec changes before Go', v(stats?.spec_changes)],
+    ['Who stormed', stormWho(stats?.answered_by ?? [])],
     [
-      'Гейт',
+      'Gate',
       stats
         ? gateState({ go_at: stats.go_at, spec_changes: stats.spec_changes, has_gate: stats.has_gate ?? false })
         : '—',

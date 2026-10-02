@@ -52,12 +52,12 @@ describe('BrainstormResult', () => {
 
   it('names the agent who answered', () => {
     render(<BrainstormResult question={{ ...answered, answered_by: 'cto' }} />)
-    expect(screen.getByText('ответил: cto')).toBeInTheDocument()
+    expect(screen.getByText('answered by cto')).toBeInTheDocument()
   })
 
   it('adds nothing when the human answered', () => {
     render(<BrainstormResult question={{ ...answered, answered_by: 'human' }} />)
-    expect(screen.queryByText(/ответил/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/answered by/)).not.toBeInTheDocument()
   })
 
   it('lets the human override the outcome', async () => {

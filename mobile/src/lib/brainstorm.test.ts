@@ -10,7 +10,6 @@ import {
   isBrainstorm,
   isRecommended,
   latestDoc,
-  participantLabel,
   pendingGate,
   showBrainstormTab,
   stormWho,
@@ -164,26 +163,18 @@ describe('exitState', () => {
 })
 
 describe('who stormed (task #5019)', () => {
-  it.each([
-    ['human', 'Иван'],
-    ['', 'Иван'],
-    ['cto', 'cto'],
-  ])('participantLabel(%j) is %s', (id, label) => {
-    expect(participantLabel(id)).toBe(label)
-  })
-
   it.each<[string[], string]>([
     [[], '—'],
     [['cto'], 'cto'],
-    [['human', 'cto'], 'Иван + cto'],
+    [['human', 'cto'], 'you + cto'],
   ])('stormWho(%j) is %s', (ids, label) => {
     expect(stormWho(ids)).toBe(label)
   })
 
   it.each<[{ go_at: number | null; spec_changes: number; has_gate: boolean }, string]>([
-    [{ go_at: 100, spec_changes: 0, has_gate: true }, 'Go с 1-го раза'],
-    [{ go_at: 100, spec_changes: 2, has_gate: true }, 'Go после 2 правок'],
-    [{ go_at: null, spec_changes: 1, has_gate: true }, 'ждёт Go (правок: 1)'],
+    [{ go_at: 100, spec_changes: 0, has_gate: true }, 'Go first try'],
+    [{ go_at: 100, spec_changes: 2, has_gate: true }, 'Go after 2 changes'],
+    [{ go_at: null, spec_changes: 1, has_gate: true }, 'awaiting Go (changes: 1)'],
     [{ go_at: null, spec_changes: 0, has_gate: false }, '—'],
   ])('gateState(%j) is %s', (s, label) => {
     expect(gateState(s)).toBe(label)

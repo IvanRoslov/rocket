@@ -58,11 +58,11 @@ describe('BrainstormMetricsScreen', () => {
     expect(cells).toEqual([
       '#17 Metering rewrite',
       'orchestrator-brainstorming',
-      'Иван',
+      'you',
       '2',
       '1 / 1 / 0 / 0',
       '1',
-      'ждёт Go (правок: 1)',
+      'awaiting Go (changes: 1)',
       '—',
     ])
   })
@@ -71,7 +71,7 @@ describe('BrainstormMetricsScreen', () => {
     renderScreen()
     const table = await screen.findByRole('table')
     const headers = within(table).getAllByRole('columnheader').map((h) => h.textContent)
-    expect(headers).toEqual(expect.arrayContaining(['Кто штормил', 'Правок до Go', 'Гейт']))
+    expect(headers).toEqual(expect.arrayContaining(['Who stormed', 'Spec changes before Go', 'Gate']))
     expect(headers).not.toContain('Spec changes')
 
     const cellsOf = (name: RegExp) =>
@@ -79,12 +79,12 @@ describe('BrainstormMetricsScreen', () => {
         .getAllByRole('cell')
         .map((c) => c.textContent)
     const mixed = cellsOf(/#12 Billing v2/)
-    expect(mixed[2]).toBe('Иван + cto')
-    expect(mixed[6]).toBe('Go с 1-го раза')
+    expect(mixed[2]).toBe('you + cto')
+    expect(mixed[6]).toBe('Go first try')
     const agent = cellsOf(/#18 Usage alerts/)
     expect(agent[2]).toBe('cto')
     expect(agent[5]).toBe('2')
-    expect(agent[6]).toBe('Go после 2 правок')
+    expect(agent[6]).toBe('Go after 2 changes')
   })
 
   it('shows an empty state with no storms', async () => {
@@ -120,8 +120,8 @@ describe('BrainstormMetricsScreen — participant switch', () => {
     renderScreen()
     const group = await participantSwitch()
     const buttons = within(group).getAllByRole('button')
-    expect(buttons.map((b) => b.textContent)).toEqual(['Иван', 'cto'])
-    expect(within(group).getByRole('button', { name: 'Иван' })).toHaveAttribute('aria-pressed', 'true')
+    expect(buttons.map((b) => b.textContent)).toEqual(['you', 'cto'])
+    expect(within(group).getByRole('button', { name: 'you' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(group).getByRole('button', { name: 'cto' })).toHaveAttribute('aria-pressed', 'false')
   })
 
@@ -169,7 +169,7 @@ describe('BrainstormMetricsScreen — participant switch', () => {
     window.localStorage.setItem(STORAGE_KEY, 'architect')
     renderScreen()
     const group = await participantSwitch()
-    expect(within(group).getByRole('button', { name: 'Иван' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(group).getByRole('button', { name: 'you' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(chart()).getByLabelText('2026-W40 · orchestrator-brainstorming: 80% (4 of 5)')).toBeInTheDocument()
   })
 })
@@ -191,7 +191,7 @@ describe('BrainstormMetricsScreen — older daemon', () => {
     )
     renderScreen()
     const group = (await screen.findByRole('group', { name: 'Participant' })) as HTMLElement
-    expect(within(group).getByRole('button', { name: 'Иван' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(group).getByRole('button', { name: 'you' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByLabelText('2026-W40 · unknown: 50% (1 of 2)')).toBeInTheDocument()
     const cells = within(screen.getByRole('table')).getAllByRole('cell').map((c) => c.textContent)
     expect(cells[2]).toBe('—')

@@ -13,9 +13,9 @@ import {
   gateState,
   isBrainstorm,
   latestDoc,
-  participantLabel,
   stormWho,
 } from '../lib/brainstorm'
+import { participantLabel } from '../lib/threads'
 import { ago } from '../lib/format'
 import { colors, radius } from '../theme'
 import { Markdown } from './Markdown'
@@ -28,7 +28,7 @@ const COUNTERS: { key: keyof BrainstormStorm; label: string }[] = [
   { key: 'accepted_with_comment', label: 'with comment' },
   { key: 'corrected', label: 'Corrected' },
   { key: 'wrong_turn', label: 'Wrong turn' },
-  { key: 'spec_changes', label: 'Правок до Go' },
+  { key: 'spec_changes', label: 'Spec changes before Go' },
 ]
 
 export function BrainstormTab({
@@ -67,10 +67,10 @@ export function BrainstormTab({
         ))}
         <View style={styles.who}>
           <Text testID="stat-who" style={styles.whoText}>
-            {`Кто штормил: ${stormWho(stats.data?.answered_by ?? [])}`}
+            {`Who stormed: ${stormWho(stats.data?.answered_by ?? [])}`}
           </Text>
           <Text testID="stat-gate" style={styles.whoText}>
-            {`Гейт: ${
+            {`Gate: ${
               stats.data
                 ? gateState({
                     go_at: stats.data.go_at,
