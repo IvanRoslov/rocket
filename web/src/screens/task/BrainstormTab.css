@@ -29,6 +29,26 @@
   color: var(--text);
 }
 
+.brainstorm-tab__stats {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.brainstorm-tab__answerers {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font: 13px var(--font-ui);
+  color: var(--text-2);
+}
+.brainstorm-tab__answerer {
+  font-weight: 600;
+  color: var(--text);
+}
+
 .brainstorm-tab__section {
   display: flex;
   flex-direction: column;

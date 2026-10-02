@@ -108,7 +108,56 @@ describe('Brainstorm tab — content', () => {
     expect(counter('Accepted')).toBe('1 (with comment 1)')
     expect(counter('Corrected')).toBe('0')
     expect(counter('Wrong turn')).toBe('0')
-    expect(counter('Spec changes')).toBe('1')
+    expect(counter('Правок до Go')).toBe('1')
+    expect(counter('Кто штормил')).toBe('Иван')
+    expect(counter('Гейт')).toBe('ждёт Go (правок: 1)')
+    expect(screen.queryByRole('list', { name: 'By participant' })).not.toBeInTheDocument()
+  })
+
+  it('shows who stormed and the gate for a storm cto answered alone', async () => {
+    server.use(
+      http.get('/v1/tasks/:id/brainstorm/stats', () =>
+        HttpResponse.json({
+          task_id: 17, title: 'Metering rewrite', project_id: 'billing', skill: 'orchestrator-brainstorming',
+          questions: 3, answered: 3, accepted: 3, accepted_with_comment: 0, corrected: 0, wrong_turn: 0,
+          answered_by: ['cto'],
+          by_answerer: [{ answered_by: 'cto', answered: 3, accepted: 3, accepted_with_comment: 0, corrected: 0, wrong_turn: 0 }],
+          spec_changes: 0, first_try_go: true, has_gate: true, go_at: 1790926157,
+        }),
+      ),
+    )
+    await openStorm()
+    await waitFor(() => expect(counter('Кто штормил')).toBe('cto'))
+    expect(counter('Гейт')).toBe('Go с 1-го раза')
+    expect(screen.queryByRole('list', { name: 'By participant' })).not.toBeInTheDocument()
+  })
+
+  it('splits the counters by participant in a mixed storm', async () => {
+    renderTask(12, '?tab=brainstorm')
+    const rows = await screen.findByRole('list', { name: 'By participant' })
+    expect(counter('Кто штормил')).toBe('Иван + cto')
+    expect(counter('Гейт')).toBe('Go с 1-го раза')
+    const items = within(rows).getAllByRole('listitem').map((li) => li.textContent)
+    expect(items).toEqual([
+      'Иван: answered 4 · accepted 2 (with comment 1) · corrected 1 · wrong turn 1',
+      'cto: answered 2 · accepted 1 (with comment 0) · corrected 1 · wrong turn 0',
+    ])
+  })
+
+  it('shows a dash for who stormed while nothing is answered', async () => {
+    server.use(
+      http.get('/v1/tasks/:id/brainstorm/stats', () =>
+        HttpResponse.json({
+          task_id: 17, title: 'Metering rewrite', project_id: 'billing', skill: 'orchestrator-brainstorming',
+          questions: 1, answered: 0, accepted: 0, accepted_with_comment: 0, corrected: 0, wrong_turn: 0,
+          answered_by: [], by_answerer: [], spec_changes: 0, first_try_go: false, has_gate: false, go_at: null,
+        }),
+      ),
+    )
+    await openStorm()
+    await waitFor(() => expect(counter('Questions')).toBe('1'))
+    expect(counter('Кто штормил')).toBe('—')
+    expect(counter('Гейт')).toBe('—')
   })
 
   it('shows dashes when the counters cannot be read', async () => {
@@ -119,6 +168,8 @@ describe('Brainstorm tab — content', () => {
     )
     await openStorm()
     await waitFor(() => expect(counter('Questions')).toBe('—'))
+    expect(counter('Кто штормил')).toBe('—')
+    expect(counter('Гейт')).toBe('—')
   })
 
   it('shows the latest problem doc, or says it is not written yet', async () => {

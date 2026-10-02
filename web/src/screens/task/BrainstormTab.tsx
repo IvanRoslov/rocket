@@ -9,6 +9,7 @@ import { Markdown } from '../../components/Markdown'
 import { QuestionContent } from '../../components/QuestionContent'
 import { QuestionThread } from '../../components/QuestionThread'
 import { ApiError } from '../../lib/api'
+import { gateState, participantLabel, stormWho } from '../../lib/brainstormWho'
 import { timeAgo } from '../../lib/format'
 import {
   useDecideGate,
@@ -18,7 +19,7 @@ import {
   useTaskGates,
 } from '../../lib/queries'
 import { questionTitle } from '../../lib/thread'
-import type { BrainstormStorm, Question, TaskDoc, TaskDocKind, TaskGate } from '../../lib/types'
+import type { BrainstormAnswerer, BrainstormStorm, Question, TaskDoc, TaskDocKind, TaskGate } from '../../lib/types'
 import './BrainstormTab.css'
 
 export interface BrainstormTabProps {
@@ -54,20 +55,45 @@ function Counters({ stats }: { stats?: BrainstormStorm }) {
     ],
     ['Corrected', v(stats?.corrected)],
     ['Wrong turn', v(stats?.wrong_turn)],
-    ['Spec changes', v(stats?.spec_changes)],
+    ['Правок до Go', v(stats?.spec_changes)],
+    ['Кто штормил', stormWho(stats?.answered_by ?? [])],
+    [
+      'Гейт',
+      stats
+        ? gateState({ go_at: stats.go_at, spec_changes: stats.spec_changes, has_gate: stats.has_gate ?? false })
+        : '—',
+    ],
   ]
+  // The totals above are the whole storm; split only when several took part.
+  const byAnswerer = stats?.by_answerer ?? []
   return (
-    <dl className="brainstorm-tab__counters">
-      {items.map(([label, value]) => (
-        <div key={label} className="brainstorm-tab__counter">
-          <dt className="brainstorm-tab__counter-label">{label}</dt>
-          <dd className="brainstorm-tab__counter-value" data-testid="value">
-            {value}
-          </dd>
-        </div>
-      ))}
-    </dl>
+    <div className="brainstorm-tab__stats">
+      <dl className="brainstorm-tab__counters">
+        {items.map(([label, value]) => (
+          <div key={label} className="brainstorm-tab__counter">
+            <dt className="brainstorm-tab__counter-label">{label}</dt>
+            <dd className="brainstorm-tab__counter-value" data-testid="value">
+              {value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {byAnswerer.length > 1 && (
+        <ul className="brainstorm-tab__answerers" aria-label="By participant">
+          {byAnswerer.map((a) => (
+            <li key={a.answered_by}>
+              <span className="brainstorm-tab__answerer">{participantLabel(a.answered_by)}</span>
+              {`: ${answererLine(a)}`}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
+}
+
+function answererLine(a: BrainstormAnswerer): string {
+  return `answered ${a.answered} · accepted ${a.accepted} (with comment ${a.accepted_with_comment}) · corrected ${a.corrected} · wrong turn ${a.wrong_turn}`
 }
 
 /** An answered (or dismissed) storm question: what was decided stays in view. */
