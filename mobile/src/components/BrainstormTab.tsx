@@ -6,7 +6,16 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import { ApiError } from '../api/client'
 import { useBrainstormStats, useDecideGate, useTaskDocs } from '../api/queries'
 import type { BrainstormStorm, Question, TaskDoc, TaskDocKind, TaskGate } from '../api/types'
-import { docAt, exitState, gateHistoryLabel, isBrainstorm, latestDoc } from '../lib/brainstorm'
+import {
+  docAt,
+  exitState,
+  gateHistoryLabel,
+  gateState,
+  isBrainstorm,
+  latestDoc,
+  participantLabel,
+  stormWho,
+} from '../lib/brainstorm'
 import { ago } from '../lib/format'
 import { colors, radius } from '../theme'
 import { Markdown } from './Markdown'
@@ -19,7 +28,7 @@ const COUNTERS: { key: keyof BrainstormStorm; label: string }[] = [
   { key: 'accepted_with_comment', label: 'with comment' },
   { key: 'corrected', label: 'Corrected' },
   { key: 'wrong_turn', label: 'Wrong turn' },
-  { key: 'spec_changes', label: 'Spec changes' },
+  { key: 'spec_changes', label: 'Правок до Go' },
 ]
 
 export function BrainstormTab({
@@ -56,6 +65,30 @@ export function BrainstormTab({
             <Text style={styles.counterLabel}>{c.label}</Text>
           </View>
         ))}
+        <View style={styles.who}>
+          <Text testID="stat-who" style={styles.whoText}>
+            {`Кто штормил: ${stormWho(stats.data?.answered_by ?? [])}`}
+          </Text>
+          <Text testID="stat-gate" style={styles.whoText}>
+            {`Гейт: ${
+              stats.data
+                ? gateState({
+                    go_at: stats.data.go_at,
+                    spec_changes: stats.data.spec_changes,
+                    has_gate: stats.data.has_gate ?? false,
+                  })
+                : '—'
+            }`}
+          </Text>
+          {/* The totals above are the whole storm; split only when several took part. */}
+          {(stats.data?.by_answerer ?? []).length > 1
+            ? stats.data!.by_answerer.map((a) => (
+                <Text key={a.answered_by} testID="by-answerer" style={styles.answerer}>
+                  {`${participantLabel(a.answered_by)}: answered ${a.answered} · accepted ${a.accepted} (with comment ${a.accepted_with_comment}) · corrected ${a.corrected} · wrong turn ${a.wrong_turn}`}
+                </Text>
+              ))
+            : null}
+        </View>
       </Card>
 
       <View>
@@ -274,6 +307,9 @@ const styles = StyleSheet.create({
   counter: { width: '33.33%', alignItems: 'center' },
   counterValue: { fontSize: 20, fontWeight: '700', color: colors.text },
   counterLabel: { fontSize: 11, color: colors.textDim, marginTop: 2 },
+  who: { width: '100%', gap: 4, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border },
+  whoText: { fontSize: 13, fontWeight: '600', color: colors.textMid },
+  answerer: { fontSize: 12, color: colors.textDim },
   label: { fontSize: 10.5, fontWeight: '600', color: colors.textFaint, letterSpacing: 0.5, marginBottom: 8 },
   meta: { fontSize: 11, color: colors.textFaint },
   empty: { fontSize: 13, color: colors.textFaint },

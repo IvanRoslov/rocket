@@ -6,11 +6,14 @@ import {
   docAt,
   exitState,
   gateHistoryLabel,
+  gateState,
   isBrainstorm,
   isRecommended,
   latestDoc,
+  participantLabel,
   pendingGate,
   showBrainstormTab,
+  stormWho,
 } from './brainstorm'
 
 const doc = (p: Partial<TaskDoc>): TaskDoc => ({
@@ -157,5 +160,32 @@ describe('exitState', () => {
   it('reports Go when the newest gate passed', () => {
     const g = gate({ id: 5, status: 'go' })
     expect(exitState([g], 1)).toEqual({ kind: 'go', gate: g })
+  })
+})
+
+describe('who stormed (task #5019)', () => {
+  it.each([
+    ['human', 'Иван'],
+    ['', 'Иван'],
+    ['cto', 'cto'],
+  ])('participantLabel(%j) is %s', (id, label) => {
+    expect(participantLabel(id)).toBe(label)
+  })
+
+  it.each<[string[], string]>([
+    [[], '—'],
+    [['cto'], 'cto'],
+    [['human', 'cto'], 'Иван + cto'],
+  ])('stormWho(%j) is %s', (ids, label) => {
+    expect(stormWho(ids)).toBe(label)
+  })
+
+  it.each<[{ go_at: number | null; spec_changes: number; has_gate: boolean }, string]>([
+    [{ go_at: 100, spec_changes: 0, has_gate: true }, 'Go с 1-го раза'],
+    [{ go_at: 100, spec_changes: 2, has_gate: true }, 'Go после 2 правок'],
+    [{ go_at: null, spec_changes: 1, has_gate: true }, 'ждёт Go (правок: 1)'],
+    [{ go_at: null, spec_changes: 0, has_gate: false }, '—'],
+  ])('gateState(%j) is %s', (s, label) => {
+    expect(gateState(s)).toBe(label)
   })
 })

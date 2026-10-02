@@ -1,6 +1,7 @@
 // Pure rules behind the storm UI (task #4901, spec §3.1): outcome labels,
-// the recommendation star, the Problem doc and the exit gate. No React, so
-// they are unit-tested without rendering.
+// the recommendation star, the Problem doc, the exit gate, and who stormed
+// (task #5019). No React, so they are unit-tested without rendering.
+import { isHuman } from './threads'
 import type { BrainstormFields, BrainstormOutcome, GateStatus, TaskDoc, TaskDocKind, TaskGate, TaskStatus } from '../api/types'
 
 export const OUTCOMES: BrainstormOutcome[] = ['accepted', 'corrected', 'wrong_turn']
@@ -103,4 +104,21 @@ export function exitState(gates: TaskGate[], specVersion: number | undefined): E
     return { kind: 'waiting_request' }
   }
   return { kind: 'waiting_spec' }
+}
+
+/** "Иван" for the human (also the legacy `""`), an agent by its id, verbatim — as the web and the CLI. */
+export function participantLabel(id: string): string {
+  return isHuman(id) ? 'Иван' : id
+}
+
+/** A storm's participants in first-answer order: "Иван + cto"; "—" with no answers. */
+export function stormWho(ids: string[]): string {
+  return ids.length === 0 ? '—' : ids.map(participantLabel).join(' + ')
+}
+
+/** How the human received the spec gate. Without `has_gate` "no gates" and "pending, 0 changes" look alike. */
+export function gateState(s: { go_at: number | null; spec_changes: number; has_gate: boolean }): string {
+  if (s.go_at !== null) return s.spec_changes === 0 ? 'Go с 1-го раза' : `Go после ${s.spec_changes} правок`
+  if (s.has_gate) return `ждёт Go (правок: ${s.spec_changes})`
+  return '—'
 }

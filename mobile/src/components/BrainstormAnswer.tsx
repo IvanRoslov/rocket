@@ -6,6 +6,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { useSetQuestionOutcome } from '../api/queries'
 import type { BrainstormFields, BrainstormOutcome } from '../api/types'
 import { OUTCOME_LABEL, OUTCOMES, chosenLabel, isRecommended } from '../lib/brainstorm'
+import { isHuman } from '../lib/threads'
 import { colors, radius } from '../theme'
 import { useToast } from './Toast'
 import { Badge } from './ui'
@@ -87,6 +88,7 @@ export function StormAnswerSummary({
         {q.answer_source === 'terminal' ? (
           <Badge label="From terminal" fg={colors.slateFg} bg={colors.slateBg} />
         ) : null}
+        {!isHuman(q.answered_by) ? <Text style={styles.meta}>{`ответил: ${q.answered_by}`}</Text> : null}
       </View>
       {/* Inline, not a sheet: correcting the score is a one-tap aside. */}
       {menu ? (

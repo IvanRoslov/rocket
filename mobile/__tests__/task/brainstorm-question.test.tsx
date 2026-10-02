@@ -162,6 +162,24 @@ describe('brainstorm QuestionCard — answered', () => {
     expect(screen.getByText('From terminal')).toBeTruthy()
   })
 
+  it('names the agent who answered, and nobody for the human', async () => {
+    mockFetch()
+    await renderCard({ ...ANSWERED, answered_by: 'cto' })
+    expect(screen.getByText('ответил: cto')).toBeTruthy()
+    await screen.rerender(
+      <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 0, left: 0, right: 0, bottom: 0 } }}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ServerProvider>
+            <ToastProvider>
+              <QuestionCard q={ANSWERED} />
+            </ToastProvider>
+          </ServerProvider>
+        </QueryClientProvider>
+      </SafeAreaProvider>,
+    )
+    expect(screen.queryByText(/ответил/)).toBeNull()
+  })
+
   it('marks an overridden outcome', async () => {
     mockFetch()
     await renderCard({ ...ANSWERED, outcome: 'corrected', outcome_overridden: true })
