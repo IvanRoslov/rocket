@@ -1347,3 +1347,6 @@ func TestQueue_TimeoutExpiryAlsoNotifiesSender(t *testing.T) {
 		t.Errorf("notice body = %q, want it to contain 'timeout'", noticeMsg.Body)
 	}
 }
+
+func (*fakeRuntime) ScrollHistory(context.Context, runtime.Handle, int) error { return nil }
+func (*fakeRuntime) ExitHistory(context.Context, runtime.Handle) error        { return nil }

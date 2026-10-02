@@ -1113,6 +1113,30 @@ func (m *Manager) UnpinWindowSize(ctx context.Context, id string) error {
 	return m.rt.UnpinWindowSize(ctx, runtime.Handle{Name: sess.TmuxName})
 }
 
+// ScrollHistory moves a session's tmux pane through its history.
+func (m *Manager) ScrollHistory(ctx context.Context, id string, lines int) error {
+	sess, err := m.st.GetSession(id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return validationErr("session_not_found", "session not found: "+id)
+		}
+		return err
+	}
+	return m.rt.ScrollHistory(ctx, runtime.Handle{Name: sess.TmuxName}, lines)
+}
+
+// ExitHistory restores a session's pane to its live view.
+func (m *Manager) ExitHistory(ctx context.Context, id string) error {
+	sess, err := m.st.GetSession(id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return validationErr("session_not_found", "session not found: "+id)
+		}
+		return err
+	}
+	return m.rt.ExitHistory(ctx, runtime.Handle{Name: sess.TmuxName})
+}
+
 // TmuxInfo describes one live tmux session for /v1/system inspection.
 type TmuxInfo struct {
 	// Name is the tmux session name.

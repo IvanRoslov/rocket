@@ -476,3 +476,6 @@ func TestPostMessage_UnknownRecipientStill404(t *testing.T) {
 func (r msgFakeRuntime) CaptureEscaped(ctx context.Context, h runtime.Handle, lines int) (string, error) {
 	return r.Capture(ctx, h, lines)
 }
+
+func (msgFakeRuntime) ScrollHistory(context.Context, runtime.Handle, int) error { return nil }
+func (msgFakeRuntime) ExitHistory(context.Context, runtime.Handle) error        { return nil }

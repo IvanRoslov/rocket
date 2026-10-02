@@ -604,3 +604,6 @@ func (a *atomicBool) get() bool {
 func (f *reactFakeRuntime) CaptureEscaped(ctx context.Context, h runtime.Handle, lines int) (string, error) {
 	return f.Capture(ctx, h, lines)
 }
+
+func (*reactFakeRuntime) ScrollHistory(context.Context, runtime.Handle, int) error { return nil }
+func (*reactFakeRuntime) ExitHistory(context.Context, runtime.Handle) error        { return nil }

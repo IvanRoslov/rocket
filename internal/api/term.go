@@ -20,14 +20,24 @@ import (
 // have pinned the tmux window to their size (Manager.PinWindowSize). The
 // window must stay pinned while ANY writer web terminal is attached (two
 // dashboard tabs on the same session must not unpin each other), and be
-// released only when the last one disconnects.
+// released only when the last one disconnects. It also shares copy-mode
+// state between writers, because they all attach to the same tmux pane.
 type termClaims struct {
-	mu     sync.Mutex
-	counts map[string]int
+	mu        sync.Mutex
+	counts    map[string]int
+	histories map[string]*termHistory
+}
+
+type termHistory struct {
+	mu       sync.Mutex
+	scrolled bool
 }
 
 func newTermClaims() *termClaims {
-	return &termClaims{counts: make(map[string]int)}
+	return &termClaims{
+		counts:    make(map[string]int),
+		histories: make(map[string]*termHistory),
+	}
 }
 
 // claim registers one writer connection for the session.
@@ -51,6 +61,47 @@ func (c *termClaims) release(id string) bool {
 	return false
 }
 
+func (c *termClaims) history(id string) *termHistory {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	h := c.histories[id]
+	if h == nil {
+		h = &termHistory{}
+		c.histories[id] = h
+	}
+	return h
+}
+
+// cleanupHistory restores the live pane after the final writer disconnects.
+// A new writer may claim the same pane while tmux exits, but its scroll/input
+// waits on h.mu. Failed exits retain state for the next writer to retry.
+func (c *termClaims) cleanupHistory(id string, h *termHistory, exit func() error) {
+	c.mu.Lock()
+	if c.counts[id] != 0 || c.histories[id] != h {
+		c.mu.Unlock()
+		return
+	}
+	h.mu.Lock()
+	c.mu.Unlock()
+	if h.scrolled {
+		if err := exit(); err == nil {
+			h.scrolled = false
+		}
+	}
+	h.mu.Unlock()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.counts[id] != 0 || c.histories[id] != h {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.scrolled {
+		delete(c.histories, id)
+	}
+}
+
 // registerTermRoutes wires the /v1/sessions/{id}/term WebSocket terminal
 // route onto mux.
 func registerTermRoutes(mux *http.ServeMux, d Deps) {
@@ -61,11 +112,13 @@ func registerTermRoutes(mux *http.ServeMux, d Deps) {
 }
 
 // termControl is the JSON shape of a client->server text control frame:
-// {"type":"resize","cols":N,"rows":N} or {"type":"ping"}.
+// {"type":"resize","cols":N,"rows":N}, {"type":"scroll","lines":N},
+// or {"type":"ping"}.
 type termControl struct {
-	Type string `json:"type"`
-	Cols int    `json:"cols"`
-	Rows int    `json:"rows"`
+	Type  string `json:"type"`
+	Cols  int    `json:"cols"`
+	Rows  int    `json:"rows"`
+	Lines int    `json:"lines"`
 }
 
 // parseControl decodes a text WS frame into a termControl. It returns
@@ -76,11 +129,23 @@ func parseControl(data []byte) (termControl, bool) {
 		return termControl{}, false
 	}
 	switch c.Type {
-	case "resize", "ping":
+	case "resize", "ping", "scroll":
 		return c, true
 	default:
 		return termControl{}, false
 	}
+}
+
+const maxScrollLines = 1000
+
+func clampScroll(n int) int {
+	if n > maxScrollLines {
+		return maxScrollLines
+	}
+	if n < -maxScrollLines {
+		return -maxScrollLines
+	}
+	return n
 }
 
 // maxTermDim bounds resize control frames: PTY dimensions outside
@@ -98,7 +163,7 @@ func validResize(cols, rows int) bool {
 // handleSessionTerm upgrades the connection to a WebSocket and proxies a
 // tmux attach session's PTY over it: server->client binary frames carry PTY
 // output; client->server binary frames carry input; client->server text
-// frames carry JSON control messages (resize/ping). Closing the WS kills
+// frames carry JSON control messages (resize/ping/scroll). Closing the WS kills
 // only the attach client process, never the underlying tmux session.
 //
 // Client-size policy (docs/03-daemon-api.md «Размер окна»): the web
@@ -165,12 +230,17 @@ func handleSessionTerm(w http.ResponseWriter, r *http.Request, d Deps, claims *t
 	// actual pin happens on each resize frame below. Unpin runs on a
 	// fresh context: r.Context() is already canceled by the time the
 	// client has disconnected.
+	var history *termHistory
 	if !readonly {
 		claims.claim(id)
+		history = claims.history(id)
 		defer func() {
 			if claims.release(id) {
 				unpinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
+				claims.cleanupHistory(id, history, func() error {
+					return d.Manager.ExitHistory(unpinCtx, id)
+				})
 				_ = d.Manager.UnpinWindowSize(unpinCtx, id)
 			}
 		}()
@@ -207,11 +277,27 @@ func handleSessionTerm(w http.ResponseWriter, r *http.Request, d Deps, claims *t
 		switch typ {
 		case websocket.MessageBinary:
 			if !readonly {
+				history.mu.Lock()
+				if history.scrolled {
+					// Restore the live pane before forwarding the first key or
+					// paste; otherwise copy-mode would consume that input.
+					if err := d.Manager.ExitHistory(ctx, id); err == nil {
+						history.scrolled = false
+					}
+				}
 				_, _ = ptmx.Write(data)
+				history.mu.Unlock()
 			}
 		case websocket.MessageText:
 			if c, ok := parseControl(data); ok {
 				switch c.Type {
+				case "scroll":
+					if !readonly && c.Lines != 0 {
+						history.mu.Lock()
+						_ = d.Manager.ScrollHistory(ctx, id, clampScroll(c.Lines))
+						history.scrolled = true
+						history.mu.Unlock()
+					}
 				case "resize":
 					// Readonly clients (view-only observers) must not resize
 					// the shared PTY out from under the writer; treat resize

@@ -1044,3 +1044,11 @@ func (r sessFakeRuntime) CaptureEscaped(ctx context.Context, h runtime.Handle, l
 func (r sessFakeRuntimeErrorOnCreate) CaptureEscaped(ctx context.Context, h runtime.Handle, lines int) (string, error) {
 	return r.Capture(ctx, h, lines)
 }
+
+func (sessFakeRuntime) ScrollHistory(context.Context, runtime.Handle, int) error { return nil }
+func (sessFakeRuntime) ExitHistory(context.Context, runtime.Handle) error        { return nil }
+
+func (sessFakeRuntimeErrorOnCreate) ScrollHistory(context.Context, runtime.Handle, int) error {
+	return nil
+}
+func (sessFakeRuntimeErrorOnCreate) ExitHistory(context.Context, runtime.Handle) error { return nil }

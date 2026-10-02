@@ -530,3 +530,6 @@ func seedSystemSessionState(t *testing.T, st *store.Store, worktreesRootDir, ses
 func (f *systemFakeRuntime) CaptureEscaped(ctx context.Context, h runtime.Handle, lines int) (string, error) {
 	return f.Capture(ctx, h, lines)
 }
+
+func (*systemFakeRuntime) ScrollHistory(context.Context, runtime.Handle, int) error { return nil }
+func (*systemFakeRuntime) ExitHistory(context.Context, runtime.Handle) error        { return nil }

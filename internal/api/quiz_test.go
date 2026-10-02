@@ -476,3 +476,6 @@ func TestPostQuizAnswer_UnconfirmedTimerFires(t *testing.T) {
 func (f *quizAnswerFakeRuntime) CaptureEscaped(ctx context.Context, h runtime.Handle, lines int) (string, error) {
 	return f.Capture(ctx, h, lines)
 }
+
+func (*quizAnswerFakeRuntime) ScrollHistory(context.Context, runtime.Handle, int) error { return nil }
+func (*quizAnswerFakeRuntime) ExitHistory(context.Context, runtime.Handle) error        { return nil }

@@ -315,3 +315,6 @@ func TestAdoptionFailureSkipsTheAgent(t *testing.T) {
 func (f *fakeRuntime) CaptureEscaped(ctx context.Context, h runtime.Handle, lines int) (string, error) {
 	return f.Capture(ctx, h, lines)
 }
+
+func (*fakeRuntime) ScrollHistory(context.Context, runtime.Handle, int) error { return nil }
+func (*fakeRuntime) ExitHistory(context.Context, runtime.Handle) error        { return nil }
