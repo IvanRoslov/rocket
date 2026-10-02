@@ -135,3 +135,65 @@ Worker: `web-models` (claude-code). Branch `feature/choose-model/web-models`. **
 ## Merge order
 
 A → (B ∥ C) → final: orchestrator runs `make test` on main, `rocket verify-merge` per subtask, final report.
+
+---
+
+# v2 — Model catalog (spec section «v2: каталог моделей»)
+
+Tasks A–C are merged (#114–#116). v2 adds two more worker PRs. Global Constraints above still apply.
+
+## v2 Global Constraints
+
+- Catalog source order — codex: `codex debug models` (10 s timeout) → `~/.codex/models_cache.json` → builtin; claude-code: newest `~/.claude/cache/model-catalog/*-cc.json` → builtin. Never an error, only `warning`.
+- Codex models with `visibility=hide` are excluded. Claude `section=main` → `Main=true`.
+- Builtin lists = the exact model sets listed in the spec (snapshot 2026-10-02).
+- In-memory cache TTL 10 min; `refresh=1` bypasses it.
+- `Agent.Efforts()` widened: codex `minimal, low, medium, high, xhigh, max, ultra`; claude-code unchanged `low, medium, high, xhigh, max`.
+- Import names: claude-code → model id; codex → `codex-` + slug with `.`/`_` → `-`; collisions get `-2`, `-3`….
+- Imported profiles: `enabled=false`, effort empty, description from catalog (fallback: model name), positioned after existing.
+
+## v2 Review Focus
+
+1. Claude cache file present but with an unknown `version` or a missing `catalog.config.models` — must fall back to builtin with a warning, never 500. (Task D)
+2. `codex` binary missing or hanging — 10 s timeout, fall back to cache/builtin; the HTTP request must not hang. (Task D)
+3. Profile with alias model `opus` + effort `max` keeps validating (agent-level list); an existing v1 profile must stay editable. (Task D)
+4. Import run twice creates nothing the second time; a profile with the same agent+model but different effort counts as existing. (Task D)
+5. Switching agent or model in the form clears an effort the new model doesn't support; Haiku disables the effort select. (Task E)
+
+### Task D: Catalog backend + CLI
+
+Worker: `catalog-backend` (claude-code). Branch `feature/choose-model/catalog-backend`.
+
+**Files:**
+- Modify: `internal/agent/agent.go` (types `Catalog`, `CatalogModel`; `Catalog(ctx)` in the `Agent` interface; update test fakes)
+- Create: `internal/agent/codex/catalog.go` (+ test, fixtures under `testdata/` copied from a real `codex debug models` / `models_cache.json`)
+- Create: `internal/agent/claudecode/catalog.go` (+ test, fixture from `~/.claude/cache/model-catalog/*-cc.json`)
+- Modify: `internal/agent/codex/codex.go` (`Efforts()` widened)
+- Create: `internal/api/model_catalog.go` (+ test): `GET /v1/model-catalog`, `POST /v1/model-profiles/import-catalog`, in-memory TTL cache
+- Modify: `internal/api/model_profiles.go`: per-model effort validation via the catalog
+- Modify: `internal/cli/models.go` (+ test): `rocket models catalog`, `rocket models import`
+- Modify: `docs/10-agents.md`: catalog section
+
+**Interfaces (Produces, consumed by Task E):**
+- `GET /v1/model-catalog[?agent=A][&refresh=1]` → `{"agents":[{"agent","source","fetched_at","warning","models":[{"id","name","description","main","efforts","default_effort"}]}]}`
+- `POST /v1/model-profiles/import-catalog` with body `{"agent"?: string, "include_legacy"?: bool}` → `{"created":[string],"skipped":[{"model","reason"}]}`; 403 `human_only`; 400 `agent_unavailable`
+
+- [ ] Detailed TDD plan → `docs/superpowers/plans/2026-10-02-choose-model-catalog-backend.md`
+- [ ] Tests for v2 Review Focus 1–4 plus everything in the spec's «Тестирование (дополнение)» backend list
+- [ ] `make test` green; PR body has the test tail and sample output of `rocket models catalog` from an ISOLATED daemon (`ROCKET_HOME` and `ROCKET_SOCKET` in a tmpdir — never the live socket)
+
+### Task E: Catalog in the dashboard
+
+Worker: `catalog-web` (claude-code). Branch `feature/choose-model/catalog-web`. **Starts after Task D merges.**
+
+**Files:**
+- Modify: `web/src/screens/settings/ModelsSection.tsx` (+ test): model combobox («Основные» / «Предыдущие» / «Другая…»), per-model efforts, description prefill, source line + warning, button «Добавить профили для всех моделей» with a «включая предыдущие» checkbox and a result message
+- Modify: API client/types/queries + MSW handlers
+
+- [ ] Detailed TDD plan → `docs/superpowers/plans/2026-10-02-choose-model-catalog-web.md`
+- [ ] Vitest+MSW tests incl. v2 Review Focus 5
+- [ ] `make test` green; screenshots from an isolated daemon in the PR body
+
+## v2 merge order
+
+D → E → final verification on main, report v2.
