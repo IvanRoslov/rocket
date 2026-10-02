@@ -867,3 +867,35 @@ export interface ModelProfileInput {
   effort: string
   description: string
 }
+
+// ---------------------------------------------------------------------------
+// Model catalog — internal/api/model_catalog.go (choose-model v2)
+// ---------------------------------------------------------------------------
+
+/** One model an agent offers. Empty `efforts` = the model has no effort setting. */
+export interface CatalogModel {
+  id: string
+  name: string
+  description: string
+  /** A current model (codex: visibility=list; claude: section=main), else a previous one. */
+  main: boolean
+  efforts: string[]
+  default_effort: string
+}
+
+/** One agent's catalog and where it came from; `warning` explains a fallback. */
+export interface AgentCatalog {
+  agent: string
+  /** "cli" | "cache" | "builtin" */
+  source: string
+  /** Null for the builtin list. */
+  fetched_at: string | null
+  warning: string
+  models: CatalogModel[]
+}
+
+/** `POST /v1/model-profiles/import-catalog` -> what was created and what was not. */
+export interface ImportCatalogResult {
+  created: string[]
+  skipped: { model: string; reason: string }[]
+}

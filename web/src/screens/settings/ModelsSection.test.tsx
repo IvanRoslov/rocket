@@ -88,7 +88,7 @@ describe('ModelsSection', () => {
     const levels = within(effort)
       .getAllByRole('option')
       .map((o) => o.getAttribute('value'))
-    expect(levels).toEqual(['', 'minimal', 'low', 'medium', 'high'])
+    expect(levels).toEqual(['', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
 
     await user.type(within(dialog).getByLabelText('Модель'), 'gpt-5')
     await user.selectOptions(effort, 'high')
@@ -108,20 +108,26 @@ describe('ModelsSection', () => {
     const bodies = captureBodies('patch', '/v1/model-profiles/')
     const user = userEvent.setup()
     renderSection()
-    await screen.findByRole('row', { name: /^claude-haiku\b/ })
+    await screen.findByRole('row', { name: /^codex\b/ })
 
-    await user.click(within(row('claude-haiku')).getByRole('button', { name: 'Изменить' }))
+    await user.click(within(row('codex')).getByRole('button', { name: 'Изменить' }))
     const dialog = screen.getByRole('dialog')
     expect(within(dialog).getByLabelText('Имя')).toHaveAttribute('readonly')
-    expect(within(dialog).getByLabelText('Усилие')).toHaveValue('low')
 
-    await user.selectOptions(within(dialog).getByLabelText('Усилие'), 'xhigh')
-    await user.selectOptions(within(dialog).getByLabelText('Агент'), 'codex')
+    await user.selectOptions(within(dialog).getByLabelText('Усилие'), 'ultra')
+    await user.selectOptions(within(dialog).getByLabelText('Агент'), 'claude-code')
     expect(within(dialog).getByLabelText('Усилие')).toHaveValue('')
 
     await user.click(within(dialog).getByRole('button', { name: 'Сохранить' }))
     await waitFor(() =>
-      expect(bodies).toEqual([{ agent: 'codex', model: 'haiku', effort: '', description: 'Быстрые мелкие правки' }]),
+      expect(bodies).toEqual([
+        {
+          agent: 'claude-code',
+          model: '',
+          effort: '',
+          description: 'Codex с моделью по умолчанию: тексты, доки, механические правки',
+        },
+      ]),
     )
   })
 

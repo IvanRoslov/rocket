@@ -19,6 +19,7 @@ import type {
   Question,
   Repo,
   Session,
+  AgentCatalog,
   ModelProfile,
   Settings,
   SystemInfo,
@@ -1246,6 +1247,35 @@ export const modelProfiles: ModelProfile[] = [
     description: 'Быстрые мелкие правки',
     enabled: false,
     position: 3,
+  },
+]
+
+// Model catalog — internal/api/model_catalog.go (choose-model v2). Claude
+// Code's comes from its cache file; codex has no binary on the fixture
+// machine, so it fell back to the builtin list with a warning.
+const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+export const modelCatalog: AgentCatalog[] = [
+  {
+    agent: 'claude-code',
+    source: 'cache',
+    fetched_at: '2026-10-02T08:00:00Z',
+    warning: '',
+    models: [
+      { id: 'claude-opus-5-5', name: 'Opus 5.5', description: 'Most capable for complex work', main: true, efforts: CLAUDE_EFFORTS, default_effort: 'high' },
+      { id: 'claude-sonnet-5-5', name: 'Sonnet 5.5', description: 'Best for everyday tasks', main: true, efforts: CLAUDE_EFFORTS, default_effort: 'high' },
+      { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5', description: 'Fastest for quick answers', main: true, efforts: [], default_effort: '' },
+      { id: 'claude-opus-4-6', name: 'Opus 4.6', description: '', main: false, efforts: ['low', 'medium', 'high', 'max'], default_effort: 'high' },
+    ],
+  },
+  {
+    agent: 'codex',
+    source: 'builtin',
+    fetched_at: null,
+    warning: 'codex debug models: exec: "codex": executable file not found in $PATH',
+    models: [
+      { id: 'gpt-6-sol', name: 'GPT-6 Sol', description: 'Frontier agentic coding', main: true, efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], default_effort: 'medium' },
+      { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', description: 'Fast and cheap', main: true, efforts: ['low', 'medium', 'high'], default_effort: 'low' },
+    ],
   },
 ]
 
