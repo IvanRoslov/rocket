@@ -31,8 +31,13 @@ type sessionResponse struct {
 	PRNumber     int    `json:"pr_number,omitempty"`
 	PRState      string `json:"pr_state,omitempty"`
 	CIState      string `json:"ci_state,omitempty"`
-	CreatedAt    int64  `json:"created_at"`
-	UpdatedAt    int64  `json:"updated_at"`
+	// Profile, Model and Effort are the model-profile snapshot the session
+	// was launched with (task #5026); empty for legacy launches.
+	Profile   string `json:"profile,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Effort    string `json:"effort,omitempty"`
+	CreatedAt int64  `json:"created_at"`
+	UpdatedAt int64  `json:"updated_at"`
 
 	// PendingQuiz is the session's currently pending AskUserQuestion quiz
 	// (see internal/api's internal_quiz.go), nil when there is none.
@@ -63,6 +68,9 @@ func toSessionResponse(s store.Session, threshold time.Duration) sessionResponse
 		PRNumber:     s.PRNumber,
 		PRState:      s.PRState,
 		CIState:      s.CIState,
+		Profile:      s.Profile,
+		Model:        s.Model,
+		Effort:       s.Effort,
 		CreatedAt:    s.CreatedAt,
 		UpdatedAt:    s.UpdatedAt,
 		PendingQuiz:  parseQuizResponse(s.PendingQuiz),

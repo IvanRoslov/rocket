@@ -699,6 +699,10 @@ func (c *ClaudeCode) LaunchCommand(spec agent.LaunchSpec) []string {
 		cmd = append(cmd, "--model", spec.Model)
 	}
 
+	if spec.Effort != "" {
+		cmd = append(cmd, "--effort", spec.Effort)
+	}
+
 	if spec.PermissionMode != "" {
 		cmd = append(cmd, "--permission-mode", spec.PermissionMode)
 	}
@@ -708,6 +712,11 @@ func (c *ClaudeCode) LaunchCommand(spec agent.LaunchSpec) []string {
 	}
 
 	return cmd
+}
+
+// Efforts returns the levels `claude --effort` accepts (claude --help).
+func (c *ClaudeCode) Efforts() []string {
+	return []string{"low", "medium", "high", "xhigh", "max"}
 }
 
 // Env returns environment variables for the agent.

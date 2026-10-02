@@ -116,6 +116,7 @@ func (sessFakeWorkspaceErrorOnCreate) List() ([]workspace.Entry, error) { return
 type sessFakeAgent struct{}
 
 func (sessFakeAgent) Name() string                                 { return "fake" }
+func (sessFakeAgent) Efforts() []string                            { return nil }
 func (sessFakeAgent) Available() error                             { return nil }
 func (sessFakeAgent) SetupWorkspace(spec agent.LaunchSpec) error   { return nil }
 func (sessFakeAgent) LaunchCommand(spec agent.LaunchSpec) []string { return []string{"fake-agent"} }

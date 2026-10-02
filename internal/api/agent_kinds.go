@@ -15,6 +15,9 @@ type agentKindResponse struct {
 	Name      string `json:"name"`
 	Available bool   `json:"available"`
 	Error     string `json:"error,omitempty"`
+	// Efforts are the reasoning-effort levels a model profile of this agent
+	// may set (always an array, empty when the agent has none).
+	Efforts []string `json:"efforts"`
 }
 
 // agentKindsResponse is the payload of GET /v1/agent-kinds: the registry
@@ -29,7 +32,10 @@ func registerAgentKindRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("GET /v1/agent-kinds", func(w http.ResponseWriter, r *http.Request) {
 		kinds := make([]agentKindResponse, 0, 4)
 		for name, a := range agent.Registry() {
-			k := agentKindResponse{Name: name}
+			k := agentKindResponse{Name: name, Efforts: a.Efforts()}
+			if k.Efforts == nil {
+				k.Efforts = []string{}
+			}
 			if err := a.Available(); err != nil {
 				k.Error = err.Error()
 			} else {
