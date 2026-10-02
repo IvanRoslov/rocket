@@ -608,7 +608,7 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 		return store.Session{}, err
 	}
 
-	brainstormSkill := m.brainstormSkill(task, ag)
+	brainstormSkill := prompts.SkillName(m.brainstormSkill(task, ag))
 
 	sysPrompt, err := prompts.Render(m.cfg.Home, "orchestrator", prompts.Vars{
 		"brainstorm_skill": brainstormSkill,
@@ -682,8 +682,34 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 	return sess, nil
 }
 
+// noteSkillUpgrade records in the task log that a restored orchestrator
+// gets the current text of the custom brainstorm skill although its task
+// started on an older version. The binary carries one copy of the skill, and
+// the task's label stays as it was, so the metric keeps the storm under the
+// version it started with. Best effort: a failed write never fails restore.
+func (m *Manager) noteSkillUpgrade(task store.Task) {
+	rec := task.BrainstormSkill
+	if prompts.SkillName(rec) != prompts.CustomBrainstormSkill {
+		return
+	}
+	_, v, ok := strings.Cut(rec, "@")
+	if !ok || v == prompts.CustomBrainstormSkillVersion {
+		return
+	}
+	if _, err := m.st.AddTaskLog(store.TaskLogEntry{
+		TaskID: task.ID,
+		Kind:   "note",
+		Author: "rocket",
+		Body: fmt.Sprintf("скилл шторма обновлён %s %s→%s при restore (метка задачи не меняется)",
+			prompts.CustomBrainstormSkill, v, prompts.CustomBrainstormSkillVersion),
+	}); err != nil {
+		slog.Warn("session: restore skill-version note failed", "task", task.ID, "error", err)
+	}
+}
+
 // brainstormSkill returns the brainstorm skill task's orchestrator runs with:
-// the one recorded when the task was started, or — for a task started before
+// the one recorded when the task was started (custom skill with its
+// "@version"; callers take prompts.SkillName of it), or — for a task started before
 // that was recorded — whatever the orchestrator_brainstorm_custom setting
 // says now, and the custom skill only for an agent that lays it out. An
 // unreadable setting falls back to the stock skill.
@@ -980,7 +1006,8 @@ func (m *Manager) fillRestorePrompt(spec *agent.LaunchSpec, ag agent.Agent, sess
 		if err != nil {
 			return
 		}
-		brainstormSkill := m.brainstormSkill(task, ag)
+		brainstormSkill := prompts.SkillName(m.brainstormSkill(task, ag))
+		m.noteSkillUpgrade(task)
 		sysPrompt, err := prompts.Render(m.cfg.Home, "orchestrator", prompts.Vars{
 			"brainstorm_skill": brainstormSkill,
 			"feature_slug":     sess.FeatureSlug,

@@ -93,7 +93,7 @@ const orchestratorSkillRelDir = ".claude/skills/" + prompts.CustomBrainstormSkil
 // carry the same description, so a stray copy could be picked instead of
 // superpowers:brainstorming and blur the per-skill brainstorm metric.
 func syncOrchestratorSkill(spec agent.LaunchSpec) error {
-	if spec.BrainstormSkill == prompts.CustomBrainstormSkill {
+	if prompts.SkillName(spec.BrainstormSkill) == prompts.CustomBrainstormSkill {
 		return prompts.WriteOrchestratorSkill(filepath.Join(spec.WorktreePath, ".claude", "skills"))
 	}
 	return os.RemoveAll(filepath.Join(spec.WorktreePath, filepath.FromSlash(orchestratorSkillRelDir)))
