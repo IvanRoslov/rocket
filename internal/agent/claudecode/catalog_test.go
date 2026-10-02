@@ -169,3 +169,35 @@ func TestBuiltinCatalogMatchesFixture(t *testing.T) {
 		t.Errorf("builtin catalog drifted from the fixture:\nbuiltin %+v\nfixture %+v", builtinCatalog(), fromCache)
 	}
 }
+
+// Older caches (2026-09-27) badge the default level "Default", newer ones
+// (2026-10-02) "Recommended"; "Default" wins when both appear.
+func TestParseClaudeCatalogDefaultBadge(t *testing.T) {
+	fixture := string(catalogFixture(t))
+	allDefault := strings.ReplaceAll(fixture, `"Recommended"`, `"Default"`)
+	ms, _, err := parseClaudeCatalog([]byte(allDefault))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := model(t, ms, "claude-fable-5-1").DefaultEffort; got != "high" {
+		t.Errorf("Default badge: fable default = %q, want high", got)
+	}
+
+	body := `{"version": 2, "fetchedAt": 1, "catalog": {"config": {"models": [
+	  {"id": "m", "name": "M", "section": "main", "thinking": {"effort_options": [
+	    {"id": "low", "badge": {"message": "Recommended"}},
+	    {"id": "high", "badge": {"message": "Default"}},
+	    {"id": "max", "badge": {"message": "New"}}]}},
+	  {"id": "n", "name": "N", "section": "main", "thinking": {"effort_options": [
+	    {"id": "low", "badge": {"message": "New"}}, {"id": "high"}]}}]}}}`
+	ms, _, err = parseClaudeCatalog([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := model(t, ms, "m").DefaultEffort; got != "high" {
+		t.Errorf("Default vs Recommended: default = %q, want high", got)
+	}
+	if got := model(t, ms, "n").DefaultEffort; got != "" {
+		t.Errorf("no Default/Recommended badge: default = %q, want empty", got)
+	}
+}

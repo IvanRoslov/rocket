@@ -42,7 +42,8 @@ type claudeCatalogJSON struct {
 }
 
 // parseClaudeCatalog parses a *-cc.json cache file. DefaultEffort is the
-// option Claude Code badges "Recommended".
+// option Claude Code badges "Default" (older caches, e.g. 2026-09-27), else
+// the one badged "Recommended" (2026-10-02), else empty.
 func parseClaudeCatalog(b []byte) ([]agent.CatalogModel, time.Time, error) {
 	var raw claudeCatalogJSON
 	if err := json.Unmarshal(b, &raw); err != nil {
@@ -60,11 +61,21 @@ func parseClaudeCatalog(b []byte) ([]agent.CatalogModel, time.Time, error) {
 			continue
 		}
 		cm := agent.CatalogModel{ID: m.ID, Name: m.Name, Description: m.Description, Main: m.Section == "main"}
+		var recommended string
 		for _, o := range m.Thinking.EffortOptions {
 			cm.Efforts = append(cm.Efforts, o.ID)
-			if o.Badge != nil && o.Badge.Message == "Recommended" {
-				cm.DefaultEffort = o.ID
+			if o.Badge == nil {
+				continue
 			}
+			switch o.Badge.Message {
+			case "Default":
+				cm.DefaultEffort = o.ID
+			case "Recommended":
+				recommended = o.ID
+			}
+		}
+		if cm.DefaultEffort == "" {
+			cm.DefaultEffort = recommended
 		}
 		out = append(out, cm)
 	}
