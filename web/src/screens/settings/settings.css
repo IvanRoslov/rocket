@@ -346,3 +346,60 @@
   font: 13px var(--font-ui);
   color: var(--err-text);
 }
+
+/* ---------- Models (task #5026) ---------- */
+.settings-models__table {
+  width: 100%;
+  border-collapse: collapse;
+  font: 13px var(--font-ui);
+  color: var(--text);
+}
+.settings-models__table th {
+  text-align: left;
+  font: 600 11.5px var(--font-ui);
+  color: var(--text-4);
+  padding: 0 8px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-models__table td {
+  padding: 9px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.settings-models__table tr:last-child td {
+  border-bottom: none;
+}
+.settings-models__row--off td {
+  color: var(--text-4);
+}
+.settings-models__muted {
+  color: var(--text-4);
+}
+.settings-models__description {
+  max-width: 280px;
+  line-height: 1.4;
+}
+.settings-models__actions {
+  white-space: nowrap;
+  text-align: right;
+}
+.settings-models__actions .btn + .btn {
+  margin-left: 6px;
+}
+.settings-models__input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.settings-models__description-input {
+  font-family: var(--font-ui);
+  box-sizing: border-box;
+}
+.settings-models__defaults {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
+}
+.settings-models__defaults .settings-field__hint,
+.settings-models__defaults .settings-error {
+  grid-column: 1 / -1;
+}
