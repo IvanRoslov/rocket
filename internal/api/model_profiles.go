@@ -104,7 +104,7 @@ func handleAvailableModelProfiles(w http.ResponseWriter, r *http.Request, d Deps
 	}
 	var task *store.Task
 	if caller != nil {
-		if task, err = featureTaskOf(d.Store, caller.ID); err != nil {
+		if task, err = featureTaskOf(d.Store, caller); err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
@@ -123,10 +123,22 @@ func handleAvailableModelProfiles(w http.ResponseWriter, r *http.Request, d Deps
 	writeJSON(w, http.StatusOK, map[string]any{"profiles": out, "default": modelpolicy.DefaultWorkerName(in)})
 }
 
-// featureTaskOf returns the feature task whose allowlist governs sessionID:
-// the task it owns, or that task's parent when it owns a subtask. nil when
-// the session owns no task (a persistent agent, a detached session).
-func featureTaskOf(st *store.Store, sessionID string) (*store.Task, error) {
+// featureTaskOf returns the feature task whose allowlist governs caller:
+// the task it owns, or that task's parent when it owns a subtask. A session
+// that owns no task any more (its subtask was handed to a newer worker) is
+// resolved through its parent orchestrator's task. nil when neither leads to
+// a task (a persistent agent, a detached session).
+func featureTaskOf(st *store.Store, caller *store.Session) (*store.Task, error) {
+	t, err := featureTaskOfSession(st, caller.ID)
+	if err != nil || t != nil || caller.ParentID == "" {
+		return t, err
+	}
+	return featureTaskOfSession(st, caller.ParentID)
+}
+
+// featureTaskOfSession returns the root task of the task sessionID owns, or
+// nil if it owns none or its parent is gone.
+func featureTaskOfSession(st *store.Store, sessionID string) (*store.Task, error) {
 	t, err := st.GetTaskBySessionID(sessionID)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil

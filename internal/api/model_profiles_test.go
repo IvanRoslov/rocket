@@ -407,3 +407,24 @@ func TestSessionResponseCarriesProfileSnapshot(t *testing.T) {
 		t.Errorf("got %d %v", status, body)
 	}
 }
+
+// A worker whose subtask was handed to a newer worker no longer owns any
+// task; it must still see its orchestrator's feature allowlist, not every
+// enabled profile.
+func TestAvailableForReassignedWorkerUsesOrchestratorTask(t *testing.T) {
+	f := newMPFixture(t)
+	if err := f.d.Store.SetTaskAllowedProfiles(f.featureID, []string{"codex"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.d.Store.AddSession(store.Session{ID: "wrk-old", Kind: "worker", ProjectID: "p",
+		FeatureSlug: "f", ParentID: "orch", Agent: "claude-code", State: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	status, body := mpDo(t, f.url, "GET", "/v1/model-profiles/available", "wrk-old", nil)
+	if status != 200 {
+		t.Fatalf("status = %d %v", status, body)
+	}
+	if got := profileNamesOf(t, body); !reflect.DeepEqual(got, []string{"codex"}) || body["default"] != "codex" {
+		t.Errorf("available = %v default %v, want [codex] codex", got, body["default"])
+	}
+}
