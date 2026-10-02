@@ -3,7 +3,7 @@
 //
 // Server->client binary frames are raw PTY output written straight into
 // the terminal; client->server binary frames carry keystrokes/input.
-// Resize is a JSON text control frame; ping/pong keeps the connection
+// Resize and scroll are JSON text control frames; ping/pong keeps the connection
 // (and any intermediate proxy) alive.
 //
 // Close handling (Task 9 review fix):
@@ -23,6 +23,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
+import { ScrollAccumulator, encodeScroll, wheelDeltaToLines } from './termScroll'
 import '@xterm/xterm/css/xterm.css'
 import './TermPanel.css'
 
@@ -300,6 +301,67 @@ export function TermPanel({ sessionId, readonly, onResize, fontSize }: TermPanel
     let openedThisAttempt = false
     let cancelled = false
 
+    const scrollAccumulator = new ScrollAccumulator()
+    let pendingScroll = 0
+    let scrollFrame: number | null = null
+
+    const flushScroll = () => {
+      scrollFrame = null
+      if (!appOwnsMouse() && ws && ws.readyState === WebSocket.OPEN) {
+        // A single gesture may contain many events; keep each frame within
+        // the daemon's 1000-line control-frame limit without losing movement.
+        while (pendingScroll !== 0) {
+          const lines = Math.sign(pendingScroll) * Math.min(1000, Math.abs(pendingScroll))
+          ws.send(encodeScroll(lines))
+          pendingScroll -= lines
+        }
+      }
+      pendingScroll = 0
+    }
+
+    const queueScroll = (deltaLines: number) => {
+      const lines = scrollAccumulator.add(deltaLines)
+      if (lines === 0) return
+      pendingScroll += lines
+      if (scrollFrame === null) scrollFrame = requestAnimationFrame(flushScroll)
+    }
+
+    const appOwnsMouse = () => term.modes.mouseTrackingMode !== 'none'
+    const cellHeight = () => container.clientHeight / term.rows || 1
+
+    // In an alternate screen with no mouse tracking, xterm's passive wheel
+    // path turns wheel movement into Up/Down keys. Route it to tmux history.
+    term.attachCustomWheelEventHandler((ev) => {
+      if (appOwnsMouse()) return true
+      ev.preventDefault()
+      queueScroll(wheelDeltaToLines(ev.deltaY, ev.deltaMode, cellHeight(), term.rows))
+      return false
+    })
+
+    let touchY: number | null = null
+    const onTouchStart = (ev: TouchEvent) => {
+      if (appOwnsMouse() || ev.touches.length !== 1) {
+        touchY = null
+        return
+      }
+      touchY = ev.touches[0].clientY
+    }
+    const onTouchMove = (ev: TouchEvent) => {
+      if (appOwnsMouse() || ev.touches.length !== 1) {
+        touchY = null
+        return
+      }
+      if (touchY === null) return
+      const y = ev.touches[0].clientY
+      // Finger down moves content down, revealing older output (negative).
+      queueScroll((touchY - y) / cellHeight())
+      touchY = y
+      ev.preventDefault()
+      ev.stopPropagation()
+    }
+    container.addEventListener('touchstart', onTouchStart, { capture: true, passive: true })
+    container.addEventListener('touchmove', onTouchMove, { capture: true, passive: false })
+
     function clearTimers() {
       if (pingTimer !== null) {
         clearInterval(pingTimer)
@@ -388,6 +450,10 @@ export function TermPanel({ sessionId, readonly, onResize, fontSize }: TermPanel
     if (!readonly) {
       term.onData((data) => {
         if (ws && ws.readyState === WebSocket.OPEN) {
+          // Keep scroll ahead of the first key or paste so the daemon can
+          // leave copy-mode before delivering that input to the program.
+          if (scrollFrame !== null) cancelAnimationFrame(scrollFrame)
+          flushScroll()
           ws.send(new TextEncoder().encode(data))
         }
       })
@@ -409,6 +475,9 @@ export function TermPanel({ sessionId, readonly, onResize, fontSize }: TermPanel
 
     return () => {
       cancelled = true
+      container.removeEventListener('touchstart', onTouchStart, true)
+      container.removeEventListener('touchmove', onTouchMove, true)
+      if (scrollFrame !== null) cancelAnimationFrame(scrollFrame)
       clearTimers()
       resizeObserver.disconnect()
       ws?.close()
