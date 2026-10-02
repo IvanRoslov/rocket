@@ -11,24 +11,30 @@ import {
   useAgentKinds,
   useCreateModelProfile,
   useDeleteModelProfile,
+  useModelCatalog,
   useModelProfiles,
   useSettings,
   useUpdateModelProfile,
   useUpdateSettings,
 } from '../../lib/queries'
+import { effortsFor, findCatalogModel } from '../../lib/catalog'
 import { profileErrorText } from '../../lib/profiles'
-import type { AgentKind, ModelProfile } from '../../lib/types'
+import type { AgentCatalog, AgentKind, ModelProfile } from '../../lib/types'
 
 const DEFAULT_LABEL = 'по умолчанию'
+/** The «Другая…» choice of the model picker: the model is typed by hand. */
+const CUSTOM_MODEL = '__custom__'
 
 interface ProfileModalProps {
   /** Undefined to add a new profile. */
   profile?: ModelProfile
   kinds: AgentKind[]
+  /** Every agent's model catalog; empty while loading or when it failed. */
+  catalogs: AgentCatalog[]
   onClose: () => void
 }
 
-function ProfileModal({ profile, kinds, onClose }: ProfileModalProps) {
+function ProfileModal({ profile, kinds, catalogs, onClose }: ProfileModalProps) {
   const create = useCreateModelProfile()
   const update = useUpdateModelProfile()
   const [name, setName] = useState(profile?.name ?? '')
@@ -36,14 +42,46 @@ function ProfileModal({ profile, kinds, onClose }: ProfileModalProps) {
   const [model, setModel] = useState(profile?.model ?? '')
   const [effort, setEffort] = useState(profile?.effort ?? '')
   const [description, setDescription] = useState(profile?.description ?? '')
-  const efforts = kinds.find((k) => k.name === agent)?.efforts ?? []
+  // «Другая…» picked explicitly. A model missing from the agent's catalog
+  // (a v1 alias like `opus`, or one left over from another agent) shows as
+  // «Другая…» on its own.
+  const [custom, setCustom] = useState(false)
   const mutation = profile ? update : create
+
+  const catalogOf = (a: string) => catalogs.find((c) => c.agent === a)
+  const agentEfforts = (a: string) => kinds.find((k) => k.name === a)?.efforts ?? []
+  const catalog = catalogOf(agent)
+  const { efforts, disabled: effortDisabled } = effortsFor(agentEfforts(agent), catalog, model)
+  const isCustom = custom || (model !== '' && !findCatalogModel(catalog, model))
+  const mainModels = catalog?.models.filter((m) => m.main) ?? []
+  const previousModels = catalog?.models.filter((m) => !m.main) ?? []
+
+  // An effort the new agent or model lacks would be refused with bad_effort.
+  function keepEffort(nextAgent: string, nextModel: string) {
+    const allowed = effortsFor(agentEfforts(nextAgent), catalogOf(nextAgent), nextModel).efforts
+    if (!allowed.includes(effort)) setEffort('')
+  }
 
   function changeAgent(next: string) {
     setAgent(next)
-    // An effort the new agent lacks would be refused with bad_effort.
-    const nextEfforts = kinds.find((k) => k.name === next)?.efforts ?? []
-    if (!nextEfforts.includes(effort)) setEffort('')
+    keepEffort(next, model)
+  }
+
+  function pickModel(value: string) {
+    if (value === CUSTOM_MODEL) {
+      setCustom(true)
+      return
+    }
+    setCustom(false)
+    setModel(value)
+    keepEffort(agent, value)
+    const picked = findCatalogModel(catalog, value)
+    if (picked && !description.trim()) setDescription(picked.description || picked.name)
+  }
+
+  function typeModel(value: string) {
+    setModel(value)
+    keepEffort(agent, value.trim())
   }
 
   function handleSubmit(e: FormEvent) {
@@ -88,13 +126,43 @@ function ProfileModal({ profile, kinds, onClose }: ProfileModalProps) {
         <label className="settings-field__label settings-field__label--spaced" htmlFor="profile-model">
           Модель
         </label>
-        <input
+        <select
           id="profile-model"
           className="settings-field__input settings-models__input"
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          placeholder="пусто — модель агента по умолчанию"
-        />
+          value={isCustom ? CUSTOM_MODEL : model}
+          onChange={(e) => pickModel(e.target.value)}
+        >
+          <option value="">{DEFAULT_LABEL}</option>
+          {mainModels.length > 0 && (
+            <optgroup label="Основные">
+              {mainModels.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.description ? `${m.name} — ${m.description}` : m.name}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {previousModels.length > 0 && (
+            <optgroup label="Предыдущие">
+              {previousModels.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.description ? `${m.name} — ${m.description}` : m.name}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          <option value={CUSTOM_MODEL}>Другая…</option>
+        </select>
+        {isCustom && (
+          <input
+            className="settings-field__input settings-models__input settings-models__custom-model"
+            aria-label="Своя модель"
+            value={model}
+            onChange={(e) => typeModel(e.target.value)}
+            placeholder="id модели, например claude-opus-5-5"
+            autoFocus={custom}
+          />
+        )}
 
         <label className="settings-field__label settings-field__label--spaced" htmlFor="profile-effort">
           Усилие
@@ -102,7 +170,8 @@ function ProfileModal({ profile, kinds, onClose }: ProfileModalProps) {
         <select
           id="profile-effort"
           className="settings-field__input settings-models__input"
-          value={effort}
+          value={effortDisabled ? '' : effort}
+          disabled={effortDisabled}
           onChange={(e) => setEffort(e.target.value)}
         >
           <option value="">{DEFAULT_LABEL}</option>
@@ -124,6 +193,8 @@ function ProfileModal({ profile, kinds, onClose }: ProfileModalProps) {
           onChange={(e) => setDescription(e.target.value)}
           placeholder="Оркестратор видит это описание, когда выбирает профиль воркеру"
         />
+
+        {effortDisabled && <p className="settings-field__hint">У этой модели нет настройки усилия.</p>}
 
         {mutation.isError && (
           <p className="settings-error" role="alert">
@@ -179,6 +250,7 @@ function DefaultSelect({ id, label, value, profiles, disabled, onChange }: Defau
 export function ModelsSection() {
   const profiles = useModelProfiles()
   const kinds = useAgentKinds()
+  const catalog = useModelCatalog()
   const settings = useSettings()
   const updateSettings = useUpdateSettings()
   const updateProfile = useUpdateModelProfile()
@@ -188,6 +260,7 @@ export function ModelsSection() {
 
   const list = profiles.data ?? []
   const kindList = kinds.data?.kinds ?? []
+  const catalogs = catalog.data ?? []
 
   // Show the value being saved, so a select does not flick back mid-request.
   function defaultValue(key: 'default_orchestrator_profile' | 'default_worker_profile'): string {
@@ -321,7 +394,12 @@ export function ModelsSection() {
       </div>
 
       {editing !== undefined && (
-        <ProfileModal profile={editing ?? undefined} kinds={kindList} onClose={() => setEditing(undefined)} />
+        <ProfileModal
+          profile={editing ?? undefined}
+          kinds={kindList}
+          catalogs={catalogs}
+          onClose={() => setEditing(undefined)}
+        />
       )}
     </section>
   )

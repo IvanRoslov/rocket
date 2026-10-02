@@ -90,7 +90,8 @@ describe('ModelsSection', () => {
       .map((o) => o.getAttribute('value'))
     expect(levels).toEqual(['', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
 
-    await user.type(within(dialog).getByLabelText('Модель'), 'gpt-5')
+    await user.selectOptions(within(dialog).getByLabelText('Модель'), 'Другая…')
+    await user.type(within(dialog).getByLabelText('Своя модель'), 'gpt-5')
     await user.selectOptions(effort, 'high')
     await user.type(within(dialog).getByLabelText('Для чего подходит'), 'Трудные тексты')
     await user.click(within(dialog).getByRole('button', { name: 'Сохранить' }))
@@ -127,6 +128,167 @@ describe('ModelsSection', () => {
           effort: '',
           description: 'Codex с моделью по умолчанию: тексты, доки, механические правки',
         },
+      ]),
+    )
+  })
+
+  it('offers the agent’s catalog models in groups, then «Другая…»', async () => {
+    const user = userEvent.setup()
+    renderSection()
+    await screen.findByRole('row', { name: /^codex\b/ })
+
+    await user.click(screen.getByRole('button', { name: 'Добавить профиль' }))
+    const dialog = screen.getByRole('dialog')
+    const model = within(dialog).getByLabelText('Модель')
+    await waitFor(() => expect(within(model).getByRole('group', { name: 'Основные' })).toBeInTheDocument())
+
+    const main = within(within(model).getByRole('group', { name: 'Основные' })).getAllByRole('option')
+    expect(main.map((o) => o.getAttribute('value'))).toEqual([
+      'claude-opus-5-5',
+      'claude-sonnet-5-5',
+      'claude-haiku-4-5-20251001',
+    ])
+    expect(main[0]).toHaveTextContent('Opus 5.5 — Most capable for complex work')
+    const previous = within(within(model).getByRole('group', { name: 'Предыдущие' })).getAllByRole('option')
+    expect(previous.map((o) => o.getAttribute('value'))).toEqual(['claude-opus-4-6'])
+    const all = within(model).getAllByRole('option')
+    expect(all[0]).toHaveTextContent('по умолчанию')
+    expect(all[all.length - 1]).toHaveTextContent('Другая…')
+    expect(within(dialog).queryByLabelText('Своя модель')).not.toBeInTheDocument()
+
+    await user.selectOptions(within(dialog).getByLabelText('Агент'), 'codex')
+    expect(within(model).getByRole('option', { name: 'GPT-6 Sol — Frontier agentic coding' })).toBeInTheDocument()
+    expect(within(model).queryByRole('group', { name: 'Предыдущие' })).not.toBeInTheDocument()
+  })
+
+  it('picking a catalog model offers its own efforts and fills an empty description', async () => {
+    const bodies = captureBodies('post', '/v1/model-profiles')
+    const user = userEvent.setup()
+    renderSection()
+    await screen.findByRole('row', { name: /^codex\b/ })
+
+    await user.click(screen.getByRole('button', { name: 'Добавить профиль' }))
+    const dialog = screen.getByRole('dialog')
+    await user.type(within(dialog).getByLabelText('Имя'), 'opus-46')
+    const model = within(dialog).getByLabelText('Модель')
+    await waitFor(() => expect(within(model).getByRole('group', { name: 'Предыдущие' })).toBeInTheDocument())
+    await user.selectOptions(model, 'claude-opus-4-6')
+
+    const effort = within(dialog).getByLabelText('Усилие')
+    expect(within(effort).getAllByRole('option').map((o) => o.getAttribute('value'))).toEqual([
+      '',
+      'low',
+      'medium',
+      'high',
+      'max',
+    ])
+    // Opus 4.6 has no description in the catalog: its name stands in.
+    expect(within(dialog).getByLabelText('Для чего подходит')).toHaveValue('Opus 4.6')
+
+    // A description the human wrote is never overwritten.
+    await user.clear(within(dialog).getByLabelText('Для чего подходит'))
+    await user.type(within(dialog).getByLabelText('Для чего подходит'), 'Мой текст')
+    await user.selectOptions(model, 'claude-opus-5-5')
+    expect(within(dialog).getByLabelText('Для чего подходит')).toHaveValue('Мой текст')
+
+    await user.selectOptions(effort, 'xhigh')
+    await user.click(within(dialog).getByRole('button', { name: 'Сохранить' }))
+    await waitFor(() =>
+      expect(bodies).toEqual([
+        { name: 'opus-46', agent: 'claude-code', model: 'claude-opus-5-5', effort: 'xhigh', description: 'Мой текст' },
+      ]),
+    )
+  })
+
+  it('switching to a model without the effort clears it; Haiku disables the effort', async () => {
+    const user = userEvent.setup()
+    renderSection()
+    await screen.findByRole('row', { name: /^codex\b/ })
+
+    await user.click(screen.getByRole('button', { name: 'Добавить профиль' }))
+    const dialog = screen.getByRole('dialog')
+    const model = within(dialog).getByLabelText('Модель')
+    const effort = within(dialog).getByLabelText('Усилие')
+    await waitFor(() => expect(within(model).getByRole('group', { name: 'Основные' })).toBeInTheDocument())
+
+    await user.selectOptions(model, 'claude-opus-5-5')
+    await user.selectOptions(effort, 'xhigh')
+    await user.selectOptions(model, 'claude-opus-4-6')
+    expect(effort).toHaveValue('')
+
+    await user.selectOptions(effort, 'high')
+    await user.selectOptions(model, 'claude-haiku-4-5-20251001')
+    expect(effort).toHaveValue('')
+    expect(effort).toBeDisabled()
+
+    await user.selectOptions(model, 'claude-sonnet-5-5')
+    expect(effort).toBeEnabled()
+  })
+
+  it('switching the agent turns a model the new agent lacks into «Другая…» and drops its effort', async () => {
+    const user = userEvent.setup()
+    renderSection()
+    await screen.findByRole('row', { name: /^codex\b/ })
+
+    await user.click(screen.getByRole('button', { name: 'Добавить профиль' }))
+    const dialog = screen.getByRole('dialog')
+    const model = within(dialog).getByLabelText('Модель')
+    await waitFor(() => expect(within(model).getByRole('group', { name: 'Основные' })).toBeInTheDocument())
+    await user.selectOptions(within(dialog).getByLabelText('Агент'), 'codex')
+    await user.selectOptions(model, 'gpt-6-sol')
+    await user.selectOptions(within(dialog).getByLabelText('Усилие'), 'ultra')
+
+    await user.selectOptions(within(dialog).getByLabelText('Агент'), 'claude-code')
+    expect(model).toHaveValue('__custom__')
+    expect(within(dialog).getByLabelText('Своя модель')).toHaveValue('gpt-6-sol')
+    expect(within(dialog).getByLabelText('Усилие')).toHaveValue('')
+  })
+
+  it('a v1 profile with an alias model opens as «Другая…» with the agent’s efforts and saves unchanged', async () => {
+    const bodies = captureBodies('patch', '/v1/model-profiles/')
+    const user = userEvent.setup()
+    renderSection()
+    await screen.findByRole('row', { name: /^claude-haiku\b/ })
+
+    await user.click(within(row('claude-haiku')).getByRole('button', { name: 'Изменить' }))
+    const dialog = screen.getByRole('dialog')
+    await waitFor(() => expect(within(dialog).getByLabelText('Модель')).toHaveValue('__custom__'))
+    expect(within(dialog).getByLabelText('Своя модель')).toHaveValue('haiku')
+    const effort = within(dialog).getByLabelText('Усилие')
+    expect(effort).toHaveValue('low')
+    expect(effort).toBeEnabled()
+    expect(within(effort).getByRole('option', { name: 'xhigh' })).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Сохранить' }))
+    await waitFor(() =>
+      expect(bodies).toEqual([
+        { agent: 'claude-code', model: 'haiku', effort: 'low', description: 'Быстрые мелкие правки' },
+      ]),
+    )
+  })
+
+  it('without a catalog the form still takes a custom model with the agent’s efforts', async () => {
+    server.use(
+      http.get('/v1/model-catalog', () =>
+        HttpResponse.json({ error: { code: 'internal_error', message: 'boom' } }, { status: 500 }),
+      ),
+    )
+    const bodies = captureBodies('post', '/v1/model-profiles')
+    const user = userEvent.setup()
+    renderSection()
+    await screen.findByRole('row', { name: /^codex\b/ })
+
+    await user.click(screen.getByRole('button', { name: 'Добавить профиль' }))
+    const dialog = screen.getByRole('dialog')
+    await user.type(within(dialog).getByLabelText('Имя'), 'mine')
+    await user.selectOptions(within(dialog).getByLabelText('Модель'), 'Другая…')
+    await user.type(within(dialog).getByLabelText('Своя модель'), 'claude-opus-5-5')
+    await user.selectOptions(within(dialog).getByLabelText('Усилие'), 'max')
+    await user.click(within(dialog).getByRole('button', { name: 'Сохранить' }))
+
+    await waitFor(() =>
+      expect(bodies).toEqual([
+        { name: 'mine', agent: 'claude-code', model: 'claude-opus-5-5', effort: 'max', description: '' },
       ]),
     )
   })
