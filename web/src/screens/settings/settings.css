@@ -375,9 +375,29 @@
 .settings-models__muted {
   color: var(--text-4);
 }
+.settings-models__head {
+  gap: 16px;
+}
+.settings-models__head .btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.settings-models__table td:not(.settings-models__profile) {
+  white-space: nowrap;
+}
+.settings-models__profile {
+  width: 100%;
+  min-width: 200px;
+}
+.settings-models__name {
+  font-weight: 600;
+  white-space: nowrap;
+}
 .settings-models__description {
-  max-width: 280px;
+  margin-top: 3px;
+  font-size: 12px;
   line-height: 1.4;
+  color: var(--text-3);
 }
 .settings-models__actions {
   white-space: nowrap;

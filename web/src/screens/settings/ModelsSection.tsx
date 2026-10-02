@@ -203,7 +203,7 @@ export function ModelsSection() {
 
   return (
     <section>
-      <div className="settings-section__head">
+      <div className="settings-section__head settings-models__head">
         <div>
           <h1 className="settings-section__title">Модели</h1>
           <p className="settings-section__subtitle">
@@ -224,11 +224,10 @@ export function ModelsSection() {
           <table className="settings-models__table">
             <thead>
               <tr>
-                <th>Имя</th>
+                <th>Профиль</th>
                 <th>Агент</th>
                 <th>Модель</th>
                 <th>Усилие</th>
-                <th>Для чего подходит</th>
                 <th>Вкл.</th>
                 <th />
               </tr>
@@ -241,13 +240,15 @@ export function ModelsSection() {
                     : p.enabled
                 return (
                   <tr key={p.name} className={enabled ? undefined : 'settings-models__row--off'}>
-                    <td className="settings-mono">{p.name}</td>
+                    <td className="settings-models__profile">
+                      <div className="settings-mono settings-models__name">{p.name}</div>
+                      {p.description && <div className="settings-models__description">{p.description}</div>}
+                    </td>
                     <td>{p.agent}</td>
                     <td className={p.model ? 'settings-mono' : 'settings-models__muted'}>{p.model || DEFAULT_LABEL}</td>
                     <td className={p.effort ? 'settings-mono' : 'settings-models__muted'}>
                       {p.effort || DEFAULT_LABEL}
                     </td>
-                    <td className="settings-models__description">{p.description}</td>
                     <td>
                       <input
                         type="checkbox"
