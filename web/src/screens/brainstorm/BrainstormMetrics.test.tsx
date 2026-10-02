@@ -32,14 +32,48 @@ describe('BrainstormMetricsScreen', () => {
     const chart = (await screen.findByRole('figure', { name: /Accepted recommendations/ })) as HTMLElement
 
     const legend = within(chart).getByRole('list', { name: 'Legend' })
-    expect(within(legend).getByText('orchestrator-brainstorming')).toBeInTheDocument()
+    expect(within(legend).getByText('orchestrator-brainstorming@1.1')).toBeInTheDocument()
     expect(within(legend).getByText('superpowers:brainstorming')).toBeInTheDocument()
 
     // W40: orchestrator 4/5 = 80%, superpowers 1/2 = 50%; W39 superpowers 2/4 = 50%.
     expect(within(chart).getByText('2026-W40')).toBeInTheDocument()
-    expect(within(chart).getByLabelText('2026-W40 · orchestrator-brainstorming: 80% (4 of 5)')).toBeInTheDocument()
+    expect(within(chart).getByLabelText('2026-W40 · orchestrator-brainstorming@1.1: 80% (4 of 5)')).toBeInTheDocument()
     expect(within(chart).getByLabelText('2026-W40 · superpowers:brainstorming: 50% (1 of 2)')).toBeInTheDocument()
     expect(within(chart).getByLabelText('2026-W39 · superpowers:brainstorming: 50% (2 of 4)')).toBeInTheDocument()
+  })
+
+  it('gives each skill version its own stable color, unknown versions last', async () => {
+    const week = (skill: string) => ({
+      week: '2026-W40', skill, answered_by: 'human', answered: 2, accepted: 1,
+      accepted_with_comment: 0, corrected: 0, wrong_turn: 1,
+    })
+    server.use(
+      http.get('/v1/stats/brainstorm', () =>
+        HttpResponse.json({
+          weeks: [
+            week('orchestrator-brainstorming@1.2'),
+            week('superpowers:brainstorming'),
+            week('orchestrator-brainstorming@1.1'),
+            week('orchestrator-brainstorming@1.0'),
+          ],
+          storms: [],
+        }),
+      ),
+    )
+    renderScreen()
+    const chart = (await screen.findByRole('figure', { name: /Accepted recommendations/ })) as HTMLElement
+    const items = within(within(chart).getByRole('list', { name: 'Legend' })).getAllByRole('listitem')
+    expect(items.map((li) => li.textContent)).toEqual([
+      'orchestrator-brainstorming@1.0',
+      'orchestrator-brainstorming@1.1',
+      'superpowers:brainstorming',
+      'orchestrator-brainstorming@1.2',
+    ])
+    const swatch = (li: HTMLElement) => (li.querySelector('.bm-chart__swatch') as HTMLElement).style.background
+    const known = items.slice(0, 3).map(swatch)
+    expect(new Set(known).size).toBe(3)
+    expect(swatch(items[3])).not.toBe('')
+    expect(known).not.toContain(swatch(items[3]))
   })
 
   it('lists the storms with a link to each task Brainstorm tab', async () => {
@@ -51,7 +85,7 @@ describe('BrainstormMetricsScreen', () => {
       '/p/billing/tasks/17?tab=brainstorm',
     )
     const cells = within(row).getAllByRole('cell').map((c) => c.textContent)
-    expect(cells).toEqual(['#17 Metering rewrite', 'orchestrator-brainstorming', '2', '1 / 1 / 0 / 0', '1', '—'])
+    expect(cells).toEqual(['#17 Metering rewrite', 'orchestrator-brainstorming@1.1', '2', '1 / 1 / 0 / 0', '1', '—'])
   })
 
   it('shows an empty state with no storms', async () => {

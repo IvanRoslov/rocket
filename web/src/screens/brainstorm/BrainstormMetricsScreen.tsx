@@ -8,14 +8,15 @@ import { useBrainstormStats } from '../../lib/queries'
 import type { BrainstormStorm, BrainstormWeek } from '../../lib/types'
 import './brainstorm-metrics.css'
 
-// Color follows the skill, never its rank: the two known skills own the
-// first two categorical slots; anything else (incl. "unknown") takes the third.
-const KNOWN_SKILLS = ['orchestrator-brainstorming', 'superpowers:brainstorming']
-const SERIES_COLORS = ['var(--viz-series-1)', 'var(--viz-series-2)', 'var(--viz-series-3)']
+// Color follows the skill, never its rank: each known skill (versions of
+// our own skill included) owns a categorical slot; anything else (newer
+// versions, "unknown") takes the last one.
+const KNOWN_SKILLS = ['orchestrator-brainstorming@1.0', 'orchestrator-brainstorming@1.1', 'superpowers:brainstorming']
+const SERIES_COLORS = ['var(--viz-series-1)', 'var(--viz-series-2)', 'var(--viz-series-3)', 'var(--viz-series-4)']
 
 function skillColor(skill: string): string {
   const i = KNOWN_SKILLS.indexOf(skill)
-  return SERIES_COLORS[i === -1 ? 2 : i]
+  return SERIES_COLORS[i === -1 ? SERIES_COLORS.length - 1 : i]
 }
 
 function orderSkills(skills: string[]): string[] {

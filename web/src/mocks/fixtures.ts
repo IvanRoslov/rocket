@@ -350,7 +350,7 @@ export const tasks: Task[] = [
     project_id: 'billing',
     status: 'brainstorm',
     // The storm showcase (task #4901): problem doc, storm questions, gates.
-    brainstorm_skill: 'orchestrator-brainstorming',
+    brainstorm_skill: 'orchestrator-brainstorming@1.1',
     created_by: 'user',
     created_at: NOW - 5 * DAY,
     updated_at: NOW - 1 * DAY,
@@ -885,7 +885,7 @@ export const stormGates: TaskGate[] = [
 export const brainstormStats: BrainstormStats = {
   weeks: [
     { week: '2026-W39', skill: 'superpowers:brainstorming', answered: 4, accepted: 2, accepted_with_comment: 1, corrected: 1, wrong_turn: 1 },
-    { week: '2026-W40', skill: 'orchestrator-brainstorming', answered: 5, accepted: 4, accepted_with_comment: 2, corrected: 1, wrong_turn: 0 },
+    { week: '2026-W40', skill: 'orchestrator-brainstorming@1.1', answered: 5, accepted: 4, accepted_with_comment: 2, corrected: 1, wrong_turn: 0 },
     { week: '2026-W40', skill: 'superpowers:brainstorming', answered: 2, accepted: 1, accepted_with_comment: 0, corrected: 0, wrong_turn: 1 },
   ],
   storms: [
@@ -893,7 +893,7 @@ export const brainstormStats: BrainstormStats = {
       task_id: 17,
       title: 'Metering rewrite',
       project_id: 'billing',
-      skill: 'orchestrator-brainstorming',
+      skill: 'orchestrator-brainstorming@1.1',
       questions: 2,
       answered: 1,
       accepted: 1,
