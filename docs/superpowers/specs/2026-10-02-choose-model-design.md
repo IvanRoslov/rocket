@@ -1,0 +1,246 @@
+# Выбор модели для воркеров и оркестратора — дизайн (task #5026)
+
+## Коротко
+
+**Что строим.** В Rocket появляется **реестр профилей запуска**. Профиль — это имя, агент (Claude Code или Codex), модель, необязательный уровень усилия и описание того, для чего профиль подходит.
+
+- Человек ведёт реестр в дашборде (раздел «Модели» в настройках) или командой `rocket models`. При первом запуске реестр заполняется стартовыми профилями.
+- Оркестратор командой `rocket models ls` видит **только разрешённые ему** профили с описаниями и выбирает нужный при спавне воркера: `rocket spawn --profile <имя>`.
+- Ограничение работает на двух уровнях:
+  - **глобально** — профиль можно выключить;
+  - **на задачу** — можно оставить только часть профилей.
+
+  Демон **жёстко** отклоняет запрещённый профиль. Это проверка на сервере, а не просьба в промпте.
+- Профиль оркестратора выбирается при старте задачи (окно «Старт» / `--profile`). По умолчанию берётся глобальный профиль оркестратора. Выбор запоминается и используется при restore.
+- Для каждой сессии и подзадачи видно, каким профилем, моделью и усилием она работает.
+
+**Что сознательно НЕ делаем.**
+- Учёт стоимости, бюджеты, лимиты токенов.
+- Автоматический выбор модели без оркестратора.
+- Ограничения на уровне проекта.
+- Профили для постоянных агентов-ролей (`cto` и т.п.): они запускают произвольную команду, и это отдельная история.
+- Мобильное приложение.
+- Новые агенты, кроме Claude Code и Codex.
+
+## Решения брейншторма
+
+| Вопрос | Решение |
+|---|---|
+| Q1 — что такое запись реестра | Профиль: имя, агент, модель, усилие, описание |
+| Q2 — уровни ограничения | Глобально + на задачу |
+| Q3 — модель оркестратора | Выбор при старте задачи, глобальный дефолт |
+| Q4 — хранение | База + раздел в дашборде + CLI |
+
+## Текущее состояние (факты из кода)
+
+- `agent.LaunchSpec.Model` уже существует.
+  - Claude Code передаёт его как `--model` (`internal/agent/claudecode/claudecode.go`).
+  - Codex передаёт его как `-m` (`internal/agent/codex/codex.go`).
+  - Но production-код его нигде не заполняет.
+- Уровень усилия сейчас не передаётся. В CLI он задаётся так: `claude --effort <level>`, `codex -c model_reasoning_effort=<level>`.
+- Агент выбирается в трёх местах: `rocket spawn --agent`, `rocket task start --agent` / `rocket up --agent`, `StartModal` в вебе (`GET /v1/agent-kinds`). Если агент не указан, используется `default_agent` из `config.yaml`.
+- `sessions.agent` — единственный след того, кем запущена сессия.
+- Есть таблица `settings` (key/value) с `GET/PUT /v1/settings`, и в вебе есть раздел настроек.
+- `callerSession(r, store)` определяет вызывающую сессию по `ROCKET_SESSION_ID`.
+
+## Модель данных
+
+Новая миграция `0021_model_profiles.sql`.
+
+```sql
+CREATE TABLE model_profiles (
+  name        TEXT PRIMARY KEY,          -- [a-z0-9][a-z0-9-]{0,39}
+  agent       TEXT NOT NULL,             -- зарегистрированный агент: claude-code | codex
+  model       TEXT NOT NULL DEFAULT '',  -- '' = модель агента по умолчанию
+  effort      TEXT NOT NULL DEFAULT '',  -- '' = усилие по умолчанию; иначе из списка агента
+  description TEXT NOT NULL DEFAULT '',  -- «для чего подходит», показывается оркестратору
+  enabled     INTEGER NOT NULL DEFAULT 1,-- глобальное разрешение
+  position    INTEGER NOT NULL DEFAULT 0,-- порядок в списках
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+
+ALTER TABLE tasks ADD COLUMN allowed_profiles TEXT NOT NULL DEFAULT '';     -- JSON-массив имён; '' = все включённые
+ALTER TABLE tasks ADD COLUMN orchestrator_profile TEXT NOT NULL DEFAULT ''; -- выбранный при старте
+
+ALTER TABLE sessions ADD COLUMN profile TEXT NOT NULL DEFAULT '';
+ALTER TABLE sessions ADD COLUMN model   TEXT NOT NULL DEFAULT '';
+ALTER TABLE sessions ADD COLUMN effort  TEXT NOT NULL DEFAULT '';
+```
+
+Новые ключи в `settings`:
+- `default_orchestrator_profile`
+- `default_worker_profile`
+
+**Снимок, а не ссылка.** Сессия хранит `profile/model/effort` на момент запуска. Если профиль потом отредактировать или удалить, запущенные сессии это не затронет. Restore пересоздаёт сессию из снимка.
+
+**Сидирование.** Если `model_profiles` пуста, при старте демона создаются стартовые профили:
+
+| name | agent | model | effort | description |
+|---|---|---|---|---|
+| `claude-opus` | claude-code | `opus` | — | Сложные задачи: архитектура, рефакторинг, трудные баги, оркестрация |
+| `claude-sonnet` | claude-code | `sonnet` | — | Обычная разработка по ясному брифу, тесты, средние правки |
+| `codex` | codex | — | — | Codex с моделью по умолчанию: тексты, доки, механические правки |
+
+Дефолты при сидировании:
+- `default_orchestrator_profile` = `claude-opus`, если `default_agent` = `claude-code`; иначе первый профиль агента `default_agent`.
+- `default_worker_profile` берётся так же.
+
+Сидирование происходит один раз. Если человек удалил все профили, повторно они не появятся: пишется отметка `model_profiles_seeded` в `settings`.
+
+## Агенты: модель и усилие
+
+- В `agent.LaunchSpec` добавляется поле `Effort string`.
+- В интерфейсе `Agent` появляется метод `Efforts() []string`, допустимые значения усилия:
+  - claude-code: `low, medium, high, xhigh, max`;
+  - codex: `minimal, low, medium, high`.
+
+  Точные списки воркер сверяет с `--help` установленных CLI.
+- `LaunchCommand` передаёт усилие так:
+  - claude-code: `--effort <e>`;
+  - codex: `-c model_reasoning_effort=<e>`.
+
+  Если усилие пустое, флаг не передаётся.
+- Модель агент не проверяет: имена моделей меняются, а Rocket их не знает. Неверное имя проявится при запуске CLI, как и сейчас.
+
+## Разрешение профиля (единая функция политики)
+
+Один пакет (например, `internal/modelpolicy`) с чистыми функциями. Через них проходят все пути запуска.
+
+```
+Allowed(task) []Profile
+  = профили с enabled=1,
+    ∩ task.allowed_profiles (если не пусто),
+    упорядочено по position, name.
+
+ResolveWorker(task, requestedProfile, requestedAgent) (Profile, error)
+ResolveOrchestrator(requestedProfile, requestedAgent) (Profile, error)
+```
+
+Здесь `task` — **фича-задача**:
+- для оркестратора это его задача;
+- для воркера — родитель его подзадачи.
+
+Allowlist задаётся на фиче и действует на всех её воркеров.
+
+### Правила `ResolveWorker` (спавн воркера)
+
+1. Указан `--profile P`. Если P нет в `Allowed(task)`, это ошибка `profile_not_allowed` со списком разрешённых имён (если P не существует — `profile_not_found`).
+2. Указан только `--agent A` (обратная совместимость). Берётся первый профиль из `Allowed(task)` с агентом A. Если такого нет — ошибка `profile_not_allowed`.
+3. Ничего не указано:
+   - берётся `default_worker_profile`, если он есть в `Allowed(task)`;
+   - иначе первый из `Allowed(task)`;
+   - если `Allowed` пуст — ошибка `no_profiles_allowed`.
+4. Указаны и `--profile`, и `--agent`, и агент профиля ≠ A — ошибка `bad_request`.
+
+### Правила `ResolveOrchestrator` (старт задачи)
+
+Allowlist задачи на самого оркестратора **не распространяется**: его выбирает человек. Проверяется только `enabled`.
+- Без явного выбора берётся `default_orchestrator_profile`.
+- Если он не задан или выключен, берётся первый включённый профиль агента `default_agent`.
+- Если нет и такого, сессия запускается как сейчас, без модели. Это fallback, чтобы старт задачи не сломался на пустом реестре.
+
+### Исключения
+
+Restore использует снимок сессии, а не политику: если сессию уже запустили, её можно восстановить. Если профиль из снимка выключили, restore всё равно поднимает сессию со старыми model/effort.
+
+## API
+
+### Профили
+
+- `GET /v1/model-profiles` — весь реестр (для дашборда и человека).
+- `POST /v1/model-profiles`, `PATCH /v1/model-profiles/{name}`, `DELETE /v1/model-profiles/{name}`. Валидация:
+  - имя;
+  - агент зарегистрирован;
+  - effort ∈ `Efforts()` агента.
+
+  Эти вызовы **запрещены для сессий-оркестраторов и воркеров** (`callerSession` ≠ nil → 403 `human_only`). Оркестратор не должен расширять себе выбор.
+- `GET /v1/model-profiles/available` — разрешённые вызывающему: для сессии с задачей это `Allowed(task)`, без сессии — все включённые. Ответ содержит `{profiles:[{name,agent,model,effort,description}], default}`, где `default` — профиль, который получит воркер без `--profile`.
+- `GET /v1/agent-kinds` дополняется списком `efforts` по каждому агенту (для формы в дашборде).
+
+### Настройки
+
+`GET/PUT /v1/settings` получает поля `default_orchestrator_profile` и `default_worker_profile` с валидацией: профиль должен существовать.
+
+### Задачи
+
+- `PATCH /v1/tasks/{id}` принимает `allowed_profiles: string[]`. Пустой массив значит «все включённые». Неизвестные имена дают 400. Менять это поле из агентской сессии нельзя: ответ 403 `human_only`, иначе оркестратор мог бы расширить себе выбор. Задачу отдают с `allowed_profiles` и `orchestrator_profile`.
+- `POST /v1/tasks/{id}/start` принимает `profile` (плюс прежнее `agent`) и `allowed_profiles` (необязательно, сразу задать ограничение). Решение принимает `ResolveOrchestrator`. Результат пишется в `tasks.orchestrator_profile`, а снимок — в сессию.
+
+Брейншторм-скилл по-прежнему выбирается по **агенту** профиля.
+
+### Сессии
+
+- `POST /v1/sessions` принимает `profile`. Решение принимает `ResolveWorker` для задачи вызывающего оркестратора. Ошибки политики отдаются как 400 с машинным кодом и списком разрешённых профилей в сообщении.
+- Ответ сессии содержит `profile`, `model`, `effort`.
+
+## CLI
+
+```
+rocket models ls [--all]          # оркестратор/воркер: доступные ему, с описаниями и пометкой default;
+                                  # человек: весь реестр; --all — включая выключенные
+rocket models add <name> --agent A [--model M] [--effort E] [--description D]
+rocket models edit <name> [--model M] [--effort E] [--description D] [--enable|--disable] [--position N]
+rocket models rm <name>
+rocket models default --orchestrator <name> | --worker <name>
+
+rocket spawn ... --profile <name>          # --agent остаётся (обратная совместимость)
+rocket task start <id> --profile <name> [--allow p1,p2]
+rocket up ... --profile <name>
+rocket task models <id> [--allow p1,p2 | --clear]   # посмотреть/сузить allowlist задачи
+```
+
+`add`, `edit`, `rm` и `default` из сессии-агента получают 403 от демона, а CLI печатает понятную ошибку.
+
+`rocket status` показывает профиль у каждой сессии.
+
+## Промпты
+
+В `internal/prompts/templates/orchestrator.md` блок «Which agent a worker runs on is per-spawn…» заменяется секцией **Choosing a model**:
+- перед спавном выполни `rocket models ls`;
+- выбери профиль по описанию под характер задачи;
+- спавни с `--profile`;
+- запиши выбранный профиль в подзадачу;
+- если человек просит конкретный профиль или агента — выполни просьбу;
+- `profile_not_allowed` — это ограничение человека, а не ошибка, которую надо обходить.
+
+Копия `docs/prompts/orchestrator.md` синхронизируется (это проверяет `docs_sync_test.go`). В `docs/10-agents.md` и `docs/05-state.md` описываются реестр и политика.
+
+## Дашборд (web)
+
+- **Настройки → «Модели»** (новая секция по образцу `BrainstormSection`):
+  - таблица профилей: имя, агент, модель, усилие, описание, переключатель «включён»;
+  - добавление, редактирование, удаление;
+  - выбор усилия — выпадающий список из `efforts` агента;
+  - два селектора: «Профиль оркестратора по умолчанию» и «Профиль воркера по умолчанию».
+- **Окно «Старт»** (`StartModal`):
+  - селектор «Агент» заменяется на «Профиль» (включённые профили, описание под селектором, по умолчанию — глобальный профиль оркестратора);
+  - необязательный мультиселект «Разрешённые модели для воркеров» (пусто = все).
+- **Карточка задачи:**
+  - показывает профиль оркестратора и allowlist;
+  - allowlist можно править (PATCH) в любой момент; изменение действует на следующие спавны.
+- **SessionRail / SystemScreen:** рядом с агентом показываются профиль и модель.
+
+## Ошибки
+
+| Ситуация | Ответ |
+|---|---|
+| Профиль не существует | 400 `profile_not_found` |
+| Профиль не в `Allowed(task)` / выключен | 400 `profile_not_allowed: allowed: a, b` |
+| `Allowed(task)` пуст | 400 `no_profiles_allowed` |
+| Агент профиля не зарегистрирован или недоступен | 400 `agent_unavailable` (как сейчас для агента) |
+| Неверное усилие для агента | 400 `bad_effort` при создании или правке профиля |
+| Правка реестра из агентской сессии | 403 `human_only` |
+| Удаление профиля, указанного как дефолт | 409 `profile_in_use` (сначала поменять дефолт) |
+
+Удалить профиль из allowlist задачи можно всегда. Удаление профиля, который есть в allowlist какой-то задачи, тоже разрешено: имя просто перестаёт совпадать, и `Allowed` его не вернёт.
+
+## Тестирование
+
+- Пакет политики покрывается табличными тестами на все правила `ResolveWorker` / `ResolveOrchestrator` / `Allowed`.
+- Store: CRUD, сидирование (один раз, отметка), миграция.
+- Адаптеры: `LaunchCommand` с model+effort и без них, для обоих агентов.
+- API: каждый эндпоинт, включая 403 `human_only` для сессий и ошибки политики в `POST /v1/sessions` и `/start`. Restore использует снимок.
+- CLI: `rocket models *`, `--profile` в `spawn` и `task start`.
+- Web (Vitest+MSW): секция «Модели», `StartModal` с профилем и allowlist, отображение профиля в сессиях.
+- Проверка: `make test` зелёный. CI в репозитории нет, поэтому зелёный `make test` в PR обязателен и прикладывается к описанию.
