@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react'
 import { Button } from '../../components/Button'
 import { Modal } from '../../components/Modal'
-import { profileSummary } from '../../lib/profiles'
-import { useAgentKinds, useModelProfiles, useSettings, useStartTask } from '../../lib/queries'
+import { profileErrorText, profileSummary } from '../../lib/profiles'
+import { useAgentKinds, useModelProfiles, useSettings, useStartTask, useTask } from '../../lib/queries'
 import type { AgentKinds, ModelProfile } from '../../lib/types'
 import './kanban.css'
 
@@ -28,17 +28,32 @@ export function StartModal({ taskId, onClose }: StartModalProps) {
   const profiles = useModelProfiles()
   const kinds = useAgentKinds()
   const settings = useSettings()
+  const task = useTask(taskId)
   const startTask = useStartTask()
   const [profile, setProfile] = useState('')
-  const [allowed, setAllowed] = useState<string[]>([])
+  // null = untouched: the task's current allowlist (it may have been set on
+  // the backlog task before Start) is what the boxes show and what is sent.
+  const [picked, setPicked] = useState<string[] | null>(null)
   const [agent, setAgent] = useState('')
 
-  const enabled = (profiles.data ?? []).filter((p) => p.enabled)
+  const registry = profiles.data ?? []
+  const enabled = registry.filter((p) => p.enabled)
   // A daemon without the registry (404) or an emptied one: pick an agent.
   const agentMode = profiles.isError || (profiles.isSuccess && enabled.length === 0)
 
+  // A name whose profile is gone would be refused (400 profile_not_found).
+  const current = (task.data?.allowed_profiles ?? []).filter((n) => registry.some((p) => p.name === n))
+  const allowed = picked ?? current
+  // Enabled profiles, plus a disabled one the task already allows, so it is
+  // neither hidden nor silently dropped.
+  const choices = registry.filter((p) => p.enabled || current.includes(p.name))
+  // Until the task is known, a Start would overwrite its allowlist blindly.
+  const ready = agentMode || (profiles.isSuccess && task.isSuccess)
+
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    // In profile mode the allowlist always goes on the wire, [] included:
+    // the boxes are what the human sees, so they are what holds.
     const vars = agentMode
       ? { id: taskId, agent: agent || undefined }
       : { id: taskId, profile: profile || undefined, allowed_profiles: allowed }
@@ -50,7 +65,7 @@ export function StartModal({ taskId, onClose }: StartModalProps) {
     const next = new Set(allowed)
     if (on) next.add(name)
     else next.delete(name)
-    setAllowed(enabled.map((p) => p.name).filter((n) => next.has(n)))
+    setPicked(registry.map((p) => p.name).filter((n) => next.has(n)))
   }
 
   return (
@@ -61,17 +76,17 @@ export function StartModal({ taskId, onClose }: StartModalProps) {
         ) : (
           <>
             <ProfilePicker
-              profiles={enabled}
+              profiles={registry}
               kinds={kinds.data}
               defaultName={settings.data?.default_orchestrator_profile ?? ''}
               value={profile}
               disabled={!profiles.isSuccess}
               onChange={setProfile}
             />
-            {enabled.length > 0 && (
+            {choices.length > 0 && (
               <fieldset className="kanban-modal-form__group">
                 <legend className="kanban-modal-form__label">Разрешённые модели для воркеров</legend>
-                {enabled.map((p) => (
+                {choices.map((p) => (
                   <label key={p.name} className="kanban-modal-form__check" title={p.description}>
                     <input
                       type="checkbox"
@@ -79,7 +94,10 @@ export function StartModal({ taskId, onClose }: StartModalProps) {
                       onChange={(e) => toggleAllowed(p.name, e.target.checked)}
                     />
                     <span className="kanban-modal-form__check-name">{p.name}</span>
-                    <span className="kanban-modal-form__check-meta">{profileSummary(p)}</span>
+                    <span className="kanban-modal-form__check-meta">
+                      {profileSummary(p)}
+                      {!p.enabled && ' · выключен глобально'}
+                    </span>
                   </label>
                 ))}
                 <p className="kanban-modal-form__hint">
@@ -91,19 +109,28 @@ export function StartModal({ taskId, onClose }: StartModalProps) {
           </>
         )}
 
-        {startTask.isError && <p className="kanban-modal-form__error">{startTask.error.message}</p>}
+        {startTask.isError && <p className="kanban-modal-form__error">{profileErrorText(startTask.error)}</p>}
 
         <div className="kanban-modal-form__actions">
           <Button variant="secondary" type="button" onClick={onClose}>
-            Cancel
+            Отмена
           </Button>
-          <Button variant="primary" type="submit" disabled={startTask.isPending}>
+          <Button variant="primary" type="submit" disabled={startTask.isPending || !ready}>
             Start ▸
           </Button>
         </div>
       </form>
     </Modal>
   )
+}
+
+/** The profile the daemon gives the orchestrator when none is picked
+ * (modelpolicy.ResolveOrchestrator): the global default while it is enabled,
+ * else the first enabled profile of the default agent; undefined = a launch
+ * without a model. */
+function resolveDefault(profiles: ModelProfile[], defaultName: string, defaultAgent: string | undefined) {
+  const enabled = profiles.filter((p) => p.enabled)
+  return enabled.find((p) => p.name === defaultName) ?? enabled.find((p) => p.agent === defaultAgent)
 }
 
 interface ProfilePickerProps {
@@ -116,7 +143,11 @@ interface ProfilePickerProps {
 }
 
 function ProfilePicker({ profiles, kinds, defaultName, value, disabled, onChange }: ProfilePickerProps) {
-  const effective = profiles.find((p) => p.name === (value || defaultName))
+  const enabled = profiles.filter((p) => p.enabled)
+  const fallback = resolveDefault(profiles, defaultName, kinds?.default)
+  // The configured default exists but is switched off: say so, and name what runs instead.
+  const defaultOff = defaultName !== '' && profiles.some((p) => p.name === defaultName && !p.enabled)
+  const effective = value ? enabled.find((p) => p.name === value) : fallback
   return (
     <>
       <label className="kanban-modal-form__label" htmlFor="start-task-profile">
@@ -130,8 +161,8 @@ function ProfilePicker({ profiles, kinds, defaultName, value, disabled, onChange
         onChange={(e) => onChange(e.target.value)}
         autoFocus
       >
-        <option value="">{defaultName ? `По умолчанию (${defaultName})` : 'По умолчанию'}</option>
-        {profiles.map((p) => {
+        <option value="">{fallback ? `По умолчанию (${fallback.name})` : 'По умолчанию'}</option>
+        {enabled.map((p) => {
           const kind = kinds?.kinds.find((k) => k.name === p.agent)
           const unavailable = kind !== undefined && !kind.available
           return (
@@ -141,13 +172,22 @@ function ProfilePicker({ profiles, kinds, defaultName, value, disabled, onChange
           )
         })}
       </select>
+      {!value && defaultOff && (
+        <p className="kanban-modal-form__hint">
+          {fallback
+            ? `Профиль по умолчанию ${defaultName} выключен — оркестратор получит ${fallback.name}.`
+            : `Профиль по умолчанию ${defaultName} выключен — оркестратор запустится агентом по умолчанию.`}
+        </p>
+      )}
       {effective ? (
         <div className="kanban-modal-form__profile" role="note" aria-label="Выбранный профиль">
           <div className="kanban-modal-form__profile-meta">{profileSummary(effective)}</div>
           {effective.description && <div>{effective.description}</div>}
         </div>
       ) : (
-        <p className="kanban-modal-form__hint">Runs the orchestrator. Workers are picked by the orchestrator.</p>
+        <p className="kanban-modal-form__hint">
+          Профиль запускает оркестратора. Воркерам профиль выбирает оркестратор.
+        </p>
       )}
     </>
   )
@@ -161,7 +201,7 @@ interface AgentPickerProps {
 
 /** The pre-profile picker: which agent runs the orchestrator (empty = daemon default). */
 function AgentPicker({ kinds, value, onChange }: AgentPickerProps) {
-  const defaultLabel = kinds?.default ? `Default (${kinds.default})` : 'Default agent'
+  const defaultLabel = kinds?.default ? `По умолчанию (${kinds.default})` : 'Агент по умолчанию'
   return (
     <>
       <label className="kanban-modal-form__label" htmlFor="start-task-agent">
@@ -177,7 +217,7 @@ function AgentPicker({ kinds, value, onChange }: AgentPickerProps) {
         <option value="">{defaultLabel}</option>
         {(kinds?.kinds ?? []).map((k) => (
           <option key={k.name} value={k.name} disabled={!k.available} title={k.error}>
-            {k.available ? k.name : `${k.name} — unavailable`}
+            {k.available ? k.name : `${k.name} — недоступен`}
           </option>
         ))}
       </select>

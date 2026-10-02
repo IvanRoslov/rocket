@@ -16,6 +16,7 @@ import {
   useUpdateModelProfile,
   useUpdateSettings,
 } from '../../lib/queries'
+import { profileErrorText } from '../../lib/profiles'
 import type { AgentKind, ModelProfile } from '../../lib/types'
 
 const DEFAULT_LABEL = 'по умолчанию'
@@ -126,7 +127,7 @@ function ProfileModal({ profile, kinds, onClose }: ProfileModalProps) {
 
         {mutation.isError && (
           <p className="settings-error" role="alert">
-            {mutation.error.message}
+            {profileErrorText(mutation.error)}
           </p>
         )}
         <div className="settings-modal__actions">
@@ -196,7 +197,14 @@ export function ModelsSection() {
 
   function handleDelete(p: ModelProfile) {
     if (!window.confirm(`Удалить профиль ${p.name}? Запущенные сессии продолжат работать.`)) return
+    // One error line for the table: the latest action's, never a stale one.
+    updateProfile.reset()
     deleteProfile.mutate(p.name)
+  }
+
+  function handleToggle(p: ModelProfile, enabled: boolean) {
+    deleteProfile.reset()
+    updateProfile.mutate({ name: p.name, enabled })
   }
 
   const rowError = updateProfile.error ?? deleteProfile.error
@@ -255,7 +263,7 @@ export function ModelsSection() {
                         aria-label="Включён"
                         checked={enabled}
                         disabled={updateProfile.isPending}
-                        onChange={(e) => updateProfile.mutate({ name: p.name, enabled: e.target.checked })}
+                        onChange={(e) => handleToggle(p, e.target.checked)}
                       />
                     </td>
                     <td className="settings-models__actions">
@@ -279,7 +287,7 @@ export function ModelsSection() {
         )}
         {rowError && (
           <p className="settings-error" role="alert">
-            {rowError.message}
+            {profileErrorText(rowError)}
           </p>
         )}
       </div>
@@ -307,7 +315,7 @@ export function ModelsSection() {
         </p>
         {updateSettings.isError && (
           <p className="settings-error" role="alert">
-            Не удалось сохранить: {updateSettings.error.message}
+            Не удалось сохранить: {profileErrorText(updateSettings.error)}
           </p>
         )}
       </div>

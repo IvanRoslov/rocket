@@ -555,9 +555,10 @@ export function useAgentKinds(): UseQueryResult<AgentKinds> {
 }
 
 /** `POST /v1/tasks/{id}/start` `{agent?, profile?, allowed_profiles?}` ->
- * `{task_id,feature_slug,session_id}` (201). Root tasks only. Only the fields
- * the human chose go on the wire; with none there is no body at all, and the
- * daemon falls back to the default orchestrator profile (task #5026). */
+ * `{task_id,feature_slug,session_id}` (201). Root tasks only. Empty `agent` /
+ * `profile` stay off the wire (the daemon uses its defaults, task #5026);
+ * `allowed_profiles` is sent whenever given, `[]` included — it replaces the
+ * task's allowlist. With nothing set there is no body at all. */
 export function useStartTask(): UseMutationResult<
   { task_id: number; feature_slug: string; session_id: string },
   Error,
@@ -569,7 +570,8 @@ export function useStartTask(): UseMutationResult<
       const body: { agent?: string; profile?: string; allowed_profiles?: string[] } = {}
       if (agent) body.agent = agent
       if (profile) body.profile = profile
-      if (allowed_profiles && allowed_profiles.length > 0) body.allowed_profiles = allowed_profiles
+      // [] is meaningful (clear the allowlist), so only absence leaves it off.
+      if (allowed_profiles !== undefined) body.allowed_profiles = allowed_profiles
       return api.post<{ task_id: number; feature_slug: string; session_id: string }>(
         `/v1/tasks/${id}/start`,
         Object.keys(body).length > 0 ? body : undefined,

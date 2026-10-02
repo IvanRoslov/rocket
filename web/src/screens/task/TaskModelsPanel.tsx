@@ -5,7 +5,7 @@
 // change applies to the next spawn, never to running workers.
 
 import { useState } from 'react'
-import { profileSummary } from '../../lib/profiles'
+import { profileErrorText, profileSummary } from '../../lib/profiles'
 import { useModelProfiles, useUpdateTask } from '../../lib/queries'
 import type { Task } from '../../lib/types'
 
@@ -101,7 +101,7 @@ export function TaskModelsPanel({ task }: TaskModelsPanelProps) {
           </p>
           {update.isError && (
             <p className="task-models__error" role="alert">
-              {update.error.message}
+              {profileErrorText(update.error)}
             </p>
           )}
           <div className="task-models__actions">

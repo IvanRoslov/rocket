@@ -136,7 +136,7 @@ describe('ModelsSection', () => {
     await user.selectOptions(within(dialog).getByLabelText('Агент'), 'codex')
     await user.click(within(dialog).getByRole('button', { name: 'Сохранить' }))
 
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('profile codex already exists')
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Профиль с таким именем уже есть')
   })
 
   it('deleting a default profile shows profile_in_use and keeps the row', async () => {
@@ -147,8 +147,29 @@ describe('ModelsSection', () => {
 
     await user.click(within(row('claude-opus')).getByRole('button', { name: 'Удалить' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('pick another default first')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Профиль выбран по умолчанию — сначала смените дефолт')
     expect(row('claude-opus')).toBeInTheDocument()
+  })
+
+  it('shows the latest failure, not an older one from another action', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    server.use(
+      http.patch('/v1/model-profiles/:name', () =>
+        HttpResponse.json({ error: { code: 'internal_error', message: 'disk full' } }, { status: 500 }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderSection()
+    await screen.findByRole('row', { name: /^codex\s/ })
+
+    await user.click(within(row('codex')).getByRole('checkbox', { name: 'Включён' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('disk full')
+
+    await user.click(within(row('claude-opus')).getByRole('button', { name: 'Удалить' }))
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('Профиль выбран по умолчанию — сначала смените дефолт'),
+    )
+    expect(screen.getByRole('alert')).not.toHaveTextContent('disk full')
   })
 
   it('deletes a profile that is not a default', async () => {

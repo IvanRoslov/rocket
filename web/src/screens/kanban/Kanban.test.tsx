@@ -248,7 +248,7 @@ test('Start button on a backlog card opens the profile modal and posts /start', 
   await userEvent.selectOptions(profile, 'claude-sonnet')
   await userEvent.click(within(dialog).getByRole('button', { name: 'Start ▸' }))
 
-  await waitFor(() => expect(capturedBody).toEqual({ profile: 'claude-sonnet' }))
+  await waitFor(() => expect(capturedBody).toEqual({ profile: 'claude-sonnet', allowed_profiles: [] }))
 })
 
 test('drop handler calls PATCH with the target column status', async () => {
