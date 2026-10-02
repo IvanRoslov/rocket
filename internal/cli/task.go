@@ -235,6 +235,7 @@ func newTaskCmd() *cobra.Command {
 	cmd.AddCommand(newTaskCloseCmd(false))
 	cmd.AddCommand(newTaskAnswerCmd())
 	cmd.AddCommand(newTaskBrainstormCmd())
+	cmd.AddCommand(newTaskModelsCmd())
 	return cmd
 }
 
@@ -246,14 +247,14 @@ type taskStartResponse struct {
 }
 
 func newTaskStartCmd() *cobra.Command {
-	var agentName string
+	var agentName, profile, allow string
 
 	cmd := &cobra.Command{
 		Use:   "start <id>",
 		Short: "Запустить оркестратора для задачи",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return &usageError{message: "usage: rocket task start <id> [--agent <name>]"}
+				return &usageError{message: "usage: rocket task start <id> [--profile <name>] [--allow p1,p2] [--agent <name>]"}
 			}
 
 			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
@@ -265,15 +266,12 @@ func newTaskStartCmd() *cobra.Command {
 				return err
 			}
 
-			var reqBody map[string]any
-			if agentName != "" {
-				reqBody = map[string]any{"agent": agentName}
-			}
+			reqBody := startRequestBody(agentName, profile, allow)
 
 			path := apiPath("v1", "tasks", args[0], "start")
 			var resp taskStartResponse
 			if err := c.Post(path, reqBody, &resp); err != nil {
-				return err
+				return explainHumanOnly(err)
 			}
 
 			if flags.JSON {
@@ -287,7 +285,28 @@ func newTaskStartCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&agentName, "agent", "", "имя агента (по умолчанию — из конфига)")
+	cmd.Flags().StringVar(&profile, "profile", "", "профиль модели оркестратора (rocket models ls; по умолчанию — глобальный)")
+	cmd.Flags().StringVar(&allow, "allow", "", "разрешить воркерам задачи только эти профили (через запятую)")
 	return cmd
+}
+
+// startRequestBody is the POST /v1/tasks/{id}/start body: nil when nothing
+// was chosen (the daemon applies its defaults), else only the given fields.
+func startRequestBody(agentName, profile, allow string) map[string]any {
+	body := map[string]any{}
+	if agentName != "" {
+		body["agent"] = agentName
+	}
+	if profile != "" {
+		body["profile"] = profile
+	}
+	if names := parseProfileList(allow); len(names) > 0 {
+		body["allowed_profiles"] = names
+	}
+	if len(body) == 0 {
+		return nil
+	}
+	return body
 }
 
 // needsProjectDefault reports whether `rocket task add` must resolve a

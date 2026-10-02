@@ -63,7 +63,7 @@ func newStatusCmd() *cobra.Command {
 // renderStatus writes a feature status view to w: a header line naming the
 // slug, then the orchestrator's own line ("orchestrator: <id> [state]
 // <activity> (<age> ago)", or "orchestrator: -" if none is live), followed
-// by a worker table (SESSION, ACTIVITY, PR, CI, AGE) when any workers are
+// by a worker table (SESSION, PROFILE, ACTIVITY, PR, CI, AGE) when any workers are
 // present, and finally a freshness line per mirror.
 //
 // The mirror block covers every registered mirror, deliberately unfiltered
@@ -88,7 +88,13 @@ func renderStatus(slug string, sessions []sessionRow, mirrors []mirrorRow, w io.
 		if activity == "" {
 			activity = "-"
 		}
-		fmt.Fprintf(w, "orchestrator: %s [%s] %s (%s ago)\n", orch.ID, orch.State,
+		// The profile rides between state and activity, and only when the
+		// session has one: a legacy launch keeps the line it always had.
+		profile := ""
+		if orch.Profile != "" {
+			profile = orch.Profile + " "
+		}
+		fmt.Fprintf(w, "orchestrator: %s [%s] %s%s (%s ago)\n", orch.ID, orch.State, profile,
 			withWaitingGlyph(activity, orch.WaitingTerminal), humanAge(orch.CreatedAt, now))
 	} else {
 		fmt.Fprintf(w, "orchestrator: -\n")
@@ -97,7 +103,7 @@ func renderStatus(slug string, sessions []sessionRow, mirrors []mirrorRow, w io.
 	if len(workers) > 0 {
 		fmt.Fprintf(w, "\n")
 		tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-		_, _ = tw.Write([]byte("SESSION\tACTIVITY\tPR\tCI\tAGE\n"))
+		_, _ = tw.Write([]byte("SESSION\tPROFILE\tACTIVITY\tPR\tCI\tAGE\n"))
 		for _, wk := range workers {
 			activity := wk.Activity
 			if activity == "" {
@@ -111,7 +117,7 @@ func renderStatus(slug string, sessions []sessionRow, mirrors []mirrorRow, w io.
 			if ci == "" {
 				ci = "-"
 			}
-			_, _ = tw.Write([]byte(fmt.Sprintf("%s\t%s\t%s\t%s\t%s\n", wk.ID,
+			_, _ = tw.Write([]byte(fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s\n", wk.ID, dash(wk.Profile),
 				withWaitingGlyph(activity, wk.WaitingTerminal), pr, ci, humanAge(wk.CreatedAt, now))))
 		}
 		_ = tw.Flush()

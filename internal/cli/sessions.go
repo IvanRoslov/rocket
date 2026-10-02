@@ -25,6 +25,7 @@ type sessionRow struct {
 	PRNumber  int    `json:"pr_number,omitempty"`
 	PRState   string `json:"pr_state,omitempty"`
 	CIState   string `json:"ci_state,omitempty"`
+	Profile   string `json:"profile,omitempty"`
 	CreatedAt int64  `json:"created_at"`
 	// WaitingTerminal is the API's derived stalled-on-input flag.
 	WaitingTerminal bool `json:"waiting_terminal,omitempty"`
