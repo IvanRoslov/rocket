@@ -51,11 +51,29 @@ an explicit ref — `git -C <mirror> fetch origin` then
 - A subtask card is created automatically for every spawn. To plan the
   decomposition before spawning, create subtasks first
   (rocket task add "<title>" --parent {{task_id}}) and spawn with --subtask <id>.
-- Which agent a worker runs on is per-spawn: `--agent <name>` (registered
-  agents: claude-code, codex). Omit it and the daemon's default is used.
-  The human may ask for a specific agent on a specific task ("this one is
-  text work — put a codex worker on it"); honour that with --agent and say
-  in the subtask which agent you used.
+
+## Choosing a model
+
+Every worker runs on a model profile: a name for an agent (claude-code or
+codex) plus a model and an effort level, with a description of what it is
+good for. The human keeps the registry and decides which profiles this task
+may use.
+
+- Before spawning, run `rocket models ls`. It lists only the profiles you are
+  allowed to use here, with their descriptions; `*` marks the default a spawn
+  without --profile gets.
+- Pick the profile whose description fits the subtask — a hard design or
+  debugging job, routine code from a clear brief, or text work — and spawn
+  with it: `rocket spawn ... --profile <name>`. Do not default to the
+  strongest profile for everything, nor to the cheapest.
+- Record the choice in the subtask:
+      rocket task log <subtask-id> --kind decision "profile <name>: <why>"
+- If the human asks for a specific profile or agent for a task, use it
+  (`--profile <name>`, or `--agent <name>` for "any profile of that agent").
+- `profile_not_allowed` / `no_profiles_allowed` from spawn is the human's
+  restriction, not an error to work around: pick one of the listed allowed
+  profiles, or ask the human. Never try to change the registry or the task's
+  allowlist yourself — those commands are the human's and are refused to you.
 
 ## Communicating
 

@@ -5,7 +5,7 @@ import (
 )
 
 func newSpawnCmd() *cobra.Command {
-	var repo, task, prompt, agentName string
+	var repo, task, prompt, agentName, profile string
 	var subtaskID int64
 
 	cmd := &cobra.Command{
@@ -13,7 +13,7 @@ func newSpawnCmd() *cobra.Command {
 		Short: "Запустить воркера для подзадачи (вызывается оркестратором)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if repo == "" || task == "" {
-				return &usageError{message: "usage: rocket spawn --repo <id> --task <name> [--prompt <text>] [--agent <name>] [--subtask <id>]"}
+				return &usageError{message: "usage: rocket spawn --repo <id> --task <name> [--prompt <text>] [--profile <name>] [--agent <name>] [--subtask <id>]"}
 			}
 
 			c, _, err := connect(true)
@@ -30,6 +30,9 @@ func newSpawnCmd() *cobra.Command {
 			}
 			if agentName != "" {
 				reqBody["agent"] = agentName
+			}
+			if profile != "" {
+				reqBody["profile"] = profile
 			}
 			if subtaskID != 0 {
 				reqBody["subtask_id"] = subtaskID
@@ -48,6 +51,9 @@ func newSpawnCmd() *cobra.Command {
 			cmd.Printf("session %s\n", id)
 			cmd.Printf("branch %s\n", toString(resp["branch"]))
 			cmd.Printf("worktree %s\n", toString(resp["worktree_path"]))
+			if p := toString(resp["profile"]); p != "" {
+				cmd.Printf("profile %s (%s)\n", p, toString(resp["agent"]))
+			}
 			if resp["subtask_id"] != nil {
 				cmd.Printf("subtask #%v\n", resp["subtask_id"])
 			}
@@ -59,7 +65,8 @@ func newSpawnCmd() *cobra.Command {
 	cmd.Flags().StringVar(&repo, "repo", "", "id репозитория (обязательно)")
 	cmd.Flags().StringVar(&task, "task", "", "имя задачи (обязательно)")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "первое сообщение агенту")
-	cmd.Flags().StringVar(&agentName, "agent", "", "имя агента (по умолчанию — из конфига)")
+	cmd.Flags().StringVar(&profile, "profile", "", "профиль модели воркера (rocket models ls; по умолчанию — профиль по умолчанию задачи)")
+	cmd.Flags().StringVar(&agentName, "agent", "", "имя агента (устар.: берётся первый разрешённый профиль этого агента)")
 	cmd.Flags().Int64Var(&subtaskID, "subtask", 0, "id существующей подзадачи для привязки (иначе создаётся новая)")
 
 	return cmd

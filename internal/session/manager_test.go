@@ -1094,7 +1094,7 @@ func TestSpawnOrchestratorHappyPath(t *testing.T) {
 
 	task := store.Task{ID: 42, Title: "Add login page", Description: "Users need to log in.", ProjectID: "proj1"}
 
-	sess, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake")
+	sess, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake", LaunchProfile{})
 	if err != nil {
 		t.Fatalf("SpawnOrchestrator: %v", err)
 	}
@@ -1173,7 +1173,7 @@ func TestSpawnOrchestratorEmptyTitleFallsBackToTaskID(t *testing.T) {
 
 	task := store.Task{ID: 7, Title: "!!!", Description: "d", ProjectID: "proj1"}
 
-	sess, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake")
+	sess, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake", LaunchProfile{})
 	if err != nil {
 		t.Fatalf("SpawnOrchestrator: %v", err)
 	}
@@ -1205,7 +1205,7 @@ func TestSpawnOrchestratorSlugCollisionGetsSuffix(t *testing.T) {
 
 	task := store.Task{ID: 1, Title: "Add login page", Description: "d", ProjectID: "proj1"}
 
-	sess, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake")
+	sess, err := m.SpawnOrchestrator(context.Background(), task, proj, "fake", LaunchProfile{})
 	if err != nil {
 		t.Fatalf("SpawnOrchestrator: %v", err)
 	}
@@ -1227,7 +1227,7 @@ func TestSpawnOrchestratorAgentUnknown(t *testing.T) {
 
 	task := store.Task{ID: 1, Title: "Add login page", Description: "d", ProjectID: "proj1"}
 
-	_, err = m.SpawnOrchestrator(context.Background(), task, proj, "nope")
+	_, err = m.SpawnOrchestrator(context.Background(), task, proj, "nope", LaunchProfile{})
 	assertValidationCode(t, err, "agent_unknown")
 }
 
@@ -1377,7 +1377,7 @@ func TestSpawnOrchestratorInjectsGHToken(t *testing.T) {
 
 	task := store.Task{ID: 1, Title: "Test task", Description: "d", ProjectID: "proj1"}
 
-	_, err = m.SpawnOrchestrator(context.Background(), task, proj, "fake")
+	_, err = m.SpawnOrchestrator(context.Background(), task, proj, "fake", LaunchProfile{})
 	if err != nil {
 		t.Fatalf("SpawnOrchestrator: %v", err)
 	}

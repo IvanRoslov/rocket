@@ -12,7 +12,7 @@ import (
 // starts it, spawning its orchestrator in one step.
 func newUpCmd() *cobra.Command {
 	var projectID string
-	var agentName string
+	var agentName, profile string
 	var description string
 	var descFile string
 
@@ -21,7 +21,7 @@ func newUpCmd() *cobra.Command {
 		Short: "Создать и сразу запустить задачу (add + start)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return &usageError{message: "usage: rocket up \"<описание>\" [--project <id>] [--agent <name>] [--desc <md> | --desc-file <f>]"}
+				return &usageError{message: "usage: rocket up \"<описание>\" [--project <id>] [--agent <name>] [--profile <name>] [--desc <md> | --desc-file <f>]"}
 			}
 
 			if description != "" && descFile != "" {
@@ -70,10 +70,7 @@ func newUpCmd() *cobra.Command {
 				return err
 			}
 
-			var startReqBody map[string]any
-			if agentName != "" {
-				startReqBody = map[string]any{"agent": agentName}
-			}
+			startReqBody := startRequestBody(agentName, profile, "")
 
 			startPath := apiPath("v1", "tasks", fmt.Sprint(addResp.ID), "start")
 			var startResp taskStartResponse
@@ -106,6 +103,7 @@ func newUpCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&projectID, "project", "", "id проекта")
 	cmd.Flags().StringVar(&agentName, "agent", "", "имя агента (по умолчанию — из конфига)")
+	cmd.Flags().StringVar(&profile, "profile", "", "профиль модели оркестратора (rocket models ls; по умолчанию — глобальный)")
 	cmd.Flags().StringVar(&description, "desc", "", "описание задачи (MD)")
 	cmd.Flags().StringVar(&descFile, "desc-file", "", "файл с описанием задачи (MD)")
 
