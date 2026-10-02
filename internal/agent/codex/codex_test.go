@@ -39,7 +39,7 @@ func TestLaunchCommandMinimal(t *testing.T) {
 	}
 
 	cmd := c.LaunchCommand(spec)
-	want := []string{"codex", "--sandbox", "danger-full-access", "--ask-for-approval", "never"}
+	want := []string{"codex", "--no-alt-screen", "--sandbox", "danger-full-access", "--ask-for-approval", "never"}
 	if len(cmd) != len(want) {
 		t.Fatalf("expected %d args, got %d: %v", len(want), len(cmd), cmd)
 	}
@@ -61,7 +61,7 @@ func TestLaunchCommandFull(t *testing.T) {
 
 	cmd := c.LaunchCommand(spec)
 	want := []string{
-		"codex", "--sandbox", "danger-full-access", "--ask-for-approval", "never",
+		"codex", "--no-alt-screen", "--sandbox", "danger-full-access", "--ask-for-approval", "never",
 		"-m", "gpt-5-codex",
 		"--", "Help me write a function.",
 	}
@@ -86,7 +86,7 @@ func TestLaunchCommandFirstMessageStartingWithDashIsSeparated(t *testing.T) {
 
 	cmd := c.LaunchCommand(spec)
 	want := []string{
-		"codex", "--sandbox", "danger-full-access", "--ask-for-approval", "never",
+		"codex", "--no-alt-screen", "--sandbox", "danger-full-access", "--ask-for-approval", "never",
 		"--", "-fix the login bug",
 	}
 	if len(cmd) != len(want) {
@@ -96,6 +96,33 @@ func TestLaunchCommandFirstMessageStartingWithDashIsSeparated(t *testing.T) {
 		if cmd[i] != want[i] {
 			t.Errorf("cmd[%d] = %q, want %q (full: %v)", i, cmd[i], want[i], cmd)
 		}
+	}
+}
+
+func TestLaunchCommandNoAltScreenPrecedesPromptSeparator(t *testing.T) {
+	// --no-alt-screen keeps codex's output in the tmux pane's scrollback so
+	// the dashboard terminal can scroll it (task #5073). It must sit before
+	// the `--` separator, or it becomes part of the first user message.
+	c := New()
+	spec := agent.LaunchSpec{FirstMessage: "Help me write a function."}
+	cmd := c.LaunchCommand(spec)
+
+	flag, sep := -1, -1
+	for i, arg := range cmd {
+		switch arg {
+		case "--no-alt-screen":
+			flag = i
+		case "--":
+			if sep == -1 {
+				sep = i
+			}
+		}
+	}
+	if flag == -1 {
+		t.Fatalf("LaunchCommand has no --no-alt-screen: %v", cmd)
+	}
+	if sep == -1 || flag > sep {
+		t.Errorf("--no-alt-screen at %d must precede `--` at %d: %v", flag, sep, cmd)
 	}
 }
 

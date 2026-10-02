@@ -284,8 +284,14 @@ func lockFile(lockPath string) (func(), error) {
 // prompt parses cleanly and only fails later on "stdin is not a terminal"
 // (a runtime TTY issue, not an argument-parsing one) — proof clap accepts
 // `--` as the flags/positionals separator here.
+//
+// `--no-alt-screen` runs the TUI inline instead of in the terminal's
+// alternate screen, so codex's output lands in the tmux pane's history.
+// Without it the pane has no scrollback to show and the dashboard's browser
+// terminal cannot scroll a codex session (task #5073). Like every flag it
+// precedes `--`, or it would become part of the first user message.
 func (c *Codex) LaunchCommand(spec agent.LaunchSpec) []string {
-	cmd := []string{"codex", "--sandbox", "danger-full-access", "--ask-for-approval", "never"}
+	cmd := []string{"codex", "--no-alt-screen", "--sandbox", "danger-full-access", "--ask-for-approval", "never"}
 
 	if spec.Model != "" {
 		cmd = append(cmd, "-m", spec.Model)
