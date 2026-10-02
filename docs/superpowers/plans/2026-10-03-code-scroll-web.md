@@ -28,7 +28,7 @@
 
 ---
 
-### Задача 1: чистая логика прокрутки
+### Task 1: чистая логика прокрутки
 
 **Файлы:** создать `web/src/components/termScroll.ts` и `web/src/components/termScroll.test.ts`.
 
@@ -40,7 +40,7 @@
 - [ ] Повторить тест: все проверки проходят.
 - [ ] Коммит: `feat(web): scroll delta math for terminal`.
 
-### Задача 2: события панели, документация и проверка
+### Task 2: события панели, документация и проверка
 
 **Файлы:** изменить `web/src/components/TermPanel.tsx`, `web/src/components/TermPanel.test.tsx`, `docs/11-dashboard.md`.
 
