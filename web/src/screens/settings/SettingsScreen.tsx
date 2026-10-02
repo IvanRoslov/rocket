@@ -19,7 +19,7 @@ const NAV_ITEMS: { key: SettingsSection; label: string }[] = [
   { key: 'repos', label: 'Repositories' },
   { key: 'project', label: 'Project' },
   { key: 'brainstorm', label: 'Brainstorm' },
-  { key: 'models', label: 'Модели' },
+  { key: 'models', label: 'Models' },
   { key: 'daemon', label: 'Daemon' },
   { key: 'devices', label: 'Устройства' },
 ]

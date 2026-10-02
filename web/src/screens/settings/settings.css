@@ -423,3 +423,27 @@
 .settings-models__defaults .settings-error {
   grid-column: 1 / -1;
 }
+.settings-models__custom-model {
+  margin-top: 6px;
+}
+.settings-models__sources {
+  margin-top: 12px;
+}
+.settings-models__sources .settings-field__hint {
+  margin-top: 3px;
+}
+.settings-models__sources .btn {
+  margin-top: 8px;
+}
+.settings-models__warning {
+  color: var(--warn-text);
+}
+.settings-models__import-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.settings-models__import-result {
+  color: var(--text);
+}

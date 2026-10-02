@@ -18,9 +18,9 @@ export function profileSummary(p: { agent: string; model: string; effort: string
 }
 
 const PROFILE_ERROR_TEXT: Record<string, string> = {
-  profile_exists: 'Профиль с таким именем уже есть',
-  profile_in_use: 'Профиль выбран по умолчанию — сначала смените дефолт',
-  bad_effort: 'Этот уровень усилия не поддерживается агентом',
+  profile_exists: 'A profile with this name already exists',
+  profile_in_use: 'This profile is a default — pick another default first',
+  bad_effort: 'This effort level is not supported for this model',
 }
 
 /** Human copy for a registry/allowlist error: the known daemon codes in

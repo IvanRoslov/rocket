@@ -107,6 +107,17 @@ func TestSeedModelProfilesClaudeDefault(t *testing.T) {
 	if ps[1].Model != "sonnet" || ps[2].Agent != "codex" || ps[2].Model != "" {
 		t.Errorf("seeds = %+v", ps)
 	}
+	// The dashboard and orchestrators read these as-is: English (spec v3).
+	wantDesc := []string{
+		"Hard tasks: architecture, refactoring, tricky bugs, orchestration",
+		"Everyday development from a clear brief, tests, medium-sized changes",
+		"Codex with its default model: texts, docs, mechanical edits",
+	}
+	for i, want := range wantDesc {
+		if ps[i].Description != want {
+			t.Errorf("%s description = %q, want %q", ps[i].Name, ps[i].Description, want)
+		}
+	}
 	for _, k := range []string{SettingDefaultOrchestratorProfile, SettingDefaultWorkerProfile} {
 		if v, _ := st.GetSetting(k); v != "claude-opus" {
 			t.Errorf("%s = %q, want claude-opus", k, v)

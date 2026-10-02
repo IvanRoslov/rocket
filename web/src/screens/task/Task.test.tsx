@@ -155,7 +155,7 @@ describe('TaskScreen', () => {
 
   it('the Overview of a feature task shows its model profiles panel', async () => {
     renderTask()
-    const panel = await screen.findByRole('region', { name: 'Модели' })
+    const panel = await screen.findByRole('region', { name: 'Models' })
     expect(within(panel).getByText('claude-opus')).toBeInTheDocument()
   })
 
@@ -163,7 +163,7 @@ describe('TaskScreen', () => {
     renderTask('billing', 13)
     await screen.findByRole('tab', { name: /Overview/ })
     await userEvent.click(screen.getByRole('tab', { name: /Overview/ }))
-    expect(screen.queryByRole('region', { name: 'Модели' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Models' })).not.toBeInTheDocument()
   })
 
   it('switches tabs on click', async () => {

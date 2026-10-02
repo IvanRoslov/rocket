@@ -41,6 +41,7 @@ import {
   questions,
   repos,
   sessions,
+  modelCatalog,
   modelProfiles,
   settings,
   stormDocs,
@@ -75,7 +76,7 @@ export function resetModelProfiles(): void {
 // Mirrors Agent.Efforts() (internal/agent/claudecode, internal/agent/codex).
 const AGENT_EFFORTS: Record<string, string[]> = {
   'claude-code': ['low', 'medium', 'high', 'xhigh', 'max'],
-  codex: ['minimal', 'low', 'medium', 'high'],
+  codex: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
 }
 
 function profileError(status: number, code: string, message: string) {
@@ -1583,6 +1584,44 @@ export const handlers = [
     if (bad) return bad
     profilesState = profilesState.map((p) => (p.name === current.name ? next : p))
     return HttpResponse.json(next)
+  }),
+
+  // Model catalog — internal/api/model_catalog.go (choose-model v2).
+  http.get('/v1/model-catalog', () => HttpResponse.json({ agents: modelCatalog })),
+
+  // importCatalog: a disabled profile per catalog model no profile of the
+  // same agent uses yet; names as the daemon derives them.
+  http.post('/v1/model-profiles/import-catalog', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { include_legacy?: boolean }
+    const created: string[] = []
+    const skipped: { model: string; reason: string }[] = []
+    for (const cat of modelCatalog) {
+      for (const m of cat.models) {
+        if (!m.main && !body.include_legacy) continue
+        const owner = profilesState.find((p) => p.agent === cat.agent && p.model === m.id)
+        if (owner) {
+          skipped.push({ model: m.id, reason: `profile ${owner.name} already uses it` })
+          continue
+        }
+        const base = (cat.agent === 'codex' ? `codex-${m.id}` : m.id).replace(/[^a-z0-9-]/g, '-')
+        let name = base
+        for (let i = 2; profilesState.some((p) => p.name === name); i++) name = `${base}-${i}`
+        profilesState = [
+          ...profilesState,
+          {
+            name,
+            agent: cat.agent,
+            model: m.id,
+            effort: '',
+            description: m.description || m.name,
+            enabled: false,
+            position: Math.max(-1, ...profilesState.map((e) => e.position)) + 1,
+          },
+        ]
+        created.push(name)
+      }
+    }
+    return HttpResponse.json({ created, skipped })
   }),
 
   http.delete('/v1/model-profiles/:name', ({ params }) => {

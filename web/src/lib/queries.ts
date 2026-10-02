@@ -16,6 +16,7 @@ import type {
   Agent,
   AgentDelivery,
   AgentInboxMessage,
+  AgentCatalog,
   AgentKinds,
   AgentQuestion,
   BrainstormOutcome,
@@ -24,6 +25,7 @@ import type {
   GithubIssue,
   GithubRepo,
   GlobalQuestion,
+  ImportCatalogResult,
   Message,
   ModelProfile,
   ModelProfileInput,
@@ -612,6 +614,37 @@ export function useUpdateModelProfile(): UseMutationResult<
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ name, ...body }) => api.patch<ModelProfile>(`/v1/model-profiles/${name}`, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['model-profiles'] }),
+  })
+}
+
+/** `GET /v1/model-catalog` -> every agent's model catalog (choose-model v2).
+ * The daemon caches it for 10 minutes, so there is nothing to poll. */
+export function useModelCatalog(): UseQueryResult<AgentCatalog[]> {
+  return useQuery({
+    queryKey: ['model-catalog'],
+    queryFn: () => api.get<{ agents: AgentCatalog[] }>('/v1/model-catalog').then((r) => r.agents),
+    retry: false,
+    staleTime: 10 * 60 * 1000,
+  })
+}
+
+/** `GET /v1/model-catalog?refresh=1` -> the catalogs refetched past the
+ * daemon's 10-minute cache; the result replaces `useModelCatalog`'s data. */
+export function useRefreshModelCatalog(): UseMutationResult<AgentCatalog[], Error, void> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.get<{ agents: AgentCatalog[] }>('/v1/model-catalog?refresh=1').then((r) => r.agents),
+    onSuccess: (agents) => queryClient.setQueryData(['model-catalog'], agents),
+  })
+}
+
+/** `POST /v1/model-profiles/import-catalog` -> a disabled profile for every
+ * catalog model no profile uses yet (main only unless `include_legacy`). Human-only. */
+export function useImportCatalog(): UseMutationResult<ImportCatalogResult, Error, { include_legacy: boolean }> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body) => api.post<ImportCatalogResult>('/v1/model-profiles/import-catalog', body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['model-profiles'] }),
   })
 }

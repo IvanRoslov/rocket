@@ -116,11 +116,11 @@ func (s *Store) DeleteModelProfile(name string) error {
 // seedModelProfiles are the starter profiles of an empty registry.
 var seedModelProfiles = []ModelProfile{
 	{Name: "claude-opus", Agent: "claude-code", Model: "opus",
-		Description: "Сложные задачи: архитектура, рефакторинг, трудные баги, оркестрация"},
+		Description: "Hard tasks: architecture, refactoring, tricky bugs, orchestration"},
 	{Name: "claude-sonnet", Agent: "claude-code", Model: "sonnet",
-		Description: "Обычная разработка по ясному брифу, тесты, средние правки"},
+		Description: "Everyday development from a clear brief, tests, medium-sized changes"},
 	{Name: "codex", Agent: "codex",
-		Description: "Codex с моделью по умолчанию: тексты, доки, механические правки"},
+		Description: "Codex with its default model: texts, docs, mechanical edits"},
 }
 
 // SeedModelProfiles fills an empty registry with the starter profiles and
