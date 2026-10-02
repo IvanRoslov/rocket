@@ -112,7 +112,7 @@ func validResize(cols, rows int) bool {
 // handleSessionTerm upgrades the connection to a WebSocket and proxies a
 // tmux attach session's PTY over it: server->client binary frames carry PTY
 // output; client->server binary frames carry input; client->server text
-// frames carry JSON control messages (resize/ping). Closing the WS kills
+// frames carry JSON control messages (resize/ping/scroll). Closing the WS kills
 // only the attach client process, never the underlying tmux session.
 //
 // Client-size policy (docs/03-daemon-api.md «Размер окна»): the web
@@ -213,6 +213,7 @@ func handleSessionTerm(w http.ResponseWriter, r *http.Request, d Deps, claims *t
 	// when the ws read errors out (connection closed by either side),
 	// which also unblocks the pty->ws goroutine via the deferred close
 	// above.
+	scrolled := false // this connection may have put the pane in copy-mode
 	for {
 		typ, data, err := conn.Read(ctx)
 		if err != nil {
@@ -221,11 +222,22 @@ func handleSessionTerm(w http.ResponseWriter, r *http.Request, d Deps, claims *t
 		switch typ {
 		case websocket.MessageBinary:
 			if !readonly {
+				if scrolled {
+					// Restore the live pane before forwarding the first key or
+					// paste; otherwise copy-mode would consume that input.
+					_ = d.Manager.ExitHistory(ctx, id)
+					scrolled = false
+				}
 				_, _ = ptmx.Write(data)
 			}
 		case websocket.MessageText:
 			if c, ok := parseControl(data); ok {
 				switch c.Type {
+				case "scroll":
+					if !readonly && c.Lines != 0 {
+						_ = d.Manager.ScrollHistory(ctx, id, clampScroll(c.Lines))
+						scrolled = true
+					}
 				case "resize":
 					// Readonly clients (view-only observers) must not resize
 					// the shared PTY out from under the writer; treat resize
