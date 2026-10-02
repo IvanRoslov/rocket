@@ -18,8 +18,11 @@ export function wheelDeltaToLines(
 /** Keeps sub-row trackpad movement until it amounts to a whole row. */
 export class ScrollAccumulator {
   private remainder = 0
+  private readonly maxLines: number
 
-  constructor(private readonly maxLines = 1000) {}
+  constructor(maxLines = 1000) {
+    this.maxLines = maxLines
+  }
 
   add(deltaLines: number): number {
     const total = this.remainder + deltaLines

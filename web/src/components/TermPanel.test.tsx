@@ -263,6 +263,38 @@ class MockResizeObserver {
   disconnect() {}
 }
 
+function mountedTerm(): Terminal {
+  return (window as unknown as { __rocketTerm: Terminal }).__rocketTerm
+}
+
+function scrollFrames(socket: MockWebSocket): Array<{ type: string; lines: number }> {
+  return socket.sent
+    .filter((data): data is string => typeof data === 'string')
+    .map((data) => JSON.parse(data) as { type: string; lines: number })
+    .filter((frame) => frame.type === 'scroll')
+}
+
+function touchEvent(type: string, clientY: number): Event {
+  const event = new Event(type, { bubbles: true, cancelable: true })
+  const touch = { identifier: 1, target: document.body, clientX: 0, clientY, pageX: 0, pageY: clientY }
+  const list = Object.assign([touch], { item: (index: number) => (index === 0 ? touch : null) })
+  for (const key of ['touches', 'targetTouches', 'changedTouches']) {
+    Object.defineProperty(event, key, { value: list })
+  }
+  return event
+}
+
+async function writeTerm(term: Terminal, data: string): Promise<void> {
+  let parsed = false
+  term.write(data, () => {
+    parsed = true
+  })
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1)
+  })
+  expect(parsed).toBe(true)
+}
+
 describe('TermPanel', () => {
   const originalWebSocket = window.WebSocket
   const originalResizeObserver = window.ResizeObserver
@@ -270,6 +302,10 @@ describe('TermPanel', () => {
 
   beforeEach(() => {
     vi.useFakeTimers()
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>
+      setTimeout(() => callback(performance.now()), 16)
+    )
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => clearTimeout(id))
     MockWebSocket.instances = []
     window.WebSocket = MockWebSocket as unknown as typeof WebSocket
     window.ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserver
@@ -288,6 +324,7 @@ describe('TermPanel', () => {
   afterEach(() => {
     vi.runOnlyPendingTimers()
     vi.useRealTimers()
+    vi.unstubAllGlobals()
     window.WebSocket = originalWebSocket
     window.ResizeObserver = originalResizeObserver
     window.matchMedia = originalMatchMedia
@@ -377,5 +414,126 @@ describe('TermPanel', () => {
       rerender(<TermPanel sessionId="sess-2" onResize={() => {}} />)
     })
     expect(MockWebSocket.instances).toHaveLength(2)
+  })
+
+  it('sends scroll for wheel input in the alternate screen instead of arrow keys', async () => {
+    render(<TermPanel sessionId="sess-1" />)
+    const socket = MockWebSocket.instances[0]
+    act(() => socket.triggerOpen())
+    const term = mountedTerm()
+    await writeTerm(term, '\x1b[?1049h')
+
+    act(() => {
+      term.element!.querySelector('.xterm-screen')!.dispatchEvent(
+        new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -3, deltaMode: 1 })
+      )
+      vi.advanceTimersByTime(16)
+    })
+
+    expect(scrollFrames(socket)).toEqual([{ type: 'scroll', lines: -3 }])
+    const binaryInput = socket.sent
+      .filter((data): data is Uint8Array => data instanceof Uint8Array)
+      .map((data) => new TextDecoder().decode(data))
+      .join('')
+    expect(binaryInput).not.toMatch(/\x1b(?:\[|O)[AB]/)
+  })
+
+  it('batches small pixel wheel deltas into one scroll frame per animation frame', () => {
+    const { container } = render(<TermPanel sessionId="sess-1" />)
+    const socket = MockWebSocket.instances[0]
+    act(() => socket.triggerOpen())
+    const term = mountedTerm()
+    const panel = container.querySelector('.term-panel__xterm')!
+    Object.defineProperty(panel, 'clientHeight', { value: term.rows * 16 })
+
+    act(() => {
+      for (let i = 0; i < 4; i++) {
+        term.element!.querySelector('.xterm-screen')!.dispatchEvent(
+          new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -4, deltaMode: 0 })
+        )
+      }
+    })
+    expect(scrollFrames(socket)).toEqual([])
+
+    act(() => vi.advanceTimersByTime(16))
+    expect(scrollFrames(socket)).toEqual([{ type: 'scroll', lines: -1 }])
+  })
+
+  it('reads mouse tracking mode again on each wheel event', async () => {
+    render(<TermPanel sessionId="sess-1" />)
+    const socket = MockWebSocket.instances[0]
+    act(() => socket.triggerOpen())
+    const term = mountedTerm()
+    await writeTerm(term, '\x1b[?1049h\x1b[?1003h')
+    expect(term.modes.mouseTrackingMode).toBe('any')
+
+    act(() => {
+      term.element!.querySelector('.xterm-screen')!.dispatchEvent(
+        new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -3, deltaMode: 1 })
+      )
+      vi.advanceTimersByTime(16)
+    })
+    expect(scrollFrames(socket)).toEqual([])
+
+    await writeTerm(term, '\x1b[?1003l')
+    expect(term.modes.mouseTrackingMode).toBe('none')
+    act(() => {
+      term.element!.querySelector('.xterm-screen')!.dispatchEvent(
+        new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -2, deltaMode: 1 })
+      )
+      vi.advanceTimersByTime(16)
+    })
+    expect(scrollFrames(socket)).toEqual([{ type: 'scroll', lines: -2 }])
+  })
+
+  it('turns a one-finger downward swipe into upward history scroll', () => {
+    const { container } = render(<TermPanel sessionId="sess-1" />)
+    const socket = MockWebSocket.instances[0]
+    act(() => socket.triggerOpen())
+    const panel = container.querySelector('.term-panel__xterm')!
+    const move = touchEvent('touchmove', 40)
+
+    act(() => {
+      panel.dispatchEvent(touchEvent('touchstart', 38))
+      panel.dispatchEvent(move)
+      vi.advanceTimersByTime(16)
+    })
+
+    expect(move.defaultPrevented).toBe(true)
+    expect(scrollFrames(socket)).toEqual([{ type: 'scroll', lines: -2 }])
+  })
+
+  it('does not consume touch movement when the app owns the mouse', async () => {
+    const { container } = render(<TermPanel sessionId="sess-1" />)
+    const socket = MockWebSocket.instances[0]
+    act(() => socket.triggerOpen())
+    await writeTerm(mountedTerm(), '\x1b[?1003h')
+    const panel = container.querySelector('.term-panel__xterm')!
+    const move = touchEvent('touchmove', 38)
+
+    act(() => {
+      panel.dispatchEvent(touchEvent('touchstart', 40))
+      panel.dispatchEvent(move)
+      vi.advanceTimersByTime(16)
+    })
+
+    expect(move.defaultPrevented).toBe(false)
+    expect(scrollFrames(socket)).toEqual([])
+  })
+
+  it('cancels a pending scroll frame when the panel unmounts', () => {
+    const { unmount } = render(<TermPanel sessionId="sess-1" />)
+    const socket = MockWebSocket.instances[0]
+    act(() => socket.triggerOpen())
+
+    act(() => {
+      mountedTerm().element!.querySelector('.xterm-screen')!.dispatchEvent(
+        new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -3, deltaMode: 1 })
+      )
+      unmount()
+      vi.advanceTimersByTime(16)
+    })
+
+    expect(scrollFrames(socket)).toEqual([])
   })
 })
