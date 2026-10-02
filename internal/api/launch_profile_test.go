@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/IvanRoslov/rocket/internal/client"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -126,6 +127,45 @@ func TestPostSessionProfileResolution(t *testing.T) {
 			model := map[string]string{"cheap": "sonnet", "deep": "opus"}[tt.wantProfile]
 			effort := map[string]string{"deep": "high"}[tt.wantProfile]
 			assertSessionSnapshot(t, d, "myfeat-mytask", tt.wantProfile, model, effort)
+		})
+	}
+}
+
+// TestPostSessionPolicyErrorMessage pins the exact message of a policy
+// refusal: the detail only, without the code — the CLI prints
+// "<code>: <message>", so a message that repeats the code doubles it.
+func TestPostSessionPolicyErrorMessage(t *testing.T) {
+	tests := []struct {
+		name    string
+		allow   []string
+		extra   map[string]any
+		code    string
+		message string
+		cli     string
+	}{
+		{"not allowed", []string{"cheap"}, map[string]any{"profile": "deep"}, "profile_not_allowed", "allowed: cheap", "profile_not_allowed: allowed: cheap"},
+		{"not found", nil, map[string]any{"profile": "nope"}, "profile_not_found", "no profile nope", "profile_not_found: no profile nope"},
+		{"none allowed", []string{"gone"}, nil, "no_profiles_allowed", "no model profile is allowed for this task; ask the human",
+			"no_profiles_allowed: no model profile is allowed for this task; ask the human"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := sessionsTestDeps(t)
+			srv := newTestServer(t, d)
+			orchID, rootID := seedOrchestratorWithTask(t, d, "proj1", "myfeat")
+			setProfiles(t, d, "deep", "deep", fakeProfile("cheap", "sonnet", "", 1), fakeProfile("deep", "opus", "", 2))
+			if tt.allow != nil {
+				if err := d.Store.SetTaskAllowedProfiles(rootID, tt.allow); err != nil {
+					t.Fatalf("SetTaskAllowedProfiles: %v", err)
+				}
+			}
+			eb := decodeErr(t, spawnAs(t, srv.URL, orchID, tt.extra))
+			if eb.Error.Code != tt.code || eb.Error.Message != tt.message {
+				t.Errorf("error = %q / %q, want %q / %q", eb.Error.Code, eb.Error.Message, tt.code, tt.message)
+			}
+			if got := (&client.APIError{Code: eb.Error.Code, Message: eb.Error.Message}).Error(); got != tt.cli {
+				t.Errorf("CLI prints %q, want %q", got, tt.cli)
+			}
 		})
 	}
 }

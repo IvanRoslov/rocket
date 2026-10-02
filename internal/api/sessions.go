@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/modelpolicy"
@@ -512,11 +513,27 @@ func writePolicyErr(w http.ResponseWriter, err error) bool {
 	}
 	var pe *modelpolicy.PolicyError
 	if errors.As(err, &pe) {
-		writeErr(w, http.StatusBadRequest, pe.Code, pe.Error())
+		writeErr(w, http.StatusBadRequest, pe.Code, policyErrDetail(pe))
 		return true
 	}
 	writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 	return true
+}
+
+// policyErrDetail is the message of a policy refusal: the detail only,
+// since clients print "<code>: <message>" and PolicyError.Error() already
+// leads with the code.
+func policyErrDetail(pe *modelpolicy.PolicyError) string {
+	switch {
+	case pe.Msg != "":
+		return pe.Msg
+	case len(pe.Allowed) > 0:
+		return "allowed: " + strings.Join(pe.Allowed, ", ")
+	case pe.Code == modelpolicy.CodeNoneAllowed:
+		return "no model profile is allowed for this task; ask the human"
+	default:
+		return pe.Code
+	}
 }
 
 func writeManagerErr(w http.ResponseWriter, err error) {
