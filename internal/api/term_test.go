@@ -52,7 +52,7 @@ func (f *termScrollRuntime) snapshot() []string {
 	return append([]string(nil), f.calls...)
 }
 
-func termScrollConn(t *testing.T, rt runtime.Runtime, tmuxName string, readonly bool) (*websocket.Conn, context.Context) {
+func termScrollEndpoint(t *testing.T, rt runtime.Runtime, tmuxName string) string {
 	t.Helper()
 	d := sessionsTestDeps(t)
 	d.Manager = session.NewManager(d.Store, d.Bus, rt, sessFakeWorkspace{}, d.Cfg)
@@ -68,7 +68,11 @@ func termScrollConn(t *testing.T, rt runtime.Runtime, tmuxName string, readonly 
 		t.Fatalf("AddSession: %v", err)
 	}
 	srv := newTestServer(t, d)
-	url := strings.Replace(srv.URL, "http://", "ws://", 1) + "/v1/sessions/term-scroll/term"
+	return strings.Replace(srv.URL, "http://", "ws://", 1) + "/v1/sessions/term-scroll/term"
+}
+
+func termScrollDial(t *testing.T, url string, readonly bool) (*websocket.Conn, context.Context) {
+	t.Helper()
 	if readonly {
 		url += "?readonly=true"
 	}
@@ -80,6 +84,11 @@ func termScrollConn(t *testing.T, rt runtime.Runtime, tmuxName string, readonly 
 	}
 	t.Cleanup(func() { conn.CloseNow() })
 	return conn, ctx
+}
+
+func termScrollConn(t *testing.T, rt runtime.Runtime, tmuxName string, readonly bool) (*websocket.Conn, context.Context) {
+	t.Helper()
+	return termScrollDial(t, termScrollEndpoint(t, rt, tmuxName), readonly)
 }
 
 func sendTermAndWait(t *testing.T, conn *websocket.Conn, ctx context.Context, frames ...struct {
@@ -135,6 +144,47 @@ func TestSessionTermScrollOnlyExitsAfterScroll(t *testing.T) {
 	sendTermAndWait(t, conn, ctx, termFrame(websocket.MessageBinary, "x\n"))
 	if got := f.snapshot(); len(got) != 0 {
 		t.Fatalf("runtime calls without scroll = %v, want none", got)
+	}
+}
+
+func TestSessionTermScrollOtherWriterInputExitsHistory(t *testing.T) {
+	f := &termScrollRuntime{}
+	url := termScrollEndpoint(t, f, "rocket-term-scroll")
+	first, firstCtx := termScrollDial(t, url, false)
+	second, secondCtx := termScrollDial(t, url, false)
+	sendTermAndWait(t, first, firstCtx, termFrame(websocket.MessageText, `{"type":"scroll","lines":-3}`))
+	sendTermAndWait(t, second, secondCtx, termFrame(websocket.MessageBinary, "q\n"))
+	if got := f.snapshot(); !slices.Equal(got, []string{"scroll:-3", "exit"}) {
+		t.Fatalf("runtime calls = %v, want scroll then exit before other writer's input", got)
+	}
+}
+
+func TestSessionTermScrollReconnectInputExitsHistory(t *testing.T) {
+	f := &termScrollRuntime{}
+	url := termScrollEndpoint(t, f, "rocket-term-scroll")
+	first, firstCtx := termScrollDial(t, url, false)
+	sendTermAndWait(t, first, firstCtx, termFrame(websocket.MessageText, `{"type":"scroll","lines":-3}`))
+	first.CloseNow()
+	second, secondCtx := termScrollDial(t, url, false)
+	sendTermAndWait(t, second, secondCtx, termFrame(websocket.MessageBinary, "q\n"))
+	if got := f.snapshot(); !slices.Equal(got, []string{"scroll:-3", "exit"}) {
+		t.Fatalf("runtime calls = %v, want scroll then exit across reconnect", got)
+	}
+}
+
+func TestSessionTermScrollRetriesFailedExit(t *testing.T) {
+	f := &termScrollRuntime{exitErr: errors.New("tmux temporarily unavailable")}
+	conn, ctx := termScrollConn(t, f, "rocket-term-scroll", false)
+	sendTermAndWait(t, conn, ctx,
+		termFrame(websocket.MessageText, `{"type":"scroll","lines":-3}`),
+		termFrame(websocket.MessageBinary, "q\n"),
+	)
+	f.mu.Lock()
+	f.exitErr = nil
+	f.mu.Unlock()
+	sendTermAndWait(t, conn, ctx, termFrame(websocket.MessageBinary, "x\n"))
+	if got := f.snapshot(); !slices.Equal(got, []string{"scroll:-3", "exit", "exit"}) {
+		t.Fatalf("runtime calls = %v, want exit retried on later input", got)
 	}
 }
 
@@ -227,6 +277,7 @@ func TestSessionTermScrollFirstPasteReachesRealTmuxPane(t *testing.T) {
 	prefix := "qg/SCROLL-INPUT-"
 	suffix := "-PASTE-END"
 	paste := prefix + strings.Repeat("z", 1024) + suffix + "\n"
+	wantPaste := strings.TrimSuffix(paste, "\n")
 	if err := conn.Write(wsCtx, websocket.MessageBinary, []byte(paste)); err != nil {
 		t.Fatalf("write paste: %v", err)
 	}
@@ -234,7 +285,10 @@ func TestSessionTermScrollFirstPasteReachesRealTmuxPane(t *testing.T) {
 	deadline = time.Now().Add(3 * time.Second)
 	for {
 		out, err := rt.Capture(ctx, h, 100)
-		if err == nil && strings.Contains(out, prefix) && strings.Contains(out, suffix) && paneMode() == "0" {
+		// Capture inserts newlines at pane wraps; the input itself has no
+		// embedded newline before its final Enter.
+		flat := strings.ReplaceAll(out, "\n", "")
+		if err == nil && strings.Contains(flat, wantPaste) && paneMode() == "0" {
 			return
 		}
 		if time.Now().After(deadline) {
