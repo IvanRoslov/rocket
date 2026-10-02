@@ -25,6 +25,8 @@ import type {
   GithubRepo,
   GlobalQuestion,
   Message,
+  ModelProfile,
+  ModelProfileInput,
   Project,
   Question,
   Repo,
@@ -506,7 +508,9 @@ export function useMoveTask(): UseMutationResult<Task, Error, { id: number; stat
 }
 
 /**
- * `PATCH /v1/tasks/{id}` `{title?, description?}` -> bare taskResponse (200).
+ * `PATCH /v1/tasks/{id}` `{title?, description?, allowed_profiles?}` -> bare
+ * taskResponse (200). `allowed_profiles: []` lets workers use every enabled
+ * profile; agent sessions get 403 human_only for it (task #5026).
  * Used by the Overview tab's inline title/description editor. The daemon
  * does not itself reject an empty title on this path (see
  * internal/api/tasks.go handlePatchTask) — callers must validate that
@@ -515,7 +519,7 @@ export function useMoveTask(): UseMutationResult<Task, Error, { id: number; stat
 export function useUpdateTask(): UseMutationResult<
   Task,
   Error,
-  { id: number; title?: string; description?: string }
+  { id: number; title?: string; description?: string; allowed_profiles?: string[] }
 > {
   const queryClient = useQueryClient()
   return useMutation({
@@ -550,24 +554,72 @@ export function useAgentKinds(): UseQueryResult<AgentKinds> {
   })
 }
 
-/** `POST /v1/tasks/{id}/start` `{agent?}` -> `{task_id,feature_slug,session_id}` (201). Root tasks only. */
+/** `POST /v1/tasks/{id}/start` `{agent?, profile?, allowed_profiles?}` ->
+ * `{task_id,feature_slug,session_id}` (201). Root tasks only. Only the fields
+ * the human chose go on the wire; with none there is no body at all, and the
+ * daemon falls back to the default orchestrator profile (task #5026). */
 export function useStartTask(): UseMutationResult<
   { task_id: number; feature_slug: string; session_id: string },
   Error,
-  { id: number; agent?: string }
+  { id: number; agent?: string; profile?: string; allowed_profiles?: string[] }
 > {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, agent }) =>
-      api.post<{ task_id: number; feature_slug: string; session_id: string }>(
+    mutationFn: ({ id, agent, profile, allowed_profiles }) => {
+      const body: { agent?: string; profile?: string; allowed_profiles?: string[] } = {}
+      if (agent) body.agent = agent
+      if (profile) body.profile = profile
+      if (allowed_profiles && allowed_profiles.length > 0) body.allowed_profiles = allowed_profiles
+      return api.post<{ task_id: number; feature_slug: string; session_id: string }>(
         `/v1/tasks/${id}/start`,
-        agent ? { agent } : undefined,
-      ),
+        Object.keys(body).length > 0 ? body : undefined,
+      )
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
       queryClient.invalidateQueries({ queryKey: ['task'] })
       queryClient.invalidateQueries({ queryKey: ['sessions'] })
     },
+  })
+}
+
+/** `GET /v1/model-profiles` -> the whole registry, in registry order (task #5026). */
+export function useModelProfiles(): UseQueryResult<ModelProfile[]> {
+  return useQuery({
+    queryKey: ['model-profiles'],
+    queryFn: () => api.get<{ profiles: ModelProfile[] }>('/v1/model-profiles').then((r) => r.profiles),
+    retry: false,
+  })
+}
+
+/** `POST /v1/model-profiles` -> the new profile (201). Human-only. */
+export function useCreateModelProfile(): UseMutationResult<ModelProfile, Error, ModelProfileInput> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body) => api.post<ModelProfile>('/v1/model-profiles', body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['model-profiles'] }),
+  })
+}
+
+/** `PATCH /v1/model-profiles/{name}` (partial; a profile cannot be renamed). Human-only. */
+export function useUpdateModelProfile(): UseMutationResult<
+  ModelProfile,
+  Error,
+  { name: string } & Partial<Omit<ModelProfileInput, 'name'>> & { enabled?: boolean }
+> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ name, ...body }) => api.patch<ModelProfile>(`/v1/model-profiles/${name}`, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['model-profiles'] }),
+  })
+}
+
+/** `DELETE /v1/model-profiles/{name}` (204). 409 profile_in_use while it is a default. */
+export function useDeleteModelProfile(): UseMutationResult<void, Error, string> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (name) => api.del<void>(`/v1/model-profiles/${name}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['model-profiles'] }),
   })
 }
 
@@ -715,7 +767,12 @@ export function useCreateProject(): UseMutationResult<
 export function useUpdateSettings(): UseMutationResult<
   Settings,
   Error,
-  { github_token?: string; orchestrator_brainstorm_custom?: boolean }
+  {
+    github_token?: string
+    orchestrator_brainstorm_custom?: boolean
+    default_orchestrator_profile?: string
+    default_worker_profile?: string
+  }
 > {
   const queryClient = useQueryClient()
   return useMutation({

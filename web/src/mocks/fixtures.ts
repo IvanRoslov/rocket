@@ -19,6 +19,7 @@ import type {
   Question,
   Repo,
   Session,
+  ModelProfile,
   Settings,
   SystemInfo,
   Task,
@@ -104,6 +105,10 @@ export const sessions: Session[] = [
     repo_id: 'api',
     feature_slug: 'billing-v2',
     agent: 'claude',
+    // Model-profile snapshot (task #5026); the workers are pre-feature sessions without one.
+    profile: 'claude-opus',
+    model: 'opus',
+    effort: 'high',
     branch: 'feature/billing-v2',
     worktree_path: '/home/dev/.rocket/worktrees/billing-v2-orch',
     tmux_name: 'billing-v2-orch',
@@ -332,6 +337,9 @@ export const tasks: Task[] = [
     // question (Q3, see `questions` below) is awaiting the user's reply.
     open_questions: 2,
     questions_awaiting_user: 1,
+    // Model profiles (task #5026): workers restricted to two profiles.
+    orchestrator_profile: 'claude-opus',
+    allowed_profiles: ['claude-sonnet', 'codex'],
   },
   {
     // Brainstorm showcase (task-1077): the idea is being shaped, but nothing
@@ -1154,7 +1162,52 @@ export const githubIssues: Record<string, GithubIssue[]> = {
 // default (`github_token: ""`), so the GitHub tab in the New Project wizard
 // shows the "Connect GitHub" placeholder (GET /v1/github/repos 400 no_token)
 // unless a test explicitly sets one via PUT /v1/settings.
-export const settings: Settings = { github_token: '' }
+export const settings: Settings = {
+  github_token: '',
+  default_orchestrator_profile: 'claude-opus',
+  default_worker_profile: 'claude-sonnet',
+}
+
+// Model profiles — internal/api/model_profiles.go (task #5026). The seeded
+// starters plus a disabled one, so screens can show the global switch.
+export const modelProfiles: ModelProfile[] = [
+  {
+    name: 'claude-opus',
+    agent: 'claude-code',
+    model: 'opus',
+    effort: '',
+    description: 'Сложные задачи: архитектура, рефакторинг, трудные баги, оркестрация',
+    enabled: true,
+    position: 0,
+  },
+  {
+    name: 'claude-sonnet',
+    agent: 'claude-code',
+    model: 'sonnet',
+    effort: '',
+    description: 'Обычная разработка по ясному брифу, тесты, средние правки',
+    enabled: true,
+    position: 1,
+  },
+  {
+    name: 'codex',
+    agent: 'codex',
+    model: '',
+    effort: '',
+    description: 'Codex с моделью по умолчанию: тексты, доки, механические правки',
+    enabled: true,
+    position: 2,
+  },
+  {
+    name: 'claude-haiku',
+    agent: 'claude-code',
+    model: 'haiku',
+    effort: 'low',
+    description: 'Быстрые мелкие правки',
+    enabled: false,
+    position: 3,
+  },
+]
 
 // ---------------------------------------------------------------------------
 // Agents (docs/10-agents.md): agent "sre" of project billing — enabled, its
