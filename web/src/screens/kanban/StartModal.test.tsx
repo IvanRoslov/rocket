@@ -55,7 +55,7 @@ test('offers the enabled profiles, defaulting to the global orchestrator profile
   // codex's binary is missing on the fixture machine
   expect(within(select).getByRole('option', { name: /^codex/ })).toBeDisabled()
   // the default's description shows until something else is picked
-  expect(within(screen.getByRole('note', { name: 'Selected profile' })).getByText(/Сложные задачи/)).toBeInTheDocument()
+  expect(within(screen.getByRole('note', { name: 'Selected profile' })).getByText(/Hard tasks/)).toBeInTheDocument()
 })
 
 test('shows the picked profile’s description', async () => {
@@ -67,7 +67,7 @@ test('shows the picked profile’s description', async () => {
   await user.selectOptions(select, 'claude-sonnet')
 
   const note = screen.getByRole('note', { name: 'Selected profile' })
-  expect(within(note).getByText(/Обычная разработка/)).toBeInTheDocument()
+  expect(within(note).getByText(/Everyday development/)).toBeInTheDocument()
   expect(within(note).getByText('claude-code · sonnet')).toBeInTheDocument()
 })
 

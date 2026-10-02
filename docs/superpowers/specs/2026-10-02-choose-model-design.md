@@ -94,9 +94,9 @@ ALTER TABLE sessions ADD COLUMN effort  TEXT NOT NULL DEFAULT '';
 
 | name | agent | model | effort | description |
 |---|---|---|---|---|
-| `claude-opus` | claude-code | `opus` | — | Сложные задачи: архитектура, рефакторинг, трудные баги, оркестрация |
-| `claude-sonnet` | claude-code | `sonnet` | — | Обычная разработка по ясному брифу, тесты, средние правки |
-| `codex` | codex | — | — | Codex с моделью по умолчанию: тексты, доки, механические правки |
+| `claude-opus` | claude-code | `opus` | — | Hard tasks: architecture, refactoring, tricky bugs, orchestration |
+| `claude-sonnet` | claude-code | `sonnet` | — | Everyday development from a clear brief, tests, medium-sized changes |
+| `codex` | codex | — | — | Codex with its default model: texts, docs, mechanical edits |
 
 Дефолты при сидировании:
 - `default_orchestrator_profile` = `claude-opus`, если `default_agent` = `claude-code`; иначе первый профиль агента `default_agent`.

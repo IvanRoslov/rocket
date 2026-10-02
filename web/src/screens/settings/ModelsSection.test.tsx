@@ -53,7 +53,7 @@ describe('ModelsSection', () => {
     const opus = within(row('claude-opus'))
     expect(opus.getByText('claude-code')).toBeInTheDocument()
     expect(opus.getByText('opus')).toBeInTheDocument()
-    expect(opus.getByText(/Сложные задачи/)).toBeInTheDocument()
+    expect(opus.getByText(/Hard tasks/)).toBeInTheDocument()
 
     // codex runs the agent's default model and effort
     expect(within(row('codex')).getAllByText('default')).toHaveLength(2)
@@ -126,7 +126,7 @@ describe('ModelsSection', () => {
           agent: 'claude-code',
           model: '',
           effort: '',
-          description: 'Codex с моделью по умолчанию: тексты, доки, механические правки',
+          description: 'Codex with its default model: texts, docs, mechanical edits',
         },
       ]),
     )
