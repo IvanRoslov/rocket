@@ -330,8 +330,13 @@ func handlePatchModelProfile(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 	req.apply(&p)
-	if validateProfileAgent(w, r, d, p) {
-		return
+	// Only a change to what launches is re-validated: toggling, moving or
+	// re-describing a profile must work even if its effort predates the
+	// current catalog (a v1 profile, or a level the agent since dropped).
+	if req.Agent != nil || req.Model != nil || req.Effort != nil {
+		if validateProfileAgent(w, r, d, p) {
+			return
+		}
 	}
 	if err := d.Store.UpdateModelProfile(p); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())

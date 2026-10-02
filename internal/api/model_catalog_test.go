@@ -362,3 +362,87 @@ func TestImportProfileName(t *testing.T) {
 		}
 	}
 }
+
+// A PATCH that does not touch agent/model/effort must not re-validate the
+// effort: a v1 profile whose effort its model no longer lists (codex
+// gpt-5.5 + minimal) stays togglable and movable.
+func TestPatchUnrelatedFieldsSkipsEffortCheck(t *testing.T) {
+	f := newMPFixture(t)
+	if err := f.d.Store.CreateModelProfile(store.ModelProfile{Name: "old", Agent: "codex",
+		Model: "gpt-5.5", Effort: "minimal", Enabled: false, Position: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if status, body := mpDo(t, f.url, "PATCH", "/v1/model-profiles/old", "", map[string]any{"enabled": true, "position": 1, "description": "d"}); status != http.StatusOK {
+		t.Fatalf("toggle/move: %d %v", status, body)
+	}
+	if status, _ := mpDo(t, f.url, "PATCH", "/v1/model-profiles/old", "", map[string]any{"effort": "minimal"}); status != http.StatusBadRequest {
+		t.Errorf("explicit effort still validated: status %d", status)
+	}
+}
+
+// The fetch is not tied to the caller's request: a client that disconnects
+// must not leave a degraded catalog in the cache for the whole TTL.
+func TestCatalogCacheFetchIgnoresCallerCancel(t *testing.T) {
+	c := NewCatalogCache(func(ctx context.Context, name string) (agent.Catalog, error) {
+		if ctx.Err() != nil {
+			return agent.Catalog{Source: agent.CatalogSourceBuiltin, Warning: "cancelled"}, nil
+		}
+		return agent.Catalog{Source: agent.CatalogSourceCLI}, nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := c.Get(ctx, "codex", false); got.Source != agent.CatalogSourceCLI {
+		t.Errorf("source = %q, want cli (fetch must not inherit the caller's cancellation)", got.Source)
+	}
+}
+
+// Concurrent cold reads of one agent share a single fetch.
+func TestCatalogCacheSingleFlight(t *testing.T) {
+	var calls atomic.Int32
+	release := make(chan struct{})
+	c := NewCatalogCache(func(ctx context.Context, name string) (agent.Catalog, error) {
+		calls.Add(1)
+		<-release
+		return agent.Catalog{Source: agent.CatalogSourceCLI}, nil
+	})
+	var wg sync.WaitGroup
+	for range 5 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if got := c.Get(context.Background(), "codex", false); got.Source != agent.CatalogSourceCLI {
+				t.Errorf("source = %q", got.Source)
+			}
+		}()
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+	if n := calls.Load(); n != 1 {
+		t.Errorf("fetches = %d, want 1", n)
+	}
+}
+
+// Two imports at once must not both pick the same names and 500 halfway.
+func TestImportCatalogConcurrent(t *testing.T) {
+	f := newMPFixture(t)
+	var wg sync.WaitGroup
+	statuses := make([]int, 4)
+	for i := range statuses {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			statuses[i], _ = mpDo(t, f.url, "POST", "/v1/model-profiles/import-catalog", "", nil)
+		}()
+	}
+	wg.Wait()
+	for i, s := range statuses {
+		if s != http.StatusOK {
+			t.Errorf("import %d: status %d", i, s)
+		}
+	}
+	ps, _ := f.d.Store.ListModelProfiles()
+	if len(ps) != 3+4 {
+		t.Errorf("profiles = %d, want 7 (3 seeded + 4 imported once)", len(ps))
+	}
+}

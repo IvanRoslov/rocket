@@ -201,3 +201,13 @@ func TestParseClaudeCatalogDefaultBadge(t *testing.T) {
 		t.Errorf("no Default/Recommended badge: default = %q, want empty", got)
 	}
 }
+
+func TestParseClaudeCatalogNoFetchedAt(t *testing.T) {
+	_, fetched, err := parseClaudeCatalog([]byte(`{"version": 2, "catalog": {"config": {"models": [{"id": "m", "section": "main"}]}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fetched.IsZero() {
+		t.Errorf("fetchedAt = %v, want zero when the cache has none", fetched)
+	}
+}

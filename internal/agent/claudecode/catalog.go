@@ -82,7 +82,11 @@ func parseClaudeCatalog(b []byte) ([]agent.CatalogModel, time.Time, error) {
 	if len(out) == 0 {
 		return nil, time.Time{}, errors.New("no models with an id")
 	}
-	return out, time.UnixMilli(raw.FetchedAt), nil
+	var fetched time.Time
+	if raw.FetchedAt > 0 {
+		fetched = time.UnixMilli(raw.FetchedAt)
+	}
+	return out, fetched, nil
 }
 
 // newestCatalogFile returns the most recently modified *-cc.json in dir.

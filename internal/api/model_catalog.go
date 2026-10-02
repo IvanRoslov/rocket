@@ -35,13 +35,21 @@ var fetchAgentCatalog catalogFetcher = func(ctx context.Context, name string) (a
 
 // CatalogCache keeps each agent's model catalog in memory for modelCatalogTTL.
 // Its lock is never held while fetching, so a slow `codex debug models`
-// does not stall reads of another agent's catalog.
+// does not stall reads of another agent's catalog; concurrent cold reads of
+// one agent share a single fetch.
 type CatalogCache struct {
 	fetch catalogFetcher
 	now   func() time.Time
 
-	mu      sync.Mutex
-	entries map[string]catalogEntry
+	mu       sync.Mutex
+	entries  map[string]catalogEntry
+	inflight map[string]*catalogCall
+}
+
+// catalogCall is a fetch in progress; done closes when cat is set.
+type catalogCall struct {
+	done chan struct{}
+	cat  agent.Catalog
 }
 
 type catalogEntry struct {
@@ -51,28 +59,42 @@ type catalogEntry struct {
 
 // NewCatalogCache returns an empty cache in front of fetch.
 func NewCatalogCache(fetch catalogFetcher) *CatalogCache {
-	return &CatalogCache{fetch: fetch, now: time.Now, entries: map[string]catalogEntry{}}
+	return &CatalogCache{fetch: fetch, now: time.Now, entries: map[string]catalogEntry{},
+		inflight: map[string]*catalogCall{}}
 }
 
 // Get returns agentName's catalog, fetching it when absent, older than
 // modelCatalogTTL, or refresh is set. A fetch error is not passed on: the
 // result is an empty builtin catalog whose Warning carries the error.
 func (c *CatalogCache) Get(ctx context.Context, agentName string, refresh bool) agent.Catalog {
-	if !refresh {
-		c.mu.Lock()
-		e, ok := c.entries[agentName]
+	c.mu.Lock()
+	if e, ok := c.entries[agentName]; ok && !refresh && c.now().Sub(e.at) < modelCatalogTTL {
 		c.mu.Unlock()
-		if ok && c.now().Sub(e.at) < modelCatalogTTL {
-			return e.cat
-		}
+		return e.cat
 	}
-	cat, err := c.fetch(ctx, agentName)
+	if call, ok := c.inflight[agentName]; ok {
+		c.mu.Unlock()
+		<-call.done
+		return call.cat
+	}
+	call := &catalogCall{done: make(chan struct{})}
+	c.inflight[agentName] = call
+	c.mu.Unlock()
+
+	// Detached from the caller: a client that disconnects mid-fetch must not
+	// leave a fallback catalog cached for the whole TTL. The adapters bound
+	// their own work (codex: catalogTimeout).
+	cat, err := c.fetch(context.WithoutCancel(ctx), agentName)
 	if err != nil {
 		cat = agent.Catalog{Source: agent.CatalogSourceBuiltin, Warning: "model catalog unavailable: " + err.Error()}
 	}
+	call.cat = cat
+
 	c.mu.Lock()
 	c.entries[agentName] = catalogEntry{cat: cat, at: c.now()}
+	delete(c.inflight, agentName)
 	c.mu.Unlock()
+	close(call.done)
 	return cat
 }
 
@@ -169,6 +191,9 @@ type importSkipped struct {
 	Reason string `json:"reason"`
 }
 
+// importCatalogMu serializes import-catalog requests.
+var importCatalogMu sync.Mutex
+
 // handleImportCatalog creates a disabled profile for every catalog model
 // (main only unless include_legacy) that no profile of the same agent
 // uses yet, whatever that profile's effort. Human only: an orchestrator
@@ -177,6 +202,9 @@ func handleImportCatalog(w http.ResponseWriter, r *http.Request, d Deps) {
 	if requireHuman(w, r, d) {
 		return
 	}
+	// Serialized: concurrent imports would pick the same names.
+	importCatalogMu.Lock()
+	defer importCatalogMu.Unlock()
 	var req importCatalogRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
