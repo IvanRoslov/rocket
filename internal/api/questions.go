@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/store"
+	"github.com/IvanRoslov/rocket/internal/threadtext"
 )
 
 // questionMessageResponse is the JSON shape of a single entry in a
@@ -462,7 +463,14 @@ func handlePostTaskQuestions(w http.ResponseWriter, r *http.Request, d Deps) {
 			return
 		}
 	}
-	if err := participantFanOut(d, subj, ordinal, "question", author, q.Body, participants); err != nil {
+	// An agent participant reads the question only as this delivered text,
+	// so the answer choices — with the recommended one marked — travel with
+	// it; the stored body stays as asked.
+	delivered := q.Body
+	if line := threadtext.OptionsLine(q.Options, q.RecommendedOption); line != "" {
+		delivered += "\n\n" + line
+	}
+	if err := participantFanOut(d, subj, ordinal, "question", author, delivered, participants); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
