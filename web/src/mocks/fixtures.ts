@@ -873,12 +873,19 @@ export const stormGates: TaskGate[] = [
   },
 ]
 
-/** `GET /v1/stats/brainstorm` fixture. */
+/**
+ * `GET /v1/stats/brainstorm` fixture. Every answer counts under its author:
+ * the human's weeks and cto's weeks are separate rows. Storms: #17 the human's
+ * (pending gate after one round of changes), #12 mixed (Иван + cto, Go first
+ * try), #18 cto's alone (Go after two rounds of changes).
+ */
 export const brainstormStats: BrainstormStats = {
   weeks: [
-    { week: '2026-W39', skill: 'superpowers:brainstorming', answered: 4, accepted: 2, accepted_with_comment: 1, corrected: 1, wrong_turn: 1 },
-    { week: '2026-W40', skill: 'orchestrator-brainstorming', answered: 5, accepted: 4, accepted_with_comment: 2, corrected: 1, wrong_turn: 0 },
-    { week: '2026-W40', skill: 'superpowers:brainstorming', answered: 2, accepted: 1, accepted_with_comment: 0, corrected: 0, wrong_turn: 1 },
+    { week: '2026-W39', skill: 'superpowers:brainstorming', answered_by: 'human', answered: 4, accepted: 2, accepted_with_comment: 1, corrected: 1, wrong_turn: 1 },
+    { week: '2026-W40', skill: 'orchestrator-brainstorming', answered_by: 'human', answered: 5, accepted: 4, accepted_with_comment: 2, corrected: 1, wrong_turn: 0 },
+    { week: '2026-W40', skill: 'orchestrator-brainstorming', answered_by: 'cto', answered: 3, accepted: 3, accepted_with_comment: 0, corrected: 0, wrong_turn: 0 },
+    { week: '2026-W40', skill: 'superpowers:brainstorming', answered_by: 'human', answered: 2, accepted: 1, accepted_with_comment: 0, corrected: 0, wrong_turn: 1 },
+    { week: '2026-W40', skill: 'superpowers:brainstorming', answered_by: 'cto', answered: 2, accepted: 1, accepted_with_comment: 0, corrected: 1, wrong_turn: 0 },
   ],
   storms: [
     {
@@ -892,7 +899,13 @@ export const brainstormStats: BrainstormStats = {
       accepted_with_comment: 1,
       corrected: 0,
       wrong_turn: 0,
+      answered_by: ['human'],
+      by_answerer: [
+        { answered_by: 'human', answered: 1, accepted: 1, accepted_with_comment: 1, corrected: 0, wrong_turn: 0 },
+      ],
       spec_changes: 1,
+      first_try_go: false,
+      has_gate: true,
       go_at: null,
     },
     {
@@ -906,8 +919,35 @@ export const brainstormStats: BrainstormStats = {
       accepted_with_comment: 1,
       corrected: 2,
       wrong_turn: 1,
+      answered_by: ['human', 'cto'],
+      by_answerer: [
+        { answered_by: 'human', answered: 4, accepted: 2, accepted_with_comment: 1, corrected: 1, wrong_turn: 1 },
+        { answered_by: 'cto', answered: 2, accepted: 1, accepted_with_comment: 0, corrected: 1, wrong_turn: 0 },
+      ],
       spec_changes: 0,
+      first_try_go: true,
+      has_gate: true,
       go_at: NOW - 2 * DAY,
+    },
+    {
+      task_id: 18,
+      title: 'Usage alerts',
+      project_id: 'billing',
+      skill: 'orchestrator-brainstorming',
+      questions: 3,
+      answered: 3,
+      accepted: 3,
+      accepted_with_comment: 0,
+      corrected: 0,
+      wrong_turn: 0,
+      answered_by: ['cto'],
+      by_answerer: [
+        { answered_by: 'cto', answered: 3, accepted: 3, accepted_with_comment: 0, corrected: 0, wrong_turn: 0 },
+      ],
+      spec_changes: 2,
+      first_try_go: false,
+      has_gate: true,
+      go_at: NOW - 1 * DAY,
     },
   ],
 }

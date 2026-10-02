@@ -200,7 +200,11 @@ function emptyStorm(taskId: number): BrainstormStorm {
     accepted_with_comment: 0,
     corrected: 0,
     wrong_turn: 0,
+    answered_by: [],
+    by_answerer: [],
     spec_changes: 0,
+    first_try_go: false,
+    has_gate: false,
     go_at: null,
   }
 }

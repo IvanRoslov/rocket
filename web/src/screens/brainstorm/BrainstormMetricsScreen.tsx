@@ -1,9 +1,14 @@
-// Brainstorm metrics (task #4901 spec §3.2): how often the human took the
-// orchestrator's recommendation, week by week and per storm skill, plus every
-// storm with its counters. Read-only; the numbers are computed by the daemon
-// from storm answers (GET /v1/stats/brainstorm).
+// Brainstorm metrics (task #4901 spec §3.2, task #5019 spec §3.4): how often
+// a participant — the human or an agent such as cto — took the orchestrator's
+// recommendation, week by week and per storm skill, plus every storm with its
+// counters, who stormed and the gate. Read-only; the numbers are computed by
+// the daemon from storm answers (GET /v1/stats/brainstorm).
 
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Segmented } from '../../components/Segmented'
+import { gateState, orderParticipants, participantLabel, stormWho } from '../../lib/brainstormWho'
+import { HUMAN } from '../../lib/participants'
 import { useBrainstormStats } from '../../lib/queries'
 import type { BrainstormStorm, BrainstormWeek } from '../../lib/types'
 import './brainstorm-metrics.css'
@@ -26,6 +31,34 @@ function orderSkills(skills: string[]): string[] {
 
 function percent(accepted: number, answered: number): number {
   return Math.round((accepted / answered) * 100)
+}
+
+// The chosen participant is remembered per viewer; never shared.
+const ANSWERER_STORAGE_KEY = 'rocket.brainstormMetrics.answerer'
+
+function loadAnswerer(): string | null {
+  try {
+    return window.localStorage.getItem(ANSWERER_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+function storeAnswerer(id: string) {
+  try {
+    window.localStorage.setItem(ANSWERER_STORAGE_KEY, id)
+  } catch {
+    // Storage blocked: the choice just lasts until the page is left.
+  }
+}
+
+/**
+ * Whose weeks the chart shows: the stored choice while that participant has
+ * answers in the window, else the human, else the first participant.
+ */
+function defaultAnswerer(participants: string[], stored: string | null): string | undefined {
+  if (stored && participants.includes(stored)) return stored
+  return participants.includes(HUMAN) ? HUMAN : participants[0]
 }
 
 function WeeklyChart({ weeks }: { weeks: BrainstormWeek[] }) {
@@ -97,9 +130,11 @@ function StormsTable({ storms }: { storms: BrainstormStorm[] }) {
         <tr>
           <th>Task</th>
           <th>Skill</th>
+          <th>Кто штормил</th>
           <th>Questions</th>
           <th title="Accepted / with comment / Corrected / Wrong turn">Accepted / with comment / Corrected / Wrong turn</th>
-          <th>Spec changes</th>
+          <th>Правок до Go</th>
+          <th>Гейт</th>
           <th>Go</th>
         </tr>
       </thead>
@@ -112,14 +147,43 @@ function StormsTable({ storms }: { storms: BrainstormStorm[] }) {
               </Link>
             </td>
             <td>{s.skill}</td>
+            <td>{stormWho(s.answered_by ?? [])}</td>
             <td>{s.questions}</td>
             <td>{`${s.accepted} / ${s.accepted_with_comment} / ${s.corrected} / ${s.wrong_turn}`}</td>
             <td>{s.spec_changes}</td>
+            <td>{gateState({ go_at: s.go_at, spec_changes: s.spec_changes, has_gate: s.has_gate ?? false })}</td>
             <td>{goDate(s.go_at)}</td>
           </tr>
         ))}
       </tbody>
     </table>
+  )
+}
+
+function ParticipantWeeks({ weeks: wire }: { weeks: BrainstormWeek[] }) {
+  const [picked, setPicked] = useState<string | null>(loadAnswerer)
+  // A daemon older than task #5019 sends no answered_by: it counted only the human.
+  const weeks = wire.map((w) => (w.answered_by ? w : { ...w, answered_by: HUMAN }))
+  const participants = orderParticipants(weeks.filter((w) => w.answered > 0).map((w) => w.answered_by))
+  const answerer = defaultAnswerer(participants, picked)
+
+  function pick(id: string) {
+    setPicked(id)
+    storeAnswerer(id)
+  }
+
+  return (
+    <>
+      {participants.length > 0 && (
+        <Segmented
+          label="Participant"
+          options={participants.map((id) => ({ id, label: participantLabel(id) }))}
+          activeId={answerer ?? ''}
+          onChange={pick}
+        />
+      )}
+      <WeeklyChart weeks={weeks.filter((w) => w.answered_by === answerer)} />
+    </>
   )
 }
 
@@ -143,7 +207,7 @@ export function BrainstormMetricsScreen() {
           <p className="bm-empty">No storms yet</p>
         ) : (
           <>
-            <WeeklyChart weeks={data.weeks} />
+            <ParticipantWeeks weeks={data.weeks} />
             <h2 className="bm__subtitle">Storms</h2>
             <StormsTable storms={data.storms} />
           </>
