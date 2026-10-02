@@ -185,6 +185,8 @@ function ProfileModal({ profile, kinds, catalogs, onClose }: ProfileModalProps) 
           ))}
         </select>
 
+        {effortDisabled && <p className="settings-field__hint">У этой модели нет настройки усилия.</p>}
+
         <label className="settings-field__label settings-field__label--spaced" htmlFor="profile-description">
           Для чего подходит
         </label>
@@ -196,8 +198,6 @@ function ProfileModal({ profile, kinds, catalogs, onClose }: ProfileModalProps) 
           onChange={(e) => setDescription(e.target.value)}
           placeholder="Оркестратор видит это описание, когда выбирает профиль воркеру"
         />
-
-        {effortDisabled && <p className="settings-field__hint">У этой модели нет настройки усилия.</p>}
 
         {mutation.isError && (
           <p className="settings-error" role="alert">
