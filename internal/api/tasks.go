@@ -58,6 +58,11 @@ type taskResponse struct {
 	// with (orchestrator-brainstorming | superpowers:brainstorming); "" for
 	// tasks never started or started before it was recorded.
 	BrainstormSkill string `json:"brainstorm_skill"`
+	// AllowedProfiles is the feature task's worker profile allowlist (task
+	// #5026); [] means every enabled profile. OrchestratorProfile is the
+	// profile its orchestrator was started with ("" if none).
+	AllowedProfiles     []string `json:"allowed_profiles"`
+	OrchestratorProfile string   `json:"orchestrator_profile"`
 	// Open-question annotations (docs/superpowers/specs/2026-07-21-questions-
 	// visibility-design.md §1): populated by list/board/detail handlers from
 	// one taskQuestionCounts(d) aggregate, not per-task queries.
@@ -79,6 +84,10 @@ type taskResponse struct {
 }
 
 func toTaskResponse(t store.Task) taskResponse {
+	allowed := t.AllowedProfiles
+	if allowed == nil {
+		allowed = []string{}
+	}
 	return taskResponse{
 		ID:              t.ID,
 		ParentID:        t.ParentID,
@@ -96,6 +105,9 @@ func toTaskResponse(t store.Task) taskResponse {
 		Milestone:       t.Milestone,
 		AssignedRole:    t.AssignedRole,
 		BrainstormSkill: t.BrainstormSkill,
+
+		AllowedProfiles:     allowed,
+		OrchestratorProfile: t.OrchestratorProfile,
 	}
 }
 
@@ -601,6 +613,9 @@ type patchTaskRequest struct {
 	Status      *string `json:"status"`
 	Title       *string `json:"title"`
 	Description *string `json:"description"`
+	// AllowedProfiles replaces the worker profile allowlist; [] clears it.
+	// Human-only: an agent session gets 403 human_only.
+	AllowedProfiles *[]string `json:"allowed_profiles"`
 }
 
 // patchTaskResponse is the JSON shape of PATCH /v1/tasks/{id}. CleanedUp is
@@ -709,6 +724,26 @@ func handlePatchTask(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
+	// The allowlist is checked before anything is applied, so a rejected
+	// one never leaves a half-done PATCH behind.
+	if req.AllowedProfiles != nil {
+		if caller != nil {
+			writeErr(w, http.StatusForbidden, "human_only",
+				"only the human sets a task's allowed_profiles; agent session "+caller.ID+" may not")
+			return
+		}
+		missing, err := unknownProfiles(d.Store, *req.AllowedProfiles)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		if len(missing) > 0 {
+			writeErr(w, http.StatusBadRequest, "profile_not_found",
+				"unknown profiles: "+strings.Join(missing, ", "))
+			return
+		}
+	}
+
 	if req.Status != nil && *req.Status == "cancelled" {
 		writeErr(w, http.StatusBadRequest, "use_cancel", "use POST /v1/tasks/{id}/cancel (rocket task cancel) to cancel — it also stops sessions")
 		return
@@ -772,6 +807,13 @@ func handlePatchTask(w http.ResponseWriter, r *http.Request, d Deps) {
 			task.Description = *req.Description
 		}
 		if err := d.Store.UpdateTask(task); err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+	}
+
+	if req.AllowedProfiles != nil {
+		if err := d.Store.SetTaskAllowedProfiles(task.ID, *req.AllowedProfiles); err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}

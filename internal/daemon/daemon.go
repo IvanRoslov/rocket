@@ -61,6 +61,12 @@ func Run(cfg *config.Config) error {
 	}
 	defer st.Close()
 
+	// First start on a database without a model-profile registry gets the
+	// starter profiles; it never happens again, even if the human empties it.
+	if err := st.SeedModelProfiles(cfg.DefaultAgent); err != nil {
+		slog.Error("seed model profiles failed (non-fatal)", "error", err)
+	}
+
 	b := bus.New(st)
 	rt := runtime.NewTmux()
 	ws := workspace.New(cfg.WorktreesDir)

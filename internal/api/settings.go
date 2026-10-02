@@ -45,23 +45,46 @@ func maskToken(token string) string {
 	}
 }
 
+// defaultProfileSettings maps the settings JSON fields naming a default
+// model profile to their settings keys (task #5026). The JSON field and the
+// key are the same string.
+var defaultProfileSettings = []string{
+	store.SettingDefaultOrchestratorProfile,
+	store.SettingDefaultWorkerProfile,
+}
+
 // handleGetSettings serves GET /v1/settings: the masked GitHub token (or ""
-// if unset) and the orchestrator_brainstorm_custom toggle as a bool.
+// if unset), the orchestrator_brainstorm_custom toggle as a bool and the two
+// default model profiles ("" when unset).
 func handleGetSettings(w http.ResponseWriter, r *http.Request, d Deps) {
-	token, err := d.Store.GetSetting("github_token")
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
+	resp := map[string]any{}
+	if err := fillSettings(d, resp); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// fillSettings writes every readable setting into resp.
+func fillSettings(d Deps, resp map[string]any) error {
+	token, err := d.Store.GetSetting("github_token")
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
 	}
 	custom, err := d.Store.OrchestratorBrainstormCustom()
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
+		return err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"github_token":                   maskToken(token),
-		"orchestrator_brainstorm_custom": custom,
-	})
+	resp["github_token"] = maskToken(token)
+	resp["orchestrator_brainstorm_custom"] = custom
+	for _, key := range defaultProfileSettings {
+		v, err := optionalSetting(d.Store, key)
+		if err != nil {
+			return err
+		}
+		resp[key] = v
+	}
+	return nil
 }
 
 // putSettingsRequest is the PUT /v1/settings body. Every field is optional
@@ -70,6 +93,22 @@ func handleGetSettings(w http.ResponseWriter, r *http.Request, d Deps) {
 type putSettingsRequest struct {
 	GithubToken                  *string `json:"github_token"`
 	OrchestratorBrainstormCustom *bool   `json:"orchestrator_brainstorm_custom"`
+	// Default model profiles: a profile name, or "" to unset. Human-only.
+	DefaultOrchestratorProfile *string `json:"default_orchestrator_profile"`
+	DefaultWorkerProfile       *string `json:"default_worker_profile"`
+}
+
+// defaultProfiles returns the present default-profile fields keyed by
+// settings key.
+func (req putSettingsRequest) defaultProfiles() map[string]string {
+	out := map[string]string{}
+	if req.DefaultOrchestratorProfile != nil {
+		out[store.SettingDefaultOrchestratorProfile] = *req.DefaultOrchestratorProfile
+	}
+	if req.DefaultWorkerProfile != nil {
+		out[store.SettingDefaultWorkerProfile] = *req.DefaultWorkerProfile
+	}
+	return out
 }
 
 type githubUserResponse struct {
@@ -134,10 +173,32 @@ func handlePutSettings(w http.ResponseWriter, r *http.Request, d Deps) {
 		writeErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
 		return
 	}
-	if req.GithubToken == nil && req.OrchestratorBrainstormCustom == nil {
+	defaults := req.defaultProfiles()
+	if req.GithubToken == nil && req.OrchestratorBrainstormCustom == nil && len(defaults) == 0 {
 		writeErr(w, http.StatusBadRequest, "bad_request",
-			"nothing to update: send github_token and/or orchestrator_brainstorm_custom")
+			"nothing to update: send github_token, orchestrator_brainstorm_custom, "+
+				"default_orchestrator_profile and/or default_worker_profile")
 		return
+	}
+	// Default profiles are validated before anything is written, so a
+	// rejected one leaves every other setting unchanged too.
+	if len(defaults) > 0 {
+		if requireHuman(w, r, d) {
+			return
+		}
+		for _, name := range defaults {
+			if name == "" {
+				continue
+			}
+			if _, err := d.Store.GetModelProfile(name); err != nil {
+				if errors.Is(err, store.ErrNotFound) {
+					writeErr(w, http.StatusBadRequest, "profile_not_found", "no profile "+name)
+					return
+				}
+				writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+				return
+			}
+		}
 	}
 
 	resp := map[string]any{}
@@ -174,17 +235,22 @@ func handlePutSettings(w http.ResponseWriter, r *http.Request, d Deps) {
 		}
 	}
 
-	token, err := d.Store.GetSetting("github_token")
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
+	for key, name := range defaults {
+		var err error
+		if name == "" {
+			err = d.Store.DeleteSetting(key)
+		} else {
+			err = d.Store.SetSetting(key, name)
+		}
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+	}
+
+	if err := fillSettings(d, resp); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	custom, err := d.Store.OrchestratorBrainstormCustom()
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
-	}
-	resp["github_token"] = maskToken(token)
-	resp["orchestrator_brainstorm_custom"] = custom
 	writeJSON(w, http.StatusOK, resp)
 }
