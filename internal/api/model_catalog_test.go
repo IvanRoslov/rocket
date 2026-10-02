@@ -446,3 +446,51 @@ func TestImportCatalogConcurrent(t *testing.T) {
 		t.Errorf("profiles = %d, want 7 (3 seeded + 4 imported once)", len(ps))
 	}
 }
+
+// An adapter that panics must not wedge the agent's single-flight slot:
+// the caller gets builtin + warning and later Gets fetch again.
+func TestCatalogCacheFetchPanic(t *testing.T) {
+	var calls atomic.Int32
+	c := NewCatalogCache(func(ctx context.Context, name string) (agent.Catalog, error) {
+		if calls.Add(1) == 1 {
+			panic("adapter blew up")
+		}
+		return agent.Catalog{Source: agent.CatalogSourceCLI}, nil
+	})
+	got := c.Get(context.Background(), "codex", false)
+	if got.Source != agent.CatalogSourceBuiltin || !strings.Contains(got.Warning, "adapter blew up") {
+		t.Errorf("after panic: %+v", got)
+	}
+	done := make(chan agent.Catalog)
+	go func() { done <- c.Get(context.Background(), "codex", true) }()
+	select {
+	case got := <-done:
+		if got.Source != agent.CatalogSourceCLI {
+			t.Errorf("refetch after panic: %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Get blocked after a panicking fetch")
+	}
+}
+
+// A waiter on someone else's fetch gives up when its own ctx ends.
+func TestCatalogCacheWaiterHonoursCtx(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	c := NewCatalogCache(func(ctx context.Context, name string) (agent.Catalog, error) {
+		<-release
+		return agent.Catalog{Source: agent.CatalogSourceCLI}, nil
+	})
+	go c.Get(context.Background(), "codex", false)
+	time.Sleep(20 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	got := c.Get(ctx, "codex", false)
+	if time.Since(start) > time.Second {
+		t.Fatal("waiter ignored its own ctx")
+	}
+	if got.Source != agent.CatalogSourceBuiltin || got.Warning == "" {
+		t.Errorf("cancelled waiter got %+v", got)
+	}
+}

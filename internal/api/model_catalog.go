@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -74,27 +76,48 @@ func (c *CatalogCache) Get(ctx context.Context, agentName string, refresh bool) 
 	}
 	if call, ok := c.inflight[agentName]; ok {
 		c.mu.Unlock()
-		<-call.done
-		return call.cat
+		select {
+		case <-call.done:
+			return call.cat
+		case <-ctx.Done():
+			return agent.Catalog{Source: agent.CatalogSourceBuiltin,
+				Warning: "model catalog not ready: " + ctx.Err().Error()}
+		}
 	}
 	call := &catalogCall{done: make(chan struct{})}
 	c.inflight[agentName] = call
 	c.mu.Unlock()
 
-	// Detached from the caller: a client that disconnects mid-fetch must not
-	// leave a fallback catalog cached for the whole TTL. The adapters bound
-	// their own work (codex: catalogTimeout).
+	// The slot is released whatever happens in the adapter, a panic
+	// included, so later Gets never wait on a dead fetch.
+	defer func() {
+		c.mu.Lock()
+		c.entries[agentName] = catalogEntry{cat: call.cat, at: c.now()}
+		delete(c.inflight, agentName)
+		c.mu.Unlock()
+		close(call.done)
+	}()
+	call.cat = c.safeFetch(ctx, agentName)
+	return call.cat
+}
+
+// safeFetch runs the fetcher detached from the caller — a client that
+// disconnects mid-fetch must not leave a fallback catalog cached for the
+// whole TTL; the adapters bound their own work (codex: catalogTimeout) —
+// and turns an error or a panic into an empty builtin catalog with a
+// warning.
+func (c *CatalogCache) safeFetch(ctx context.Context, agentName string) (cat agent.Catalog) {
+	defer func() {
+		if p := recover(); p != nil {
+			slog.Error("model catalog adapter panicked", "agent", agentName, "panic", p)
+			cat = agent.Catalog{Source: agent.CatalogSourceBuiltin,
+				Warning: fmt.Sprintf("model catalog unavailable: adapter panicked: %v", p)}
+		}
+	}()
 	cat, err := c.fetch(context.WithoutCancel(ctx), agentName)
 	if err != nil {
 		cat = agent.Catalog{Source: agent.CatalogSourceBuiltin, Warning: "model catalog unavailable: " + err.Error()}
 	}
-	call.cat = cat
-
-	c.mu.Lock()
-	c.entries[agentName] = catalogEntry{cat: cat, at: c.now()}
-	delete(c.inflight, agentName)
-	c.mu.Unlock()
-	close(call.done)
 	return cat
 }
 
