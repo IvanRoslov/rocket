@@ -17,26 +17,29 @@ import (
 // It carries the question body only — a thread's conversation is read with
 // "rocket task questions" / "rocket agent questions".
 type threadRow struct {
-	LocalRef     string   `json:"local_ref"`
-	Kind         string   `json:"kind"`
-	TaskID       int64    `json:"task_id,omitempty"`
-	RoleID       string   `json:"role_id,omitempty"`
-	Subject      string   `json:"subject"`
-	ID           int64    `json:"id"`
-	Ordinal      int      `json:"ordinal"`
-	AskedBy      string   `json:"asked_by"`
-	Body         string   `json:"body"`
-	Status       string   `json:"status"`
-	Resolution   string   `json:"resolution,omitempty"`
-	Type         string   `json:"type"`
-	Options      []string `json:"options,omitempty"`
-	Participants []string `json:"participants"`
-	Attention    []string `json:"attention"`
-	WaitingOn    []string `json:"waiting_on"`
-	YourTurn     bool     `json:"your_turn"`
-	AskedAt      int64    `json:"asked_at"`
-	UpdatedAt    int64    `json:"updated_at"`
-	ResolvedAt   int64    `json:"resolved_at,omitempty"`
+	LocalRef   string   `json:"local_ref"`
+	Kind       string   `json:"kind"`
+	TaskID     int64    `json:"task_id,omitempty"`
+	RoleID     string   `json:"role_id,omitempty"`
+	Subject    string   `json:"subject"`
+	ID         int64    `json:"id"`
+	Ordinal    int      `json:"ordinal"`
+	AskedBy    string   `json:"asked_by"`
+	Body       string   `json:"body"`
+	Status     string   `json:"status"`
+	Resolution string   `json:"resolution,omitempty"`
+	Type       string   `json:"type"`
+	Options    []string `json:"options,omitempty"`
+	// RecommendedOption is the 1-based option a brainstorm thread recommends;
+	// nil on other threads.
+	RecommendedOption *int     `json:"recommended_option,omitempty"`
+	Participants      []string `json:"participants"`
+	Attention         []string `json:"attention"`
+	WaitingOn         []string `json:"waiting_on"`
+	YourTurn          bool     `json:"your_turn"`
+	AskedAt           int64    `json:"asked_at"`
+	UpdatedAt         int64    `json:"updated_at"`
+	ResolvedAt        int64    `json:"resolved_at,omitempty"`
 }
 
 // threadInboxPath builds the request path. Both filters are applied by the
@@ -70,7 +73,7 @@ func renderThreadInbox(threads []threadRow, now time.Time) string {
 			th.LocalRef, threadStatusLabel(th.Status, th.Type), th.Subject,
 			humanAge(th.UpdatedAt, now))
 		fmt.Fprintf(&sb, "  %s\n", firstLine(th.Body))
-		renderThreadOptions(&sb, th.Options)
+		renderThreadOptions(&sb, th.Options, recommendedOf(th.RecommendedOption))
 		renderParticipantsLine(&sb, th.Participants)
 		if arrow := threadTurnArrow(th.Attention, th.YourTurn); arrow != "" {
 			// threadTurnArrow is written as a header suffix (" → ждут: …"); on

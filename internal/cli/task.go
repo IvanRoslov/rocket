@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/client"
+	"github.com/IvanRoslov/rocket/internal/threadtext"
 	"github.com/spf13/cobra"
 )
 
@@ -1239,16 +1240,21 @@ func threadStatusLabel(status, threadType string) string {
 }
 
 // renderThreadOptions writes the answer choices, numbered exactly as
-// "close --choose <n>" indexes them.
-func renderThreadOptions(sb *strings.Builder, options []string) {
-	if len(options) == 0 {
-		return
+// "close --choose <n>" indexes them, with the recommended one (1-based, 0 =
+// none) marked — the same line an agent participant is delivered.
+func renderThreadOptions(sb *strings.Builder, options []string, recommended int) {
+	if line := threadtext.OptionsLine(options, recommended); line != "" {
+		fmt.Fprintf(sb, "  %s\n", line)
 	}
-	parts := make([]string, len(options))
-	for i, o := range options {
-		parts[i] = fmt.Sprintf("%d) %s", i+1, o)
+}
+
+// recommendedOf reads a thread's recommended option off the wire: absent
+// (an older daemon, or not a brainstorm thread) is 0, none.
+func recommendedOf(p *int) int {
+	if p == nil {
+		return 0
 	}
-	fmt.Fprintf(sb, "  варианты: %s\n", strings.Join(parts, "  "))
+	return *p
 }
 
 // renderParticipantsLine writes the thread's participant line, omitted when
@@ -1293,7 +1299,7 @@ func renderQuestions(taskID int64, qs []questionRow) string {
 		if q.Context != "" {
 			fmt.Fprintf(&sb, "  context: %s\n", q.Context)
 		}
-		renderThreadOptions(&sb, q.Options)
+		renderThreadOptions(&sb, q.Options, recommendedOf(q.RecommendedOption))
 		renderParticipantsLine(&sb, q.Participants)
 		for _, m := range q.Messages {
 			renderThreadMessage(&sb, m)

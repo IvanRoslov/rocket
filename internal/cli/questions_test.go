@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -157,5 +158,21 @@ func TestRootRegistersQuestions(t *testing.T) {
 	}
 	if found == nil {
 		t.Fatal("expected a top-level `rocket questions` command")
+	}
+}
+
+// TestRenderThreadInboxMarksRecommendedOption: the inbox reads
+// recommended_option off the wire and marks that option (task #5027).
+func TestRenderThreadInboxMarksRecommendedOption(t *testing.T) {
+	raw := `[{"local_ref":"799/Q1","kind":"task","task_id":799,"subject":"task #799","body":"Which schema?",
+		"status":"open","type":"brainstorm","options":["A","B"],"recommended_option":1,
+		"participants":["human","orch-1"],"attention":["human"],"waiting_on":["human"]}]`
+	var threads []threadRow
+	if err := json.Unmarshal([]byte(raw), &threads); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	out := renderThreadInbox(threads, inboxNow())
+	if !strings.Contains(out, "  варианты: 1) A ★ рекомендовано  2) B\n") {
+		t.Errorf("expected the recommended option marked, got:\n%s", out)
 	}
 }
