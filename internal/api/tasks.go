@@ -56,7 +56,7 @@ type taskResponse struct {
 	Milestone    bool   `json:"milestone,omitempty"`
 	AssignedRole string `json:"assigned_role,omitempty"`
 	// BrainstormSkill is the brainstorm skill the orchestrator was started
-	// with (orchestrator-brainstorming | superpowers:brainstorming); "" for
+	// with (orchestrator-brainstorming@<version> | superpowers:brainstorming); "" for
 	// tasks never started or started before it was recorded.
 	BrainstormSkill string `json:"brainstorm_skill"`
 	// AllowedProfiles is the feature task's worker profile allowlist (task
