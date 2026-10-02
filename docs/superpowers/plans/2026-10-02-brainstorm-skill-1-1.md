@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship `orchestrator-brainstorming` 1.1 (fact tree before questions, scenarios before spec) and record the skill version per task so `rocket stats brainstorm` separates 1.1 from the 1.0 baseline.
+**Goal:** Ship `orchestrator-brainstorming` 1.1 (fact tree before questions, scenarios before spec) and record the skill version per task so `rocket stats brainstorm` separates 1.1 from the 1.0 baseline; make the recommended option of a storm question visible to agent participants and in the CLI.
 
-**Architecture:** Two independent PRs in `IvanRoslov/rocket`. Task A edits only the embedded skill text and its README. Task B versions the stored value: tasks store `orchestrator-brainstorming@1.1`, a migration relabels old rows `@1.0`, every consumer that needs the skill *name* strips `@version`; metric grouping is unchanged (it groups by the full string), the web chart gets stable colors for versions.
+**Architecture:** Three independent PRs in `IvanRoslov/rocket`. Task A edits only the embedded skill text and its README. Task B versions the stored value: tasks store `orchestrator-brainstorming@1.1`, a migration relabels old rows `@1.0`, every consumer that needs the skill *name* strips `@version`; metric grouping is unchanged (it groups by the full string), the web chart gets stable colors for versions.
 
 **Tech Stack:** Go (daemon, store with embedded SQL migrations, `prompts` embed FS), React/TS (web, vitest).
 
@@ -286,6 +286,76 @@ Check `--viz-series-4` exists in the web theme CSS (`grep -rn "viz-series-4" web
 
 ---
 
+### Task C: Recommended option visible to agents and in CLI (worker `recommend-mark`)
+
+**Files:**
+- Create: `internal/threadtext/options.go` + `options_test.go` (tiny shared formatter; if an existing shared package fits better — e.g. one already imported by both `internal/api` and `internal/cli` — put it there instead and say so in the PR)
+- Modify: `internal/api/questions.go` (~line 465, ask fan-out), `internal/cli/task.go` (`renderThreadOptions` ~1224, `renderQuestions` ~1277), `internal/cli/questions.go` (`threadRow`, `renderThreadInbox` ~73), `internal/cli/agent_questions.go:308` (call site only — pass 0)
+- Tests: `internal/api/questions_test.go`, `internal/cli/task_test.go`, `internal/cli/questions_test.go`
+- Docs: `docs/06-messaging.md` and/or `docs/12-tasks.md` — where the delivered question frame is described (grep `question from`), `docs/04-cli.md` for the ★ in output.
+
+**Interfaces:**
+- Produces: `func OptionsLine(options []string, recommended int) string` — `""` when no options; else `"варианты: 1) A ★ рекомендовано  2) B"` (two spaces between options, recommended is 1-based, 0 = none, out of range = none).
+
+- [ ] **Step 1: formatter test (fail first):**
+
+```go
+func TestOptionsLine(t *testing.T) {
+	cases := []struct {
+		opts []string
+		rec  int
+		want string
+	}{
+		{nil, 0, ""},
+		{[]string{"A", "B"}, 0, "варианты: 1) A  2) B"},
+		{[]string{"A", "B"}, 2, "варианты: 1) A  2) B ★ рекомендовано"},
+		{[]string{"A", "B"}, 5, "варианты: 1) A  2) B"},
+	}
+	for _, c := range cases {
+		if got := OptionsLine(c.opts, c.rec); got != c.want {
+			t.Errorf("OptionsLine(%v,%d) = %q, want %q", c.opts, c.rec, got, c.want)
+		}
+	}
+}
+```
+
+Implement:
+
+```go
+// Package threadtext renders thread parts that must read the same in the
+// CLI and in text delivered to agents.
+package threadtext
+
+// OptionsLine renders a thread's answer choices numbered as "--choose <n>"
+// indexes them; the recommended one (1-based, 0 = none) is marked.
+func OptionsLine(options []string, recommended int) string {
+	if len(options) == 0 {
+		return ""
+	}
+	parts := make([]string, len(options))
+	for i, o := range options {
+		parts[i] = fmt.Sprintf("%d) %s", i+1, o)
+		if i+1 == recommended {
+			parts[i] += " ★ рекомендовано"
+		}
+	}
+	return "варианты: " + strings.Join(parts, "  ")
+}
+```
+
+- [ ] **Step 2: delivery test (fail first)** in `internal/api/questions_test.go`, following the existing fan-out tests (~lines 231/255): a storm ask with options `A`,`B`, `recommend: 2`, `to: [<agent>]` → the agent's delivered text equals `"[#<task>/Q1 question from <author>] " + body + "
+
+варианты: 1) A  2) B ★ рекомендовано"`. A plain decision ask with options and no recommend → `"…body
+
+варианты: 1) A  2) B"`. An ask with no options → delivered text byte-identical to today (keep the existing assertions green). Implement at the ask call site (`questions.go:465`): `body := q.Body; if line := threadtext.OptionsLine(q.Options, q.RecommendedOption); line != "" { body += "
+
+" + line }` and pass `body` to the fan-out. Do not change reply/answer paths.
+
+- [ ] **Step 3: CLI (fail first)** — `task_test.go`: rendering a question with `recommended_option: 1` prints `  варианты: 1) A ★ рекомендовано  2) B`; `questions_test.go`: the inbox JSON with `recommended_option` renders the same. Implement: `renderThreadOptions(sb, options, recommended int)` → `fmt.Fprintf(sb, "  %s
+", threadtext.OptionsLine(options, recommended))` when non-empty; `renderQuestions` passes `deref(q.RecommendedOption)`; add `RecommendedOption *int `json:"recommended_option,omitempty"`` to `threadRow`, pass it in `renderThreadInbox`; `agent_questions.go` passes 0.
+
+- [ ] **Step 4: docs**, `make test` green, commit `fix: show the recommended option to agent participants and in CLI (task-5027)`, PR to `main`.
+
 ## Order and merge
 
-A and B are independent and run in parallel. Merge order does not matter: B's test does not read the skill text, A's test does not read the version. After both merge — `rocket verify-merge` for each subtask; spot-check: start a throwaway task in a dev daemon is NOT required; the tests cover it.
+A, B and C are independent and run in parallel (C touches only threads/CLI files; B touches prompts/session/api tasks/store/web). Merge order does not matter: B's test does not read the skill text, A's test does not read the version. After both merge — `rocket verify-merge` for each subtask; spot-check: start a throwaway task in a dev daemon is NOT required; the tests cover it.
