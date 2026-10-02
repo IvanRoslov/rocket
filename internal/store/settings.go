@@ -8,15 +8,7 @@ import (
 
 // SetSetting upserts key's value in the settings table.
 func (s *Store) SetSetting(key, value string) error {
-	_, err := s.db.Exec(
-		`INSERT INTO settings (key, value) VALUES (?, ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-		key, value,
-	)
-	if err != nil {
-		return fmt.Errorf("set setting %s: %w", key, err)
-	}
-	return nil
+	return setSettingOn(s.db, key, value)
 }
 
 // GetSetting returns the value stored under key, or ErrNotFound if unset.
