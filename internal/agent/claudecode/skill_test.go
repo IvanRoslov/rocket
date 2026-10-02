@@ -37,6 +37,19 @@ func TestSetupWorkspaceLaysCustomSkillForOrchestrator(t *testing.T) {
 	}
 }
 
+// A versioned record (as a task stores it) still lays the skill: the
+// session manager strips "@version", this guards the agent all the same.
+func TestSetupWorkspaceLaysCustomSkillForVersionedRecord(t *testing.T) {
+	wt := t.TempDir()
+	spec := agent.LaunchSpec{WorktreePath: wt, Kind: "orchestrator", BrainstormSkill: "orchestrator-brainstorming@1.1"}
+	if err := New().SetupWorkspace(spec); err != nil {
+		t.Fatalf("SetupWorkspace: %v", err)
+	}
+	if _, err := os.Stat(skillFile(wt)); err != nil {
+		t.Fatalf("skill not laid into worktree: %v", err)
+	}
+}
+
 // With the stock skill the custom copy must not be visible: both carry the
 // same description, and a stray copy would let Claude pick it and blur the
 // metric's per-skill series.

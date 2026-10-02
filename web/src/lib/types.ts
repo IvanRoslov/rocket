@@ -352,7 +352,8 @@ export interface Task {
   quiet?: boolean
   /**
    * The storm skill remembered when the task was started (task #4901):
-   * `orchestrator-brainstorming` or `superpowers:brainstorming`; `""` on
+   * `orchestrator-brainstorming@<version>` (task #5027) or
+   * `superpowers:brainstorming`; `""` on
    * tasks started before the field existed, absent on an older daemon.
    */
   brainstorm_skill?: string

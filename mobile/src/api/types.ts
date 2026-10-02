@@ -140,7 +140,8 @@ export interface Task {
   questions_awaiting_user?: number
   /**
    * Brainstorm skill picked when the task started (task #4901):
-   * `orchestrator-brainstorming` or `superpowers:brainstorming`; `""` on
+   * `orchestrator-brainstorming@<version>` (task #5027) or
+   * `superpowers:brainstorming`; `""` on
    * tasks started before it, absent on an older daemon.
    */
   brainstorm_skill?: string

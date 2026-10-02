@@ -180,7 +180,9 @@ CREATE TABLE tasks (
   milestone    INTEGER NOT NULL DEFAULT 0,     -- 1 = майлстон: корневая задача вне проектов (project_id = '')
   assigned_role TEXT,                          -- id постоянного агента, взявшего майлстон; NULL/'' — не взят
   brainstorm_skill TEXT NOT NULL DEFAULT '',   -- скилл шторма оркестратора, фиксируется при start (миграция 0020):
-                                               -- orchestrator-brainstorming | superpowers:brainstorming; '' — стартовала раньше
+                                               -- orchestrator-brainstorming@<версия> (сейчас @1.1; стартовавшие до #5027 —
+                                               -- @1.0, миграция 0022) | superpowers:brainstorming; '' — стартовала раньше.
+                                               -- Промпт и worktree получают имя без @версии
   allowed_profiles TEXT NOT NULL DEFAULT '',   -- JSON-массив имён профилей, разрешённых воркерам фичи (миграция 0021);
                                                -- ''/[] — все включённые. Меняет только человек
   orchestrator_profile TEXT NOT NULL DEFAULT '', -- профиль, с которым стартовал оркестратор; '' — без профиля

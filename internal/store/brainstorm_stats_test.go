@@ -426,6 +426,30 @@ func TestStormWeeksOrderHumanFirst(t *testing.T) {
 	}
 }
 
+// TestStormWeeksSplitBySkillVersion pins that versions of the custom skill
+// are separate rows of the metric (task #5027): grouping is by the stored
+// value, version included.
+func TestStormWeeksSplitBySkillVersion(t *testing.T) {
+	f := newStatsFixture(t)
+	w40 := at(2026, 9, 29, 10, 0)
+	old := f.task("Old", "orchestrator-brainstorming@1.0")
+	cur := f.task("New", "orchestrator-brainstorming@1.1")
+	f.answer(f.ask(old, w40), 2, "", "human", w40)
+	f.answer(f.ask(cur, w40), 2, "", "human", w40)
+
+	got, err := f.s.BrainstormStats(at(2026, 10, 1, 12, 0), 1)
+	if err != nil {
+		t.Fatalf("BrainstormStats: %v", err)
+	}
+	var skills []string
+	for _, w := range got.Weeks {
+		skills = append(skills, w.Skill)
+	}
+	if want := []string{"orchestrator-brainstorming@1.0", "orchestrator-brainstorming@1.1"}; !reflect.DeepEqual(skills, want) {
+		t.Errorf("weekly skills = %v, want %v", skills, want)
+	}
+}
+
 func TestStormSpecChangesBeforeGo(t *testing.T) {
 	base := at(2026, 9, 29, 10, 0)
 	tm := func(min int) time.Time { return base.Add(time.Duration(min) * time.Minute) }

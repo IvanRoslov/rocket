@@ -59,8 +59,10 @@ type Task struct {
 	// AssignedRole is the id of the persistent agent holding the milestone,
 	// empty when nobody has taken it. Only milestones ever carry it.
 	AssignedRole string
-	// BrainstormSkill is the brainstorm skill the task's orchestrator prompt
-	// names, fixed when the task is started (task #4901); empty for tasks
+	// BrainstormSkill is the brainstorm skill the task's orchestrator started
+	// with, fixed when the task is started (task #4901): the custom skill
+	// with its version ("orchestrator-brainstorming@1.1", task #5027) or the
+	// stock one; the prompt names prompts.SkillName of it. Empty for tasks
 	// started before it was recorded.
 	BrainstormSkill string
 	// AllowedProfiles narrows the model profiles this feature task's workers

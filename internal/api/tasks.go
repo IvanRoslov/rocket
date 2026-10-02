@@ -56,7 +56,7 @@ type taskResponse struct {
 	Milestone    bool   `json:"milestone,omitempty"`
 	AssignedRole string `json:"assigned_role,omitempty"`
 	// BrainstormSkill is the brainstorm skill the orchestrator was started
-	// with (orchestrator-brainstorming | superpowers:brainstorming); "" for
+	// with (orchestrator-brainstorming@<version> | superpowers:brainstorming); "" for
 	// tasks never started or started before it was recorded.
 	BrainstormSkill string `json:"brainstorm_skill"`
 	// AllowedProfiles is the feature task's worker profile allowlist (task
@@ -1087,6 +1087,8 @@ func handlePostTaskStart(w http.ResponseWriter, r *http.Request, d Deps) {
 	// The brainstorm skill is fixed at start from the setting as it is now;
 	// flipping the setting later never changes a started task (restore and
 	// the brainstorm metric read it back from the task). The custom skill is
+	// stored with its version ("orchestrator-brainstorming@1.1") so the
+	// metric tells versions apart; prompts and agents get the bare name. It is
 	// only named for an agent that lays it out (claude-code) — a codex
 	// orchestrator would be pointed at a skill that is not there. It is
 	// stored before spawning, so no running orchestrator ever has an empty
@@ -1101,7 +1103,7 @@ func handlePostTaskStart(w http.ResponseWriter, r *http.Request, d Deps) {
 	if ag, err := agent.Get(agentName); err == nil {
 		ships = agent.ShipsBrainstormSkill(ag)
 	}
-	task.BrainstormSkill = prompts.BrainstormSkill(custom && ships)
+	task.BrainstormSkill = prompts.BrainstormSkillRecord(custom && ships)
 	if err := d.Store.SetTaskBrainstormSkill(task.ID, task.BrainstormSkill); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
