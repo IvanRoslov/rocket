@@ -22,6 +22,7 @@
 - A task session without `session_stats` has status `running` or `pending` from its state, `final:false`, `ended_at:null`, `duration_s:null`, `models:[]`, zero tokens, `cost_usd:null`, and `error:""`.
 - Missing/error stats with no model rows have zero cost; task totals count collected sessions, while `sessions[]` also lists uncollected live and pending sessions.
 - Session `pr_number` is null when absent and `pr_url` is an empty string when unresolved.
+- CLI `prices set` merges omitted rate flags with the current stored price and sends a full PUT body; literal `null` clears a rate. For a never-priced model, omitted rates remain null.
 - The unlinked task bucket has null `task_id` and empty `title`, `status`, and `project_id`.
 
 ## Review Focus
@@ -76,7 +77,7 @@
 
 **Interfaces:** Add `rocket stats usage [--from D] [--to D] [--project P]`, `rocket stats task <id>`, `rocket stats prices [set <model> --input X --cache-write X --cache-read X --output X | rm <model>]`; support inherited `--json` and use `apiPath` for model IDs.
 
-- [ ] **Step 1: Write failing CLI tests** for command tree, argument/flag errors, safe model path escaping, and table renderers for full and partial cost, empty results, task sessions, and prices.
+- [ ] **Step 1: Write failing CLI tests** for command tree, argument/flag errors, safe model path escaping, omitted-rate merge and literal-null clear, and table renderers for full and partial cost, empty results, task sessions, and prices.
 - [ ] **Step 2: Run** `go test ./internal/cli -run 'TestStatsUsage|TestStatsTask|TestStatsPrices'` and confirm expected failures.
 - [ ] **Step 3: Implement** commands and renderers using the existing client and Cobra patterns; document API fields/errors and CLI forms.
 - [ ] **Step 4: Run** focused CLI tests and confirm green.
