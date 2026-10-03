@@ -1465,7 +1465,7 @@ export const taskUsage: TaskUsage = {
     {
       session_id: 's-billing-v2-orch', role: 'orchestrator', subtask_id: null, subtask_title: '',
       agent: 'claude', profile: 'claude-opus', effort: 'high', repo_id: 'api',
-      pr_number: null, pr_url: '', pr_state: '', state: 'running', status: 'ok', final: false,
+      pr_number: null, pr_url: '', pr_state: '', state: 'running', status: 'ok', final: false, error: '',
       started_at: NOW - 3 * DAY, ended_at: null, duration_s: null,
       models: [
         { model: 'claude-opus-5-5', tokens: OPUS_ORCH, cost_usd: 31.85 },
@@ -1477,7 +1477,7 @@ export const taskUsage: TaskUsage = {
       session_id: 's-billing-v2-w4', role: 'worker', subtask_id: 16, subtask_title: 'Retire legacy billing cron',
       agent: 'codex', profile: 'codex', effort: 'medium', repo_id: 'infra',
       pr_number: 400, pr_url: 'https://github.com/acme/infra/pull/400', pr_state: 'merged',
-      state: 'done', status: 'ok', final: true,
+      state: 'done', status: 'ok', final: true, error: '',
       started_at: NOW - 2 * DAY, ended_at: NOW - 2 * DAY + 42 * MIN, duration_s: 42 * MIN,
       models: [{ model: 'gpt-6-sol', tokens: SOL_W4, cost_usd: null }],
       tokens: SOL_W4, cost_usd: null,
@@ -1486,7 +1486,7 @@ export const taskUsage: TaskUsage = {
       session_id: 's-billing-v2-w5', role: 'worker', subtask_id: 13, subtask_title: 'Migrate billing schema',
       agent: 'claude', profile: 'claude-opus', effort: 'high', repo_id: 'api',
       pr_number: 398, pr_url: 'https://github.com/acme/api/pull/398', pr_state: 'closed',
-      state: 'killed', status: 'ok', final: true,
+      state: 'killed', status: 'ok', final: true, error: '',
       started_at: NOW - 3 * DAY, ended_at: NOW - 3 * DAY + 2 * HOUR + 5 * MIN, duration_s: 2 * HOUR + 5 * MIN,
       models: [{ model: 'claude-opus-5-5', tokens: OPUS_W5, cost_usd: 2.75 }],
       tokens: OPUS_W5, cost_usd: 2.75,
@@ -1494,7 +1494,7 @@ export const taskUsage: TaskUsage = {
     {
       session_id: 's-billing-v2-w3', role: 'worker', subtask_id: 15, subtask_title: 'Data migration + backfill',
       agent: 'claude', profile: '', effort: '', repo_id: 'infra',
-      pr_number: null, pr_url: '', pr_state: '', state: 'errored', status: 'missing', final: true,
+      pr_number: null, pr_url: '', pr_state: '', state: 'errored', status: 'missing', final: true, error: '',
       started_at: NOW - 2 * DAY, ended_at: NOW - 90 * MIN, duration_s: 2 * DAY - 90 * MIN,
       models: [], tokens: usageTokens(0, 0, 0, 0), cost_usd: 0,
     },
@@ -1510,8 +1510,15 @@ export const taskUsage: TaskUsage = {
       session_id: 's-billing-v2-w2', role: 'worker', subtask_id: 14, subtask_title: 'New billing UI',
       agent: 'claude', profile: '', effort: '', repo_id: 'web',
       pr_number: 14, pr_url: 'https://github.com/acme/web/pull/14', pr_state: 'open',
-      state: 'running', status: '', final: false,
+      state: 'running', status: 'running', final: false, error: '',
       started_at: NOW - 2 * DAY, ended_at: null, duration_s: null,
+      models: [], tokens: usageTokens(0, 0, 0, 0), cost_usd: null,
+    },
+    {
+      session_id: 's-billing-v2-w7', role: 'worker', subtask_id: 14, subtask_title: 'New billing UI',
+      agent: 'claude', profile: '', effort: '', repo_id: 'web',
+      pr_number: null, pr_url: '', pr_state: '', state: 'killed', status: 'pending', final: false, error: '',
+      started_at: NOW - 3 * DAY, ended_at: null, duration_s: null,
       models: [], tokens: usageTokens(0, 0, 0, 0), cost_usd: null,
     },
   ],
@@ -1520,5 +1527,5 @@ export const taskUsage: TaskUsage = {
 export const modelPrices: ModelPrice[] = [
   { model: 'claude-haiku-4-5', input: 1, cache_write: 1.25, cache_read: 0.1, output: 5, updated_at: NOW - 5 * DAY },
   { model: 'claude-opus-5-5', input: 5, cache_write: 6.25, cache_read: 0.5, output: 25, updated_at: NOW - 5 * DAY },
-  { model: 'gpt-6-sol', input: null, cache_write: null, cache_read: null, output: null },
+  { model: 'gpt-6-sol', input: null, cache_write: null, cache_read: null, output: null, updated_at: null },
 ]

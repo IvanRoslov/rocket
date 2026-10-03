@@ -87,6 +87,9 @@ describe('UsageTab', () => {
     const running = cells(rowOf('s-billing-v2-w2'))
     expect(status('s-billing-v2-w2')).toBe('running — counted when finished')
     expect(running.slice(5, 8)).toEqual(['—', '—', '—'])
+    const pending = cells(rowOf('s-billing-v2-w7'))
+    expect(status('s-billing-v2-w7')).toBe('pending count')
+    expect(pending.slice(5, 8)).toEqual(['—', '—', '—'])
   })
 
   it('shows an empty state for a feature with no sessions', async () => {

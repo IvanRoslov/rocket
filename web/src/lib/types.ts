@@ -957,7 +957,11 @@ export interface UsageStats {
   pending: number
 }
 
-export type UsageStatus = 'ok' | 'missing' | 'error'
+/**
+ * ok/missing/error — collected; running — live, nothing collected yet;
+ * pending — ended, not collected yet (contract addendum).
+ */
+export type UsageStatus = 'ok' | 'missing' | 'error' | 'running' | 'pending'
 
 export interface UsageSessionModel {
   model: string
@@ -979,8 +983,7 @@ export interface UsageSession {
   pr_state: string
   /** Session state (running, done, killed…). */
   state: string
-  /** Collection status; '' while a live session has nothing collected yet. */
-  status: UsageStatus | ''
+  status: UsageStatus
   /** false — a live snapshot (orchestrator at review). */
   final: boolean
   started_at: number
@@ -989,8 +992,8 @@ export interface UsageSession {
   models: UsageSessionModel[]
   tokens: UsageTokens
   cost_usd: number | null
-  /** Error text when status is `error`. */
-  error?: string
+  /** Why collection failed (status `error`); `""` when none. */
+  error: string
 }
 
 /** `GET /v1/tasks/{id}/usage` — root tasks only. */
@@ -1007,7 +1010,8 @@ export interface ModelPrice {
   cache_write: number | null
   cache_read: number | null
   output: number | null
-  updated_at?: number
+  /** null for a model never priced. */
+  updated_at: number | null
 }
 
 export type ModelPriceInput = Omit<ModelPrice, 'model' | 'updated_at'>

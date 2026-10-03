@@ -17,11 +17,6 @@ interface UsageTabProps {
   taskPath: (id: number) => string
 }
 
-/** Nothing collected yet: a live session is counted when it ends. */
-function isRunning(s: UsageSession): boolean {
-  return s.status === ''
-}
-
 function StatusLabel({ session: s }: { session: UsageSession }) {
   const label = (className: string, text: string, title?: string) => (
     <div className="usage-line2">
@@ -30,7 +25,8 @@ function StatusLabel({ session: s }: { session: UsageSession }) {
       </span>
     </div>
   )
-  if (isRunning(s)) return label('usage-muted', 'running — counted when finished')
+  if (s.status === 'running') return label('usage-muted', 'running — counted when finished')
+  if (s.status === 'pending') return label('usage-muted', 'pending count')
   if (s.status === 'missing') return label('usage-muted', 'no transcript')
   if (s.status === 'error') return label('usage-status--error', 'error', s.error || 'collection failed')
   if (!s.final) return label('usage-status--snapshot', 'live snapshot')
@@ -38,8 +34,8 @@ function StatusLabel({ session: s }: { session: UsageSession }) {
 }
 
 function SessionRows({ session: s, taskPath }: { session: UsageSession; taskPath: (id: number) => string }) {
-  // No numbers to show: still running, or the transcript gave nothing.
-  const blank = isRunning(s) || s.status === 'missing' || s.status === 'error'
+  // No numbers to show: not collected yet, or the transcript gave nothing.
+  const blank = s.status !== 'ok'
   const single = s.models.length === 1 ? s.models[0] : undefined
   const dash = (text: string) => (blank ? '—' : text)
   return (

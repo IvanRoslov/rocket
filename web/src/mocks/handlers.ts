@@ -1172,7 +1172,7 @@ export const handlers = [
   http.delete('/v1/stats/prices/:model', ({ params }) => {
     const model = String(params.model)
     pricesState = pricesState.map((p) =>
-      p.model === model ? { model, input: null, cache_write: null, cache_read: null, output: null } : p,
+      p.model === model ? { model, input: null, cache_write: null, cache_read: null, output: null, updated_at: null } : p,
     )
     return new HttpResponse(null, { status: 204 })
   }),
