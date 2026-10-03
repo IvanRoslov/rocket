@@ -1306,12 +1306,13 @@ export interface UsageFilter {
 }
 
 /** `GET /v1/stats/usage` — tokens and ≈ $ by model and by task for a period. */
-export function useUsageStats(filter: UsageFilter): UseQueryResult<UsageStats> {
+export function useUsageStats(filter: UsageFilter, enabled = true): UseQueryResult<UsageStats> {
   const params = new URLSearchParams({ from: filter.from, to: filter.to })
   if (filter.project) params.set('project', filter.project)
   return useQuery({
     queryKey: ['usage', 'stats', filter.from, filter.to, filter.project ?? ''],
     queryFn: () => api.get<UsageStats>(`/v1/stats/usage?${params}`),
+    enabled,
   })
 }
 

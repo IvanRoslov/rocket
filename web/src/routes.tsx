@@ -14,6 +14,7 @@ import { SettingsScreen } from './screens/settings/SettingsScreen'
 import { SystemScreen } from './screens/system/SystemScreen'
 import { TaskScreen } from './screens/task/TaskScreen'
 import { TermScreen } from './screens/term/TermScreen'
+import { UsageScreen } from './screens/usage/UsageScreen'
 import { WizardScreen } from './screens/newproject/WizardScreen'
 
 export const router = createBrowserRouter([
@@ -46,6 +47,8 @@ export const router = createBrowserRouter([
       { path: '/questions', element: <QuestionsScreen /> },
       // Storm metric (task #4901): global, across projects.
       { path: '/brainstorm', element: <BrainstormMetricsScreen /> },
+      // Agent token usage (task #5138): global, across projects.
+      { path: '/usage', element: <UsageScreen /> },
       { path: '/system', element: <SystemScreen /> },
       { path: '/settings', element: <SettingsScreen /> },
     ],
