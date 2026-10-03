@@ -273,7 +273,7 @@ func TestBackfillEndedAtFallsBackToLastAtThenUpdatedAt(t *testing.T) {
 	f := newFixture(t)
 	f.addSession(t, "a", "done")
 	f.addSession(t, "b", "done")
-	f.reader.set("/wt/a", twoModels())                                                                    // LastAt 1900
+	f.reader.set("/wt/a", twoModels())                                                                // LastAt 1900
 	f.reader.set("/wt/b", agent.Usage{Found: true, Models: map[string]agent.Tokens{"m": {Input: 1}}}) // no LastAt
 	for _, id := range []string{"a", "b"} {
 		if err := f.c.CollectNow(context.Background(), id, 0); err != nil {

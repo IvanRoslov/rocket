@@ -30,6 +30,7 @@ import (
 	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/socketmsg"
 	"github.com/IvanRoslov/rocket/internal/store"
+	"github.com/IvanRoslov/rocket/internal/usage"
 	"github.com/IvanRoslov/rocket/internal/workspace"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -142,6 +143,11 @@ func Run(cfg *config.Config) error {
 	// whatever commit the mirror was cloned at. The sweep never clobbers —
 	// see internal/mirror.
 	go ms.Run(ctx)
+	// Token usage from agent transcripts: collected when a session ends,
+	// snapshotted when a feature goes to review, and backfilled by a sweeper
+	// in the background (one worker; never blocks kill or the API).
+	uc := usage.New(st, b, usage.Options{})
+	go uc.Run(ctx)
 
 	shutdownCalled := make(chan struct{})
 	var shutdownOnce func()
@@ -165,6 +171,7 @@ func Run(cfg *config.Config) error {
 		Shutdown:  shutdownOnce,
 		StartedAt: time.Now(),
 		GH:        githubClientFactory(st, cfg),
+		Usage:     uc,
 	}
 
 	slog.Info("rocketd starting", "pid", os.Getpid(), "socket", cfg.SocketPath())

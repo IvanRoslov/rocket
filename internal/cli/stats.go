@@ -2,12 +2,14 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"math"
 	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/IvanRoslov/rocket/internal/client"
 	"github.com/spf13/cobra"
 )
 
@@ -69,6 +71,7 @@ func newStatsCmd() *cobra.Command {
 		Short: "Метрики",
 	}
 	cmd.AddCommand(newStatsBrainstormCmd())
+	cmd.AddCommand(newStatsCollectCmd())
 	return cmd
 }
 
@@ -184,4 +187,57 @@ func renderBrainstormStats(s brainstormStats, weeks int) string {
 	}
 	_ = tw.Flush()
 	return b.String()
+}
+
+const statsCollectUsage = "usage: rocket stats collect [--session S | --all] [--retry-missing]"
+
+// newStatsCollectCmd builds "rocket stats collect": queue a re-collection of
+// token usage from agent transcripts (human-only on the daemon side).
+func newStatsCollectCmd() *cobra.Command {
+	var session string
+	var all, retryMissing bool
+	cmd := &cobra.Command{
+		Use:   "collect",
+		Short: "Пересчитать расход токенов сессий из транскриптов",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			bulk := all || retryMissing
+			if len(args) != 0 || (session == "") == !bulk {
+				return &usageError{message: statsCollectUsage}
+			}
+			c, _, err := connect(true)
+			if err != nil {
+				return err
+			}
+			return runStatsCollect(c, cmd.OutOrStdout(), session, all, retryMissing)
+		},
+	}
+	cmd.Flags().StringVar(&session, "session", "", "пересчитать одну сессию (живую — снимком)")
+	cmd.Flags().BoolVar(&all, "all", false, "пересчитать все завершённые сессии, кроме missing")
+	cmd.Flags().BoolVar(&retryMissing, "retry-missing", false, "заново искать транскрипты у сессий со статусом missing")
+	return cmd
+}
+
+func runStatsCollect(c *client.Client, out io.Writer, session string, all, retryMissing bool) error {
+	body := map[string]any{}
+	if session != "" {
+		body["session_id"] = session
+	}
+	if all {
+		body["all"] = true
+	}
+	if retryMissing {
+		body["retry_missing"] = true
+	}
+	var resp struct {
+		Queued int `json:"queued"`
+	}
+	if err := c.Post(apiPath("v1", "stats", "usage", "collect"), body, &resp); err != nil {
+		return err
+	}
+	if session != "" {
+		fmt.Fprintf(out, "сессия %s поставлена в очередь сбора\n", session)
+		return nil
+	}
+	fmt.Fprintf(out, "в очереди сбора: %d сессий\n", resp.Queued)
+	return nil
 }
