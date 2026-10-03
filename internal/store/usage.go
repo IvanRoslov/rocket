@@ -224,6 +224,7 @@ type UsageRow struct {
 	TaskStatus   string
 	SubtaskTitle string
 	Status       string
+	Error        string
 	Final        bool
 	StartedAt    int64
 	EndedAt      *int64
@@ -237,7 +238,7 @@ const usageRowColumns = `SELECT s.id, s.kind, s.agent, s.profile, s.effort,
 	COALESCE(st.task_id, s.task_id, CASE WHEN linked.parent_id IS NULL THEN linked.id ELSE linked.parent_id END, 0),
 	COALESCE(st.subtask_id, s.subtask_id, CASE WHEN linked.parent_id IS NOT NULL THEN linked.id END, 0),
 	COALESCE(root.title,''), COALESCE(root.status,''), COALESCE(sub.title,''),
-	COALESCE(st.status,''), COALESCE(st.final,0), COALESCE(st.started_at,s.created_at),
+	COALESCE(st.status,''), COALESCE(st.error,''), COALESCE(st.final,0), COALESCE(st.started_at,s.created_at),
 	st.ended_at, COALESCE(st.collected_at,0), COALESCE(u.model,''),
 	COALESCE(u.input,0), COALESCE(u.cache_write,0), COALESCE(u.cache_read,0),
 	COALESCE(u.output,0), COALESCE(u.reasoning,0), COALESCE(u.messages,0)`
@@ -308,7 +309,7 @@ func scanUsageRows(rows *sql.Rows) ([]UsageRow, error) {
 		if err := rows.Scan(&row.SessionID, &row.Kind, &row.Agent, &row.Profile, &row.Effort,
 			&row.RepoID, &row.ProjectID, &row.PRNumber, &row.PRState, &row.State,
 			&row.TaskID, &row.SubtaskID, &row.TaskTitle, &row.TaskStatus, &row.SubtaskTitle,
-			&row.Status, &row.Final, &row.StartedAt, &endedAt, &row.CollectedAt, &row.Model,
+			&row.Status, &row.Error, &row.Final, &row.StartedAt, &endedAt, &row.CollectedAt, &row.Model,
 			&v.Input, &v.CacheWrite, &v.CacheRead, &v.Output, &v.Reasoning, &v.Messages); err != nil {
 			return nil, fmt.Errorf("scan usage row: %w", err)
 		}
