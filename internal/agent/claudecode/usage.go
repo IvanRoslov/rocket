@@ -114,6 +114,7 @@ func scanClaudeUsageFile(ctx context.Context, path, worktree string, since time.
 	matched := false
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 64*1024), usageLineLimit)
+	resolvedCWDs := make(map[string]string)
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
 			return false, err
@@ -123,11 +124,16 @@ func scanClaudeUsageFile(ctx context.Context, path, worktree string, since time.
 			continue
 		}
 		if !subagent {
-			cwd := row.Cwd
-			if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
-				cwd = resolved
+			cwd, known := resolvedCWDs[row.Cwd]
+			if !known {
+				cwd = row.Cwd
+				if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+					cwd = resolved
+				}
+				cwd = filepath.Clean(cwd)
+				resolvedCWDs[row.Cwd] = cwd
 			}
-			if filepath.Clean(cwd) != worktree {
+			if cwd != worktree {
 				continue
 			}
 		}

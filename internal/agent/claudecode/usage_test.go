@@ -62,6 +62,34 @@ func TestUsageAllMatchingClaudeTranscripts(t *testing.T) {
 	}
 }
 
+func TestUsageClaudeLastLineWinsForGrowingMessage(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	worktree := t.TempDir()
+	installUsageFixture(t, transcriptDir(worktree), "growing.jsonl", "growing.jsonl", worktree)
+	got, err := (&ClaudeCode{}).Usage(context.Background(), worktree, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := agent.Tokens{Input: 2, CacheWrite: 3, CacheRead: 4, Output: 90, Messages: 1}
+	if !got.Found || got.Models["claude-sonnet-5-5"] != want {
+		t.Fatalf("Usage = %#v, want one message with %#v", got, want)
+	}
+}
+
+func TestUsageClaudeEqualTimestampUsesLaterLine(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	worktree := t.TempDir()
+	installUsageFixture(t, transcriptDir(worktree), "equal.jsonl", "equal-timestamp.jsonl", worktree)
+	got, err := (&ClaudeCode{}).Usage(context.Background(), worktree, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := agent.Tokens{Input: 2, Output: 12, Messages: 1}
+	if !got.Found || got.Models["claude-sonnet-5-5"] != want {
+		t.Fatalf("Usage = %#v, want later line %#v", got, want)
+	}
+}
+
 func TestUsageMissingClaudeDirectory(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	got, err := (&ClaudeCode{}).Usage(context.Background(), filepath.Join(t.TempDir(), "absent"), time.Time{})
