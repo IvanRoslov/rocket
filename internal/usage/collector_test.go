@@ -232,27 +232,17 @@ func TestMissingTranscriptAndUnknownAgent(t *testing.T) {
 	}
 }
 
-func TestReaderErrorCountsAttemptsAndKeepsRows(t *testing.T) {
+func TestReaderErrorCountsAttempts(t *testing.T) {
 	f := newFixture(t)
-	f.addSession(t, "w1", "running")
-	f.reader.set("/wt/w1", twoModels())
-	if err := f.c.CollectNow(context.Background(), "w1", 0); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.st.UpdateSessionState("w1", "killed"); err != nil {
-		t.Fatal(err)
-	}
+	f.addSession(t, "w1", "killed")
 	f.reader.setErr("/wt/w1", errors.New("permission denied"))
 	for want := 1; want <= 3; want++ {
 		if err := f.c.CollectNow(context.Background(), "w1", 5000); err != nil {
 			t.Fatal(err)
 		}
 		st, models := getStats(t, f.st, "w1")
-		if st.Status != "error" || st.Attempts != want || st.Error != "permission denied" || !st.Final {
-			t.Fatalf("attempt %d: %+v", want, st)
-		}
-		if len(models) != 2 {
-			t.Fatalf("previous rows lost: %v", models)
+		if st.Status != "error" || st.Attempts != want || st.Error != "permission denied" || !st.Final || len(models) != 0 {
+			t.Fatalf("attempt %d: %+v %v", want, st, models)
 		}
 	}
 	// attempts=3: the sweeper never retries it, even an hour later.
@@ -261,11 +251,72 @@ func TestReaderErrorCountsAttemptsAndKeepsRows(t *testing.T) {
 		t.Fatalf("needing = %v %v", got, err)
 	}
 	f.reader.setErr("/wt/w1", nil)
+	f.reader.set("/wt/w1", twoModels())
 	if err := f.c.CollectNow(context.Background(), "w1", 5000); err != nil {
 		t.Fatal(err)
 	}
-	if st, _ := getStats(t, f.st, "w1"); st.Status != "ok" || st.Attempts != 0 || st.Error != "" {
-		t.Fatalf("success did not reset: %+v", st)
+	if st, models := getStats(t, f.st, "w1"); st.Status != "ok" || st.Attempts != 0 || st.Error != "" || len(models) != 2 {
+		t.Fatalf("success did not reset: %+v %v", st, models)
+	}
+}
+
+// Claude Code deletes old transcripts: a later re-collection must never
+// replace collected history with missing or error.
+func TestOkRowIsNeverDowngraded(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		set  func(f *fixture)
+	}{
+		{"transcript gone", func(f *fixture) { f.reader.set("/wt/w1", agent.Usage{}) }},
+		{"read error", func(f *fixture) { f.reader.setErr("/wt/w1", errors.New("boom")) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.addSession(t, "w1", "done")
+			f.reader.set("/wt/w1", twoModels())
+			clock := int64(10000)
+			f.c.opts.Now = func() time.Time { return time.Unix(clock, 0) }
+			if err := f.c.CollectNow(context.Background(), "w1", 5000); err != nil {
+				t.Fatal(err)
+			}
+			before, m1 := getStats(t, f.st, "w1")
+			tc.set(f)
+			clock = 20000
+			if err := f.c.CollectNow(context.Background(), "w1", 7000); err != nil {
+				t.Fatal(err)
+			}
+			after, m2 := getStats(t, f.st, "w1")
+			if after.Status != "ok" || after.Attempts != 0 || after.Error != "" || !after.Final {
+				t.Fatalf("downgraded: %+v", after)
+			}
+			if fmt.Sprint(m1) != fmt.Sprint(m2) {
+				t.Fatalf("rows changed: %v -> %v", m1, m2)
+			}
+			if *after.EndedAt != *before.EndedAt || after.CollectedAt != 20000 {
+				t.Fatalf("ended_at/collected_at = %d/%d, want %d/20000", *after.EndedAt, after.CollectedAt, *before.EndedAt)
+			}
+		})
+	}
+}
+
+func TestOkSnapshotThenTranscriptGoneBecomesFinalOk(t *testing.T) {
+	f := newFixture(t)
+	f.addSession(t, "o1", "running")
+	f.reader.set("/wt/o1", twoModels())
+	if err := f.c.CollectNow(context.Background(), "o1", 0); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.st.UpdateSessionState("o1", "killed")
+	f.reader.set("/wt/o1", agent.Usage{})
+	if err := f.c.CollectNow(context.Background(), "o1", 6000); err != nil {
+		t.Fatal(err)
+	}
+	st, models := getStats(t, f.st, "o1")
+	if st.Status != "ok" || !st.Final || st.EndedAt == nil || *st.EndedAt != 6000 || len(models) != 2 {
+		t.Fatalf("snapshot not finalised: %+v %v", st, models)
+	}
+	if batches, _ := f.c.Sweep(context.Background()); batches != 0 {
+		t.Fatalf("sweeper re-picks it: %d", batches)
 	}
 }
 
@@ -300,6 +351,16 @@ func TestCollectPublishesUsageCollected(t *testing.T) {
 	e := waitEvent(t, ch, "usage.collected")
 	if e.SessionID != "o1" || e.Data["task_id"] != root {
 		t.Fatalf("event = %+v", e)
+	}
+}
+
+// waitSession waits for usage.collected of one session, skipping others.
+func waitSession(t *testing.T, ch <-chan store.Event, id string) store.Event {
+	t.Helper()
+	for {
+		if e := waitEvent(t, ch, "usage.collected"); e.SessionID == id {
+			return e
+		}
 	}
 }
 
@@ -375,10 +436,7 @@ func TestRunCollectsTerminalEventsAfterDelay(t *testing.T) {
 	// A non-terminal transition is ignored.
 	f.bus.Publish("session.state_changed", "w2", map[string]any{"to": "running"})
 
-	e := waitEvent(t, ch, "usage.collected")
-	if e.SessionID != "w1" {
-		t.Fatalf("collected %s", e.SessionID)
-	}
+	waitSession(t, ch, "w1")
 	if st, _ := getStats(t, f.st, "w1"); !st.Final || st.Status != "ok" {
 		t.Fatalf("w1 = %+v", st)
 	}
@@ -388,9 +446,7 @@ func TestRunCollectsTerminalEventsAfterDelay(t *testing.T) {
 
 	_ = f.st.UpdateSessionState("w2", "errored")
 	f.bus.Publish("session.state_changed", "w2", map[string]any{"from": "spawning", "to": "errored"})
-	// The start-up sweep may have collected w1 a second time; wait for w2.
-	for e := waitEvent(t, ch, "usage.collected"); e.SessionID != "w2"; e = waitEvent(t, ch, "usage.collected") {
-	}
+	waitSession(t, ch, "w2")
 	if st, _ := getStats(t, f.st, "w2"); !st.Final || st.Status != "missing" {
 		t.Fatalf("w2 = %+v", st)
 	}
@@ -411,9 +467,81 @@ func TestRunSweepsAtStart(t *testing.T) {
 	ch, unsub := f.bus.Subscribe()
 	defer unsub()
 	go f.c.Run(ctx)
-	if e := waitEvent(t, ch, "usage.collected"); e.SessionID != "old" {
-		t.Fatalf("collected %s", e.SessionID)
+	e := waitEvent(t, ch, "usage.collected")
+	if e.SessionID != "" || e.Data["task_id"] != nil || e.Data["batch"] != 1 {
+		t.Fatalf("start-up sweep event = %+v", e)
 	}
+	if st, _ := getStats(t, f.st, "old"); !st.Final {
+		t.Fatalf("old = %+v", st)
+	}
+}
+
+func TestSweepPublishesOneEventPerBatch(t *testing.T) {
+	f := newFixture(t)
+	f.reader.defUse = &agent.Usage{Found: true, Models: map[string]agent.Tokens{"m": {Input: 1}}}
+	for i := 0; i < 120; i++ {
+		f.addSession(t, fmt.Sprintf("s%03d", i), "done")
+	}
+	ch, unsub := f.bus.Subscribe()
+	defer unsub()
+	if _, err := f.c.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var got []any
+	for len(ch) > 0 {
+		e := <-ch
+		if e.Type != "usage.collected" {
+			continue
+		}
+		if e.SessionID != "" || e.Data["task_id"] != nil {
+			t.Fatalf("per-session event from sweeper: %+v", e)
+		}
+		got = append(got, e.Data["batch"])
+	}
+	if fmt.Sprint(got) != "[50 50 20]" {
+		t.Fatalf("batch events = %v", got)
+	}
+}
+
+func TestBulkRecollectPublishesBatchEvents(t *testing.T) {
+	f := newFixture(t)
+	f.c.opts.BatchSize = 2
+	for _, id := range []string{"a", "b", "c"} {
+		f.addSession(t, id, "done")
+		if err := f.c.CollectNow(context.Background(), id, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ch, unsub := f.bus.Subscribe()
+	defer unsub()
+	if n, err := f.c.EnqueueTerminal(false, true); err != nil || n != 3 {
+		t.Fatalf("EnqueueTerminal = %d %v", n, err)
+	}
+	f.c.Enqueue("a") // already queued in bulk: an explicit request still announces it
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go f.c.Run(ctx)
+	var batches []any
+	perSession := map[string]int{}
+	for len(batches) < 1 || sumBatches(batches) < 2 {
+		e := waitEvent(t, ch, "usage.collected")
+		if e.SessionID == "" {
+			batches = append(batches, e.Data["batch"])
+		} else {
+			perSession[e.SessionID]++
+		}
+	}
+	if fmt.Sprint(batches) != "[2]" || perSession["a"] != 1 || len(perSession) != 1 {
+		t.Fatalf("batches = %v, per-session = %v", batches, perSession)
+	}
+}
+
+func sumBatches(b []any) int {
+	n := 0
+	for _, v := range b {
+		n += v.(int)
+	}
+	return n
 }
 
 func TestSnapshotAndEnqueueAll(t *testing.T) {

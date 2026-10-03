@@ -41,6 +41,13 @@ type Options struct {
 	Now           func() time.Time
 }
 
+// job is a queued collection. eventAt is the terminal event time (0 = none);
+// bulk jobs come from a mass re-collection and are announced once per batch.
+type job struct {
+	eventAt int64
+	bulk    bool
+}
+
 // Collector writes session_usage/session_stats rows. All collection runs on
 // the single goroutine started by Run; the public enqueue methods never block.
 type Collector struct {
@@ -50,7 +57,9 @@ type Collector struct {
 
 	mu     sync.Mutex
 	queue  []string
-	queued map[string]int64 // session id -> terminal event time (0 = none)
+	queued map[string]job
+	// bulkQueued counts queued bulk jobs: they are announced per batch.
+	bulkQueued int
 
 	wake       chan struct{}
 	subscribed chan struct{}
@@ -76,7 +85,7 @@ func New(st *store.Store, b *bus.Bus, opts Options) *Collector {
 	}
 	return &Collector{
 		st: st, bus: b, opts: opts,
-		queued:     make(map[string]int64),
+		queued:     make(map[string]job),
 		wake:       make(chan struct{}, 1),
 		subscribed: make(chan struct{}),
 	}
@@ -94,13 +103,14 @@ func registryReader(name string) (agent.UsageReader, bool) {
 // Snapshot queues an immediate collection of an orchestrator whose feature
 // went to review: a live session gets a final=0 snapshot, an already
 // terminal one its ordinary final collection.
-func (c *Collector) Snapshot(sessionID string) { c.enqueue(sessionID, 0) }
+func (c *Collector) Snapshot(sessionID string) { c.enqueue(sessionID, job{}) }
 
 // Enqueue queues an immediate (re)collection of one session.
-func (c *Collector) Enqueue(sessionID string) { c.enqueue(sessionID, 0) }
+func (c *Collector) Enqueue(sessionID string) { c.enqueue(sessionID, job{}) }
 
 // EnqueueTerminal queues terminal sessions for re-collection (see
-// store.TerminalSessionIDs) and returns how many were newly queued.
+// store.TerminalSessionIDs) and returns how many were newly queued. They are
+// announced with one batch usage.collected per BatchSize sessions.
 func (c *Collector) EnqueueTerminal(includeCollected, includeMissing bool) (int, error) {
 	ids, err := c.st.TerminalSessionIDs(includeCollected, includeMissing)
 	if err != nil {
@@ -108,7 +118,7 @@ func (c *Collector) EnqueueTerminal(includeCollected, includeMissing bool) (int,
 	}
 	n := 0
 	for _, id := range ids {
-		if c.enqueue(id, 0) {
+		if c.enqueue(id, job{bulk: true}) {
 			n++
 		}
 	}
@@ -116,16 +126,24 @@ func (c *Collector) EnqueueTerminal(includeCollected, includeMissing bool) (int,
 }
 
 // enqueue adds id to the FIFO unless it is already waiting; a known event
-// time is kept. Reports whether id was newly queued.
-func (c *Collector) enqueue(id string, eventAt int64) bool {
+// time is kept, and an explicit request turns a waiting bulk job into an
+// announced one. Reports whether id was newly queued.
+func (c *Collector) enqueue(id string, j job) bool {
 	c.mu.Lock()
 	prev, exists := c.queued[id]
-	if !exists {
+	if exists {
+		j.eventAt = max(j.eventAt, prev.eventAt)
+		j.bulk = j.bulk && prev.bulk
+		if prev.bulk {
+			c.bulkQueued--
+		}
+	} else {
 		c.queue = append(c.queue, id)
 	}
-	if !exists || eventAt > prev {
-		c.queued[id] = eventAt
+	if j.bulk {
+		c.bulkQueued++
 	}
+	c.queued[id] = j
 	c.mu.Unlock()
 	select {
 	case c.wake <- struct{}{}:
@@ -134,17 +152,21 @@ func (c *Collector) enqueue(id string, eventAt int64) bool {
 	return !exists
 }
 
-func (c *Collector) pop() (string, int64, bool) {
+// pop returns the next job and whether bulk jobs are still waiting after it.
+func (c *Collector) pop() (id string, j job, moreBulk, ok bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.queue) == 0 {
-		return "", 0, false
+		return "", job{}, false, false
 	}
-	id := c.queue[0]
+	id = c.queue[0]
 	c.queue = c.queue[1:]
-	at := c.queued[id]
+	j = c.queued[id]
 	delete(c.queued, id)
-	return id, at, true
+	if j.bulk {
+		c.bulkQueued--
+	}
+	return id, j, c.bulkQueued > 0, true
 }
 
 // Run subscribes to the bus and processes the queue and the sweeper on one
@@ -160,13 +182,21 @@ func (c *Collector) Run(ctx context.Context) {
 	defer ticker.Stop()
 	sweeping := true
 	seen := map[string]bool{}
+	bulkDone := 0
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-		if id, at, ok := c.pop(); ok {
-			if err := c.CollectNow(ctx, id, at); err != nil && ctx.Err() == nil {
+		if id, j, moreBulk, ok := c.pop(); ok {
+			if err := c.collect(ctx, id, j.eventAt, !j.bulk); err != nil && ctx.Err() == nil {
 				slog.Error("usage: collect failed", "session", id, "error", err)
+			}
+			if j.bulk {
+				bulkDone++
+				if bulkDone >= c.opts.BatchSize || !moreBulk {
+					c.publishBatch(bulkDone)
+					bulkDone = 0
+				}
 			}
 			continue
 		}
@@ -207,7 +237,7 @@ func (c *Collector) watchEvents(ctx context.Context, events <-chan store.Event) 
 			id, at := e.SessionID, e.TS
 			time.AfterFunc(c.opts.Delay, func() {
 				if ctx.Err() == nil {
-					c.enqueue(id, at)
+					c.enqueue(id, job{eventAt: at})
 				}
 			})
 		}
@@ -257,23 +287,38 @@ func (c *Collector) sweepBatch(ctx context.Context, seen map[string]bool) (n int
 	if err != nil {
 		return 0, false, err
 	}
+	defer func() { c.publishBatch(n) }()
 	for _, sess := range sessions {
 		if seen[sess.ID] {
 			continue
 		}
 		seen[sess.ID] = true
-		n++
-		if err := c.CollectNow(ctx, sess.ID, 0); err != nil {
+		if err := c.collect(ctx, sess.ID, 0, false); err != nil {
 			return n, false, err
 		}
+		n++
 	}
 	return n, n > 0 && len(sessions) == c.opts.BatchSize, nil
 }
 
-// CollectNow reads the session's transcripts and replaces its usage rows.
-// eventAt is the terminal event time (0 when unknown, e.g. backfill). Reader
-// failures are recorded in the row; only store failures are returned.
+// publishBatch announces n sessions collected by the sweeper or a mass
+// re-collection with one event instead of n: every event is stored and makes
+// the dashboard refetch.
+func (c *Collector) publishBatch(n int) {
+	if n > 0 {
+		c.bus.Publish("usage.collected", "", map[string]any{"task_id": nil, "batch": n})
+	}
+}
+
+// CollectNow reads the session's transcripts, replaces its usage rows and
+// announces them with a per-session usage.collected. eventAt is the terminal
+// event time (0 when unknown, e.g. backfill). Reader failures are recorded in
+// the row; only store failures are returned.
 func (c *Collector) CollectNow(ctx context.Context, sessionID string, eventAt int64) error {
+	return c.collect(ctx, sessionID, eventAt, true)
+}
+
+func (c *Collector) collect(ctx context.Context, sessionID string, eventAt int64, announce bool) error {
 	sess, err := c.st.GetSession(sessionID)
 	if err != nil {
 		return err
@@ -308,7 +353,16 @@ func (c *Collector) CollectNow(ctx context.Context, sessionID string, eventAt in
 	}
 
 	var models []store.ModelUsage
+	kept := hasPrev && prev.Status == "ok" && (readErr != nil || !u.Found)
 	switch {
+	case kept:
+		// Never downgrade collected history: Claude Code deletes old
+		// transcripts, and a re-collection must not wipe what was counted.
+		st.Status = "ok"
+		models = prevModels
+		if readErr != nil {
+			slog.Warn("usage: keeping collected usage after read error", "session", sessionID, "error", readErr)
+		}
 	case readErr != nil:
 		// A partial result is never stored: the previous rows stay.
 		st.Status, st.Error, st.Attempts = "error", readErr.Error(), 1
@@ -326,6 +380,8 @@ func (c *Collector) CollectNow(ctx context.Context, sessionID string, eventAt in
 	if terminal {
 		ended := sess.UpdatedAt
 		switch {
+		case kept && prev.Final && prev.EndedAt != nil:
+			ended = *prev.EndedAt
 		case eventAt > 0:
 			ended = eventAt
 		case hasPrev && prev.Final && prev.EndedAt != nil:
@@ -338,6 +394,9 @@ func (c *Collector) CollectNow(ctx context.Context, sessionID string, eventAt in
 
 	if err := c.st.ReplaceSessionUsage(st, models); err != nil {
 		return err
+	}
+	if !announce {
+		return nil
 	}
 	var task any
 	if taskID != 0 {
