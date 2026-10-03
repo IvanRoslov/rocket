@@ -299,6 +299,22 @@ func TestTaskUsageRowsIncludesRunningAndMissingSessions(t *testing.T) {
 	}
 }
 
+func TestTaskUsageRowsCarriesCollectionError(t *testing.T) {
+	s := openTestStore(t)
+	rootID, err := s.AddTask(Task{Title: "root", ProjectID: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	addUsageTestSession(t, s, Session{ID: "failed", Kind: "worker", State: "errored", TaskID: rootID})
+	if err := s.ReplaceSessionUsage(SessionStats{SessionID: "failed", TaskID: rootID, Status: "error", Error: "read denied", Final: true, StartedAt: 100, CollectedAt: 200}, nil); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.TaskUsageRows(rootID)
+	if err != nil || len(rows) != 1 || rows[0].Error != "read denied" {
+		t.Fatalf("TaskUsageRows = %+v, err=%v", rows, err)
+	}
+}
+
 func TestCountPendingUsageCountsTerminalUncollectedAndSnapshots(t *testing.T) {
 	s := openTestStore(t)
 	for _, tc := range []struct {

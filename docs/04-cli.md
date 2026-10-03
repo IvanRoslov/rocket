@@ -92,6 +92,35 @@ rocket stats brainstorm [--weeks N] [--json]
     --weeks — сколько последних ISO-недель (по умолчанию 12, от 1 до 520);
     --json — сырой ответ GET /v1/stats/brainstorm.
 
+rocket stats usage [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--project ID] [--json]
+    Расход за период: итоги, таблицы по моделям и по корневым задачам. Даты —
+    локальные даты демона, граница `--to` включена; без дат — последние 30 дней.
+    Показывает число ещё не собранных сессий. `--json` — ответ
+    GET /v1/stats/usage целиком.
+
+rocket stats task <id> [--json]
+    Расход всех сессий корневой задачи и её подзадач: модель, PR, длительность,
+    токены, стоимость и статус сбора. Живые и ещё не обработанные сессии видны
+    с пустыми цифрами. `--json` — ответ GET /v1/tasks/{id}/usage.
+
+rocket stats prices [--json]
+    Текущие ставки $/1 млн токенов, включая модели без прайса.
+
+rocket stats prices set <model> [--input X] [--cache-write X] [--cache-read X] [--output X]
+    Изменить одну или несколько ставок. Неуказанные флаги сохраняют прежние
+    значения; у новой модели остаются `null`. Буквальное `null` очищает ставку,
+    например `rocket stats prices set gpt-6-sol --cache-read null`.
+    Команда читает текущий прайс и отправляет полный PUT. `--json` печатает
+    сохранённую строку.
+
+rocket stats prices rm <model> [--json]
+    Удалить прайс модели. `--json` печатает `{model, deleted:true}`.
+
+Главное число токенов во всех таблицах — `input + cache_write + output`;
+`cache_read` показывается отдельно. `≈ $` вычисляется по текущему прайсу:
+«—» у модели без полной цены, `(partial)` у итогов и сессий с оценённой лишь частью.
+PUT и DELETE прайса из сессии агента запрещены (`403 human_only`).
+
 rocket stats collect [--session S | --all] [--retry-missing]
     Поставить пересчёт расхода токенов в очередь демона (POST
     /v1/stats/usage/collect, только человек). --session — одна сессия (живая
