@@ -152,6 +152,8 @@ CREATE TABLE sessions (  -- продолжение схемы
   profile       TEXT NOT NULL DEFAULT '',  -- снимок профиля модели на момент запуска (миграция 0021); '' — запуск без профиля
   model         TEXT NOT NULL DEFAULT '',  --   модель снимка ('' — модель агента по умолчанию)
   effort        TEXT NOT NULL DEFAULT '',  --   усилие снимка ('' — по умолчанию); restore поднимает сессию именно с ними
+  task_id       INTEGER,                   -- корневая задача; NULL, если связи нет (миграция 0023)
+  subtask_id    INTEGER,                   -- подзадача воркера; NULL у оркестратора и агента
   created_at    INTEGER NOT NULL,
   updated_at    INTEGER NOT NULL
 );
@@ -326,6 +328,53 @@ CREATE INDEX idx_events_session ON events(session_id, id);
 ```
 
 Драйвер: `modernc.org/sqlite` (без cgo, кросс-компиляция сохраняется). Режим WAL. Ретенция: events и messages чистятся фоновой задачей (по умолчанию 30 дней).
+
+### Расход сессий (миграция 0023)
+
+`sessions.task_id` и `sessions.subtask_id` заполняются при старте оркестратора или воркера. Для старых сессий `ResolveSessionTask` сначала проверяет эти колонки, затем текущую связь `tasks.session_id`, затем запись журнала `spawned worker <id> for subtask #N`. Найденные ID сохраняются в `sessions`, поэтому респавн подзадачи не стирает историю расхода предыдущего воркера. У сессии вне задачи оба поля остаются `NULL`.
+
+```sql
+CREATE TABLE session_usage (
+  session_id  TEXT NOT NULL,
+  model       TEXT NOT NULL,              -- фактическая модель из транскрипта
+  input       INTEGER NOT NULL DEFAULT 0, -- без чтения кэша
+  cache_write INTEGER NOT NULL DEFAULT 0,
+  cache_read  INTEGER NOT NULL DEFAULT 0,
+  output      INTEGER NOT NULL DEFAULT 0, -- включает reasoning
+  reasoning   INTEGER NOT NULL DEFAULT 0, -- часть output, отдельно не тарифицируется
+  messages    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (session_id, model)
+);
+
+CREATE TABLE session_stats (
+  session_id   TEXT PRIMARY KEY,
+  task_id      INTEGER,
+  subtask_id   INTEGER,
+  status       TEXT NOT NULL,            -- ok|missing|error
+  final        INTEGER NOT NULL,         -- 0 = живой снимок, 1 = итог терминальной сессии
+  started_at   INTEGER NOT NULL,
+  ended_at     INTEGER,                  -- NULL у снимка
+  collected_at INTEGER NOT NULL,
+  error        TEXT NOT NULL DEFAULT '',
+  attempts     INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX session_stats_ended ON session_stats(ended_at);
+CREATE INDEX session_stats_collected ON session_stats(collected_at);
+CREATE INDEX session_stats_task ON session_stats(task_id);
+
+CREATE TABLE model_prices (
+  model       TEXT PRIMARY KEY,
+  input       REAL,                       -- $ за 1M токенов; NULL = цена не задана
+  cache_write REAL,
+  cache_read  REAL,
+  output      REAL,
+  updated_at  INTEGER NOT NULL
+);
+```
+
+`session_usage` содержит одну строку на пару сессия/модель; повторный сбор целиком заменяет её строки и `session_stats` в одной транзакции. Цена не фиксируется в статистике: стоимость считается при чтении по текущему `model_prices`, который после миграции пуст. Главное число токенов — `input + cache_write + output`, без `cache_read`. `SessionsNeedingUsage` выбирает терминальные сессии без итога и повторяет ошибку не более трёх раз с интервалом от часа; `missing` повторно не ищется без ручного запроса.
+
+Миграция также создаёт индексы `idx_sessions_task` и `idx_tasks_session` для поиска сессий задачи и восстановления старых связей.
 
 ## Env-переменные сессий
 

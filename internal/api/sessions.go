@@ -273,6 +273,7 @@ func handlePostSession(w http.ResponseWriter, r *http.Request, d Deps) {
 		AgentName: prof.Agent,
 		Kind:      "worker",
 		ParentID:  caller.ID,
+		TaskID:    root.ID,
 		SubtaskID: sub.ID,
 		Profile:   session.LaunchProfile{Name: prof.Name, Model: prof.Model, Effort: prof.Effort},
 	})
