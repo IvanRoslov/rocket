@@ -324,15 +324,9 @@ func scanUsageRows(rows *sql.Rows) ([]UsageRow, error) {
 }
 
 // CountPendingUsage counts terminal sessions in [from,to) that have not yet
-// received a final collection. Until collected, updated_at is the best
-// available approximation of their terminal time.
-func (s *Store) CountPendingUsage(from, to int64) (int, error) {
-	return s.CountPendingUsageForProject(from, to, "")
-}
-
-// CountPendingUsageForProject applies the same pending count to one project;
-// an empty projectID means all projects.
-func (s *Store) CountPendingUsageForProject(from, to int64, projectID string) (int, error) {
+// received a final collection. An empty projectID means all projects. Until
+// collected, updated_at is the best available terminal-time approximation.
+func (s *Store) CountPendingUsage(from, to int64, projectID string) (int, error) {
 	query := `SELECT COUNT(*) FROM sessions s
 		LEFT JOIN session_stats st ON st.session_id = s.id
 		WHERE s.state IN ('done','killed','errored')

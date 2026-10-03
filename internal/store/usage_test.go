@@ -320,21 +320,21 @@ func TestCountPendingUsageCountsTerminalUncollectedAndSnapshots(t *testing.T) {
 	if err := s.ReplaceSessionUsage(SessionStats{SessionID: "final", Status: "ok", Final: true, StartedAt: 10, EndedAt: &end, CollectedAt: 101}, nil); err != nil {
 		t.Fatal(err)
 	}
-	count, err := s.CountPendingUsage(100, 200)
+	count, err := s.CountPendingUsage(100, 200, "")
 	if err != nil || count != 2 {
 		t.Fatalf("CountPendingUsage = %d, err=%v; want 2", count, err)
 	}
 }
 
-func TestCountPendingUsageForProject(t *testing.T) {
+func TestCountPendingUsageFiltersProject(t *testing.T) {
 	s := openTestStore(t)
 	addUsageTestSession(t, s, Session{ID: "p-pending", Kind: "worker", ProjectID: "p", State: "done", CreatedAt: 10, UpdatedAt: 150})
 	addUsageTestSession(t, s, Session{ID: "q-pending", Kind: "worker", ProjectID: "q", State: "done", CreatedAt: 10, UpdatedAt: 150})
-	all, err := s.CountPendingUsage(100, 200)
+	all, err := s.CountPendingUsage(100, 200, "")
 	if err != nil || all != 2 {
 		t.Fatalf("all pending = %d, err=%v; want 2", all, err)
 	}
-	project, err := s.CountPendingUsageForProject(100, 200, "p")
+	project, err := s.CountPendingUsage(100, 200, "p")
 	if err != nil || project != 1 {
 		t.Fatalf("project pending = %d, err=%v; want 1", project, err)
 	}

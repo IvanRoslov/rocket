@@ -54,7 +54,7 @@
 
 **Files:** `internal/store/usage.go`, `usage_test.go`.
 
-**Interfaces:** `UsageRow`, `ModelPrice`, `UsageRows`, `TaskUsageRows`, `CountPendingUsage`, `ListModelPrices`, `UpsertModelPrice`, `DeleteModelPrice`, `UsageModels` as in parent plan W2. `UsageRow` includes session metadata and task/subtask titles and status for W4.
+**Interfaces:** `UsageRow`, `ModelPrice`, `UsageRows`, `TaskUsageRows`, `CountPendingUsage(from, to int64, projectID string) (int, error)`, `ListModelPrices`, `UpsertModelPrice`, `DeleteModelPrice`, `UsageModels`. The orchestrator clarified that an empty project ID means all projects. `UsageRow` includes session metadata and task/subtask titles and status for W4.
 
 - [ ] Write tests for date boundaries, snapshot date, project scope, task rows including running sessions, pending count, and nullable price CRUD.
 - [ ] Run focused tests and observe missing methods.
