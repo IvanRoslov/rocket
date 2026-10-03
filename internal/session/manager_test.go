@@ -1109,6 +1109,9 @@ func TestSpawnOrchestratorHappyPath(t *testing.T) {
 	if sess.Kind != "orchestrator" {
 		t.Errorf("Kind = %q, want orchestrator", sess.Kind)
 	}
+	if sess.TaskID != task.ID || sess.SubtaskID != 0 {
+		t.Errorf("TaskID/SubtaskID = %d/%d, want %d/0", sess.TaskID, sess.SubtaskID, task.ID)
+	}
 	if sess.Branch != "orch/add-login-page" {
 		t.Errorf("Branch = %q, want orch/add-login-page", sess.Branch)
 	}

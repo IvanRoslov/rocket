@@ -58,6 +58,7 @@ type SpawnReq struct {
 	AgentName string
 	Kind      string
 	ParentID  string
+	TaskID    int64
 	SubtaskID int64
 	// Profile is the model profile the API resolved for this worker; the
 	// zero value launches with the agent's own defaults.
@@ -379,6 +380,8 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 			RepoID:      req.Repo,
 			FeatureSlug: feature,
 			ParentID:    req.ParentID,
+			TaskID:      req.TaskID,
+			SubtaskID:   req.SubtaskID,
 			Agent:       agentName,
 			Branch:      branch,
 			TmuxName:    id,
@@ -562,6 +565,7 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 			ProjectID:   project.ID,
 			RepoID:      project.MainRepo,
 			FeatureSlug: slug,
+			TaskID:      task.ID,
 			Agent:       agentName,
 			Branch:      "orch/" + slug,
 			TmuxName:    id,

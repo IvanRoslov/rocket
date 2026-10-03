@@ -417,6 +417,9 @@ func TestPostSessionHappyPathAutoSubtask(t *testing.T) {
 	if workerSess.Kind != "worker" {
 		t.Errorf("worker Kind = %q, want worker", workerSess.Kind)
 	}
+	if workerSess.TaskID != rootID || workerSess.SubtaskID != int64(subID) {
+		t.Errorf("worker TaskID/SubtaskID = %d/%d, want %d/%d", workerSess.TaskID, workerSess.SubtaskID, rootID, int64(subID))
+	}
 
 	logs, err := d.Store.ListTaskLog(rootID, "status")
 	if err != nil {
