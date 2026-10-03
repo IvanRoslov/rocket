@@ -1,0 +1,2 @@
+{"type":"assistant","timestamp":"2026-09-01T10:00:00Z","cwd":"__WORKTREE__","message":{"id":"old-file","model":"claude-sonnet-5-5","usage":{"input_tokens":900,"output_tokens":900}}}
+{"type":"assistant","cwd":"__WORKTREE__","message":{"id":"undated-old","model":"claude-sonnet-5-5","usage":{"input_tokens":900,"output_tokens":900}}}
