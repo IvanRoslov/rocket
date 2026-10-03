@@ -2,6 +2,7 @@
 package usage
 
 import (
+	"math"
 	"sort"
 
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -126,17 +127,44 @@ func modelCost(t Tokens, p store.ModelPrice) *float64 {
 		if part.p == nil {
 			return nil
 		}
-		cost += float64(part.n) * *part.p / 1_000_000
+		cost += float64(part.n) / 1_000_000 * *part.p
+		if math.IsInf(cost, 0) || math.IsNaN(cost) {
+			return nil
+		}
 	}
 	return &cost
+}
+
+func addFiniteCost(sum **float64, cost *float64) {
+	if *sum == nil || cost == nil {
+		*sum = nil
+		return
+	}
+	next := **sum + *cost
+	if math.IsInf(next, 0) || math.IsNaN(next) {
+		*sum = nil
+		return
+	}
+	**sum = next
 }
 
 func addCost(total *Totals, cost *float64) {
 	if cost == nil {
 		total.CostPartial = true
-		return
 	}
-	*total.CostUSD += *cost
+	// A mathematically valid sum can exceed float64. Return null/partial
+	// instead of emitting nonfinite JSON (which encoding/json rejects).
+	if total.CostUSD != nil {
+		if cost != nil {
+			next := *total.CostUSD + *cost
+			if math.IsInf(next, 0) || math.IsNaN(next) {
+				total.CostUSD = nil
+				total.CostPartial = true
+			} else {
+				*total.CostUSD = next
+			}
+		}
+	}
 }
 
 func isCollected(row store.UsageRow) bool {
@@ -188,7 +216,10 @@ func Period(rows []store.UsageRow, prices []store.ModelPrice) PeriodSummary {
 		if cost == nil {
 			task.CostPartial = true
 		} else {
-			*task.CostUSD += *cost
+			addFiniteCost(&task.CostUSD, cost)
+			if task.CostUSD == nil {
+				task.CostPartial = true
+			}
 		}
 		key := modelKey{row.Model, row.Agent}
 		model := models[key]
@@ -202,11 +233,7 @@ func Period(rows []store.UsageRow, prices []store.ModelPrice) PeriodSummary {
 			model.Sessions++
 			modelSessions[key][row.SessionID] = true
 		}
-		if cost == nil {
-			model.CostUSD = nil
-		} else if model.CostUSD != nil {
-			*model.CostUSD += *cost
-		}
+		addFiniteCost(&model.CostUSD, cost)
 	}
 	for _, model := range models {
 		out.Models = append(out.Models, *model)
@@ -275,7 +302,7 @@ func Task(rows []store.UsageRow, prices []store.ModelPrice, taskID int64, prURLF
 				s.DurationS = &duration
 			}
 			if !isCollected(row) {
-				if row.State == "running" {
+				if row.State == "running" || row.State == "spawning" {
 					s.Status = "running"
 				} else {
 					s.Status = "pending"
@@ -298,11 +325,7 @@ func Task(rows []store.UsageRow, prices []store.ModelPrice, taskID int64, prURLF
 		s.Tokens.add(t)
 		out.Totals.Tokens.add(t)
 		addCost(&out.Totals, cost)
-		if cost == nil {
-			s.CostUSD = nil
-		} else if s.CostUSD != nil {
-			*s.CostUSD += *cost
-		}
+		addFiniteCost(&s.CostUSD, cost)
 	}
 	sort.Slice(out.Sessions, func(i, j int) bool {
 		a, b := out.Sessions[i], out.Sessions[j]

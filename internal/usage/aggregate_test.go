@@ -49,6 +49,36 @@ func TestPeriodSeparatesSameModelByAgent(t *testing.T) {
 	}
 }
 
+func TestLargeFinitePriceDoesNotOverflowIntermediateProduct(t *testing.T) {
+	got := modelCost(Tokens{Input: 2}, store.ModelPrice{Input: rate(1e308)})
+	if got == nil || math.IsInf(*got, 0) || math.Abs(*got/1e302-2) > 1e-12 {
+		t.Fatalf("large finite cost = %v, want 2e302", got)
+	}
+}
+
+func TestOverflowingCostStillEncodesUsageJSON(t *testing.T) {
+	rows := []store.UsageRow{
+		{SessionID: "s1", Status: "ok", Model: "a", Tokens: store.UsageTokens{Input: 1_000_000}},
+		{SessionID: "s1", Status: "ok", Model: "b", Tokens: store.UsageTokens{Input: 1_000_000}},
+	}
+	prices := []store.ModelPrice{{Model: "a", Input: rate(1e308)}, {Model: "b", Input: rate(1e308)}}
+	for name, value := range map[string]any{
+		"period": Period(rows, prices),
+		"task":   Task(rows, prices, 7, nil),
+	} {
+		b, err := json.Marshal(value)
+		if err != nil {
+			t.Fatalf("%s usage cannot encode: %v", name, err)
+		}
+		var raw struct {
+			Totals Totals `json:"totals"`
+		}
+		if err := json.Unmarshal(b, &raw); err != nil || raw.Totals.CostUSD != nil || !raw.Totals.CostPartial {
+			t.Fatalf("%s overflowing total = %+v, err %v", name, raw.Totals, err)
+		}
+	}
+}
+
 func TestTaskIncludesUncollectedSessionsWithoutCountingThem(t *testing.T) {
 	end := int64(160)
 	rows := []store.UsageRow{
@@ -57,10 +87,11 @@ func TestTaskIncludesUncollectedSessionsWithoutCountingThem(t *testing.T) {
 		{SessionID: "s2", Kind: "worker", State: "errored", Status: "error", Error: "read denied", Final: true, StartedAt: 120, EndedAt: &end},
 		{SessionID: "s3", Kind: "orchestrator", State: "running", StartedAt: 130},
 		{SessionID: "s4", Kind: "worker", State: "killed", StartedAt: 140},
+		{SessionID: "s5", Kind: "worker", State: "spawning", StartedAt: 150},
 	}
 	got := Task(rows, []store.ModelPrice{{Model: "priced", Input: rate(1), CacheRead: rate(1), Output: rate(1)}}, 7,
 		func(repo string, number int) string { return "https://github.com/acme/" + repo + "/pull/12" })
-	if got.TaskID != 7 || got.Totals.Sessions != 2 || got.Totals.Tokens.Billable != 31 || !got.Totals.CostPartial || len(got.Sessions) != 4 {
+	if got.TaskID != 7 || got.Totals.Sessions != 2 || got.Totals.Tokens.Billable != 31 || !got.Totals.CostPartial || len(got.Sessions) != 5 {
 		t.Fatalf("task = %+v", got)
 	}
 	s1 := got.Sessions[0]
@@ -70,7 +101,7 @@ func TestTaskIncludesUncollectedSessionsWithoutCountingThem(t *testing.T) {
 	if got.Sessions[1].Error != "read denied" || got.Sessions[1].CostUSD == nil || *got.Sessions[1].CostUSD != 0 {
 		t.Errorf("error session = %+v", got.Sessions[1])
 	}
-	for i, want := range []string{"running", "pending"} {
+	for i, want := range []string{"running", "pending", "running"} {
 		s := got.Sessions[i+2]
 		if s.Status != want || s.Final || s.EndedAt != nil || s.DurationS != nil || s.CostUSD != nil || len(s.Models) != 0 || s.Tokens.Billable != 0 || s.Error != "" {
 			t.Errorf("uncollected session = %+v, want status %q", s, want)
