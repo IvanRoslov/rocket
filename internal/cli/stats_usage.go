@@ -345,7 +345,7 @@ func renderTaskUsage(s usage.TaskUsageSummary) string {
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\t%s\t%s\n",
 			session.SessionID, session.Role, session.SubtaskTitle, session.PRURL, strings.Join(models, ", "),
-			duration, session.Tokens.Billable, session.Tokens.CacheRead, costText(session.CostUSD, false), session.Status)
+			duration, session.Tokens.Billable, session.Tokens.CacheRead, costText(session.CostUSD, session.CostPartial), session.Status)
 	}
 	_ = tw.Flush()
 	return b.String()

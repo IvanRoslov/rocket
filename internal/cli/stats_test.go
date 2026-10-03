@@ -105,7 +105,7 @@ func TestStatsUsageEmptyTable(t *testing.T) {
 func TestStatsTaskCommandAndSessionTable(t *testing.T) {
 	f := &fakeStatsClient{getReply: usage.TaskUsageSummary{
 		TaskID: 42, Totals: usage.Totals{Sessions: 1, Tokens: usage.Tokens{Billable: 10}, CostUSD: floatPtr(0.2)},
-		Sessions: []usage.SessionSummary{{SessionID: "s-1", Role: "worker", SubtaskTitle: "Build", Status: "ok", State: "done", PRURL: "https://github.com/acme/r/pull/9", Models: []usage.SessionModel{{Model: "m", Tokens: usage.Tokens{Billable: 10}}}, Tokens: usage.Tokens{Billable: 10}}},
+		Sessions: []usage.SessionSummary{{SessionID: "s-1", Role: "worker", SubtaskTitle: "Build", Status: "ok", State: "done", PRURL: "https://github.com/acme/r/pull/9", Models: []usage.SessionModel{{Model: "m", Tokens: usage.Tokens{Billable: 10}}}, Tokens: usage.Tokens{Billable: 10}, CostUSD: floatPtr(0.2), CostPartial: true}},
 	}}
 	cmd := newStatsTaskCmd(testStatsDial(f))
 	cmd.SetArgs([]string{"42"})
@@ -117,7 +117,7 @@ func TestStatsTaskCommandAndSessionTable(t *testing.T) {
 	if f.getPath != "/v1/tasks/42/usage" {
 		t.Errorf("GET path=%q", f.getPath)
 	}
-	for _, want := range []string{"#42", "s-1", "worker", "Build", "m", "10", "https://github.com/acme/r/pull/9"} {
+	for _, want := range []string{"#42", "s-1", "worker", "Build", "m", "10", "https://github.com/acme/r/pull/9", "$0.2000 (partial)"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, out.String())
 		}

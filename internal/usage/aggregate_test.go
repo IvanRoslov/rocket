@@ -63,8 +63,27 @@ func TestAggregatesExcludeIncompleteModelAcrossSessions(t *testing.T) {
 		t.Fatalf("task row must sum complete models only: %+v", period.Tasks)
 	}
 	task := Task(rows, prices, 7, nil)
-	if task.Totals.CostUSD == nil || *task.Totals.CostUSD != 0 || !task.Totals.CostPartial || len(task.Sessions) != 2 || task.Sessions[0].CostUSD == nil || *task.Sessions[0].CostUSD != 1 || task.Sessions[1].CostUSD != nil {
+	if task.Totals.CostUSD == nil || *task.Totals.CostUSD != 0 || !task.Totals.CostPartial || len(task.Sessions) != 2 || task.Sessions[0].CostUSD == nil || *task.Sessions[0].CostUSD != 1 || task.Sessions[0].CostPartial || task.Sessions[1].CostUSD == nil || *task.Sessions[1].CostUSD != 0 || !task.Sessions[1].CostPartial {
 		t.Fatalf("task totals must sum complete models; session costs stay local: %+v", task)
+	}
+}
+
+func TestTaskGroupsCostsByExactModelAcrossAgents(t *testing.T) {
+	rows := []store.UsageRow{
+		{SessionID: "a", Agent: "claude", TaskID: 7, Status: "ok", Model: "shared", Tokens: store.UsageTokens{Input: 1_000_000}},
+		{SessionID: "b", Agent: "codex", TaskID: 7, Status: "ok", Model: "shared", Tokens: store.UsageTokens{Output: 1}},
+	}
+	prices := []store.ModelPrice{{Model: "shared", Input: rate(1)}}
+	period := Period(rows, prices)
+	if len(period.Models) != 2 || period.Totals.CostUSD == nil || *period.Totals.CostUSD != 1 || !period.Totals.CostPartial {
+		t.Fatalf("period total must sum visible model rows: %+v", period)
+	}
+	if len(period.Tasks) != 1 || period.Tasks[0].CostUSD == nil || *period.Tasks[0].CostUSD != 0 || !period.Tasks[0].CostPartial {
+		t.Fatalf("task row must price the exact model across agents: %+v", period.Tasks)
+	}
+	task := Task(rows, prices, 7, nil)
+	if task.Totals.CostUSD == nil || *task.Totals.CostUSD != 0 || !task.Totals.CostPartial {
+		t.Fatalf("task totals must price the exact model across agents: %+v", task.Totals)
 	}
 }
 
@@ -114,15 +133,23 @@ func TestTaskIncludesUncollectedSessionsWithoutCountingThem(t *testing.T) {
 		t.Fatalf("task = %+v", got)
 	}
 	s1 := got.Sessions[0]
-	if s1.Role != "worker" || s1.SubtaskID == nil || *s1.SubtaskID != 8 || s1.SubtaskTitle != "Ship" || s1.PRNumber == nil || *s1.PRNumber != 12 || s1.PRURL != "https://github.com/acme/r/pull/12" || s1.DurationS == nil || *s1.DurationS != 60 || s1.Tokens.Billable != 31 || s1.CostUSD != nil || len(s1.Models) != 2 {
+	if s1.Role != "worker" || s1.SubtaskID == nil || *s1.SubtaskID != 8 || s1.SubtaskTitle != "Ship" || s1.PRNumber == nil || *s1.PRNumber != 12 || s1.PRURL != "https://github.com/acme/r/pull/12" || s1.DurationS == nil || *s1.DurationS != 60 || s1.Tokens.Billable != 31 || s1.CostUSD == nil || math.Abs(*s1.CostUSD-0.000035) > 1e-12 || !s1.CostPartial || len(s1.Models) != 2 {
 		t.Errorf("s1 = %+v", s1)
 	}
-	if got.Sessions[1].Error != "read denied" || got.Sessions[1].CostUSD == nil || *got.Sessions[1].CostUSD != 0 {
+	encoded, err := json.Marshal(s1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(encoded, &fields); err != nil || fields["cost_partial"] != true {
+		t.Errorf("session cost_partial JSON missing: %s, err %v", encoded, err)
+	}
+	if got.Sessions[1].Error != "read denied" || got.Sessions[1].CostUSD == nil || *got.Sessions[1].CostUSD != 0 || got.Sessions[1].CostPartial {
 		t.Errorf("error session = %+v", got.Sessions[1])
 	}
 	for i, want := range []string{"running", "pending", "running"} {
 		s := got.Sessions[i+2]
-		if s.Status != want || s.Final || s.EndedAt != nil || s.DurationS != nil || s.CostUSD != nil || len(s.Models) != 0 || s.Tokens.Billable != 0 || s.Error != "" {
+		if s.Status != want || s.Final || s.EndedAt != nil || s.DurationS != nil || s.CostUSD != nil || s.CostPartial || len(s.Models) != 0 || s.Tokens.Billable != 0 || s.Error != "" {
 			t.Errorf("uncollected session = %+v, want status %q", s, want)
 		}
 	}

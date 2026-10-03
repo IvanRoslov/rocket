@@ -87,6 +87,7 @@ type SessionSummary struct {
 	Models       []SessionModel `json:"models"`
 	Tokens       Tokens         `json:"tokens"`
 	CostUSD      *float64       `json:"cost_usd"`
+	CostPartial  bool           `json:"cost_partial"`
 }
 
 type PeriodSummary struct {
@@ -116,21 +117,17 @@ func priceMap(prices []store.ModelPrice) map[string]store.ModelPrice {
 
 type modelKey struct{ model, agent string }
 
-func sortedModelKeys(models map[modelKey]Tokens) []modelKey {
-	keys := make([]modelKey, 0, len(models))
-	for key := range models {
-		keys = append(keys, key)
+func sortedModelNames(models map[string]Tokens) []string {
+	names := make([]string, 0, len(models))
+	for name := range models {
+		names = append(names, name)
 	}
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].model != keys[j].model {
-			return keys[i].model < keys[j].model
-		}
-		return keys[i].agent < keys[j].agent
-	})
-	return keys
+	sort.Strings(names)
+	return names
 }
 
-// modelCost returns nil only when a nonzero category lacks a rate.
+// modelCost returns nil when a nonzero category lacks a rate or the
+// calculated amount cannot be represented as a finite JSON number.
 func modelCost(t Tokens, p store.ModelPrice) *float64 {
 	var cost float64
 	for _, part := range []struct {
@@ -194,7 +191,7 @@ func Period(rows []store.UsageRow, prices []store.ModelPrice) PeriodSummary {
 	byPrice := priceMap(prices)
 	models := make(map[modelKey]*ModelSummary)
 	tasks := make(map[int64]*TaskSummary)
-	taskModels := make(map[int64]map[modelKey]Tokens)
+	taskModels := make(map[int64]map[string]Tokens)
 	allSessions := make(map[string]bool)
 	modelSessions := make(map[modelKey]map[string]bool)
 	taskSessions := make(map[int64]map[string]bool)
@@ -227,13 +224,13 @@ func Period(rows []store.UsageRow, prices []store.ModelPrice) PeriodSummary {
 		t := tokens(row.Tokens)
 		out.Totals.Tokens.add(t)
 		task.Tokens.add(t)
-		key := modelKey{row.Model, row.Agent}
 		if taskModels[row.TaskID] == nil {
-			taskModels[row.TaskID] = make(map[modelKey]Tokens)
+			taskModels[row.TaskID] = make(map[string]Tokens)
 		}
-		taskModelTokens := taskModels[row.TaskID][key]
+		taskModelTokens := taskModels[row.TaskID][row.Model]
 		taskModelTokens.add(t)
-		taskModels[row.TaskID][key] = taskModelTokens
+		taskModels[row.TaskID][row.Model] = taskModelTokens
+		key := modelKey{row.Model, row.Agent}
 		model := models[key]
 		if model == nil {
 			model = &ModelSummary{Model: row.Model, Agent: row.Agent, CostUSD: zeroCost()}
@@ -264,8 +261,8 @@ func Period(rows []store.UsageRow, prices []store.ModelPrice) PeriodSummary {
 		addCost(&out.Totals, model.CostUSD)
 	}
 	for id, task := range tasks {
-		for _, key := range sortedModelKeys(taskModels[id]) {
-			addPartialCost(&task.CostUSD, &task.CostPartial, modelCost(taskModels[id][key], byPrice[key.model]))
+		for _, model := range sortedModelNames(taskModels[id]) {
+			addPartialCost(&task.CostUSD, &task.CostPartial, modelCost(taskModels[id][model], byPrice[model]))
 		}
 		out.Tasks = append(out.Tasks, *task)
 	}
@@ -291,7 +288,7 @@ func Task(rows []store.UsageRow, prices []store.ModelPrice, taskID int64, prURLF
 	out := TaskUsageSummary{TaskID: taskID, Totals: Totals{CostUSD: zeroCost()}, Sessions: []SessionSummary{}}
 	byPrice := priceMap(prices)
 	index := make(map[string]int)
-	totalModels := make(map[modelKey]Tokens)
+	totalModels := make(map[string]Tokens)
 	for _, row := range rows {
 		i, exists := index[row.SessionID]
 		if !exists {
@@ -343,14 +340,13 @@ func Task(rows []store.UsageRow, prices []store.ModelPrice, taskID int64, prURLF
 		s.Models = append(s.Models, SessionModel{Model: row.Model, Tokens: t, CostUSD: cost})
 		s.Tokens.add(t)
 		out.Totals.Tokens.add(t)
-		key := modelKey{row.Model, row.Agent}
-		modelTokens := totalModels[key]
+		modelTokens := totalModels[row.Model]
 		modelTokens.add(t)
-		totalModels[key] = modelTokens
-		addFiniteCost(&s.CostUSD, cost)
+		totalModels[row.Model] = modelTokens
+		addPartialCost(&s.CostUSD, &s.CostPartial, cost)
 	}
-	for _, key := range sortedModelKeys(totalModels) {
-		addCost(&out.Totals, modelCost(totalModels[key], byPrice[key.model]))
+	for _, model := range sortedModelNames(totalModels) {
+		addCost(&out.Totals, modelCost(totalModels[model], byPrice[model]))
 	}
 	sort.Slice(out.Sessions, func(i, j int) bool {
 		a, b := out.Sessions[i], out.Sessions[j]

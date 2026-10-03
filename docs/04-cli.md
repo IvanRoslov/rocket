@@ -118,7 +118,7 @@ rocket stats prices rm <model> [--json]
 
 Главное число токенов во всех таблицах — `input + cache_write + output`;
 `cache_read` показывается отдельно. `≈ $` вычисляется по текущему прайсу:
-«—» у модели без полной цены, `(partial)` у итогов с оценённой лишь частью.
+«—» у модели без полной цены, `(partial)` у итогов и сессий с оценённой лишь частью.
 PUT и DELETE прайса из сессии агента запрещены (`403 human_only`).
 
 rocket stats collect [--session S | --all] [--retry-missing]
