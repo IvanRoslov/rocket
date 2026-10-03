@@ -72,6 +72,9 @@ func newStatsCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newStatsBrainstormCmd())
 	cmd.AddCommand(newStatsCollectCmd())
+	cmd.AddCommand(newStatsUsageCmd(dialStatsClient))
+	cmd.AddCommand(newStatsTaskCmd(dialStatsClient))
+	cmd.AddCommand(newStatsPricesCmd(dialStatsClient))
 	return cmd
 }
 

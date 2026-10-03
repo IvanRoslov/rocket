@@ -2,11 +2,14 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/IvanRoslov/rocket/internal/usage"
 )
 
 func TestStatsBrainstormUsage(t *testing.T) {
@@ -32,6 +35,174 @@ func TestStatsBrainstormUsage(t *testing.T) {
 		})
 	}
 }
+
+type fakeStatsClient struct {
+	getPath, putPath, deletePath string
+	getReply                     any
+	putBody                      map[string]any
+}
+
+func (f *fakeStatsClient) Get(path string, _, out any) error {
+	f.getPath = path
+	b, _ := json.Marshal(f.getReply)
+	return json.Unmarshal(b, out)
+}
+
+func (f *fakeStatsClient) Put(path string, in, out any) error {
+	f.putPath = path
+	b, _ := json.Marshal(in)
+	if err := json.Unmarshal(b, &f.putBody); err != nil {
+		return err
+	}
+	if out != nil {
+		return json.Unmarshal([]byte(`{"model":"vendor/gpt-6","input":2,"cache_write":3,"cache_read":null,"output":4,"updated_at":123}`), out)
+	}
+	return nil
+}
+
+func (f *fakeStatsClient) Delete(path string, _, _ any) error {
+	f.deletePath = path
+	return nil
+}
+
+func testStatsDial(f *fakeStatsClient) func() (statsClient, error) {
+	return func() (statsClient, error) { return f, nil }
+}
+
+func TestStatsUsageCommandFiltersAndTable(t *testing.T) {
+	f := &fakeStatsClient{getReply: statsUsageReply{
+		From: "2026-10-01", To: "2026-10-03", Pending: 2,
+		PeriodSummary: usage.PeriodSummary{
+			Totals: usage.Totals{Sessions: 1, Tokens: usage.Tokens{Input: 5, CacheRead: 9, Billable: 5}, CostUSD: floatPtr(1.25), CostPartial: true},
+			Models: []usage.ModelSummary{{Model: "m", Agent: "codex", Sessions: 1, Tokens: usage.Tokens{Input: 5, Billable: 5}}},
+			Tasks:  []usage.TaskSummary{{Sessions: 1, Tokens: usage.Tokens{Input: 5, Billable: 5}}},
+		},
+	}}
+	cmd := newStatsUsageCmd(testStatsDial(f))
+	cmd.SetArgs([]string{"--from", "2026-10-01", "--to", "2026-10-03", "--project", "p/x"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if f.getPath != "/v1/stats/usage?from=2026-10-01&project=p%2Fx&to=2026-10-03" {
+		t.Errorf("GET path=%q", f.getPath)
+	}
+	for _, want := range []string{"2026-10-01", "2026-10-03", "partial", "2", "m", "Без задачи", "—"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestStatsUsageEmptyTable(t *testing.T) {
+	out := renderUsageStats(statsUsageReply{From: "2026-10-01", To: "2026-10-03", PeriodSummary: usage.PeriodSummary{Totals: usage.Totals{CostUSD: floatPtr(0)}}})
+	if !strings.Contains(out, "нет расхода") {
+		t.Fatalf("empty output=%q", out)
+	}
+}
+
+func TestStatsTaskCommandAndSessionTable(t *testing.T) {
+	f := &fakeStatsClient{getReply: usage.TaskUsageSummary{
+		TaskID: 42, Totals: usage.Totals{Sessions: 1, Tokens: usage.Tokens{Billable: 10}, CostUSD: floatPtr(0.2)},
+		Sessions: []usage.SessionSummary{{SessionID: "s-1", Role: "worker", SubtaskTitle: "Build", Status: "ok", State: "done", PRURL: "https://github.com/acme/r/pull/9", Models: []usage.SessionModel{{Model: "m", Tokens: usage.Tokens{Billable: 10}}}, Tokens: usage.Tokens{Billable: 10}}},
+	}}
+	cmd := newStatsTaskCmd(testStatsDial(f))
+	cmd.SetArgs([]string{"42"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if f.getPath != "/v1/tasks/42/usage" {
+		t.Errorf("GET path=%q", f.getPath)
+	}
+	for _, want := range []string{"#42", "s-1", "worker", "Build", "m", "10", "https://github.com/acme/r/pull/9"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestStatsPricesSetMergesOmittedRatesAndClearsNull(t *testing.T) {
+	f := &fakeStatsClient{getReply: statsPricesReply{Prices: []statsPriceRow{{Model: "vendor/gpt-6", Input: floatPtr(1), CacheWrite: floatPtr(3), CacheRead: floatPtr(5), Output: floatPtr(4)}}}}
+	cmd := newStatsPricesCmd(testStatsDial(f))
+	cmd.SetArgs([]string{"set", "vendor/gpt-6", "--input", "2", "--cache-read", "null"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if f.getPath != "/v1/stats/prices" || f.putPath != "/v1/stats/prices/vendor%2Fgpt-6" {
+		t.Errorf("paths GET=%q PUT=%q", f.getPath, f.putPath)
+	}
+	if f.putBody["input"] != float64(2) || f.putBody["cache_write"] != float64(3) || f.putBody["cache_read"] != nil || f.putBody["output"] != float64(4) {
+		t.Errorf("merged body=%+v", f.putBody)
+	}
+}
+
+func TestStatsPricesSetNewModelOmittedRatesAreNull(t *testing.T) {
+	f := &fakeStatsClient{getReply: statsPricesReply{Prices: []statsPriceRow{}}}
+	cmd := newStatsPricesCmd(testStatsDial(f))
+	cmd.SetArgs([]string{"set", "new", "--output", "2"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if f.putBody["input"] != nil || f.putBody["cache_write"] != nil || f.putBody["cache_read"] != nil || f.putBody["output"] != float64(2) {
+		t.Errorf("new body=%+v", f.putBody)
+	}
+}
+
+func TestStatsPricesRemoveEscapesModel(t *testing.T) {
+	f := &fakeStatsClient{}
+	cmd := newStatsPricesCmd(testStatsDial(f))
+	cmd.SetArgs([]string{"rm", "vendor/gpt-6?x"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if f.deletePath != "/v1/stats/prices/vendor%2Fgpt-6%3Fx" {
+		t.Errorf("DELETE path=%q", f.deletePath)
+	}
+}
+
+func TestStatsPricesListUnpricedAndPriced(t *testing.T) {
+	out := renderPrices([]statsPriceRow{{Model: "a"}, {Model: "b", Input: floatPtr(1.5), Output: floatPtr(4)}})
+	for _, want := range []string{"a", "b", "—", "1.5", "4"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prices missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestStatsUsageTaskPricesArgumentErrors(t *testing.T) {
+	for _, args := range [][]string{
+		{"usage", "extra"}, {"task"}, {"task", "bad"}, {"task", "0"},
+		{"prices", "set", "m"}, {"prices", "set", "m", "--input", "-1"},
+		{"prices", "set", "m", "--output", "NaN"}, {"prices", "rm"}, {"prices", "rm", "m", "extra"},
+	} {
+		cmd := newStatsCmd()
+		cmd.SetArgs(args)
+		cmd.SilenceUsage, cmd.SilenceErrors = true, true
+		var usageErr *usageError
+		if err := cmd.Execute(); !errors.As(err, &usageErr) {
+			t.Errorf("args=%v: want usageError, got %v", args, err)
+		}
+	}
+}
+
+func TestStatsUsageTaskPricesAreRegistered(t *testing.T) {
+	seen := map[string]bool{}
+	for _, cmd := range newStatsCmd().Commands() {
+		seen[cmd.Name()] = true
+	}
+	for _, name := range []string{"usage", "task", "prices"} {
+		if !seen[name] {
+			t.Errorf("missing stats %s", name)
+		}
+	}
+}
+
+func floatPtr(v float64) *float64 { return &v }
 
 func TestRootHasStatsBrainstorm(t *testing.T) {
 	for _, c := range NewRootCmd().Commands() {
