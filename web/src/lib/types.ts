@@ -917,7 +917,11 @@ export interface UsageTokens {
   billable: number
 }
 
-/** Period or task totals. `cost_usd` sums the priced models; `cost_partial` says some usage had no price. */
+/**
+ * Period or task totals. `cost_usd` sums the priced models (null when none is
+ * priced); `cost_partial` says some usage had no price. `sessions` counts
+ * collected sessions (status ok) only.
+ */
 export interface UsageTotals {
   sessions: number
   tokens: UsageTokens
@@ -991,7 +995,10 @@ export interface UsageSession {
   duration_s: number | null
   models: UsageSessionModel[]
   tokens: UsageTokens
+  /** null when none of the session's models is priced. */
   cost_usd: number | null
+  /** Some of the session's usage has no price. */
+  cost_partial: boolean
   /** Why collection failed (status `error`); `""` when none. */
   error: string
 }

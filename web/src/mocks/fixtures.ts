@@ -1431,7 +1431,7 @@ export const usageStats: UsageStats = {
   from: '2026-09-04',
   to: '2026-10-03',
   totals: {
-    sessions: 8,
+    sessions: 5,
     tokens: sumTokens(OPUS_ORCH, HAIKU_ORCH, SOL_W4, OPUS_W5, OPUS_T17, OPUS_NO_TASK),
     cost_usd: 35.61,
     cost_partial: true,
@@ -1443,7 +1443,7 @@ export const usageStats: UsageStats = {
   ],
   tasks: [
     {
-      task_id: 12, title: 'Billing v2', project_id: 'billing', status: 'in_progress', sessions: 6,
+      task_id: 12, title: 'Billing v2', project_id: 'billing', status: 'in_progress', sessions: 3,
       tokens: sumTokens(OPUS_ORCH, HAIKU_ORCH, SOL_W4, OPUS_W5), cost_usd: 34.86, cost_partial: true,
     },
     {
@@ -1460,7 +1460,7 @@ export const usageStats: UsageStats = {
 
 export const taskUsage: TaskUsage = {
   task_id: 12,
-  totals: { sessions: 6, tokens: sumTokens(OPUS_ORCH, HAIKU_ORCH, SOL_W4, OPUS_W5), cost_usd: 34.86, cost_partial: true },
+  totals: { sessions: 3, tokens: sumTokens(OPUS_ORCH, HAIKU_ORCH, SOL_W4, OPUS_W5), cost_usd: 34.86, cost_partial: true },
   sessions: [
     {
       session_id: 's-billing-v2-orch', role: 'orchestrator', subtask_id: null, subtask_title: '',
@@ -1471,7 +1471,7 @@ export const taskUsage: TaskUsage = {
         { model: 'claude-opus-5-5', tokens: OPUS_ORCH, cost_usd: 31.85 },
         { model: 'claude-haiku-4-5', tokens: HAIKU_ORCH, cost_usd: 0.26 },
       ],
-      tokens: sumTokens(OPUS_ORCH, HAIKU_ORCH), cost_usd: 32.11,
+      tokens: sumTokens(OPUS_ORCH, HAIKU_ORCH), cost_usd: 32.11, cost_partial: false,
     },
     {
       session_id: 's-billing-v2-w4', role: 'worker', subtask_id: 16, subtask_title: 'Retire legacy billing cron',
@@ -1480,7 +1480,7 @@ export const taskUsage: TaskUsage = {
       state: 'done', status: 'ok', final: true, error: '',
       started_at: NOW - 2 * DAY, ended_at: NOW - 2 * DAY + 42 * MIN, duration_s: 42 * MIN,
       models: [{ model: 'gpt-6-sol', tokens: SOL_W4, cost_usd: null }],
-      tokens: SOL_W4, cost_usd: null,
+      tokens: SOL_W4, cost_usd: null, cost_partial: true,
     },
     {
       session_id: 's-billing-v2-w5', role: 'worker', subtask_id: 13, subtask_title: 'Migrate billing schema',
@@ -1489,14 +1489,14 @@ export const taskUsage: TaskUsage = {
       state: 'killed', status: 'ok', final: true, error: '',
       started_at: NOW - 3 * DAY, ended_at: NOW - 3 * DAY + 2 * HOUR + 5 * MIN, duration_s: 2 * HOUR + 5 * MIN,
       models: [{ model: 'claude-opus-5-5', tokens: OPUS_W5, cost_usd: 2.75 }],
-      tokens: OPUS_W5, cost_usd: 2.75,
+      tokens: OPUS_W5, cost_usd: 2.75, cost_partial: false,
     },
     {
       session_id: 's-billing-v2-w3', role: 'worker', subtask_id: 15, subtask_title: 'Data migration + backfill',
       agent: 'claude', profile: '', effort: '', repo_id: 'infra',
       pr_number: null, pr_url: '', pr_state: '', state: 'errored', status: 'missing', final: true, error: '',
       started_at: NOW - 2 * DAY, ended_at: NOW - 90 * MIN, duration_s: 2 * DAY - 90 * MIN,
-      models: [], tokens: usageTokens(0, 0, 0, 0), cost_usd: 0,
+      models: [], tokens: usageTokens(0, 0, 0, 0), cost_usd: null, cost_partial: false,
     },
     {
       session_id: 's-billing-v2-w6', role: 'worker', subtask_id: 15, subtask_title: 'Data migration + backfill',
@@ -1504,7 +1504,7 @@ export const taskUsage: TaskUsage = {
       pr_number: null, pr_url: '', pr_state: '', state: 'killed', status: 'error', final: true,
       error: 'read transcript: permission denied',
       started_at: NOW - 2 * DAY, ended_at: NOW - 2 * DAY + 10 * MIN, duration_s: 10 * MIN,
-      models: [], tokens: usageTokens(0, 0, 0, 0), cost_usd: 0,
+      models: [], tokens: usageTokens(0, 0, 0, 0), cost_usd: null, cost_partial: false,
     },
     {
       session_id: 's-billing-v2-w2', role: 'worker', subtask_id: 14, subtask_title: 'New billing UI',
@@ -1512,14 +1512,14 @@ export const taskUsage: TaskUsage = {
       pr_number: 14, pr_url: 'https://github.com/acme/web/pull/14', pr_state: 'open',
       state: 'running', status: 'running', final: false, error: '',
       started_at: NOW - 2 * DAY, ended_at: null, duration_s: null,
-      models: [], tokens: usageTokens(0, 0, 0, 0), cost_usd: null,
+      models: [], tokens: usageTokens(0, 0, 0, 0), cost_usd: null, cost_partial: false,
     },
     {
       session_id: 's-billing-v2-w7', role: 'worker', subtask_id: 14, subtask_title: 'New billing UI',
       agent: 'claude', profile: '', effort: '', repo_id: 'web',
       pr_number: null, pr_url: '', pr_state: '', state: 'killed', status: 'pending', final: false, error: '',
       started_at: NOW - 3 * DAY, ended_at: null, duration_s: null,
-      models: [], tokens: usageTokens(0, 0, 0, 0), cost_usd: null,
+      models: [], tokens: usageTokens(0, 0, 0, 0), cost_usd: null, cost_partial: false,
     },
   ],
 }

@@ -1123,7 +1123,7 @@ export const handlers = [
     if (project && project !== 'billing') {
       return HttpResponse.json({
         from, to, models: [], tasks: [], pending: 0,
-        totals: { sessions: 0, tokens: usageTokens(0, 0, 0, 0), cost_usd: 0, cost_partial: false },
+        totals: { sessions: 0, tokens: usageTokens(0, 0, 0, 0), cost_usd: null, cost_partial: false },
       })
     }
     return HttpResponse.json({ ...usageStats, from, to })
@@ -1141,7 +1141,7 @@ export const handlers = [
     if (id === taskUsage.task_id) return HttpResponse.json(taskUsage)
     return HttpResponse.json({
       task_id: id, sessions: [],
-      totals: { sessions: 0, tokens: usageTokens(0, 0, 0, 0), cost_usd: 0, cost_partial: false },
+      totals: { sessions: 0, tokens: usageTokens(0, 0, 0, 0), cost_usd: null, cost_partial: false },
     })
   }),
 

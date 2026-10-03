@@ -28,9 +28,9 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 
 export const PRICES_PATH = '/settings?section=prices'
 
-/** "$12.40 (partial)" when some of the usage has no price. */
+/** "$12.40 (partial)" when some of the usage has no price; "—" when none has. */
 export function costText(cost: number | null, partial: boolean): string {
-  return partial ? `${formatCost(cost)} (partial)` : formatCost(cost)
+  return partial && cost !== null ? `${formatCost(cost)} (partial)` : formatCost(cost)
 }
 
 /** The four headline cards, shared with the task Usage tab. */
@@ -225,7 +225,7 @@ export function UsageScreen() {
           <p className="usage-empty">No usage in this period</p>
         ) : (
           <>
-            <TotalsCards totals={data.totals} sessionsHint="ended in this period" />
+            <TotalsCards totals={data.totals} sessionsHint="counted, ended in this period" />
             <h2 className="usage__subtitle">By model</h2>
             <ModelsTable models={data.models} />
             <h2 className="usage__subtitle">By task</h2>

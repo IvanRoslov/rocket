@@ -119,7 +119,7 @@ describe('UsageScreen — numbers', () => {
     expect(card('Tokens')).toHaveTextContent('4.26M')
     expect(card('Cache read')).toHaveTextContent('33.9M')
     expect(card('≈ Cost')).toHaveTextContent('$35.61 (partial)')
-    expect(card('Sessions')).toHaveTextContent('8')
+    expect(card('Sessions')).toHaveTextContent('5')
   })
 
   it('lists models with the token breakdown; a model without a price links to Settings', async () => {
@@ -149,7 +149,7 @@ describe('UsageScreen — numbers', () => {
     )
     const billing = within(table).getByRole('link', { name: '#12 Billing v2' }).closest('tr') as HTMLElement
     expect(within(billing).getAllByRole('cell').map((c) => c.textContent)).toEqual([
-      '#12 Billing v2', 'billing', 'In Progress', '6', '4.16M', '$34.86 (partial)',
+      '#12 Billing v2', 'billing', 'In Progress', '3', '4.16M', '$34.86 (partial)',
     ])
     const none = within(table).getByText('No task').closest('tr') as HTMLElement
     expect(within(none).queryByRole('link')).not.toBeInTheDocument()

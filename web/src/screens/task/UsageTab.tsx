@@ -9,7 +9,7 @@ import { Link } from 'react-router-dom'
 import { useTaskUsage } from '../../lib/queries'
 import type { UsageSession } from '../../lib/types'
 import { formatCost, formatDuration, formatTokens } from '../../lib/usage'
-import { TotalsCards } from '../usage/UsageScreen'
+import { TotalsCards, costText } from '../usage/UsageScreen'
 import '../usage/usage.css'
 
 interface UsageTabProps {
@@ -72,7 +72,7 @@ function SessionRows({ session: s, taskPath }: { session: UsageSession; taskPath
         <td className="usage-num">{formatDuration(s.duration_s)}</td>
         <td className="usage-num usage-strong">{dash(formatTokens(s.tokens.billable))}</td>
         <td className="usage-num usage-muted">{dash(formatTokens(s.tokens.cache_read))}</td>
-        <td className="usage-num">{dash(formatCost(s.cost_usd))}</td>
+        <td className="usage-num">{dash(costText(s.cost_usd, s.cost_partial))}</td>
       </tr>
       {!single &&
         s.models.map((m) => (
@@ -107,7 +107,7 @@ export function UsageTab({ taskId, taskPath }: UsageTabProps) {
 
   return (
     <div className="usage-tab">
-      <TotalsCards totals={data.totals} sessionsHint="orchestrator and workers" />
+      <TotalsCards totals={data.totals} sessionsHint="counted sessions of the feature" />
       <div className="usage-scroll">
         <table className="usage-table usage-table--compact" aria-label="Sessions">
           <thead>

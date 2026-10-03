@@ -7,6 +7,7 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { MemoryRouter } from 'react-router-dom'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { taskUsage } from '../../mocks/fixtures'
 import { handlers } from '../../mocks/handlers'
 import { UsageTab } from './UsageTab'
 
@@ -90,6 +91,22 @@ describe('UsageTab', () => {
     const pending = cells(rowOf('s-billing-v2-w7'))
     expect(status('s-billing-v2-w7')).toBe('pending count')
     expect(pending.slice(5, 8)).toEqual(['—', '—', '—'])
+  })
+
+  it('marks a session cost that leaves out an unpriced model', async () => {
+    server.use(
+      http.get('/v1/tasks/:id/usage', () =>
+        HttpResponse.json({
+          ...taskUsage,
+          sessions: taskUsage.sessions.map((s) =>
+            s.session_id === 's-billing-v2-orch' ? { ...s, cost_usd: 31.85, cost_partial: true } : s,
+          ),
+        }),
+      ),
+    )
+    renderTab()
+    await screen.findByRole('table', { name: 'Sessions' })
+    expect(cells(rowOf('s-billing-v2-orch'))[7]).toBe('$31.85 (partial)')
   })
 
   it('shows an empty state for a feature with no sessions', async () => {
