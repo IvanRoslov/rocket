@@ -42,6 +42,27 @@ type LaunchSpec struct {
 - **Activity:** сессионные JSONL codex в `~/.codex/sessions/` (аналогичный принцип: mtime + последняя запись); минимум — процесс жив/мёртв + пороги по mtime.
 - Уточнение деталей — задача фазы 5; интерфейс рассчитан на то, что адаптер знает только свои источники.
 
+## Расход токенов (UsageReader)
+
+Оба адаптера дополнительно реализуют необязательный интерфейс `agent.UsageReader`; основной `agent.Agent` от него не зависит:
+
+```go
+type Tokens struct { Input, CacheWrite, CacheRead, Output, Reasoning, Messages int64 }
+type Usage struct {
+    Models map[string]Tokens
+    FirstAt, LastAt time.Time
+    Found bool
+}
+type UsageReader interface {
+    Usage(ctx context.Context, worktreePath string, since time.Time) (Usage, error)
+}
+```
+
+`Models` индексируется **фактическим id модели из транскрипта**, а не моделью профиля запуска. `FirstAt` и `LastAt` берутся из временных меток записей. `Found=false` без ошибки означает, что транскрипт сессии не найден; ошибка чтения файла возвращается без частичной суммы. Записи до `since` не учитываются; для записей без временной метки берётся mtime файла. Парсеры читают JSONL построчно, пропускают повреждённые строки и поддерживают строки до 16 МиБ.
+
+- **Claude Code:** все `*.jsonl` в `~/.claude/projects/<slug-worktree>/` и `*/subagents/*.jsonl` при наличии подходящего родительского файла. У родителя сверяется `cwd` с worktree; сабагент привязывается через родителя. Из строк `type=assistant` учитываются `message.model` и `message.usage`, кроме модели `<synthetic>`. Повторы `message.id` дают один ответ: `Messages` — число уникальных ответов. `input_tokens` → `Input`, `cache_creation_input_tokens` → `CacheWrite`, `cache_read_input_tokens` → `CacheRead`, `output_tokens` → `Output`.
+- **Codex:** все `rollout-*.jsonl` в каталогах `$CODEX_HOME/sessions/YYYY/MM/DD` от даты `since` до сегодня, если `session_meta.payload.cwd` совпадает с worktree. `event_msg` с `payload.type=token_count` содержит накопительный `info.total_token_usage`; разница между соседними событиями относится к последнему `turn_context.model`. `Input = input_tokens − cached_input_tokens`, `CacheRead = cached_input_tokens`, `CacheWrite = cache_write_input_tokens`, `Output = output_tokens`; `Reasoning = reasoning_output_tokens` уже входит в `Output`. `Messages` — число событий `token_count`, у которых накопительный `total_tokens` вырос относительно предыдущего события; повтор без прироста не считается.
+
 ## Профили моделей
 
 Профиль — запись реестра `model_profiles` (схема — в [05-state.md](05-state.md)): имя, агент, модель, усилие, описание «для чего подходит», флаг `enabled`. Реестр ведёт **только человек** — дашборд (Настройки → «Модели») или CLI:
