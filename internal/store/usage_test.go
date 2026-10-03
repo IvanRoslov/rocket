@@ -454,3 +454,37 @@ func addUsageTestSession(t *testing.T, s *Store, sess Session) {
 }
 
 func itoaUsage(n int64) string { return fmt.Sprintf("%d", n) }
+
+func TestTerminalSessionIDsForManualRecollect(t *testing.T) {
+	s := openTestStore(t)
+	for _, id := range []string{"none", "ok", "missing", "error", "live"} {
+		state := "killed"
+		if id == "live" {
+			state = "running"
+		}
+		addUsageTestSession(t, s, Session{ID: id, Kind: "worker", State: state})
+	}
+	for id, status := range map[string]string{"ok": "ok", "missing": "missing", "error": "error"} {
+		if err := s.ReplaceSessionUsage(SessionStats{SessionID: id, Status: status, Final: true, StartedAt: 1, CollectedAt: 1, Attempts: 3}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		collected, missing bool
+		want               []string
+	}{
+		{true, false, []string{"error", "none", "ok"}},
+		{true, true, []string{"error", "missing", "none", "ok"}},
+		{false, true, []string{"missing"}},
+		{false, false, nil},
+	} {
+		got, err := s.TerminalSessionIDs(tc.collected, tc.missing)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sort.Strings(got)
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("TerminalSessionIDs(%v,%v) = %v, want %v", tc.collected, tc.missing, got, tc.want)
+		}
+	}
+}

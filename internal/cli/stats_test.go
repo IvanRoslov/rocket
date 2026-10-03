@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"reflect"
 	"strings"
@@ -187,6 +188,60 @@ func TestRenderBrainstormStats(t *testing.T) {
 	for _, want := range []string{"последние 4 нед.", "ответов на вопросы шторма нет", "штормов нет"} {
 		if !strings.Contains(empty, want) {
 			t.Errorf("empty output missing %q:\n%s", want, empty)
+		}
+	}
+}
+
+func TestStatsCollectSendsRequest(t *testing.T) {
+	tests := []struct {
+		name     string
+		session  string
+		all      bool
+		retry    bool
+		wantBody map[string]any
+		wantOut  string
+	}{
+		{"session", "w1", false, false, map[string]any{"session_id": "w1"}, "w1"},
+		{"all", "", true, false, map[string]any{"all": true}, "3"},
+		{"all and missing", "", true, true, map[string]any{"all": true, "retry_missing": true}, "3"},
+		{"missing only", "", false, true, map[string]any{"retry_missing": true}, "3"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			seen, h := fakeDaemon(t, map[string]any{
+				"POST /v1/stats/usage/collect": map[string]any{"queued": 3},
+			})
+			c := newUnixSocketTestServer(t, h)
+			var out bytes.Buffer
+			if err := runStatsCollect(c, &out, tt.session, tt.all, tt.retry); err != nil {
+				t.Fatal(err)
+			}
+			if len(*seen) != 1 || (*seen)[0].Method != "POST" || (*seen)[0].Path != "/v1/stats/usage/collect" {
+				t.Fatalf("requests = %+v", *seen)
+			}
+			if !reflect.DeepEqual((*seen)[0].Body, tt.wantBody) {
+				t.Fatalf("body = %v, want %v", (*seen)[0].Body, tt.wantBody)
+			}
+			if !strings.Contains(out.String(), tt.wantOut) {
+				t.Fatalf("output %q lacks %q", out.String(), tt.wantOut)
+			}
+		})
+	}
+}
+
+func TestStatsCollectUsage(t *testing.T) {
+	for _, args := range [][]string{
+		{"collect"},
+		{"collect", "--session", "w1", "--all"},
+		{"collect", "extra"},
+	} {
+		cmd := newStatsCmd()
+		cmd.SetArgs(args)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		var usageErr *usageError
+		if err := cmd.Execute(); !errors.As(err, &usageErr) {
+			t.Errorf("%v: expected usageError, got %T: %v", args, err, err)
 		}
 	}
 }
