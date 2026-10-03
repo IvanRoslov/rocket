@@ -17,13 +17,14 @@ import { MessagesTab } from './MessagesTab'
 import { OverviewTab } from './OverviewTab'
 import { QuestionBanner } from './QuestionBanner'
 import { QuestionsTab } from './QuestionsTab'
+import { UsageTab } from './UsageTab'
 import { AgentRail } from '../milestones/AgentRail'
 import { SessionRail } from './SessionRail'
 import './TaskScreen.css'
 
-type TabId = 'brainstorm' | 'questions' | 'overview' | 'docs' | 'journal' | 'messages'
+type TabId = 'brainstorm' | 'questions' | 'overview' | 'docs' | 'journal' | 'messages' | 'usage'
 
-const TAB_IDS: TabId[] = ['brainstorm', 'questions', 'overview', 'docs', 'journal', 'messages']
+const TAB_IDS: TabId[] = ['brainstorm', 'questions', 'overview', 'docs', 'journal', 'messages', 'usage']
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
   backlog: 'Backlog',
@@ -105,12 +106,15 @@ export function TaskScreen() {
   if (task && task.id === taskId && pickedTab === null) setTab(task.status === 'brainstorm' ? 'brainstorm' : 'overview')
 
   if (!taskId || !task) return null
-  const tab: TabId = pickedTab ?? (task.status === 'brainstorm' ? 'brainstorm' : 'overview')
 
   // A milestone (task #1023, spec v2) belongs to no project: it is reached at
   // /milestones/:taskId, goes back to the milestones board, and shows the
   // agent holding it where a project task shows its feature branch.
   const isMilestone = task.milestone === true
+  // Usage is counted per feature (task #5138): the daemon refuses a subtask.
+  const hasUsage = !isMilestone && task.parent_id === undefined
+  const defaultTab: TabId = task.status === 'brainstorm' ? 'brainstorm' : 'overview'
+  const tab: TabId = pickedTab === 'usage' && !hasUsage ? defaultTab : (pickedTab ?? defaultTab)
   const project = projects?.find((p) => p.id === projectId)
   if (!projectId && !isMilestone) return null
   const backPath = isMilestone ? '/milestones' : `/p/${projectId}`
@@ -128,6 +132,7 @@ export function TaskScreen() {
     { id: 'docs', label: 'Docs', count: docs?.length },
     { id: 'journal', label: 'Journal', count: log?.length },
     { id: 'messages', label: 'Messages', count: messages?.length },
+    ...(hasUsage ? [{ id: 'usage' as const, label: 'Usage' }] : []),
   ]
 
   return (
@@ -228,6 +233,7 @@ export function TaskScreen() {
           {tab === 'docs' && <DocsTab docs={docs ?? []} />}
           {tab === 'journal' && <JournalTab log={log ?? []} />}
           {tab === 'messages' && <MessagesTab session={task.session} messages={messages ?? []} />}
+          {tab === 'usage' && <UsageTab taskId={taskId} taskPath={taskPath} />}
         </div>
       </div>
 

@@ -149,3 +149,33 @@
 .usage-link {
   color: var(--accent-text);
 }
+
+/* ---------- Task Usage tab ---------- */
+.usage-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.usage-nowrap {
+  white-space: nowrap;
+}
+.usage-subrow td {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  font-size: 12.5px;
+  color: var(--text-3);
+  background: var(--surface-2);
+}
+.usage-status--snapshot {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font: 600 11px var(--font-ui);
+  color: var(--warn-text-2);
+  background: var(--warn-bg-2);
+  white-space: nowrap;
+}
+.usage-status--error {
+  color: var(--err-text);
+  text-decoration: underline dotted;
+  cursor: help;
+}

@@ -6,7 +6,7 @@
 import { Link, useSearchParams } from 'react-router-dom'
 import { Segmented } from '../../components/Segmented'
 import { useProjects, useUsageStats } from '../../lib/queries'
-import type { TaskStatus, UsageModelRow, UsageStats, UsageTaskRow } from '../../lib/types'
+import type { TaskStatus, UsageModelRow, UsageTaskRow, UsageTotals } from '../../lib/types'
 import { formatCost, formatTokens, presetRange, validRange } from '../../lib/usage'
 import './usage.css'
 
@@ -33,13 +33,13 @@ export function costText(cost: number | null, partial: boolean): string {
   return partial ? `${formatCost(cost)} (partial)` : formatCost(cost)
 }
 
-function Totals({ data }: { data: UsageStats }) {
-  const { totals } = data
+/** The four headline cards, shared with the task Usage tab. */
+export function TotalsCards({ totals, sessionsHint }: { totals: UsageTotals; sessionsHint: string }) {
   const cards = [
     { label: 'Tokens', value: formatTokens(totals.tokens.billable), hint: 'input + cache write + output' },
     { label: 'Cache read', value: formatTokens(totals.tokens.cache_read), hint: 'not in Tokens' },
     { label: '≈ Cost', value: costText(totals.cost_usd, totals.cost_partial), hint: 'by the prices in Settings' },
-    { label: 'Sessions', value: String(totals.sessions), hint: 'ended in this period' },
+    { label: 'Sessions', value: String(totals.sessions), hint: sessionsHint },
   ]
   return (
     <ul className="usage-cards" aria-label="Totals">
@@ -221,7 +221,7 @@ export function UsageScreen() {
           <p className="usage-empty">No usage in this period</p>
         ) : (
           <>
-            <Totals data={data} />
+            <TotalsCards totals={data.totals} sessionsHint="ended in this period" />
             <h2 className="usage__subtitle">By model</h2>
             <ModelsTable models={data.models} />
             <h2 className="usage__subtitle">By task</h2>
