@@ -53,6 +53,11 @@ type Deps struct {
 	// per-model effort checks, import-catalog). NewHandler fills a fresh one
 	// in front of the real agents when nil.
 	Catalogs *CatalogCache
+
+	// Usage queues token-usage collection (orchestrator snapshot on review,
+	// manual re-collection). Nil disables both: POST /v1/stats/usage/collect
+	// answers 503.
+	Usage UsageCollector
 }
 
 // NewHandler builds the routed http.Handler for rocket's API.
@@ -92,6 +97,7 @@ func NewHandler(d Deps) http.Handler {
 	registerTaskRoutes(mux, d)
 	registerGateRoutes(mux, d)
 	registerStatsRoutes(mux, d)
+	registerUsageCollectRoutes(mux, d)
 	registerEventsRoutes(mux, d)
 	registerSSERoutes(mux, d)
 	registerInternalActivityRoutes(mux, d)

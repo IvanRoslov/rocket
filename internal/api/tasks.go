@@ -794,6 +794,12 @@ func handlePatchTask(w http.ResponseWriter, r *http.Request, d Deps) {
 		// the final response.
 		task.Status = *req.Status
 
+		// The feature went to review: snapshot its orchestrator's usage.
+		// Only queued, so the PATCH never waits for transcript reading.
+		if *req.Status == "review" && task.ParentID == 0 && task.SessionID != "" && d.Usage != nil {
+			d.Usage.Snapshot(task.SessionID)
+		}
+
 		if *req.Status == "done" && task.ParentID == 0 {
 			done := cascadeOrchestratorCleanup(r.Context(), d, task)
 			cleanedUp = &done
