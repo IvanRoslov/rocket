@@ -1383,11 +1383,13 @@ function eventQueryKeys(type: string): string[][] {
     // times a second per open tab.
     return []
   }
-  if (type.startsWith('session.')) return [['sessions'], ['projects']]
+  // The task Usage tab lists live sessions ("running") and their PR state.
+  if (type.startsWith('session.')) return [['sessions'], ['projects'], ['taskUsage']]
   if (type.startsWith('message.')) return [['messages']]
   if (type.startsWith('task.')) {
     // Answers, outcome overrides and gate decisions all move the storm metric.
-    return [['tasks'], ['task'], ['questions'], ['threads'], ['stats']]
+    // Task status shows in the Usage screen's By task table.
+    return [['tasks'], ['task'], ['questions'], ['threads'], ['stats'], ['usage']]
   }
   if (type.startsWith('milestone.')) {
     // `milestone.quiet` (subtask #1032) flips the quiet flag the milestone
@@ -1410,7 +1412,7 @@ function eventQueryKeys(type: string): string[][] {
   if (type.startsWith('pr.')) {
     // PR state changes (phase 4): re-fetch the sessions carrying pr_*
     // fields plus the task/board views that surface PR badges.
-    return [['sessions'], ['tasks'], ['task']]
+    return [['sessions'], ['tasks'], ['task'], ['taskUsage']]
   }
   return []
 }

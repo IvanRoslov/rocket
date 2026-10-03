@@ -155,6 +155,20 @@ describe('UsageScreen — numbers', () => {
     expect(within(none).queryByRole('link')).not.toBeInTheDocument()
   })
 
+  it('links a task without a project to its milestone page', async () => {
+    server.use(
+      http.get('/v1/stats/usage', () =>
+        HttpResponse.json({
+          ...usageStats,
+          tasks: [{ ...usageStats.tasks[0], task_id: 40, title: 'Pager noise', project_id: '' }],
+        }),
+      ),
+    )
+    renderScreen()
+    const table = await screen.findByRole('table', { name: 'By task' })
+    expect(within(table).getByRole('link', { name: '#40 Pager noise' })).toHaveAttribute('href', '/milestones/40')
+  })
+
   it('shows a banner while the history is being counted', async () => {
     server.use(http.get('/v1/stats/usage', () => HttpResponse.json({ ...usageStats, pending: 120 })))
     renderScreen()

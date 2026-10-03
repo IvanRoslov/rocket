@@ -18,9 +18,16 @@ export function presetRange(days: number, today: Date = new Date()): { from: str
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
-/** Two well-formed dates, `from` not after `to` (ISO dates compare as strings). */
+/** A real calendar day: 2026-02-30 round-trips to March and fails. */
+function realDate(s: string): boolean {
+  if (!DATE_RE.test(s)) return false
+  const [y, m, d] = s.split('-').map(Number)
+  return localDate(new Date(y, m - 1, d)) === s
+}
+
+/** Two real dates, `from` not after `to` (ISO dates compare as strings). */
 export function validRange(from: string, to: string): boolean {
-  return DATE_RE.test(from) && DATE_RE.test(to) && from <= to
+  return realDate(from) && realDate(to) && from <= to
 }
 
 const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumSignificantDigits: 3 })

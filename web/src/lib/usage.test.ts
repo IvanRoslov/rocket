@@ -19,6 +19,8 @@ describe('usage helpers', () => {
     expect(validRange('2026-10-01', '2026-09-30')).toBe(false)
     expect(validRange('', '2026-09-30')).toBe(false)
     expect(validRange('2026-9-1', '2026-09-30')).toBe(false)
+    expect(validRange('2026-02-30', '2026-03-10')).toBe(false)
+    expect(validRange('2026-02-28', '2026-13-01')).toBe(false)
   })
 
   it('formatTokens is compact with three significant digits', () => {

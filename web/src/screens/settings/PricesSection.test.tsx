@@ -79,6 +79,16 @@ describe('PricesSection', () => {
     expect(within(await rowOf('gpt-6-sol')).getByRole('button', { name: 'Save' })).toBeDisabled()
   })
 
+  it('treats the same number in another spelling as unchanged', async () => {
+    const user = userEvent.setup()
+    renderWith(<PricesSection />)
+    const opus = await rowOf('claude-opus-5-5')
+    const input = within(opus).getByLabelText('claude-opus-5-5 input')
+    await user.clear(input)
+    await user.type(input, '5.00')
+    expect(within(opus).getByRole('button', { name: 'Save' })).toBeDisabled()
+  })
+
   it('refuses a negative or non-numeric price without a request', async () => {
     const user = userEvent.setup()
     const puts = spyPuts()

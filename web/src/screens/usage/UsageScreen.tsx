@@ -120,7 +120,11 @@ function TasksTable({ tasks }: { tasks: UsageTaskRow[] }) {
               {t.task_id === null ? (
                 <span className="usage-muted">No task</span>
               ) : (
-                <Link className="usage-link" to={`/p/${t.project_id}/tasks/${t.task_id}?tab=usage`}>
+                <Link
+                  className="usage-link"
+                  // A task without a project is a milestone, reached outside any project.
+                  to={t.project_id ? `/p/${t.project_id}/tasks/${t.task_id}?tab=usage` : `/milestones/${t.task_id}`}
+                >
                   #{t.task_id} {t.title}
                 </Link>
               )}

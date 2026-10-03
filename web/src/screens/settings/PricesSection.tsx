@@ -42,10 +42,11 @@ function parseDraft(d: Draft): ModelPriceInput | undefined {
 function PriceRow({ price }: { price: ModelPrice }) {
   const setPrice = useSetPrice()
   const deletePrice = useDeletePrice()
-  const initial = draftOf(price)
-  const [draft, setDraft] = useState<Draft>(initial)
+  const [draft, setDraft] = useState<Draft>(() => draftOf(price))
   const [invalid, setInvalid] = useState(false)
-  const dirty = KINDS.some(({ key }) => draft[key].trim() !== initial[key])
+  // "5.00" over a saved 5 is no change; a bad field is, so Save can say why.
+  const parsed = parseDraft(draft)
+  const dirty = parsed === undefined || KINDS.some(({ key }) => parsed[key] !== price[key])
   const priced = KINDS.some(({ key }) => price[key] !== null)
   const busy = setPrice.isPending || deletePrice.isPending
 

@@ -592,4 +592,25 @@ describe('usage (task #5138)', () => {
       vi.useRealTimers()
     }
   })
+
+  it('session, PR and task events refresh the usage views that show them', () => {
+    vi.useFakeTimers()
+    try {
+      const keysFor = (type: string) => {
+        const queryClient = new QueryClient()
+        const spy = vi.spyOn(queryClient, 'invalidateQueries')
+        wireInvalidation(queryClient)({ id: 1, ts: 1, type })
+        vi.advanceTimersByTime(INVALIDATION_WINDOW_MS)
+        return spy.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))
+      }
+      // A new worker's "running" row and its PR state live in the task Usage tab.
+      expect(keysFor('session.spawned')).toContain('["taskUsage"]')
+      expect(keysFor('pr.merged')).toContain('["taskUsage"]')
+      // Task status shows in the By task table.
+      expect(keysFor('task.status_changed')).toContain('["usage"]')
+      expect(keysFor('session.chat_updated')).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
