@@ -899,3 +899,126 @@ export interface ImportCatalogResult {
   created: string[]
   skipped: { model: string; reason: string }[]
 }
+
+// ---------------------------------------------------------------------------
+// Agent usage — GET /v1/stats/usage, GET /v1/tasks/{id}/usage,
+// /v1/stats/prices (task #5138 spec §3). Times are unix seconds.
+// ---------------------------------------------------------------------------
+
+/** Token counts by kind. `billable = input + cache_write + output` — the headline number; cache reads never count. */
+export interface UsageTokens {
+  input: number
+  cache_write: number
+  cache_read: number
+  /** Includes reasoning. */
+  output: number
+  /** Subset of output (Codex), else 0. */
+  reasoning: number
+  billable: number
+}
+
+/**
+ * Period or task totals. `cost_usd` sums the priced models (null when none is
+ * priced); `cost_partial` says some usage had no price. `sessions` counts
+ * collected sessions (status ok) only.
+ */
+export interface UsageTotals {
+  sessions: number
+  tokens: UsageTokens
+  cost_usd: number | null
+  cost_partial: boolean
+}
+
+export interface UsageModelRow {
+  model: string
+  agent: string
+  sessions: number
+  tokens: UsageTokens
+  /** null when the model has no full price for a kind it used. */
+  cost_usd: number | null
+}
+
+export interface UsageTaskRow {
+  /** null — the "No task" bucket. */
+  task_id: number | null
+  title: string
+  project_id: string
+  status: TaskStatus | ''
+  sessions: number
+  tokens: UsageTokens
+  cost_usd: number | null
+  cost_partial: boolean
+}
+
+/** `GET /v1/stats/usage?from=&to=&project=`. */
+export interface UsageStats {
+  from: string
+  to: string
+  totals: UsageTotals
+  models: UsageModelRow[]
+  tasks: UsageTaskRow[]
+  /** Terminal sessions in the period the backfill has not reached yet. */
+  pending: number
+}
+
+/**
+ * ok/missing/error — collected; running — live, nothing collected yet;
+ * pending — ended, not collected yet (contract addendum).
+ */
+export type UsageStatus = 'ok' | 'missing' | 'error' | 'running' | 'pending'
+
+export interface UsageSessionModel {
+  model: string
+  tokens: UsageTokens
+  cost_usd: number | null
+}
+
+export interface UsageSession {
+  session_id: string
+  role: 'orchestrator' | 'worker'
+  subtask_id: number | null
+  subtask_title: string
+  agent: string
+  profile: string
+  effort: string
+  repo_id: string
+  pr_number: number | null
+  pr_url: string
+  pr_state: string
+  /** Session state (running, done, killed…). */
+  state: string
+  status: UsageStatus
+  /** false — a live snapshot (orchestrator at review). */
+  final: boolean
+  started_at: number
+  ended_at: number | null
+  duration_s: number | null
+  models: UsageSessionModel[]
+  tokens: UsageTokens
+  /** null when none of the session's models is priced. */
+  cost_usd: number | null
+  /** Some of the session's usage has no price. */
+  cost_partial: boolean
+  /** Why collection failed (status `error`); `""` when none. */
+  error: string
+}
+
+/** `GET /v1/tasks/{id}/usage` — root tasks only. */
+export interface TaskUsage {
+  task_id: number
+  totals: UsageTotals
+  sessions: UsageSession[]
+}
+
+/** $ per 1M tokens; null — not set. */
+export interface ModelPrice {
+  model: string
+  input: number | null
+  cache_write: number | null
+  cache_read: number | null
+  output: number | null
+  /** null for a model never priced. */
+  updated_at: number | null
+}
+
+export type ModelPriceInput = Omit<ModelPrice, 'model' | 'updated_at'>

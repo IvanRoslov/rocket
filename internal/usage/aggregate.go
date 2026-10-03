@@ -287,6 +287,11 @@ func Period(rows []store.UsageRow, prices []store.ModelPrice) PeriodSummary {
 	}
 	out.Totals.CostUSD, out.Totals.CostPartial = sumCosts(periodCosts)
 	for id, task := range tasks {
+		// Only groups with usage in the period (spec §3): a task — or the
+		// "No task" bucket — whose sessions are all missing/error is left out.
+		if task.Sessions == 0 {
+			continue
+		}
 		costs := make([]*float64, 0, len(taskModels[id]))
 		for _, model := range sortedModelNames(taskModels[id]) {
 			costs = append(costs, modelCost(taskModels[id][model], byPrice[model]))

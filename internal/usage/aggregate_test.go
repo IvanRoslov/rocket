@@ -179,7 +179,32 @@ func TestEmptyAggregatesEncodeArraysAndZeroCost(t *testing.T) {
 
 func TestPeriodMissingOnlyHasNoUsageSessionsOrPartialCost(t *testing.T) {
 	got := Period([]store.UsageRow{{SessionID: "missing", TaskID: 7, Status: "missing"}}, nil)
-	if got.Totals.Sessions != 0 || got.Totals.CostUSD == nil || *got.Totals.CostUSD != 0 || got.Totals.CostPartial || len(got.Models) != 0 || len(got.Tasks) != 1 || got.Tasks[0].Sessions != 0 || got.Tasks[0].CostUSD == nil || *got.Tasks[0].CostUSD != 0 || got.Tasks[0].CostPartial {
+	// The task has no collected session, so it has no row in tasks[] either.
+	if got.Totals.Sessions != 0 || got.Totals.CostUSD == nil || *got.Totals.CostUSD != 0 || got.Totals.CostPartial || len(got.Models) != 0 || len(got.Tasks) != 0 {
 		t.Fatalf("missing-only period = %+v", got)
+	}
+}
+
+// Spec §3: tasks[] holds only groups with usage in the period. A group whose
+// sessions are all missing/error has no collected session — the "No task"
+// bucket as much as a real task — and is left out.
+func TestPeriodDropsTaskGroupsWithoutCollectedSessions(t *testing.T) {
+	rows := []store.UsageRow{
+		{SessionID: "orphan-missing", Status: "missing"},
+		{SessionID: "orphan-error", Status: "error"},
+		{SessionID: "t7-missing", TaskID: 7, TaskTitle: "Gone", Status: "missing"},
+		{SessionID: "t8-ok", TaskID: 8, TaskTitle: "Kept", Model: "a", Status: "ok", Tokens: store.UsageTokens{Input: 1}},
+		{SessionID: "t9-empty", TaskID: 9, TaskTitle: "Ok without tokens", Status: "ok"},
+	}
+	got := Period(rows, nil)
+	ids := []int64{}
+	for _, task := range got.Tasks {
+		if task.TaskID == nil {
+			t.Fatalf("empty No-task bucket kept: %+v", task)
+		}
+		ids = append(ids, *task.TaskID)
+	}
+	if !reflect.DeepEqual(ids, []int64{8, 9}) {
+		t.Fatalf("task ids = %v, want [8 9]", ids)
 	}
 }

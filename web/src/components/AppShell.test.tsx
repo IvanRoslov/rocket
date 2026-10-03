@@ -202,3 +202,12 @@ test('таб Brainstorm ведёт на экран метрики брейншт
   expect(tabHref('Brainstorm')).toBe('/brainstorm')
   expect(screen.getByRole('link', { name: 'Brainstorm' })).toHaveAttribute('aria-current', 'page')
 })
+
+// Agent usage (task #5138) is global too, right after Brainstorm.
+test('таб Usage ведёт на экран расхода и стоит после Brainstorm', () => {
+  renderShell('/usage')
+  expect(tabHref('Usage')).toBe('/usage')
+  expect(screen.getByRole('link', { name: 'Usage' })).toHaveAttribute('aria-current', 'page')
+  const names = screen.getAllByRole('link').map((l) => l.textContent)
+  expect(names.indexOf('Usage')).toBe(names.indexOf('Brainstorm') + 1)
+})

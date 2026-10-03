@@ -737,3 +737,26 @@ describe('TaskScreen — storm questions only in the Brainstorm tab', () => {
     await waitFor(() => expect(bodies).toEqual([{ choose: 2, body: 'с архивом' }]))
   })
 })
+
+describe('TaskScreen — Usage tab (task #5138)', () => {
+  it('offers Usage on a root task and opens it from ?tab=usage', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/p/billing/tasks/12?tab=usage']}>
+          <Routes>
+            <Route path="/p/:projectId/tasks/:taskId" element={<TaskScreen />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByRole('tab', { name: 'Usage' })).toHaveAttribute('aria-selected', 'true')
+    expect(await screen.findByRole('table', { name: 'Sessions' })).toBeInTheDocument()
+  })
+
+  it('has no Usage tab on a subtask — usage is counted per feature', async () => {
+    renderTask('billing', 14)
+    expect(await screen.findByText('New billing UI')).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Usage' })).not.toBeInTheDocument()
+  })
+})

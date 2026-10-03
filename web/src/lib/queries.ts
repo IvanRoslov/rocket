@@ -27,6 +27,8 @@ import type {
   GlobalQuestion,
   ImportCatalogResult,
   Message,
+  ModelPrice,
+  ModelPriceInput,
   ModelProfile,
   ModelProfileInput,
   Project,
@@ -43,7 +45,9 @@ import type {
   TaskGate,
   TaskLogEntry,
   TaskStatus,
+  TaskUsage,
   ThreadInboxEntry,
+  UsageStats,
   ThreadType,
 } from './types'
 
@@ -1290,6 +1294,69 @@ export function useSetOutcome(): UseMutationResult<
 }
 
 // ---------------------------------------------------------------------------
+// Agent usage (task #5138 spec §3)
+// ---------------------------------------------------------------------------
+
+export interface UsageFilter {
+  /** Local `YYYY-MM-DD`, inclusive. */
+  from: string
+  to: string
+  /** Project id; empty for all projects. */
+  project?: string
+}
+
+/** `GET /v1/stats/usage` — tokens and ≈ $ by model and by task for a period. */
+export function useUsageStats(filter: UsageFilter, enabled = true): UseQueryResult<UsageStats> {
+  const params = new URLSearchParams({ from: filter.from, to: filter.to })
+  if (filter.project) params.set('project', filter.project)
+  return useQuery({
+    queryKey: ['usage', 'stats', filter.from, filter.to, filter.project ?? ''],
+    queryFn: () => api.get<UsageStats>(`/v1/stats/usage?${params}`),
+    enabled,
+  })
+}
+
+/** `GET /v1/tasks/{id}/usage` — every session of a feature; root tasks only. */
+export function useTaskUsage(id: number | undefined): UseQueryResult<TaskUsage> {
+  return useQuery({
+    queryKey: ['taskUsage', id],
+    queryFn: () => api.get<TaskUsage>(`/v1/tasks/${id}/usage`),
+    enabled: id !== undefined,
+  })
+}
+
+/** `GET /v1/stats/prices` — every model seen in usage, unpriced ones with null prices. */
+export function usePrices(): UseQueryResult<ModelPrice[]> {
+  return useQuery({
+    queryKey: ['usage', 'prices'],
+    queryFn: () => api.get<{ prices: ModelPrice[] }>('/v1/stats/prices').then((r) => r.prices),
+  })
+}
+
+// Cost is computed at read time from the current prices, so a price change
+// moves every usage view.
+function invalidateUsage(queryClient: QueryClient) {
+  queryClient.invalidateQueries({ queryKey: ['usage'] })
+  queryClient.invalidateQueries({ queryKey: ['taskUsage'] })
+}
+
+export function useSetPrice(): UseMutationResult<ModelPrice, Error, { model: string } & ModelPriceInput> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ model, ...body }) => api.put<ModelPrice>(`/v1/stats/prices/${encodeURIComponent(model)}`, body),
+    onSuccess: () => invalidateUsage(queryClient),
+  })
+}
+
+export function useDeletePrice(): UseMutationResult<void, Error, string> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (model) => api.del<void>(`/v1/stats/prices/${encodeURIComponent(model)}`),
+    onSuccess: () => invalidateUsage(queryClient),
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Live invalidation
 // ---------------------------------------------------------------------------
 
@@ -1309,18 +1376,21 @@ export function useSetOutcome(): UseMutationResult<
 export const INVALIDATION_WINDOW_MS = 1000
 
 /** The query keys an SSE event makes stale; empty when it moves nothing. */
-function eventQueryKeys(type: string): string[][] {
+function eventQueryKeys(event: RocketEvent): unknown[][] {
+  const { type } = event
   if (type === 'session.chat_updated') {
     // Fires on every activity tick of a talking agent; the chat screen polls
     // its own cursor. Invalidating on it refetched sessions and projects many
     // times a second per open tab.
     return []
   }
-  if (type.startsWith('session.')) return [['sessions'], ['projects']]
+  // The task Usage tab lists live sessions ("running") and their PR state.
+  if (type.startsWith('session.')) return [['sessions'], ['projects'], ['taskUsage']]
   if (type.startsWith('message.')) return [['messages']]
   if (type.startsWith('task.')) {
     // Answers, outcome overrides and gate decisions all move the storm metric.
-    return [['tasks'], ['task'], ['questions'], ['threads'], ['stats']]
+    // Task status shows in the Usage screen's By task table.
+    return [['tasks'], ['task'], ['questions'], ['threads'], ['stats'], ['usage']]
   }
   if (type.startsWith('milestone.')) {
     // `milestone.quiet` (subtask #1032) flips the quiet flag the milestone
@@ -1338,11 +1408,18 @@ function eventQueryKeys(type: string): string[][] {
     // `session_alive` move with them.
     return [['agents'], ['agent'], ['sessions']]
   }
+  if (type === 'usage.collected') {
+    // One event per collected session names its task. A backfill batch comes
+    // as one event with task_id null and may touch any task: every Usage tab
+    // goes stale (only mounted ones refetch).
+    const taskId = event.data?.task_id
+    return typeof taskId === 'number' ? [['usage'], ['taskUsage', taskId]] : [['usage'], ['taskUsage']]
+  }
   if (type.startsWith('repo.clone_')) return [['repos']]
   if (type.startsWith('pr.')) {
     // PR state changes (phase 4): re-fetch the sessions carrying pr_*
     // fields plus the task/board views that surface PR badges.
-    return [['sessions'], ['tasks'], ['task']]
+    return [['sessions'], ['tasks'], ['task'], ['taskUsage']]
   }
   return []
 }
@@ -1357,7 +1434,7 @@ function eventQueryKeys(type: string): string[][] {
  * kept executing every abandoned request until it drowned.
  */
 export function wireInvalidation(queryClient: QueryClient) {
-  const pending = new Map<string, string[]>()
+  const pending = new Map<string, unknown[]>()
   let timer: ReturnType<typeof setTimeout> | undefined
 
   const flush = () => {
@@ -1370,7 +1447,7 @@ export function wireInvalidation(queryClient: QueryClient) {
   }
 
   return (event: RocketEvent) => {
-    const keys = eventQueryKeys(event.type)
+    const keys = eventQueryKeys(event)
     if (keys.length === 0) return
     for (const key of keys) pending.set(JSON.stringify(key), key)
     timer ??= setTimeout(flush, INVALIDATION_WINDOW_MS)

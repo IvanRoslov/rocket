@@ -1,0 +1,239 @@
+/* Usage screen and the task Usage tab (task #5138). Same page frame and
+   table chrome as Brainstorm metrics. */
+.usage {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 28px 24px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.usage__title {
+  margin: 0;
+  font: 700 22px var(--font-ui);
+  color: var(--text);
+}
+.usage__lede {
+  margin: 0;
+  font: 13.5px var(--font-ui);
+  color: var(--text-3);
+}
+.usage__subtitle {
+  margin: 12px 0 0;
+  font: 600 15px var(--font-ui);
+  color: var(--text);
+}
+
+.usage-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.usage-toolbar .segmented__option {
+  padding: 0 14px;
+}
+.usage-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 12.5px var(--font-ui);
+  color: var(--text-3);
+}
+.usage-field input,
+.usage-select {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: 13px var(--font-ui);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.usage-empty,
+.usage-hint {
+  margin: 0;
+  font: 13.5px var(--font-ui);
+  color: var(--text-4);
+}
+.usage-error {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font: 13px var(--font-ui);
+  color: var(--err-text);
+  background: var(--err-bg-2);
+}
+.usage-banner {
+  margin: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--warn-border);
+  border-radius: 8px;
+  font: 500 13px var(--font-ui);
+  color: var(--warn-text-2);
+  background: var(--warn-bg-2);
+}
+
+.usage-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.usage-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+}
+.usage-card__label {
+  font: 600 11px var(--font-ui);
+  color: var(--text-4);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.usage-card__value {
+  font: 650 22px var(--font-ui);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.usage-card__hint {
+  font: 12px var(--font-ui);
+  color: var(--text-4);
+}
+
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font: 13px var(--font-ui);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+}
+.usage-table th,
+.usage-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+.usage-table th {
+  font: 600 11px var(--font-ui);
+  color: var(--text-4);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.usage-num {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.usage-mono {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.usage-strong {
+  font-weight: 600;
+  color: var(--text);
+}
+.usage-muted {
+  color: var(--text-4);
+}
+.usage-link {
+  color: var(--accent-text);
+}
+
+/* ---------- Task Usage tab ---------- */
+.usage-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.usage-nowrap {
+  white-space: nowrap;
+}
+.usage-subrow td {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  font-size: 12.5px;
+  color: var(--text-3);
+  background: var(--surface-2);
+}
+.usage-status--snapshot {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font: 600 11px var(--font-ui);
+  color: var(--warn-text-2);
+  background: var(--warn-bg-2);
+  white-space: nowrap;
+}
+.usage-status--error {
+  color: var(--err-text);
+  text-decoration: underline dotted;
+  cursor: help;
+}
+/* The task column is narrower than the page: the table scrolls inside it
+   rather than pushing the session rail away. */
+.usage-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+}
+.usage-scroll .usage-table {
+  border: none;
+}
+.usage-table--compact th,
+.usage-table--compact td {
+  padding: 8px 9px;
+  font-size: 12.5px;
+}
+.usage-table--compact th {
+  font-size: 10.5px;
+}
+.usage-subtask {
+  min-width: 140px;
+}
+.usage-line2 {
+  margin-top: 2px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.usage-role {
+  width: 110px;
+}
+.usage-role .usage-line2 {
+  white-space: normal;
+}
+
+/* One line per task: long titles end in an ellipsis, the full title is in the tooltip. */
+.usage-task {
+  max-width: 460px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-more {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn-sm);
+  background: var(--surface);
+  font: 500 13px var(--font-ui);
+  color: var(--text-2);
+  cursor: pointer;
+}
+/* Subtask titles run long: two lines, the rest in the tooltip. */
+.usage-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}

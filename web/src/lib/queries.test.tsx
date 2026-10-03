@@ -33,6 +33,11 @@ import {
   useSetOutcome,
   useTaskBrainstormStats,
   useTaskGates,
+  useDeletePrice,
+  usePrices,
+  useSetPrice,
+  useTaskUsage,
+  useUsageStats,
   wireInvalidation,
   INVALIDATION_WINDOW_MS,
 } from './queries'
@@ -500,5 +505,125 @@ describe('wireInvalidation coalescing', () => {
     wireInvalidation(queryClient)({ id: 1, ts: 1, type: 'session.chat_updated' })
     vi.advanceTimersByTime(INVALIDATION_WINDOW_MS)
     expect(spy).not.toHaveBeenCalled()
+  })
+})
+
+describe('usage (task #5138)', () => {
+  it('useUsageStats sends the period and project to /v1/stats/usage', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get('/v1/stats/usage', ({ request }) => {
+        urls.push(request.url)
+        return HttpResponse.json({
+          from: '2026-09-01', to: '2026-09-30', pending: 0, models: [], tasks: [],
+          totals: { sessions: 0, cost_usd: 0, cost_partial: false,
+            tokens: { input: 0, cache_write: 0, cache_read: 0, output: 0, reasoning: 0, billable: 0 } },
+        })
+      }),
+    )
+    const { result } = renderHook(
+      () => useUsageStats({ from: '2026-09-01', to: '2026-09-30', project: 'billing' }),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    const url = new URL(urls[0])
+    expect(url.searchParams.get('from')).toBe('2026-09-01')
+    expect(url.searchParams.get('to')).toBe('2026-09-30')
+    expect(url.searchParams.get('project')).toBe('billing')
+  })
+
+  it('useUsageStats omits an empty project', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get('/v1/stats/usage', ({ request }) => {
+        urls.push(request.url)
+        return HttpResponse.json({ from: 'a', to: 'b', pending: 0, models: [], tasks: [], totals: {} })
+      }),
+    )
+    const { result } = renderHook(() => useUsageStats({ from: '2026-09-01', to: '2026-09-30' }), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(new URL(urls[0]).searchParams.has('project')).toBe(false)
+  })
+
+  it('useTaskUsage reads the feature usage', async () => {
+    const { result } = renderHook(() => useTaskUsage(12), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data?.task_id).toBe(12)
+    expect(result.current.data?.sessions.length).toBeGreaterThan(0)
+  })
+
+  it('usePrices unwraps {prices}, useSetPrice PUTs and useDeletePrice DELETEs by model', async () => {
+    const calls: Array<{ method: string; model: string; body?: unknown }> = []
+    server.use(
+      http.put('/v1/stats/prices/:model', async ({ request, params }) => {
+        calls.push({ method: 'PUT', model: String(params.model), body: await request.json() })
+        return HttpResponse.json({ model: params.model })
+      }),
+      http.delete('/v1/stats/prices/:model', ({ params }) => {
+        calls.push({ method: 'DELETE', model: String(params.model) })
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    const prices = renderHook(() => usePrices(), { wrapper })
+    await waitFor(() => expect(prices.result.current.isSuccess).toBe(true))
+    expect(prices.result.current.data?.length).toBeGreaterThan(0)
+
+    const set = renderHook(() => useSetPrice(), { wrapper })
+    set.result.current.mutate({ model: 'gpt-6-sol', input: 1.25, cache_write: null, cache_read: 0.125, output: 10 })
+    const del = renderHook(() => useDeletePrice(), { wrapper })
+    del.result.current.mutate('claude-opus-5-5')
+    await waitFor(() => expect(calls).toHaveLength(2))
+    expect(calls).toContainEqual({
+      method: 'PUT', model: 'gpt-6-sol', body: { input: 1.25, cache_write: null, cache_read: 0.125, output: 10 },
+    })
+    expect(calls).toContainEqual({ method: 'DELETE', model: 'claude-opus-5-5' })
+  })
+
+  it('usage.collected refreshes the usage screen and that task\'s usage tab', () => {
+    vi.useFakeTimers()
+    try {
+      const queryClient = new QueryClient()
+      const spy = vi.spyOn(queryClient, 'invalidateQueries')
+      wireInvalidation(queryClient)({ id: 1, ts: 1, type: 'usage.collected', session_id: 's1', data: { task_id: 12 } })
+      vi.advanceTimersByTime(INVALIDATION_WINDOW_MS)
+      const keys = spy.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))
+      expect(keys).toEqual(['["usage"]', '["taskUsage",12]'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a backfill batch (task_id null) refreshes the usage screen and every task usage tab', () => {
+    vi.useFakeTimers()
+    try {
+      const queryClient = new QueryClient()
+      const spy = vi.spyOn(queryClient, 'invalidateQueries')
+      wireInvalidation(queryClient)({ id: 1, ts: 1, type: 'usage.collected', session_id: '', data: { task_id: null, batch: 3 } })
+      vi.advanceTimersByTime(INVALIDATION_WINDOW_MS)
+      expect(spy.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))).toEqual(['["usage"]', '["taskUsage"]'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('session, PR and task events refresh the usage views that show them', () => {
+    vi.useFakeTimers()
+    try {
+      const keysFor = (type: string) => {
+        const queryClient = new QueryClient()
+        const spy = vi.spyOn(queryClient, 'invalidateQueries')
+        wireInvalidation(queryClient)({ id: 1, ts: 1, type })
+        vi.advanceTimersByTime(INVALIDATION_WINDOW_MS)
+        return spy.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))
+      }
+      // A new worker's "running" row and its PR state live in the task Usage tab.
+      expect(keysFor('session.spawned')).toContain('["taskUsage"]')
+      expect(keysFor('pr.merged')).toContain('["taskUsage"]')
+      // Task status shows in the By task table.
+      expect(keysFor('task.status_changed')).toContain('["usage"]')
+      expect(keysFor('session.chat_updated')).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

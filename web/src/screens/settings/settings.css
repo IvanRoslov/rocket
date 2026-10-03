@@ -447,3 +447,29 @@
 .settings-models__import-result {
   color: var(--text);
 }
+
+/* ---------- Prices ---------- */
+.settings-prices__model {
+  width: 100%;
+  min-width: 160px;
+}
+.settings-prices__input {
+  width: 78px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font: 13px var(--font-mono);
+  text-align: right;
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+}
+.settings-prices__actions {
+  display: flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+.settings-prices__table td {
+  vertical-align: middle;
+}
