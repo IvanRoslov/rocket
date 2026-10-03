@@ -3,6 +3,7 @@
 // daemon counts everything from the agents' transcripts (GET /v1/stats/usage).
 // The period and project live in the query string, so a view can be linked.
 
+import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Segmented } from '../../components/Segmented'
 import { useProjects, useUsageStats } from '../../lib/queries'
@@ -16,6 +17,8 @@ const PRESETS = [
   { id: '90', label: '90d' },
 ]
 const DEFAULT_DAYS = 30
+/** By task rows shown before «Show all»: a month holds hundreds of tasks. */
+const TASKS_SHOWN = 20
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
   backlog: 'Backlog',
@@ -101,43 +104,54 @@ function ModelsTable({ models }: { models: UsageModelRow[] }) {
 }
 
 function TasksTable({ tasks }: { tasks: UsageTaskRow[] }) {
+  const [all, setAll] = useState(false)
+  const shown = all ? tasks : tasks.slice(0, TASKS_SHOWN)
   return (
-    <table className="usage-table" aria-label="By task">
-      <thead>
-        <tr>
-          <th>Task</th>
-          <th>Project</th>
-          <th>Status</th>
-          <th className="usage-num">Sessions</th>
-          <th className="usage-num">Tokens</th>
-          <th className="usage-num">≈ $</th>
-        </tr>
-      </thead>
-      <tbody>
-        {tasks.map((t) => (
-          <tr key={t.task_id ?? 'none'}>
-            <td>
-              {t.task_id === null ? (
-                <span className="usage-muted">No task</span>
-              ) : (
-                <Link
-                  className="usage-link"
-                  // A task without a project is a milestone, reached outside any project.
-                  to={t.project_id ? `/p/${t.project_id}/tasks/${t.task_id}?tab=usage` : `/milestones/${t.task_id}`}
-                >
-                  #{t.task_id} {t.title}
-                </Link>
-              )}
-            </td>
-            <td>{t.project_id}</td>
-            <td>{t.status ? STATUS_LABEL[t.status] : ''}</td>
-            <td className="usage-num">{t.sessions}</td>
-            <td className="usage-num usage-strong">{formatTokens(t.tokens.billable)}</td>
-            <td className="usage-num">{costText(t.cost_usd, t.cost_partial)}</td>
+    <>
+      <table className="usage-table" aria-label="By task">
+        <thead>
+          <tr>
+            <th>Task</th>
+            <th>Project</th>
+            <th>Status</th>
+            <th className="usage-num">Sessions</th>
+            <th className="usage-num">Tokens</th>
+            <th className="usage-num">≈ $</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {shown.map((t) => (
+            <tr key={t.task_id ?? 'none'}>
+              <td className="usage-task">
+                {t.task_id === null ? (
+                  <span className="usage-muted">No task</span>
+                ) : (
+                  <Link
+                    className="usage-link"
+                    // A task without a project is a milestone, reached outside any project.
+                    to={t.project_id ? `/p/${t.project_id}/tasks/${t.task_id}?tab=usage` : `/milestones/${t.task_id}`}
+                  >
+                    <span title={t.title}>
+                      #{t.task_id} {t.title}
+                    </span>
+                  </Link>
+                )}
+              </td>
+              <td>{t.project_id}</td>
+              <td>{t.status ? STATUS_LABEL[t.status] : ''}</td>
+              <td className="usage-num">{t.sessions}</td>
+              <td className="usage-num usage-strong">{formatTokens(t.tokens.billable)}</td>
+              <td className="usage-num">{costText(t.cost_usd, t.cost_partial)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!all && tasks.length > TASKS_SHOWN && (
+        <button type="button" className="usage-more" onClick={() => setAll(true)}>
+          Show all {tasks.length} tasks
+        </button>
+      )}
+    </>
   )
 }
 
@@ -229,7 +243,8 @@ export function UsageScreen() {
             <h2 className="usage__subtitle">By model</h2>
             <ModelsTable models={data.models} />
             <h2 className="usage__subtitle">By task</h2>
-            <TasksTable tasks={data.tasks} />
+            {/* A new period or project starts collapsed again. */}
+            <TasksTable key={`${from}|${to}|${project}`} tasks={data.tasks} />
           </>
         ))}
     </main>

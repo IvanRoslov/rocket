@@ -155,6 +155,21 @@ describe('UsageScreen — numbers', () => {
     expect(within(none).queryByRole('link')).not.toBeInTheDocument()
   })
 
+  it('shows the top 20 tasks and the rest on request', async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({
+      ...usageStats.tasks[0],
+      task_id: 100 + i,
+      title: `Task ${i}`,
+    }))
+    server.use(http.get('/v1/stats/usage', () => HttpResponse.json({ ...usageStats, tasks: many })))
+    renderScreen()
+    const table = await screen.findByRole('table', { name: 'By task' })
+    expect(within(table).getAllByRole('row')).toHaveLength(1 + 20)
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 25 tasks' }))
+    expect(within(table).getAllByRole('row')).toHaveLength(1 + 25)
+    expect(screen.queryByRole('button', { name: /Show all/ })).not.toBeInTheDocument()
+  })
+
   it('links a task without a project to its milestone page', async () => {
     server.use(
       http.get('/v1/stats/usage', () =>

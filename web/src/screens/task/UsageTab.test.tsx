@@ -42,7 +42,7 @@ describe('UsageTab', () => {
     renderTab()
     const table = await screen.findByRole('table', { name: 'Sessions' })
     expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual([
-      'Session', 'Subtask / PR', 'Agent / Model', 'Effort', 'Duration', 'Tokens', 'Cache read', '≈ $',
+      'Session', 'Subtask / PR', 'Agent / Model', 'Duration', 'Tokens', 'Cache read', '≈ $',
     ])
   })
 
@@ -50,12 +50,12 @@ describe('UsageTab', () => {
     renderTab()
     await screen.findByRole('table', { name: 'Sessions' })
     expect(cells(rowOf('s-billing-v2-orch'))).toEqual([
-      'Orchestratorlive snapshot', '', 'claude', 'high', '—', '2.48M', '25.1M', '$32.11',
+      'Orchestratorlive snapshot', '', 'claudehigh', '—', '2.48M', '25.1M', '$32.11',
     ])
     const models = screen.getAllByTestId('usage-model-s-billing-v2-orch')
     expect(models.map(cells)).toEqual([
-      ['', '', 'claude-opus-5-5', '', '', '2.33M', '24.5M', '$31.85'],
-      ['', '', 'claude-haiku-4-5', '', '', '145K', '600K', '$0.26'],
+      ['', '', 'claude-opus-5-5', '', '2.33M', '24.5M', '$31.85'],
+      ['', '', 'claude-haiku-4-5', '', '145K', '600K', '$0.26'],
     ])
   })
 
@@ -64,7 +64,7 @@ describe('UsageTab', () => {
     await screen.findByRole('table', { name: 'Sessions' })
     const row = rowOf('s-billing-v2-w4')
     expect(cells(row)).toEqual([
-      'Worker', '#16 Retire legacy billing cronPR #400 merged', 'codexgpt-6-sol', 'medium', '42m', '1.16M', '3.2M',
+      'Worker', '#16 Retire legacy billing cronPR #400 merged', 'codexgpt-6-sol · medium', '42m', '1.16M', '3.2M',
       '—',
     ])
     expect(within(row).getByRole('link', { name: 'PR #400' })).toHaveAttribute('href', 'https://github.com/acme/infra/pull/400')
@@ -82,15 +82,15 @@ describe('UsageTab', () => {
     const missing = cells(rowOf('s-billing-v2-w3'))
     expect(status('s-billing-v2-w3')).toBe('no transcript')
     expect(status('s-billing-v2-w4')).toBeUndefined()
-    expect(missing.slice(5, 8)).toEqual(['—', '—', '—'])
+    expect(missing.slice(4, 7)).toEqual(['—', '—', '—'])
     const error = within(rowOf('s-billing-v2-w6')).getByText('error')
     expect(error).toHaveAttribute('title', 'read transcript: permission denied')
     const running = cells(rowOf('s-billing-v2-w2'))
     expect(status('s-billing-v2-w2')).toBe('running — counted when finished')
-    expect(running.slice(5, 8)).toEqual(['—', '—', '—'])
+    expect(running.slice(4, 7)).toEqual(['—', '—', '—'])
     const pending = cells(rowOf('s-billing-v2-w7'))
     expect(status('s-billing-v2-w7')).toBe('pending count')
-    expect(pending.slice(5, 8)).toEqual(['—', '—', '—'])
+    expect(pending.slice(4, 7)).toEqual(['—', '—', '—'])
   })
 
   it('marks a session cost that leaves out an unpriced model', async () => {
@@ -106,7 +106,7 @@ describe('UsageTab', () => {
     )
     renderTab()
     await screen.findByRole('table', { name: 'Sessions' })
-    expect(cells(rowOf('s-billing-v2-orch'))[7]).toBe('$31.85 (partial)')
+    expect(cells(rowOf('s-billing-v2-orch'))[6]).toBe('$31.85 (partial)')
   })
 
   it('shows an empty state for a feature with no sessions', async () => {

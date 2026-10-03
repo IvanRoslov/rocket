@@ -211,3 +211,29 @@
 .usage-role .usage-line2 {
   white-space: normal;
 }
+
+/* One line per task: long titles end in an ellipsis, the full title is in the tooltip. */
+.usage-task {
+  max-width: 460px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-more {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn-sm);
+  background: var(--surface);
+  font: 500 13px var(--font-ui);
+  color: var(--text-2);
+  cursor: pointer;
+}
+/* Subtask titles run long: two lines, the rest in the tooltip. */
+.usage-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}

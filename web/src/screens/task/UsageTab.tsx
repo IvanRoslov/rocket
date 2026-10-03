@@ -1,6 +1,7 @@
 // Task card › Usage (task #5138 spec §5): what the feature's agents spent —
 // the total, then one row per session (orchestrator and workers) with its
-// subtask, PR, duration and tokens; the collection status sits under the role. A session that used several models
+// subtask, PR, duration and tokens; the collection status sits under the role
+// and the effort next to the model, so the table fits beside the session rail. A session that used several models
 // (subagents, /model) gets a sub-row per model. Root tasks only: the daemon
 // counts usage per feature (GET /v1/tasks/{id}/usage).
 
@@ -47,7 +48,7 @@ function SessionRows({ session: s, taskPath }: { session: UsageSession; taskPath
         </td>
         <td className="usage-subtask">
           {s.subtask_id !== null && (
-            <Link className="usage-link" to={taskPath(s.subtask_id)}>
+            <Link className="usage-link usage-clamp" to={taskPath(s.subtask_id)} title={s.subtask_title}>
               #{s.subtask_id} {s.subtask_title}
             </Link>
           )}
@@ -66,9 +67,14 @@ function SessionRows({ session: s, taskPath }: { session: UsageSession; taskPath
         </td>
         <td className="usage-nowrap">
           {s.agent}
-          {single && <div className="usage-line2 usage-mono">{single.model}</div>}
+          {(single || s.effort) && (
+            <div className="usage-line2">
+              {single && <span className="usage-mono">{single.model}</span>}
+              {single && s.effort && ' · '}
+              {s.effort && <span className="usage-muted">{s.effort}</span>}
+            </div>
+          )}
         </td>
-        <td>{s.effort}</td>
         <td className="usage-num">{formatDuration(s.duration_s)}</td>
         <td className="usage-num usage-strong">{dash(formatTokens(s.tokens.billable))}</td>
         <td className="usage-num usage-muted">{dash(formatTokens(s.tokens.cache_read))}</td>
@@ -80,7 +86,6 @@ function SessionRows({ session: s, taskPath }: { session: UsageSession; taskPath
             <td />
             <td />
             <td className="usage-mono usage-nowrap">{m.model}</td>
-            <td />
             <td />
             <td className="usage-num">{formatTokens(m.tokens.billable)}</td>
             <td className="usage-num usage-muted">{formatTokens(m.tokens.cache_read)}</td>
@@ -115,7 +120,6 @@ export function UsageTab({ taskId, taskPath }: UsageTabProps) {
               <th>Session</th>
               <th>Subtask / PR</th>
               <th>Agent / Model</th>
-              <th>Effort</th>
               <th className="usage-num">Duration</th>
               <th className="usage-num">Tokens</th>
               <th className="usage-num">Cache read</th>
