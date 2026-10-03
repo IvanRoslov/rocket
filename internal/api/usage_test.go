@@ -2,9 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"os/exec"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -214,4 +216,157 @@ func TestUsageTaskIncludesLinkedSessionsAndPRURL(t *testing.T) {
 			t.Errorf("%s code=%s", path, code)
 		}
 	}
+}
+
+func priceHTTP(t *testing.T, method, url, body, sessionID string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(method, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if sessionID != "" {
+		req.Header.Set(sessionHeader, sessionID)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func TestUsagePricesListIncludesObservedUnpricedModels(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "p")
+	usageAPISession(t, d, "s", "p", "done", 0, 0, 100, 200)
+	end := int64(150)
+	collectAPISession(t, d, "s", 0, 0, true, &end, 200, "ok", "vendor/gpt-6.sol", 5)
+	one := 1.0
+	if err := d.Store.UpsertModelPrice(store.ModelPrice{Model: "priced", Input: &one, UpdatedAt: 123}); err != nil {
+		t.Fatal(err)
+	}
+	resp := getJSON(t, srv.URL+"/v1/stats/prices")
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	var raw struct {
+		Prices []struct {
+			Model      string   `json:"model"`
+			Input      *float64 `json:"input"`
+			CacheWrite *float64 `json:"cache_write"`
+			CacheRead  *float64 `json:"cache_read"`
+			Output     *float64 `json:"output"`
+			UpdatedAt  *int64   `json:"updated_at"`
+		} `json:"prices"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw.Prices) != 2 || raw.Prices[0].Model != "priced" || raw.Prices[0].Input == nil || *raw.Prices[0].Input != 1 || raw.Prices[0].UpdatedAt == nil || *raw.Prices[0].UpdatedAt != 123 || raw.Prices[1].Model != "vendor/gpt-6.sol" || raw.Prices[1].Input != nil || raw.Prices[1].CacheWrite != nil || raw.Prices[1].CacheRead != nil || raw.Prices[1].Output != nil || raw.Prices[1].UpdatedAt != nil {
+		t.Fatalf("prices = %+v", raw.Prices)
+	}
+}
+
+func TestUsagePricesPutGetDeleteExactModel(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	url := srv.URL + "/v1/stats/prices/vendor%2Fgpt-6.sol"
+	resp := priceHTTP(t, http.MethodPut, url, `{"input":1,"cache_write":null,"cache_read":0,"output":2}`, "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("PUT status=%d", resp.StatusCode)
+	}
+	var saved struct {
+		Model      string   `json:"model"`
+		Input      *float64 `json:"input"`
+		CacheWrite *float64 `json:"cache_write"`
+		CacheRead  *float64 `json:"cache_read"`
+		Output     *float64 `json:"output"`
+		UpdatedAt  *int64   `json:"updated_at"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&saved); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if saved.Model != "vendor/gpt-6.sol" || saved.Input == nil || *saved.Input != 1 || saved.CacheWrite != nil || saved.CacheRead == nil || *saved.CacheRead != 0 || saved.Output == nil || *saved.Output != 2 || saved.UpdatedAt == nil || *saved.UpdatedAt <= 0 {
+		t.Fatalf("saved = %+v", saved)
+	}
+	stored, err := d.Store.ListModelPrices()
+	if err != nil || len(stored) != 1 || stored[0].Model != "vendor/gpt-6.sol" {
+		t.Fatalf("store prices=%+v err=%v", stored, err)
+	}
+	resp = priceHTTP(t, http.MethodDelete, url, "", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("DELETE status=%d", resp.StatusCode)
+	}
+	stored, err = d.Store.ListModelPrices()
+	if err != nil || len(stored) != 0 {
+		t.Fatalf("prices after delete=%+v err=%v", stored, err)
+	}
+}
+
+func TestUsagePricesRejectsInvalidBodies(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	url := srv.URL + "/v1/stats/prices/model"
+	for name, body := range map[string]string{
+		"negative":        `{"input":-1,"cache_write":null,"cache_read":0,"output":2}`,
+		"wrong type":      `{"input":"1","cache_write":null,"cache_read":0,"output":2}`,
+		"missing rate":    `{"input":1,"cache_write":null,"cache_read":0}`,
+		"unknown field":   `{"input":1,"cache_write":null,"cache_read":0,"output":2,"surprise":1}`,
+		"trailing object": `{"input":1,"cache_write":null,"cache_read":0,"output":2}{}`,
+		"overflow":        `{"input":1e9999,"cache_write":null,"cache_read":0,"output":2}`,
+		"malformed":       `{`,
+		"null object":     `null`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp := priceHTTP(t, http.MethodPut, url, body, "")
+			if resp.StatusCode != 400 {
+				t.Fatalf("status=%d", resp.StatusCode)
+			}
+			if code := decodeErr(t, resp).Error.Code; code != "bad_request" {
+				t.Errorf("code=%s", code)
+			}
+		})
+	}
+	stored, err := d.Store.ListModelPrices()
+	if err != nil || len(stored) != 0 {
+		t.Fatalf("invalid PUT persisted %+v: %v", stored, err)
+	}
+}
+
+func TestUsagePricesMutationsRequireHuman(t *testing.T) {
+	d := tasksTestDeps(t)
+	srv := newTestServer(t, d)
+	addTestProject(t, d, "p")
+	addTestSession(t, d, "agent", "worker", "p")
+	url := srv.URL + "/v1/stats/prices/model"
+	for _, tc := range []struct{ method, body string }{
+		{http.MethodPut, `{"input":1,"cache_write":2,"cache_read":3,"output":4}`},
+		{http.MethodDelete, ""},
+	} {
+		resp := priceHTTP(t, tc.method, url, tc.body, "agent")
+		if resp.StatusCode != 403 {
+			t.Errorf("%s status=%d", tc.method, resp.StatusCode)
+			resp.Body.Close()
+			continue
+		}
+		if code := decodeErr(t, resp).Error.Code; code != "human_only" {
+			t.Errorf("%s code=%s", tc.method, code)
+		}
+	}
+	resp := priceHTTP(t, http.MethodGet, srv.URL+"/v1/stats/prices", "", "agent")
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("agent GET status=%d", resp.StatusCode)
+	}
+	stored, err := d.Store.ListModelPrices()
+	if err != nil || len(stored) != 0 {
+		t.Fatalf("agent mutation changed prices %+v: %v", stored, err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
 }
