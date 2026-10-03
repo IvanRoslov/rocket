@@ -470,3 +470,6 @@
   gap: 6px;
   white-space: nowrap;
 }
+.settings-prices__table td {
+  vertical-align: middle;
+}

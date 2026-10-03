@@ -179,3 +179,35 @@
   text-decoration: underline dotted;
   cursor: help;
 }
+/* The task column is narrower than the page: the table scrolls inside it
+   rather than pushing the session rail away. */
+.usage-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+}
+.usage-scroll .usage-table {
+  border: none;
+}
+.usage-table--compact th,
+.usage-table--compact td {
+  padding: 8px 9px;
+  font-size: 12.5px;
+}
+.usage-table--compact th {
+  font-size: 10.5px;
+}
+.usage-subtask {
+  min-width: 140px;
+}
+.usage-line2 {
+  margin-top: 2px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.usage-role {
+  width: 110px;
+}
+.usage-role .usage-line2 {
+  white-space: normal;
+}

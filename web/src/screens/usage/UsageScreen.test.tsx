@@ -116,10 +116,10 @@ describe('UsageScreen — numbers', () => {
     renderScreen()
     const cards = await screen.findByRole('list', { name: 'Totals' })
     const card = (name: string) => within(cards).getByText(name).closest('li') as HTMLElement
-    expect(card('Tokens')).toHaveTextContent('4.16M')
-    expect(card('Cache read')).toHaveTextContent('33.4M')
-    expect(card('≈ Cost')).toHaveTextContent('$34.86 (partial)')
-    expect(card('Sessions')).toHaveTextContent('5')
+    expect(card('Tokens')).toHaveTextContent('4.26M')
+    expect(card('Cache read')).toHaveTextContent('33.9M')
+    expect(card('≈ Cost')).toHaveTextContent('$35.61 (partial)')
+    expect(card('Sessions')).toHaveTextContent('8')
   })
 
   it('lists models with the token breakdown; a model without a price links to Settings', async () => {
@@ -129,7 +129,7 @@ describe('UsageScreen — numbers', () => {
     expect(headers).toEqual(['Model', 'Agent', 'Sessions', 'Tokens', 'Input', 'Cache write', 'Cache read', 'Output', '≈ $'])
     const rows = within(table).getAllByRole('row').slice(1)
     expect(within(rows[0]).getAllByRole('cell').map((c) => c.textContent)).toEqual([
-      'claude-opus-5-5', 'claude', '3', '2.86M', '150K', '2.2M', '29.6M', '505K', '$34.60',
+      'claude-opus-5-5', 'claude', '4', '2.95M', '162K', '2.28M', '30.1M', '514K', '$35.35',
     ])
     const sol = within(rows[1]).getAllByRole('cell')
     expect(sol[0]).toHaveTextContent('gpt-6-sol')
@@ -149,7 +149,7 @@ describe('UsageScreen — numbers', () => {
     )
     const billing = within(table).getByRole('link', { name: '#12 Billing v2' }).closest('tr') as HTMLElement
     expect(within(billing).getAllByRole('cell').map((c) => c.textContent)).toEqual([
-      '#12 Billing v2', 'billing', 'In Progress', '4', '4.16M', '$34.86 (partial)',
+      '#12 Billing v2', 'billing', 'In Progress', '6', '4.16M', '$34.86 (partial)',
     ])
     const none = within(table).getByText('No task').closest('tr') as HTMLElement
     expect(within(none).queryByRole('link')).not.toBeInTheDocument()

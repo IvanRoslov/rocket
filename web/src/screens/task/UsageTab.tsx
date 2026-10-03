@@ -1,6 +1,6 @@
 // Task card › Usage (task #5138 spec §5): what the feature's agents spent —
 // the total, then one row per session (orchestrator and workers) with its
-// subtask, PR, duration and tokens. A session that used several models
+// subtask, PR, duration and tokens; the collection status sits under the role. A session that used several models
 // (subagents, /model) gets a sub-row per model. Root tasks only: the daemon
 // counts usage per feature (GET /v1/tasks/{id}/usage).
 
@@ -23,74 +23,72 @@ function isRunning(s: UsageSession): boolean {
 }
 
 function StatusLabel({ session: s }: { session: UsageSession }) {
-  if (isRunning(s)) return <span className="usage-muted">running — counted when finished</span>
-  if (s.status === 'missing') return <span className="usage-muted">no transcript</span>
-  if (s.status === 'error') {
-    return (
-      <span className="usage-status--error" title={s.error || 'collection failed'}>
-        error
+  const label = (className: string, text: string, title?: string) => (
+    <div className="usage-line2">
+      <span className={className} title={title} data-testid="usage-status">
+        {text}
       </span>
-    )
-  }
-  if (!s.final) return <span className="usage-status--snapshot">live snapshot</span>
+    </div>
+  )
+  if (isRunning(s)) return label('usage-muted', 'running — counted when finished')
+  if (s.status === 'missing') return label('usage-muted', 'no transcript')
+  if (s.status === 'error') return label('usage-status--error', 'error', s.error || 'collection failed')
+  if (!s.final) return label('usage-status--snapshot', 'live snapshot')
   return null
 }
 
 function SessionRows({ session: s, taskPath }: { session: UsageSession; taskPath: (id: number) => string }) {
-  const running = isRunning(s)
+  // No numbers to show: still running, or the transcript gave nothing.
+  const blank = isRunning(s) || s.status === 'missing' || s.status === 'error'
   const single = s.models.length === 1 ? s.models[0] : undefined
-  const dash = (text: string) => (running ? '—' : text)
+  const dash = (text: string) => (blank ? '—' : text)
   return (
     <>
       <tr data-testid={`usage-session-${s.session_id}`}>
-        <td>{s.role === 'orchestrator' ? 'Orchestrator' : 'Worker'}</td>
-        <td>
+        <td className="usage-role">
+          {s.role === 'orchestrator' ? 'Orchestrator' : 'Worker'}
+          <StatusLabel session={s} />
+        </td>
+        <td className="usage-subtask">
           {s.subtask_id !== null && (
             <Link className="usage-link" to={taskPath(s.subtask_id)}>
               #{s.subtask_id} {s.subtask_title}
             </Link>
           )}
-        </td>
-        <td className="usage-nowrap">
           {s.pr_number !== null && (
-            <>
+            <div className="usage-line2">
               {s.pr_url ? (
                 <a className="usage-link" href={s.pr_url} target="_blank" rel="noreferrer">
-                  #{s.pr_number}
+                  PR #{s.pr_number}
                 </a>
               ) : (
-                `#${s.pr_number}`
+                `PR #${s.pr_number}`
               )}
               {s.pr_state && <span className="usage-muted"> {s.pr_state}</span>}
-            </>
+            </div>
           )}
         </td>
-        <td>
+        <td className="usage-nowrap">
           {s.agent}
-          {single && <span className="usage-mono"> · {single.model}</span>}
+          {single && <div className="usage-line2 usage-mono">{single.model}</div>}
         </td>
         <td>{s.effort}</td>
         <td className="usage-num">{formatDuration(s.duration_s)}</td>
         <td className="usage-num usage-strong">{dash(formatTokens(s.tokens.billable))}</td>
         <td className="usage-num usage-muted">{dash(formatTokens(s.tokens.cache_read))}</td>
-        <td className="usage-num">{running ? '—' : formatCost(s.cost_usd)}</td>
-        <td>
-          <StatusLabel session={s} />
-        </td>
+        <td className="usage-num">{dash(formatCost(s.cost_usd))}</td>
       </tr>
       {!single &&
         s.models.map((m) => (
           <tr key={m.model} className="usage-subrow" data-testid={`usage-model-${s.session_id}`}>
             <td />
             <td />
-            <td />
-            <td className="usage-mono">{m.model}</td>
+            <td className="usage-mono usage-nowrap">{m.model}</td>
             <td />
             <td />
             <td className="usage-num">{formatTokens(m.tokens.billable)}</td>
             <td className="usage-num usage-muted">{formatTokens(m.tokens.cache_read)}</td>
             <td className="usage-num">{formatCost(m.cost_usd)}</td>
-            <td />
           </tr>
         ))}
     </>
@@ -114,29 +112,29 @@ export function UsageTab({ taskId, taskPath }: UsageTabProps) {
   return (
     <div className="usage-tab">
       <TotalsCards totals={data.totals} sessionsHint="orchestrator and workers" />
-      <table className="usage-table" aria-label="Sessions">
-        <thead>
-          <tr>
-            <th>Role</th>
-            <th>Subtask</th>
-            <th>PR</th>
-            <th>Agent / Model</th>
-            <th>Effort</th>
-            <th className="usage-num">Duration</th>
-            <th className="usage-num">Tokens</th>
-            <th className="usage-num">Cache read</th>
-            <th className="usage-num">≈ $</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.sessions.map((s) => (
-            <Fragment key={s.session_id}>
-              <SessionRows session={s} taskPath={taskPath} />
-            </Fragment>
-          ))}
-        </tbody>
-      </table>
+      <div className="usage-scroll">
+        <table className="usage-table usage-table--compact" aria-label="Sessions">
+          <thead>
+            <tr>
+              <th>Session</th>
+              <th>Subtask / PR</th>
+              <th>Agent / Model</th>
+              <th>Effort</th>
+              <th className="usage-num">Duration</th>
+              <th className="usage-num">Tokens</th>
+              <th className="usage-num">Cache read</th>
+              <th className="usage-num">≈ $</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.sessions.map((s) => (
+              <Fragment key={s.session_id}>
+                <SessionRows session={s} taskPath={taskPath} />
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

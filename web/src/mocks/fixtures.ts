@@ -1417,6 +1417,8 @@ const OPUS_ORCH = usageTokens(120_000, 1_800_000, 24_500_000, 410_000)
 const HAIKU_ORCH = usageTokens(40_000, 90_000, 600_000, 15_000)
 const SOL_W4 = usageTokens(900_000, 0, 3_200_000, 260_000, 120_000)
 const OPUS_W5 = usageTokens(30_000, 400_000, 5_100_000, 95_000)
+const OPUS_T17 = usageTokens(10_000, 60_000, 400_000, 8_000)
+const OPUS_NO_TASK = usageTokens(2_000, 15_000, 90_000, 1_000)
 
 function sumTokens(...all: UsageTokens[]): UsageTokens {
   return all.reduce(
@@ -1428,24 +1430,29 @@ function sumTokens(...all: UsageTokens[]): UsageTokens {
 export const usageStats: UsageStats = {
   from: '2026-09-04',
   to: '2026-10-03',
-  totals: { sessions: 5, tokens: sumTokens(OPUS_ORCH, HAIKU_ORCH, SOL_W4, OPUS_W5), cost_usd: 34.86, cost_partial: true },
+  totals: {
+    sessions: 8,
+    tokens: sumTokens(OPUS_ORCH, HAIKU_ORCH, SOL_W4, OPUS_W5, OPUS_T17, OPUS_NO_TASK),
+    cost_usd: 35.61,
+    cost_partial: true,
+  },
   models: [
-    { model: 'claude-opus-5-5', agent: 'claude', sessions: 3, tokens: sumTokens(OPUS_ORCH, OPUS_W5), cost_usd: 34.6 },
+    { model: 'claude-opus-5-5', agent: 'claude', sessions: 4, tokens: sumTokens(OPUS_ORCH, OPUS_W5, OPUS_T17, OPUS_NO_TASK), cost_usd: 35.35 },
     { model: 'gpt-6-sol', agent: 'codex', sessions: 1, tokens: SOL_W4, cost_usd: null },
     { model: 'claude-haiku-4-5', agent: 'claude', sessions: 1, tokens: HAIKU_ORCH, cost_usd: 0.26 },
   ],
   tasks: [
     {
-      task_id: 12, title: 'Billing v2', project_id: 'billing', status: 'in_progress', sessions: 4,
+      task_id: 12, title: 'Billing v2', project_id: 'billing', status: 'in_progress', sessions: 6,
       tokens: sumTokens(OPUS_ORCH, HAIKU_ORCH, SOL_W4, OPUS_W5), cost_usd: 34.86, cost_partial: true,
     },
     {
       task_id: 17, title: 'Metering rewrite', project_id: 'billing', status: 'brainstorm', sessions: 1,
-      tokens: usageTokens(10_000, 60_000, 400_000, 8_000), cost_usd: 0.63, cost_partial: false,
+      tokens: OPUS_T17, cost_usd: 0.63, cost_partial: false,
     },
     {
       task_id: null, title: '', project_id: '', status: '', sessions: 1,
-      tokens: usageTokens(2_000, 15_000, 90_000, 1_000), cost_usd: 0.12, cost_partial: false,
+      tokens: OPUS_NO_TASK, cost_usd: 0.12, cost_partial: false,
     },
   ],
   pending: 0,
@@ -1453,7 +1460,7 @@ export const usageStats: UsageStats = {
 
 export const taskUsage: TaskUsage = {
   task_id: 12,
-  totals: { sessions: 5, tokens: sumTokens(OPUS_ORCH, HAIKU_ORCH, SOL_W4, OPUS_W5), cost_usd: 34.86, cost_partial: true },
+  totals: { sessions: 6, tokens: sumTokens(OPUS_ORCH, HAIKU_ORCH, SOL_W4, OPUS_W5), cost_usd: 34.86, cost_partial: true },
   sessions: [
     {
       session_id: 's-billing-v2-orch', role: 'orchestrator', subtask_id: null, subtask_title: '',

@@ -41,7 +41,7 @@ describe('UsageTab', () => {
     renderTab()
     const table = await screen.findByRole('table', { name: 'Sessions' })
     expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual([
-      'Role', 'Subtask', 'PR', 'Agent / Model', 'Effort', 'Duration', 'Tokens', 'Cache read', '≈ $', 'Status',
+      'Session', 'Subtask / PR', 'Agent / Model', 'Effort', 'Duration', 'Tokens', 'Cache read', '≈ $',
     ])
   })
 
@@ -49,12 +49,12 @@ describe('UsageTab', () => {
     renderTab()
     await screen.findByRole('table', { name: 'Sessions' })
     expect(cells(rowOf('s-billing-v2-orch'))).toEqual([
-      'Orchestrator', '', '', 'claude', 'high', '—', '2.48M', '25.1M', '$32.11', 'live snapshot',
+      'Orchestratorlive snapshot', '', 'claude', 'high', '—', '2.48M', '25.1M', '$32.11',
     ])
     const models = screen.getAllByTestId('usage-model-s-billing-v2-orch')
     expect(models.map(cells)).toEqual([
-      ['', '', '', 'claude-opus-5-5', '', '', '2.33M', '24.5M', '$31.85', ''],
-      ['', '', '', 'claude-haiku-4-5', '', '', '145K', '600K', '$0.26', ''],
+      ['', '', 'claude-opus-5-5', '', '', '2.33M', '24.5M', '$31.85'],
+      ['', '', 'claude-haiku-4-5', '', '', '145K', '600K', '$0.26'],
     ])
   })
 
@@ -63,10 +63,10 @@ describe('UsageTab', () => {
     await screen.findByRole('table', { name: 'Sessions' })
     const row = rowOf('s-billing-v2-w4')
     expect(cells(row)).toEqual([
-      'Worker', '#16 Retire legacy billing cron', '#400 merged', 'codex · gpt-6-sol', 'medium', '42m', '1.16M', '3.2M',
-      '—', '',
+      'Worker', '#16 Retire legacy billing cronPR #400 merged', 'codexgpt-6-sol', 'medium', '42m', '1.16M', '3.2M',
+      '—',
     ])
-    expect(within(row).getByRole('link', { name: '#400' })).toHaveAttribute('href', 'https://github.com/acme/infra/pull/400')
+    expect(within(row).getByRole('link', { name: 'PR #400' })).toHaveAttribute('href', 'https://github.com/acme/infra/pull/400')
     expect(within(row).getByRole('link', { name: '#16 Retire legacy billing cron' })).toHaveAttribute(
       'href',
       '/p/billing/tasks/16',
@@ -77,12 +77,16 @@ describe('UsageTab', () => {
   it('labels missing transcripts, errors and running sessions', async () => {
     renderTab()
     await screen.findByRole('table', { name: 'Sessions' })
-    expect(cells(rowOf('s-billing-v2-w3')).at(-1)).toBe('no transcript')
+    const status = (session: string) => within(rowOf(session)).queryByTestId('usage-status')?.textContent
+    const missing = cells(rowOf('s-billing-v2-w3'))
+    expect(status('s-billing-v2-w3')).toBe('no transcript')
+    expect(status('s-billing-v2-w4')).toBeUndefined()
+    expect(missing.slice(5, 8)).toEqual(['—', '—', '—'])
     const error = within(rowOf('s-billing-v2-w6')).getByText('error')
     expect(error).toHaveAttribute('title', 'read transcript: permission denied')
     const running = cells(rowOf('s-billing-v2-w2'))
-    expect(running.at(-1)).toBe('running — counted when finished')
-    expect(running.slice(6, 9)).toEqual(['—', '—', '—'])
+    expect(status('s-billing-v2-w2')).toBe('running — counted when finished')
+    expect(running.slice(5, 8)).toEqual(['—', '—', '—'])
   })
 
   it('shows an empty state for a feature with no sessions', async () => {
