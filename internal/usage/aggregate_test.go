@@ -18,22 +18,23 @@ func TestPeriodAggregatesBillableCostAndUniqueSessions(t *testing.T) {
 		{SessionID: "s2", Agent: "claude", Model: "a", Status: "ok", Tokens: store.UsageTokens{Input: 10, Output: 10}},
 		{SessionID: "s3", Agent: "codex", TaskID: 7, TaskTitle: "Feature", TaskStatus: "review", ProjectID: "p", Model: "c", Status: "ok"},
 		{SessionID: "s4", Agent: "claude", TaskID: 7, TaskTitle: "Feature", TaskStatus: "review", ProjectID: "p", Status: "missing"},
+		{SessionID: "s5", Agent: "claude", TaskID: 7, TaskTitle: "Feature", TaskStatus: "review", ProjectID: "p", Status: "error"},
 	}
 	prices := []store.ModelPrice{
 		{Model: "a", Input: rate(1), CacheWrite: rate(2), CacheRead: rate(.5), Output: rate(4)},
 		{Model: "c"},
 	}
 	got := Period(rows, prices)
-	if got.Totals.Sessions != 4 || got.Totals.Tokens != (Tokens{Input: 16, CacheWrite: 3, CacheRead: 16, Output: 15, Reasoning: 1, Billable: 34}) {
+	if got.Totals.Sessions != 3 || got.Totals.Tokens != (Tokens{Input: 16, CacheWrite: 3, CacheRead: 16, Output: 15, Reasoning: 1, Billable: 34}) {
 		t.Fatalf("totals = %+v", got.Totals)
 	}
 	if got.Totals.CostUSD == nil || math.Abs(*got.Totals.CostUSD-0.0000815) > 1e-12 || !got.Totals.CostPartial {
 		t.Errorf("cost = %v, partial = %v", got.Totals.CostUSD, got.Totals.CostPartial)
 	}
-	if len(got.Models) != 3 || got.Models[0].Model != "a" || got.Models[0].Sessions != 2 || got.Models[0].Tokens.Billable != 30 || got.Models[1].Model != "b" || got.Models[1].CostUSD != nil || got.Models[2].Model != "c" || got.Models[2].CostUSD == nil || *got.Models[2].CostUSD != 0 {
+	if len(got.Models) != 3 || got.Models[0].Model != "a" || got.Models[0].Sessions != 2 || got.Models[0].Tokens.Billable != 30 || got.Models[1].Model != "b" || got.Models[1].Sessions != 1 || got.Models[1].CostUSD != nil || got.Models[2].Model != "c" || got.Models[2].Sessions != 1 || got.Models[2].CostUSD == nil || *got.Models[2].CostUSD != 0 {
 		t.Errorf("models = %+v", got.Models)
 	}
-	if len(got.Tasks) != 2 || got.Tasks[0].TaskID != nil || got.Tasks[0].Title != "" || got.Tasks[0].Status != "" || got.Tasks[0].ProjectID != "" || got.Tasks[0].Sessions != 1 || got.Tasks[1].TaskID == nil || *got.Tasks[1].TaskID != 7 || got.Tasks[1].Sessions != 3 || got.Tasks[1].Tokens.Billable != 14 || !got.Tasks[1].CostPartial {
+	if len(got.Tasks) != 2 || got.Tasks[0].TaskID != nil || got.Tasks[0].Title != "" || got.Tasks[0].Status != "" || got.Tasks[0].ProjectID != "" || got.Tasks[0].Sessions != 1 || got.Tasks[1].TaskID == nil || *got.Tasks[1].TaskID != 7 || got.Tasks[1].Sessions != 2 || got.Tasks[1].Tokens.Billable != 14 || !got.Tasks[1].CostPartial {
 		t.Errorf("tasks = %+v", got.Tasks)
 	}
 }
@@ -56,14 +57,14 @@ func TestAggregatesExcludeIncompleteModelAcrossSessions(t *testing.T) {
 	}
 	prices := []store.ModelPrice{{Model: "m", Input: rate(1)}}
 	period := Period(rows, prices)
-	if len(period.Models) != 1 || period.Models[0].CostUSD != nil || period.Totals.CostUSD == nil || *period.Totals.CostUSD != 0 || !period.Totals.CostPartial {
+	if len(period.Models) != 1 || period.Models[0].CostUSD != nil || period.Totals.CostUSD != nil || !period.Totals.CostPartial {
 		t.Fatalf("period must sum complete models only: %+v", period)
 	}
-	if len(period.Tasks) != 1 || period.Tasks[0].CostUSD == nil || *period.Tasks[0].CostUSD != 0 || !period.Tasks[0].CostPartial {
+	if len(period.Tasks) != 1 || period.Tasks[0].CostUSD != nil || !period.Tasks[0].CostPartial {
 		t.Fatalf("task row must sum complete models only: %+v", period.Tasks)
 	}
 	task := Task(rows, prices, 7, nil)
-	if task.Totals.CostUSD == nil || *task.Totals.CostUSD != 0 || !task.Totals.CostPartial || len(task.Sessions) != 2 || task.Sessions[0].CostUSD == nil || *task.Sessions[0].CostUSD != 1 || task.Sessions[0].CostPartial || task.Sessions[1].CostUSD == nil || *task.Sessions[1].CostUSD != 0 || !task.Sessions[1].CostPartial {
+	if task.Totals.CostUSD != nil || !task.Totals.CostPartial || len(task.Sessions) != 2 || task.Sessions[0].CostUSD == nil || *task.Sessions[0].CostUSD != 1 || task.Sessions[0].CostPartial || task.Sessions[1].CostUSD != nil || !task.Sessions[1].CostPartial {
 		t.Fatalf("task totals must sum complete models; session costs stay local: %+v", task)
 	}
 }
@@ -75,14 +76,14 @@ func TestTaskGroupsCostsByExactModelAcrossAgents(t *testing.T) {
 	}
 	prices := []store.ModelPrice{{Model: "shared", Input: rate(1)}}
 	period := Period(rows, prices)
-	if len(period.Models) != 2 || period.Models[0].CostUSD != nil || period.Models[1].CostUSD != nil || period.Totals.CostUSD == nil || *period.Totals.CostUSD != 0 || !period.Totals.CostPartial {
+	if len(period.Models) != 2 || period.Models[0].CostUSD != nil || period.Models[1].CostUSD != nil || period.Totals.CostUSD != nil || !period.Totals.CostPartial {
 		t.Fatalf("period must exclude incomplete model across agents: %+v", period)
 	}
-	if len(period.Tasks) != 1 || period.Tasks[0].CostUSD == nil || *period.Tasks[0].CostUSD != 0 || !period.Tasks[0].CostPartial {
+	if len(period.Tasks) != 1 || period.Tasks[0].CostUSD != nil || !period.Tasks[0].CostPartial {
 		t.Fatalf("task row must price the exact model across agents: %+v", period.Tasks)
 	}
 	task := Task(rows, prices, 7, nil)
-	if task.Totals.CostUSD == nil || *task.Totals.CostUSD != 0 || !task.Totals.CostPartial {
+	if task.Totals.CostUSD != nil || !task.Totals.CostPartial {
 		t.Fatalf("task totals must price the exact model across agents: %+v", task.Totals)
 	}
 }
@@ -129,7 +130,7 @@ func TestTaskIncludesUncollectedSessionsWithoutCountingThem(t *testing.T) {
 	}
 	got := Task(rows, []store.ModelPrice{{Model: "priced", Input: rate(1), CacheRead: rate(1), Output: rate(1)}}, 7,
 		func(repo string, number int) string { return "https://github.com/acme/" + repo + "/pull/12" })
-	if got.TaskID != 7 || got.Totals.Sessions != 2 || got.Totals.Tokens.Billable != 31 || !got.Totals.CostPartial || len(got.Sessions) != 5 {
+	if got.TaskID != 7 || got.Totals.Sessions != 1 || got.Totals.Tokens.Billable != 31 || !got.Totals.CostPartial || len(got.Sessions) != 5 {
 		t.Fatalf("task = %+v", got)
 	}
 	s1 := got.Sessions[0]
@@ -173,5 +174,12 @@ func TestEmptyAggregatesEncodeArraysAndZeroCost(t *testing.T) {
 		if !reflect.DeepEqual(raw["models"], json.RawMessage("[]")) && !reflect.DeepEqual(raw["sessions"], json.RawMessage("[]")) {
 			t.Fatalf("empty arrays missing: %s", b)
 		}
+	}
+}
+
+func TestPeriodMissingOnlyHasNoUsageSessionsOrPartialCost(t *testing.T) {
+	got := Period([]store.UsageRow{{SessionID: "missing", TaskID: 7, Status: "missing"}}, nil)
+	if got.Totals.Sessions != 0 || got.Totals.CostUSD == nil || *got.Totals.CostUSD != 0 || got.Totals.CostPartial || len(got.Models) != 0 || len(got.Tasks) != 1 || got.Tasks[0].Sessions != 0 || got.Tasks[0].CostUSD == nil || *got.Tasks[0].CostUSD != 0 || got.Tasks[0].CostPartial {
+		t.Fatalf("missing-only period = %+v", got)
 	}
 }

@@ -94,6 +94,9 @@ func TestUsagePeriodDefaultsAndLocalInclusiveEnd(t *testing.T) {
 	if status != 200 || got.From != day || got.To != day || got.Totals.Sessions != 2 || got.Totals.Tokens.Billable != 20 || got.Pending != 1 {
 		t.Fatalf("filtered period: status=%d body=%+v", status, got)
 	}
+	if got.Totals.CostUSD != nil || !got.Totals.CostPartial {
+		t.Errorf("all-unpriced period cost = %+v", got.Totals)
+	}
 	status, got = readUsagePeriod(t, srv.URL+"/v1/stats/usage")
 	wantFrom := start.AddDate(0, 0, -29).Format("2006-01-02")
 	if status != 200 || got.From != wantFrom || got.To != day || got.Totals.Sessions != 3 || got.Pending != 1 {
@@ -196,10 +199,10 @@ func TestUsageTaskIncludesLinkedSessionsAndPRURL(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got.TaskID != root || got.Totals.Sessions != 2 || len(got.Sessions) != 4 || got.Sessions[0].PRURL != "https://github.com/acme/widgets/pull/42" || got.Sessions[0].SubtaskID == nil || *got.Sessions[0].SubtaskID != sub {
+	if got.TaskID != root || got.Totals.Sessions != 1 || len(got.Sessions) != 4 || got.Sessions[0].PRURL != "https://github.com/acme/widgets/pull/42" || got.Sessions[0].SubtaskID == nil || *got.Sessions[0].SubtaskID != sub {
 		t.Fatalf("task usage = %+v", got)
 	}
-	if got.Sessions[0].CostUSD == nil || *got.Sessions[0].CostUSD != 0 || !got.Sessions[0].CostPartial {
+	if got.Totals.CostUSD != nil || !got.Totals.CostPartial || got.Sessions[0].CostUSD != nil || !got.Sessions[0].CostPartial {
 		t.Errorf("unpriced session cost = %+v", got.Sessions[0])
 	}
 	if got.Sessions[1].Status != "missing" || got.Sessions[2].Status != "running" || got.Sessions[3].Status != "pending" || got.Sessions[2].CostUSD != nil || got.Sessions[3].CostUSD != nil {

@@ -176,8 +176,21 @@ func addPartialCost(sum **float64, partial *bool, cost *float64) {
 	}
 }
 
-func addCost(total *Totals, cost *float64) {
-	addPartialCost(&total.CostUSD, &total.CostPartial, cost)
+// sumCosts keeps the no-model case at zero, but an all-unpriced group has
+// no usable dollar estimate and must be null rather than a misleading zero.
+func sumCosts(costs []*float64) (*float64, bool) {
+	sum := zeroCost()
+	var partial, priced bool
+	for _, cost := range costs {
+		if cost != nil {
+			priced = true
+		}
+		addPartialCost(&sum, &partial, cost)
+	}
+	if len(costs) > 0 && !priced {
+		return nil, true
+	}
+	return sum, partial
 }
 
 func isCollected(row store.UsageRow) bool {
@@ -200,7 +213,7 @@ func Period(rows []store.UsageRow, prices []store.ModelPrice) PeriodSummary {
 		if !isCollected(row) {
 			continue
 		}
-		if !allSessions[row.SessionID] {
+		if row.Status == "ok" && !allSessions[row.SessionID] {
 			out.Totals.Sessions++
 			allSessions[row.SessionID] = true
 		}
@@ -215,11 +228,11 @@ func Period(rows []store.UsageRow, prices []store.ModelPrice) PeriodSummary {
 			tasks[row.TaskID] = task
 			taskSessions[row.TaskID] = make(map[string]bool)
 		}
-		if !taskSessions[row.TaskID][row.SessionID] {
+		if row.Status == "ok" && !taskSessions[row.TaskID][row.SessionID] {
 			task.Sessions++
 			taskSessions[row.TaskID][row.SessionID] = true
 		}
-		if row.Model == "" {
+		if row.Model == "" || row.Status != "ok" {
 			continue
 		}
 		t := tokens(row.Tokens)
@@ -268,13 +281,17 @@ func Period(rows []store.UsageRow, prices []store.ModelPrice) PeriodSummary {
 		}
 		return a.Agent < b.Agent
 	})
+	periodCosts := make([]*float64, 0, len(out.Models))
 	for _, model := range out.Models {
-		addCost(&out.Totals, model.CostUSD)
+		periodCosts = append(periodCosts, model.CostUSD)
 	}
+	out.Totals.CostUSD, out.Totals.CostPartial = sumCosts(periodCosts)
 	for id, task := range tasks {
+		costs := make([]*float64, 0, len(taskModels[id]))
 		for _, model := range sortedModelNames(taskModels[id]) {
-			addPartialCost(&task.CostUSD, &task.CostPartial, modelCost(taskModels[id][model], byPrice[model]))
+			costs = append(costs, modelCost(taskModels[id][model], byPrice[model]))
 		}
+		task.CostUSD, task.CostPartial = sumCosts(costs)
 		out.Tasks = append(out.Tasks, *task)
 	}
 	sort.Slice(out.Tasks, func(i, j int) bool {
@@ -299,6 +316,7 @@ func Task(rows []store.UsageRow, prices []store.ModelPrice, taskID int64, prURLF
 	out := TaskUsageSummary{TaskID: taskID, Totals: Totals{CostUSD: zeroCost()}, Sessions: []SessionSummary{}}
 	byPrice := priceMap(prices)
 	index := make(map[string]int)
+	collected := make(map[string]bool)
 	totalModels := make(map[string]Tokens)
 	for _, row := range rows {
 		i, exists := index[row.SessionID]
@@ -335,14 +353,15 @@ func Task(rows []store.UsageRow, prices []store.ModelPrice, taskID int64, prURLF
 					s.Status = "pending"
 				}
 				s.CostUSD = nil
-			} else {
+			} else if row.Status == "ok" {
 				out.Totals.Sessions++
 			}
 			out.Sessions = append(out.Sessions, s)
 			i = len(out.Sessions) - 1
 			index[row.SessionID] = i
+			collected[row.SessionID] = isCollected(row)
 		}
-		if row.Model == "" {
+		if row.Model == "" || row.Status != "ok" {
 			continue
 		}
 		s := &out.Sessions[i]
@@ -354,11 +373,23 @@ func Task(rows []store.UsageRow, prices []store.ModelPrice, taskID int64, prURLF
 		modelTokens := totalModels[row.Model]
 		modelTokens.add(t)
 		totalModels[row.Model] = modelTokens
-		addPartialCost(&s.CostUSD, &s.CostPartial, cost)
 	}
+	for i := range out.Sessions {
+		s := &out.Sessions[i]
+		if !collected[s.SessionID] {
+			continue
+		}
+		costs := make([]*float64, 0, len(s.Models))
+		for _, model := range s.Models {
+			costs = append(costs, model.CostUSD)
+		}
+		s.CostUSD, s.CostPartial = sumCosts(costs)
+	}
+	totalCosts := make([]*float64, 0, len(totalModels))
 	for _, model := range sortedModelNames(totalModels) {
-		addCost(&out.Totals, modelCost(totalModels[model], byPrice[model]))
+		totalCosts = append(totalCosts, modelCost(totalModels[model], byPrice[model]))
 	}
+	out.Totals.CostUSD, out.Totals.CostPartial = sumCosts(totalCosts)
 	sort.Slice(out.Sessions, func(i, j int) bool {
 		a, b := out.Sessions[i], out.Sessions[j]
 		if a.StartedAt != b.StartedAt {
