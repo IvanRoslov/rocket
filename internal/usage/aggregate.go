@@ -190,6 +190,7 @@ func Period(rows []store.UsageRow, prices []store.ModelPrice) PeriodSummary {
 	out := PeriodSummary{Totals: Totals{CostUSD: zeroCost()}, Models: []ModelSummary{}, Tasks: []TaskSummary{}}
 	byPrice := priceMap(prices)
 	models := make(map[modelKey]*ModelSummary)
+	periodModels := make(map[string]Tokens)
 	tasks := make(map[int64]*TaskSummary)
 	taskModels := make(map[int64]map[string]Tokens)
 	allSessions := make(map[string]bool)
@@ -223,6 +224,9 @@ func Period(rows []store.UsageRow, prices []store.ModelPrice) PeriodSummary {
 		}
 		t := tokens(row.Tokens)
 		out.Totals.Tokens.add(t)
+		periodModelTokens := periodModels[row.Model]
+		periodModelTokens.add(t)
+		periodModels[row.Model] = periodModelTokens
 		task.Tokens.add(t)
 		if taskModels[row.TaskID] == nil {
 			taskModels[row.TaskID] = make(map[string]Tokens)
@@ -244,7 +248,14 @@ func Period(rows []store.UsageRow, prices []store.ModelPrice) PeriodSummary {
 		}
 	}
 	for _, model := range models {
-		model.CostUSD = modelCost(model.Tokens, byPrice[model.Model])
+		// A model's rates must cover its combined usage for the whole period.
+		// Agent-specific rows stay visible, but none contributes dollars when
+		// another agent used an unpriced category of the same model.
+		if modelCost(periodModels[model.Model], byPrice[model.Model]) == nil {
+			model.CostUSD = nil
+		} else {
+			model.CostUSD = modelCost(model.Tokens, byPrice[model.Model])
+		}
 		out.Models = append(out.Models, *model)
 	}
 	sort.Slice(out.Models, func(i, j int) bool {

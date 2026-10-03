@@ -44,7 +44,7 @@ func TestPeriodSeparatesSameModelByAgent(t *testing.T) {
 		{SessionID: "b", Agent: "codex", Model: "shared", Status: "ok", Tokens: store.UsageTokens{Input: 2}},
 	}
 	got := Period(rows, []store.ModelPrice{{Model: "shared", Input: rate(1)}})
-	if len(got.Models) != 2 || got.Models[0].Agent != "codex" || got.Models[0].Sessions != 1 || got.Models[1].Agent != "claude" || got.Models[1].Sessions != 1 {
+	if len(got.Models) != 2 || got.Models[0].Agent != "codex" || got.Models[0].Sessions != 1 || got.Models[0].CostUSD == nil || *got.Models[0].CostUSD != 0.000002 || got.Models[1].Agent != "claude" || got.Models[1].Sessions != 1 || got.Models[1].CostUSD == nil || *got.Models[1].CostUSD != 0.000001 || got.Totals.CostUSD == nil || *got.Totals.CostUSD != *got.Models[0].CostUSD+*got.Models[1].CostUSD {
 		t.Fatalf("models = %+v", got.Models)
 	}
 }
@@ -75,8 +75,8 @@ func TestTaskGroupsCostsByExactModelAcrossAgents(t *testing.T) {
 	}
 	prices := []store.ModelPrice{{Model: "shared", Input: rate(1)}}
 	period := Period(rows, prices)
-	if len(period.Models) != 2 || period.Totals.CostUSD == nil || *period.Totals.CostUSD != 1 || !period.Totals.CostPartial {
-		t.Fatalf("period total must sum visible model rows: %+v", period)
+	if len(period.Models) != 2 || period.Models[0].CostUSD != nil || period.Models[1].CostUSD != nil || period.Totals.CostUSD == nil || *period.Totals.CostUSD != 0 || !period.Totals.CostPartial {
+		t.Fatalf("period must exclude incomplete model across agents: %+v", period)
 	}
 	if len(period.Tasks) != 1 || period.Tasks[0].CostUSD == nil || *period.Tasks[0].CostUSD != 0 || !period.Tasks[0].CostPartial {
 		t.Fatalf("task row must price the exact model across agents: %+v", period.Tasks)
