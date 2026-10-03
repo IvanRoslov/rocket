@@ -24,7 +24,7 @@
 - A second usage collection removes prior model rows and replaces stats atomically.
 - Historical worker links survive a respawn that overwrote `tasks.session_id`.
 - Terminal `missing` and final `ok` sessions do not enter ordinary retry batches; errors retry after one hour at most three times.
-- Date filtering uses `ended_at` for final rows and `collected_at` for live snapshots, including both endpoints.
+- Date filtering uses `ended_at` for final rows and `collected_at` for live snapshots in the caller-supplied `[from,to)` Unix-second interval.
 
 ---
 
