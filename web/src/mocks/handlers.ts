@@ -10,6 +10,7 @@ import type { Device, PairingCode } from '../lib/auth'
 import { isHuman } from '../lib/participants'
 import { slugify } from '../lib/slug'
 import type {
+  ModelPrice,
   ModelProfile,
   Agent,
   AgentInboxMessage,
@@ -42,7 +43,11 @@ import {
   repos,
   sessions,
   modelCatalog,
+  modelPrices,
   modelProfiles,
+  taskUsage,
+  usageStats,
+  usageTokens,
   settings,
   stormDocs,
   stormGates,
@@ -59,6 +64,15 @@ import {
 // that mutate this (e.g. "connect GitHub") should call `resetSettings()` in
 // `afterEach` to avoid leaking state into later tests in the same file.
 let settingsState: Settings = { ...settings }
+
+// Mutable price list, written by PUT/DELETE /v1/stats/prices/{model}.
+let pricesState: ModelPrice[] = modelPrices.map((p) => ({ ...p }))
+
+export function resetPrices(): void {
+  pricesState = modelPrices.map((p) => ({ ...p }))
+}
+
+const PRICE_KINDS = ['input', 'cache_write', 'cache_read', 'output'] as const
 
 export function resetSettings(): void {
   settingsState = { ...settings }
@@ -1095,6 +1109,73 @@ export const handlers = [
   }),
 
   http.get('/v1/stats/brainstorm', () => HttpResponse.json(brainstormStats)),
+
+  // --------------------------------------------------------------------
+  // Agent usage — internal/api/usage.go (task #5138 spec §3)
+  // --------------------------------------------------------------------
+
+  http.get('/v1/stats/usage', ({ request }) => {
+    const url = new URL(request.url)
+    const from = url.searchParams.get('from') ?? usageStats.from
+    const to = url.searchParams.get('to') ?? usageStats.to
+    const project = url.searchParams.get('project')
+    // Every fixture task is in billing; any other project spent nothing.
+    if (project && project !== 'billing') {
+      return HttpResponse.json({
+        from, to, models: [], tasks: [], pending: 0,
+        totals: { sessions: 0, tokens: usageTokens(0, 0, 0, 0), cost_usd: 0, cost_partial: false },
+      })
+    }
+    return HttpResponse.json({ ...usageStats, from, to })
+  }),
+
+  http.get('/v1/tasks/:id/usage', ({ params }) => {
+    const id = Number(params.id)
+    const task = tasksState.find((t) => t.id === id)
+    if (task?.parent_id !== undefined) {
+      return HttpResponse.json({ error: { code: 'not_root_task', message: 'usage is per root task' } }, { status: 400 })
+    }
+    if (!task) {
+      return HttpResponse.json({ error: { code: 'task_not_found', message: 'task not found' } }, { status: 404 })
+    }
+    if (id === taskUsage.task_id) return HttpResponse.json(taskUsage)
+    return HttpResponse.json({
+      task_id: id, sessions: [],
+      totals: { sessions: 0, tokens: usageTokens(0, 0, 0, 0), cost_usd: 0, cost_partial: false },
+    })
+  }),
+
+  http.get('/v1/stats/prices', () => HttpResponse.json({ prices: pricesState })),
+
+  http.put('/v1/stats/prices/:model', async ({ params, request }) => {
+    const model = String(params.model)
+    const body = (await request.json()) as Record<string, unknown>
+    for (const kind of PRICE_KINDS) {
+      const v = body[kind]
+      if (v !== null && (typeof v !== 'number' || v < 0)) {
+        return HttpResponse.json({ error: { code: 'bad_request', message: `${kind} must be a number >= 0 or null` } }, { status: 400 })
+      }
+    }
+    const next: ModelPrice = {
+      model,
+      input: body.input as number | null,
+      cache_write: body.cache_write as number | null,
+      cache_read: body.cache_read as number | null,
+      output: body.output as number | null,
+      updated_at: nowSeconds(),
+    }
+    pricesState = [...pricesState.filter((p) => p.model !== model), next].sort((a, b) => a.model.localeCompare(b.model))
+    return HttpResponse.json(next)
+  }),
+
+  // The model stays listed while usage has it — only its prices go.
+  http.delete('/v1/stats/prices/:model', ({ params }) => {
+    const model = String(params.model)
+    pricesState = pricesState.map((p) =>
+      p.model === model ? { model, input: null, cache_write: null, cache_read: null, output: null } : p,
+    )
+    return new HttpResponse(null, { status: 204 })
+  }),
 
   // --------------------------------------------------------------------
   // Settings & GitHub — internal/api/settings.go, internal/api/

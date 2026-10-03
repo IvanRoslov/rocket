@@ -27,6 +27,8 @@ import type {
   GlobalQuestion,
   ImportCatalogResult,
   Message,
+  ModelPrice,
+  ModelPriceInput,
   ModelProfile,
   ModelProfileInput,
   Project,
@@ -43,7 +45,9 @@ import type {
   TaskGate,
   TaskLogEntry,
   TaskStatus,
+  TaskUsage,
   ThreadInboxEntry,
+  UsageStats,
   ThreadType,
 } from './types'
 
@@ -1290,6 +1294,68 @@ export function useSetOutcome(): UseMutationResult<
 }
 
 // ---------------------------------------------------------------------------
+// Agent usage (task #5138 spec §3)
+// ---------------------------------------------------------------------------
+
+export interface UsageFilter {
+  /** Local `YYYY-MM-DD`, inclusive. */
+  from: string
+  to: string
+  /** Project id; empty for all projects. */
+  project?: string
+}
+
+/** `GET /v1/stats/usage` — tokens and ≈ $ by model and by task for a period. */
+export function useUsageStats(filter: UsageFilter): UseQueryResult<UsageStats> {
+  const params = new URLSearchParams({ from: filter.from, to: filter.to })
+  if (filter.project) params.set('project', filter.project)
+  return useQuery({
+    queryKey: ['usage', 'stats', filter.from, filter.to, filter.project ?? ''],
+    queryFn: () => api.get<UsageStats>(`/v1/stats/usage?${params}`),
+  })
+}
+
+/** `GET /v1/tasks/{id}/usage` — every session of a feature; root tasks only. */
+export function useTaskUsage(id: number | undefined): UseQueryResult<TaskUsage> {
+  return useQuery({
+    queryKey: ['taskUsage', id],
+    queryFn: () => api.get<TaskUsage>(`/v1/tasks/${id}/usage`),
+    enabled: id !== undefined,
+  })
+}
+
+/** `GET /v1/stats/prices` — every model seen in usage, unpriced ones with null prices. */
+export function usePrices(): UseQueryResult<ModelPrice[]> {
+  return useQuery({
+    queryKey: ['usage', 'prices'],
+    queryFn: () => api.get<{ prices: ModelPrice[] }>('/v1/stats/prices').then((r) => r.prices),
+  })
+}
+
+// Cost is computed at read time from the current prices, so a price change
+// moves every usage view.
+function invalidateUsage(queryClient: QueryClient) {
+  queryClient.invalidateQueries({ queryKey: ['usage'] })
+  queryClient.invalidateQueries({ queryKey: ['taskUsage'] })
+}
+
+export function useSetPrice(): UseMutationResult<ModelPrice, Error, { model: string } & ModelPriceInput> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ model, ...body }) => api.put<ModelPrice>(`/v1/stats/prices/${encodeURIComponent(model)}`, body),
+    onSuccess: () => invalidateUsage(queryClient),
+  })
+}
+
+export function useDeletePrice(): UseMutationResult<void, Error, string> {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (model) => api.del<void>(`/v1/stats/prices/${encodeURIComponent(model)}`),
+    onSuccess: () => invalidateUsage(queryClient),
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Live invalidation
 // ---------------------------------------------------------------------------
 
@@ -1338,6 +1404,7 @@ function eventQueryKeys(type: string): string[][] {
     // `session_alive` move with them.
     return [['agents'], ['agent'], ['sessions']]
   }
+  if (type === 'usage.collected') return [['usage'], ['taskUsage']]
   if (type.startsWith('repo.clone_')) return [['repos']]
   if (type.startsWith('pr.')) {
     // PR state changes (phase 4): re-fetch the sessions carrying pr_*

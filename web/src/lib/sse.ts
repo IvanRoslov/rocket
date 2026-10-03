@@ -72,6 +72,8 @@ export const EVENT_TYPES = [
   'pr.opened',
   'pr.ci_changed',
   'pr.merged',
+  // A session's token usage was (re)collected (task #5138).
+  'usage.collected',
   'repo.clone_started',
   'repo.clone_done',
   'repo.clone_failed',

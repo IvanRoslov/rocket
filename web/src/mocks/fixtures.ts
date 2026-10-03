@@ -20,6 +20,7 @@ import type {
   Repo,
   Session,
   AgentCatalog,
+  ModelPrice,
   ModelProfile,
   Settings,
   SystemInfo,
@@ -27,6 +28,9 @@ import type {
   TaskDoc,
   TaskGate,
   TaskLogEntry,
+  TaskUsage,
+  UsageStats,
+  UsageTokens,
 } from '../lib/types'
 
 // Fixed "now" reference so relative fixture timestamps stay stable across
@@ -1398,4 +1402,116 @@ export const agentQuestions: AgentQuestion[] = [
       { id: 2, author: '', kind: 'answer', body: 'thanks, keep it deferred', created_at: NOW - 2 * DAY + HOUR },
     ],
   },
+]
+
+// ---------------------------------------------------------------------------
+// Agent usage (task #5138 spec §3). billable = input + cache_write + output.
+// Opus and Haiku are priced, gpt-6-sol is not — so the totals are partial.
+// ---------------------------------------------------------------------------
+
+export function usageTokens(input: number, cache_write: number, cache_read: number, output: number, reasoning = 0): UsageTokens {
+  return { input, cache_write, cache_read, output, reasoning, billable: input + cache_write + output }
+}
+
+const OPUS_ORCH = usageTokens(120_000, 1_800_000, 24_500_000, 410_000)
+const HAIKU_ORCH = usageTokens(40_000, 90_000, 600_000, 15_000)
+const SOL_W4 = usageTokens(900_000, 0, 3_200_000, 260_000, 120_000)
+const OPUS_W5 = usageTokens(30_000, 400_000, 5_100_000, 95_000)
+
+function sumTokens(...all: UsageTokens[]): UsageTokens {
+  return all.reduce(
+    (a, t) => usageTokens(a.input + t.input, a.cache_write + t.cache_write, a.cache_read + t.cache_read, a.output + t.output, a.reasoning + t.reasoning),
+    usageTokens(0, 0, 0, 0),
+  )
+}
+
+export const usageStats: UsageStats = {
+  from: '2026-09-04',
+  to: '2026-10-03',
+  totals: { sessions: 5, tokens: sumTokens(OPUS_ORCH, HAIKU_ORCH, SOL_W4, OPUS_W5), cost_usd: 34.86, cost_partial: true },
+  models: [
+    { model: 'claude-opus-5-5', agent: 'claude', sessions: 3, tokens: sumTokens(OPUS_ORCH, OPUS_W5), cost_usd: 34.6 },
+    { model: 'gpt-6-sol', agent: 'codex', sessions: 1, tokens: SOL_W4, cost_usd: null },
+    { model: 'claude-haiku-4-5', agent: 'claude', sessions: 1, tokens: HAIKU_ORCH, cost_usd: 0.26 },
+  ],
+  tasks: [
+    {
+      task_id: 12, title: 'Billing v2', project_id: 'billing', status: 'in_progress', sessions: 4,
+      tokens: sumTokens(OPUS_ORCH, HAIKU_ORCH, SOL_W4, OPUS_W5), cost_usd: 34.86, cost_partial: true,
+    },
+    {
+      task_id: 17, title: 'Metering rewrite', project_id: 'billing', status: 'brainstorm', sessions: 1,
+      tokens: usageTokens(10_000, 60_000, 400_000, 8_000), cost_usd: 0.63, cost_partial: false,
+    },
+    {
+      task_id: null, title: '', project_id: '', status: '', sessions: 1,
+      tokens: usageTokens(2_000, 15_000, 90_000, 1_000), cost_usd: 0.12, cost_partial: false,
+    },
+  ],
+  pending: 0,
+}
+
+export const taskUsage: TaskUsage = {
+  task_id: 12,
+  totals: { sessions: 5, tokens: sumTokens(OPUS_ORCH, HAIKU_ORCH, SOL_W4, OPUS_W5), cost_usd: 34.86, cost_partial: true },
+  sessions: [
+    {
+      session_id: 's-billing-v2-orch', role: 'orchestrator', subtask_id: null, subtask_title: '',
+      agent: 'claude', profile: 'claude-opus', effort: 'high', repo_id: 'api',
+      pr_number: null, pr_url: '', pr_state: '', state: 'running', status: 'ok', final: false,
+      started_at: NOW - 3 * DAY, ended_at: null, duration_s: null,
+      models: [
+        { model: 'claude-opus-5-5', tokens: OPUS_ORCH, cost_usd: 31.85 },
+        { model: 'claude-haiku-4-5', tokens: HAIKU_ORCH, cost_usd: 0.26 },
+      ],
+      tokens: sumTokens(OPUS_ORCH, HAIKU_ORCH), cost_usd: 32.11,
+    },
+    {
+      session_id: 's-billing-v2-w4', role: 'worker', subtask_id: 16, subtask_title: 'Retire legacy billing cron',
+      agent: 'codex', profile: 'codex', effort: 'medium', repo_id: 'infra',
+      pr_number: 400, pr_url: 'https://github.com/acme/infra/pull/400', pr_state: 'merged',
+      state: 'done', status: 'ok', final: true,
+      started_at: NOW - 2 * DAY, ended_at: NOW - 2 * DAY + 42 * MIN, duration_s: 42 * MIN,
+      models: [{ model: 'gpt-6-sol', tokens: SOL_W4, cost_usd: null }],
+      tokens: SOL_W4, cost_usd: null,
+    },
+    {
+      session_id: 's-billing-v2-w5', role: 'worker', subtask_id: 13, subtask_title: 'Migrate billing schema',
+      agent: 'claude', profile: 'claude-opus', effort: 'high', repo_id: 'api',
+      pr_number: 398, pr_url: 'https://github.com/acme/api/pull/398', pr_state: 'closed',
+      state: 'killed', status: 'ok', final: true,
+      started_at: NOW - 3 * DAY, ended_at: NOW - 3 * DAY + 2 * HOUR + 5 * MIN, duration_s: 2 * HOUR + 5 * MIN,
+      models: [{ model: 'claude-opus-5-5', tokens: OPUS_W5, cost_usd: 2.75 }],
+      tokens: OPUS_W5, cost_usd: 2.75,
+    },
+    {
+      session_id: 's-billing-v2-w3', role: 'worker', subtask_id: 15, subtask_title: 'Data migration + backfill',
+      agent: 'claude', profile: '', effort: '', repo_id: 'infra',
+      pr_number: null, pr_url: '', pr_state: '', state: 'errored', status: 'missing', final: true,
+      started_at: NOW - 2 * DAY, ended_at: NOW - 90 * MIN, duration_s: 2 * DAY - 90 * MIN,
+      models: [], tokens: usageTokens(0, 0, 0, 0), cost_usd: 0,
+    },
+    {
+      session_id: 's-billing-v2-w6', role: 'worker', subtask_id: 15, subtask_title: 'Data migration + backfill',
+      agent: 'claude', profile: '', effort: '', repo_id: 'infra',
+      pr_number: null, pr_url: '', pr_state: '', state: 'killed', status: 'error', final: true,
+      error: 'read transcript: permission denied',
+      started_at: NOW - 2 * DAY, ended_at: NOW - 2 * DAY + 10 * MIN, duration_s: 10 * MIN,
+      models: [], tokens: usageTokens(0, 0, 0, 0), cost_usd: 0,
+    },
+    {
+      session_id: 's-billing-v2-w2', role: 'worker', subtask_id: 14, subtask_title: 'New billing UI',
+      agent: 'claude', profile: '', effort: '', repo_id: 'web',
+      pr_number: 14, pr_url: 'https://github.com/acme/web/pull/14', pr_state: 'open',
+      state: 'running', status: '', final: false,
+      started_at: NOW - 2 * DAY, ended_at: null, duration_s: null,
+      models: [], tokens: usageTokens(0, 0, 0, 0), cost_usd: null,
+    },
+  ],
+}
+
+export const modelPrices: ModelPrice[] = [
+  { model: 'claude-haiku-4-5', input: 1, cache_write: 1.25, cache_read: 0.1, output: 5, updated_at: NOW - 5 * DAY },
+  { model: 'claude-opus-5-5', input: 5, cache_write: 6.25, cache_read: 0.5, output: 25, updated_at: NOW - 5 * DAY },
+  { model: 'gpt-6-sol', input: null, cache_write: null, cache_read: null, output: null },
 ]
