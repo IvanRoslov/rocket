@@ -1,5 +1,7 @@
 ALTER TABLE sessions ADD COLUMN task_id INTEGER;
 ALTER TABLE sessions ADD COLUMN subtask_id INTEGER;
+CREATE INDEX idx_sessions_task ON sessions(task_id);
+CREATE INDEX idx_tasks_session ON tasks(session_id);
 
 CREATE TABLE session_usage (
   session_id  TEXT NOT NULL,
@@ -26,6 +28,7 @@ CREATE TABLE session_stats (
   attempts     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX session_stats_ended ON session_stats(ended_at);
+CREATE INDEX session_stats_collected ON session_stats(collected_at);
 CREATE INDEX session_stats_task ON session_stats(task_id);
 
 CREATE TABLE model_prices (

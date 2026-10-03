@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -325,6 +326,20 @@ func TestCountPendingUsageCountsTerminalUncollectedAndSnapshots(t *testing.T) {
 	}
 }
 
+func TestCountPendingUsageForProject(t *testing.T) {
+	s := openTestStore(t)
+	addUsageTestSession(t, s, Session{ID: "p-pending", Kind: "worker", ProjectID: "p", State: "done", CreatedAt: 10, UpdatedAt: 150})
+	addUsageTestSession(t, s, Session{ID: "q-pending", Kind: "worker", ProjectID: "q", State: "done", CreatedAt: 10, UpdatedAt: 150})
+	all, err := s.CountPendingUsage(100, 200)
+	if err != nil || all != 2 {
+		t.Fatalf("all pending = %d, err=%v; want 2", all, err)
+	}
+	project, err := s.CountPendingUsageForProject(100, 200, "p")
+	if err != nil || project != 1 {
+		t.Fatalf("project pending = %d, err=%v; want 1", project, err)
+	}
+}
+
 func TestModelPricesAndObservedModels(t *testing.T) {
 	s := openTestStore(t)
 	addUsageTestSession(t, s, Session{ID: "s", Kind: "worker", State: "done"})
@@ -358,6 +373,76 @@ func TestModelPricesAndObservedModels(t *testing.T) {
 	prices, err = s.ListModelPrices()
 	if err != nil || len(prices) != 0 {
 		t.Fatalf("price deletion = %+v, err=%v", prices, err)
+	}
+}
+
+func TestUsageHistoryQueriesUseIndexes(t *testing.T) {
+	s := openTestStore(t)
+	for _, tc := range []struct {
+		query string
+		index string
+	}{
+		{`SELECT session_id FROM session_stats WHERE final=1 AND ended_at>=100 AND ended_at<200`, "session_stats_ended"},
+		{`SELECT session_id FROM session_stats WHERE final=0 AND collected_at>=100 AND collected_at<200`, "session_stats_collected"},
+		{`SELECT id FROM sessions WHERE task_id=42`, "idx_sessions_task"},
+		{`SELECT id FROM tasks WHERE session_id='worker'`, "idx_tasks_session"},
+	} {
+		rows, err := s.db.Query(`EXPLAIN QUERY PLAN ` + tc.query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var details []string
+		for rows.Next() {
+			var id, parent, unused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+				t.Fatal(err)
+			}
+			details = append(details, detail)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		rows.Close()
+		if !strings.Contains(strings.Join(details, " "), tc.index) {
+			t.Errorf("query %q plan %v does not use %s", tc.query, details, tc.index)
+		}
+	}
+}
+
+func TestUsageReadStatementsUseIndexedCandidateSets(t *testing.T) {
+	s := openTestStore(t)
+	for _, tc := range []struct {
+		query string
+		args  []any
+		want  []string
+	}{
+		{usageRowsStatement(false), []any{100, 200, 100, 200}, []string{"session_stats_ended", "session_stats_collected"}},
+		{taskUsageRowsStatement(), []any{42, 42, 42, 42, 42}, []string{"idx_sessions_task", "session_stats_task"}},
+	} {
+		rows, err := s.db.Query(`EXPLAIN QUERY PLAN `+tc.query, tc.args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var details []string
+		for rows.Next() {
+			var id, parent, unused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+				t.Fatal(err)
+			}
+			details = append(details, detail)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		rows.Close()
+		plan := strings.Join(details, " ")
+		for _, index := range tc.want {
+			if !strings.Contains(plan, index) {
+				t.Errorf("query plan %v does not use %s", details, index)
+			}
+		}
 	}
 }
 

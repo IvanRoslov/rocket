@@ -359,6 +359,7 @@ CREATE TABLE session_stats (
   attempts     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX session_stats_ended ON session_stats(ended_at);
+CREATE INDEX session_stats_collected ON session_stats(collected_at);
 CREATE INDEX session_stats_task ON session_stats(task_id);
 
 CREATE TABLE model_prices (
@@ -372,6 +373,8 @@ CREATE TABLE model_prices (
 ```
 
 `session_usage` содержит одну строку на пару сессия/модель; повторный сбор целиком заменяет её строки и `session_stats` в одной транзакции. Цена не фиксируется в статистике: стоимость считается при чтении по текущему `model_prices`, который после миграции пуст. Главное число токенов — `input + cache_write + output`, без `cache_read`. `SessionsNeedingUsage` выбирает терминальные сессии без итога и повторяет ошибку не более трёх раз с интервалом от часа; `missing` повторно не ищется без ручного запроса.
+
+Миграция также создаёт индексы `idx_sessions_task` и `idx_tasks_session` для поиска сессий задачи и восстановления старых связей.
 
 ## Env-переменные сессий
 

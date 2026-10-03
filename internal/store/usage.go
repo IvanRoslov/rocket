@@ -232,7 +232,7 @@ type UsageRow struct {
 	Tokens       UsageTokens
 }
 
-const usageRowSelect = `SELECT s.id, s.kind, s.agent, s.profile, s.effort,
+const usageRowColumns = `SELECT s.id, s.kind, s.agent, s.profile, s.effort,
 	s.repo_id, s.project_id, COALESCE(s.pr_number,0), COALESCE(s.pr_state,''), s.state,
 	COALESCE(st.task_id, s.task_id, CASE WHEN linked.parent_id IS NULL THEN linked.id ELSE linked.parent_id END, 0),
 	COALESCE(st.subtask_id, s.subtask_id, CASE WHEN linked.parent_id IS NOT NULL THEN linked.id END, 0),
@@ -240,9 +240,9 @@ const usageRowSelect = `SELECT s.id, s.kind, s.agent, s.profile, s.effort,
 	COALESCE(st.status,''), COALESCE(st.final,0), COALESCE(st.started_at,s.created_at),
 	st.ended_at, COALESCE(st.collected_at,0), COALESCE(u.model,''),
 	COALESCE(u.input,0), COALESCE(u.cache_write,0), COALESCE(u.cache_read,0),
-	COALESCE(u.output,0), COALESCE(u.reasoning,0), COALESCE(u.messages,0)
-	FROM sessions s
-	LEFT JOIN session_stats st ON st.session_id = s.id
+	COALESCE(u.output,0), COALESCE(u.reasoning,0), COALESCE(u.messages,0)`
+
+const usageRowJoins = `
 	LEFT JOIN tasks linked ON linked.id = (SELECT id FROM tasks WHERE session_id = s.id LIMIT 1)
 	LEFT JOIN session_usage u ON u.session_id = s.id
 	LEFT JOIN tasks root ON root.id = COALESCE(st.task_id, s.task_id,
@@ -250,19 +250,25 @@ const usageRowSelect = `SELECT s.id, s.kind, s.agent, s.profile, s.effort,
 	LEFT JOIN tasks sub ON sub.id = COALESCE(st.subtask_id, s.subtask_id,
 		CASE WHEN linked.parent_id IS NOT NULL THEN linked.id END)`
 
+func usageRowsStatement(hasProject bool) string {
+	query := usageRowColumns + `
+		FROM session_stats st JOIN sessions s ON s.id = st.session_id` + usageRowJoins + `
+		WHERE ((st.final = 1 AND st.ended_at >= ? AND st.ended_at < ?)
+			OR (st.final = 0 AND st.collected_at >= ? AND st.collected_at < ?))`
+	if hasProject {
+		query += ` AND s.project_id = ?`
+	}
+	return query + ` ORDER BY s.id, u.model`
+}
+
 // UsageRows returns collected sessions in the caller-supplied [from,to)
 // interval. Final rows use ended_at; live snapshots use collected_at.
 func (s *Store) UsageRows(from, to int64, projectID string) ([]UsageRow, error) {
-	query := usageRowSelect + ` WHERE st.session_id IS NOT NULL
-		AND (CASE WHEN st.final = 1 THEN st.ended_at ELSE st.collected_at END) >= ?
-		AND (CASE WHEN st.final = 1 THEN st.ended_at ELSE st.collected_at END) < ?`
-	args := []any{from, to}
+	args := []any{from, to, from, to}
 	if projectID != "" {
-		query += ` AND s.project_id = ?`
 		args = append(args, projectID)
 	}
-	query += ` ORDER BY s.id, u.model`
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.Query(usageRowsStatement(projectID != ""), args...)
 	if err != nil {
 		return nil, fmt.Errorf("query usage rows: %w", err)
 	}
@@ -270,12 +276,22 @@ func (s *Store) UsageRows(from, to int64, projectID string) ([]UsageRow, error) 
 	return scanUsageRows(rows)
 }
 
+func taskUsageRowsStatement() string {
+	return `WITH related AS (
+		SELECT id AS session_id FROM sessions WHERE task_id = ?
+		UNION SELECT session_id FROM session_stats WHERE task_id = ?
+		UNION SELECT session_id FROM tasks WHERE id = ? OR parent_id = ?
+	)` + usageRowColumns + `
+		FROM related r JOIN sessions s ON s.id = r.session_id
+		LEFT JOIN session_stats st ON st.session_id = s.id` + usageRowJoins + `
+		WHERE COALESCE(st.task_id, s.task_id,
+			CASE WHEN linked.parent_id IS NULL THEN linked.id ELSE linked.parent_id END) = ?
+		ORDER BY s.created_at, s.id, u.model`
+}
+
 // TaskUsageRows includes running sessions before any snapshot exists.
 func (s *Store) TaskUsageRows(taskID int64) ([]UsageRow, error) {
-	query := usageRowSelect + ` WHERE COALESCE(st.task_id, s.task_id,
-		CASE WHEN linked.parent_id IS NULL THEN linked.id ELSE linked.parent_id END) = ?
-		ORDER BY s.created_at, s.id, u.model`
-	rows, err := s.db.Query(query, taskID)
+	rows, err := s.db.Query(taskUsageRowsStatement(), taskID, taskID, taskID, taskID, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("query task usage rows: %w", err)
 	}
@@ -311,12 +327,24 @@ func scanUsageRows(rows *sql.Rows) ([]UsageRow, error) {
 // received a final collection. Until collected, updated_at is the best
 // available approximation of their terminal time.
 func (s *Store) CountPendingUsage(from, to int64) (int, error) {
-	var n int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM sessions s
+	return s.CountPendingUsageForProject(from, to, "")
+}
+
+// CountPendingUsageForProject applies the same pending count to one project;
+// an empty projectID means all projects.
+func (s *Store) CountPendingUsageForProject(from, to int64, projectID string) (int, error) {
+	query := `SELECT COUNT(*) FROM sessions s
 		LEFT JOIN session_stats st ON st.session_id = s.id
 		WHERE s.state IN ('done','killed','errored')
 		AND (st.session_id IS NULL OR st.final = 0)
-		AND s.updated_at >= ? AND s.updated_at < ?`, from, to).Scan(&n)
+		AND s.updated_at >= ? AND s.updated_at < ?`
+	args := []any{from, to}
+	if projectID != "" {
+		query += ` AND s.project_id = ?`
+		args = append(args, projectID)
+	}
+	var n int
+	err := s.db.QueryRow(query, args...).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count pending usage: %w", err)
 	}
