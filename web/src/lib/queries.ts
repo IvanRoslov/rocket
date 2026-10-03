@@ -1409,10 +1409,11 @@ function eventQueryKeys(event: RocketEvent): unknown[][] {
     return [['agents'], ['agent'], ['sessions']]
   }
   if (type === 'usage.collected') {
-    // One event per collected session, or one per backfill batch with
-    // task_id null: only a known task's Usage tab is worth a refetch.
+    // One event per collected session names its task. A backfill batch comes
+    // as one event with task_id null and may touch any task: every Usage tab
+    // goes stale (only mounted ones refetch).
     const taskId = event.data?.task_id
-    return typeof taskId === 'number' ? [['usage'], ['taskUsage', taskId]] : [['usage']]
+    return typeof taskId === 'number' ? [['usage'], ['taskUsage', taskId]] : [['usage'], ['taskUsage']]
   }
   if (type.startsWith('repo.clone_')) return [['repos']]
   if (type.startsWith('pr.')) {

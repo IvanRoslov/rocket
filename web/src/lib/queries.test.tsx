@@ -593,14 +593,14 @@ describe('usage (task #5138)', () => {
     }
   })
 
-  it('a backfill batch (task_id null) refreshes only the usage screen', () => {
+  it('a backfill batch (task_id null) refreshes the usage screen and every task usage tab', () => {
     vi.useFakeTimers()
     try {
       const queryClient = new QueryClient()
       const spy = vi.spyOn(queryClient, 'invalidateQueries')
       wireInvalidation(queryClient)({ id: 1, ts: 1, type: 'usage.collected', session_id: '', data: { task_id: null, batch: 3 } })
       vi.advanceTimersByTime(INVALIDATION_WINDOW_MS)
-      expect(spy.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))).toEqual(['["usage"]'])
+      expect(spy.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))).toEqual(['["usage"]', '["taskUsage"]'])
     } finally {
       vi.useRealTimers()
     }
