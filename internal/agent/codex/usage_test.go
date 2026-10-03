@@ -81,6 +81,24 @@ func TestUsageCodexSkipsOlderShard(t *testing.T) {
 	}
 }
 
+func TestUsageCodexOldSameDayRolloutDoesNotCountAsFound(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	worktree := t.TempDir()
+	today := time.Now().In(time.Local)
+	installCodexUsageFixture(t, today, "rollout-old.jsonl", "same_day_old.jsonl", worktree)
+	since, err := time.Parse(time.RFC3339, today.Format("2006-01-02")+"T10:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := (&Codex{}).Usage(context.Background(), worktree, since)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Found || len(got.Models) != 0 || !got.FirstAt.IsZero() || !got.LastAt.IsZero() {
+		t.Fatalf("Usage = %#v, want missing transcript for new session", got)
+	}
+}
+
 func TestUsageCodexResetDoesNotSubtractTokens(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 	worktree := t.TempDir()
@@ -110,5 +128,29 @@ func TestUsageCodexUnreadableFileReturnsNoPartialResult(t *testing.T) {
 	}
 	if got.Found || len(got.Models) != 0 {
 		t.Fatalf("Usage = %#v, want no partial result", got)
+	}
+}
+
+func TestUsageCodexReadsFull16MiBJSONLRecord(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	worktree := t.TempDir()
+	today := time.Now().In(time.Local)
+	dir := usageDayDir(today)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := `{"type":"session_meta","payload":{"cwd":"` + worktree + `"}}` + "\n" +
+		`{"type":"turn_context","payload":{"model":"gpt-6-sol"}}` + "\n" +
+		strings.Repeat(" ", 16*1024*1024-2) + "{}\n" +
+		`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1,"total_tokens":1}}}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "rollout-large.jsonl"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := (&Codex{}).Usage(context.Background(), worktree, today.AddDate(0, 0, -1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Found || got.Models["gpt-6-sol"] != (agent.Tokens{Input: 1, Messages: 1}) {
+		t.Fatalf("Usage = %#v, want token count after large record", got)
 	}
 }

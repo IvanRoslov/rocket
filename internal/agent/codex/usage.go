@@ -13,7 +13,8 @@ import (
 	"github.com/IvanRoslov/rocket/internal/agent"
 )
 
-const usageLineLimit = 16 * 1024 * 1024
+// Scanner needs room for a full 16 MiB JSONL record plus the line delimiter.
+const usageLineLimit = 16*1024*1024 + 64*1024
 
 type cumulativeUsage struct {
 	Input      int64 `json:"input_tokens"`
@@ -104,7 +105,6 @@ func scanCodexUsageFile(ctx context.Context, path, worktree string, since time.T
 	if json.Unmarshal(scanner.Bytes(), &meta) != nil || meta.Type != "session_meta" || resolvedUsagePath(meta.Payload.Cwd) != worktree {
 		return nil
 	}
-	result.Found = true
 	observeCodexTimestamp(meta.Timestamp, info.ModTime(), since, result)
 
 	var previous cumulativeUsage
@@ -176,6 +176,7 @@ func observeCodexTimestamp(raw string, fallback time.Time, since time.Time, resu
 	if at.Before(since) {
 		return at, false
 	}
+	result.Found = true
 	if result.FirstAt.IsZero() || at.Before(result.FirstAt) {
 		result.FirstAt = at
 	}

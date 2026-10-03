@@ -109,3 +109,25 @@ func TestUsageUnreadableClaudeFileReturnsNoPartialResult(t *testing.T) {
 		t.Fatalf("Usage = %#v, want no partial result", got)
 	}
 }
+
+func TestUsageClaudeReadsFull16MiBJSONLRecord(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	worktree := t.TempDir()
+	dir := transcriptDir(worktree)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := `{"type":"user","cwd":"` + worktree + `"}` + "\n" +
+		strings.Repeat(" ", 16*1024*1024-2) + "{}\n" +
+		`{"type":"assistant","cwd":"` + worktree + `","message":{"id":"after-large","model":"claude-sonnet-5-5","usage":{"input_tokens":1}}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "large.jsonl"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := (&ClaudeCode{}).Usage(context.Background(), worktree, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Found || got.Models["claude-sonnet-5-5"] != (agent.Tokens{Input: 1, Messages: 1}) {
+		t.Fatalf("Usage = %#v, want assistant after large record", got)
+	}
+}

@@ -13,7 +13,8 @@ import (
 	"github.com/IvanRoslov/rocket/internal/agent"
 )
 
-const usageLineLimit = 16 * 1024 * 1024
+// Scanner needs room for a full 16 MiB JSONL record plus the line delimiter.
+const usageLineLimit = 16*1024*1024 + 64*1024
 
 type usageRecord struct {
 	Type      string `json:"type"`
