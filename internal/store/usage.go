@@ -433,3 +433,34 @@ func (s *Store) UsageModels() ([]string, error) {
 	}
 	return out, nil
 }
+
+// TerminalSessionIDs lists terminal sessions for a manual re-collection.
+// includeCollected selects every terminal session whose last result is not
+// "missing" (including never-collected ones); includeMissing selects the
+// "missing" ones, which the sweeper never retries on its own.
+func (s *Store) TerminalSessionIDs(includeCollected, includeMissing bool) ([]string, error) {
+	if !includeCollected && !includeMissing {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`SELECT s.id FROM sessions s
+		LEFT JOIN session_stats st ON st.session_id = s.id
+		WHERE s.state IN ('done', 'killed', 'errored')
+		AND ((? AND COALESCE(st.status, '') <> 'missing') OR (? AND st.status = 'missing'))
+		ORDER BY s.created_at, s.id`, includeCollected, includeMissing)
+	if err != nil {
+		return nil, fmt.Errorf("query terminal sessions: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan terminal session: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate terminal sessions: %w", err)
+	}
+	return out, nil
+}
