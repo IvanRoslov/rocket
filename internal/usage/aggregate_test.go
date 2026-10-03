@@ -49,6 +49,25 @@ func TestPeriodSeparatesSameModelByAgent(t *testing.T) {
 	}
 }
 
+func TestAggregatesExcludeIncompleteModelAcrossSessions(t *testing.T) {
+	rows := []store.UsageRow{
+		{SessionID: "input", Agent: "codex", TaskID: 7, Model: "m", Status: "ok", Tokens: store.UsageTokens{Input: 1_000_000}},
+		{SessionID: "output", Agent: "codex", TaskID: 7, Model: "m", Status: "ok", Tokens: store.UsageTokens{Output: 1}},
+	}
+	prices := []store.ModelPrice{{Model: "m", Input: rate(1)}}
+	period := Period(rows, prices)
+	if len(period.Models) != 1 || period.Models[0].CostUSD != nil || period.Totals.CostUSD == nil || *period.Totals.CostUSD != 0 || !period.Totals.CostPartial {
+		t.Fatalf("period must sum complete models only: %+v", period)
+	}
+	if len(period.Tasks) != 1 || period.Tasks[0].CostUSD == nil || *period.Tasks[0].CostUSD != 0 || !period.Tasks[0].CostPartial {
+		t.Fatalf("task row must sum complete models only: %+v", period.Tasks)
+	}
+	task := Task(rows, prices, 7, nil)
+	if task.Totals.CostUSD == nil || *task.Totals.CostUSD != 0 || !task.Totals.CostPartial || len(task.Sessions) != 2 || task.Sessions[0].CostUSD == nil || *task.Sessions[0].CostUSD != 1 || task.Sessions[1].CostUSD != nil {
+		t.Fatalf("task totals must sum complete models; session costs stay local: %+v", task)
+	}
+}
+
 func TestLargeFinitePriceDoesNotOverflowIntermediateProduct(t *testing.T) {
 	got := modelCost(Tokens{Input: 2}, store.ModelPrice{Input: rate(1e308)})
 	if got == nil || math.IsInf(*got, 0) || math.Abs(*got/1e302-2) > 1e-12 {
