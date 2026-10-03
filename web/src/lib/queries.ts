@@ -1376,7 +1376,8 @@ export function useDeletePrice(): UseMutationResult<void, Error, string> {
 export const INVALIDATION_WINDOW_MS = 1000
 
 /** The query keys an SSE event makes stale; empty when it moves nothing. */
-function eventQueryKeys(type: string): string[][] {
+function eventQueryKeys(event: RocketEvent): unknown[][] {
+  const { type } = event
   if (type === 'session.chat_updated') {
     // Fires on every activity tick of a talking agent; the chat screen polls
     // its own cursor. Invalidating on it refetched sessions and projects many
@@ -1407,7 +1408,12 @@ function eventQueryKeys(type: string): string[][] {
     // `session_alive` move with them.
     return [['agents'], ['agent'], ['sessions']]
   }
-  if (type === 'usage.collected') return [['usage'], ['taskUsage']]
+  if (type === 'usage.collected') {
+    // One event per collected session, or one per backfill batch with
+    // task_id null: only a known task's Usage tab is worth a refetch.
+    const taskId = event.data?.task_id
+    return typeof taskId === 'number' ? [['usage'], ['taskUsage', taskId]] : [['usage']]
+  }
   if (type.startsWith('repo.clone_')) return [['repos']]
   if (type.startsWith('pr.')) {
     // PR state changes (phase 4): re-fetch the sessions carrying pr_*
@@ -1427,7 +1433,7 @@ function eventQueryKeys(type: string): string[][] {
  * kept executing every abandoned request until it drowned.
  */
 export function wireInvalidation(queryClient: QueryClient) {
-  const pending = new Map<string, string[]>()
+  const pending = new Map<string, unknown[]>()
   let timer: ReturnType<typeof setTimeout> | undefined
 
   const flush = () => {
@@ -1440,7 +1446,7 @@ export function wireInvalidation(queryClient: QueryClient) {
   }
 
   return (event: RocketEvent) => {
-    const keys = eventQueryKeys(event.type)
+    const keys = eventQueryKeys(event)
     if (keys.length === 0) return
     for (const key of keys) pending.set(JSON.stringify(key), key)
     timer ??= setTimeout(flush, INVALIDATION_WINDOW_MS)
