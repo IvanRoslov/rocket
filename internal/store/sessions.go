@@ -16,6 +16,8 @@ type Session struct {
 	RepoID       string
 	FeatureSlug  string
 	ParentID     string
+	TaskID       int64 // 0 = no linked root task
+	SubtaskID    int64 // 0 = orchestrator or no linked subtask
 	Agent        string
 	Branch       string
 	WorktreePath string
@@ -68,14 +70,16 @@ func (s *Store) AddSession(sess Session) error {
 		`INSERT INTO sessions (
 			id, kind, project_id, repo_id, feature_slug, parent_id, agent, branch,
 			worktree_path, tmux_name, state, activity, activity_ts, pr_number, pr_state,
-			ci_state, prompt, pending_quiz, pr_checked_at, profile, model, effort, created_at, updated_at
-		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			ci_state, prompt, pending_quiz, pr_checked_at, profile, model, effort, created_at, updated_at,
+			task_id, subtask_id
+		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sess.ID, sess.Kind, sess.ProjectID, sess.RepoID, sess.FeatureSlug,
 		nullIfEmpty(sess.ParentID), sess.Agent, sess.Branch, sess.WorktreePath,
 		sess.TmuxName, sess.State, nullIfEmpty(sess.Activity), nullIfZero(sess.ActivityTS),
 		nullIfZero(int64(sess.PRNumber)), nullIfEmpty(sess.PRState), nullIfEmpty(sess.CIState),
 		nullIfEmpty(sess.Prompt), nullIfEmpty(sess.PendingQuiz), nullIfZero(sess.PRCheckedAt),
 		sess.Profile, sess.Model, sess.Effort, sess.CreatedAt, sess.UpdatedAt,
+		nullIfZero(sess.TaskID), nullIfZero(sess.SubtaskID),
 	)
 	if isUniqueViolation(err) {
 		return ErrExists
@@ -91,7 +95,8 @@ func (s *Store) GetSession(id string) (Session, error) {
 	row := s.db.QueryRow(
 		`SELECT id, kind, project_id, repo_id, feature_slug, parent_id, agent, branch,
 		        worktree_path, tmux_name, state, activity, activity_ts, pr_number, pr_state,
-		        ci_state, prompt, pending_quiz, pr_checked_at, profile, model, effort, created_at, updated_at
+		        ci_state, prompt, pending_quiz, pr_checked_at, profile, model, effort, created_at, updated_at,
+		        task_id, subtask_id
 		 FROM sessions WHERE id = ?`, id,
 	)
 	return scanSession(row)
@@ -101,7 +106,8 @@ func (s *Store) GetSession(id string) (Session, error) {
 func (s *Store) ListSessions(f SessionFilter) ([]Session, error) {
 	query := `SELECT id, kind, project_id, repo_id, feature_slug, parent_id, agent, branch,
 	                  worktree_path, tmux_name, state, activity, activity_ts, pr_number, pr_state,
-	                  ci_state, prompt, pending_quiz, pr_checked_at, profile, model, effort, created_at, updated_at
+	                  ci_state, prompt, pending_quiz, pr_checked_at, profile, model, effort, created_at, updated_at,
+	                  task_id, subtask_id
 	          FROM sessions`
 
 	var conds []string
@@ -174,6 +180,7 @@ func (s *Store) UpdateSession(sess Session) error {
 			agent = ?, branch = ?, worktree_path = ?, tmux_name = ?, state = ?,
 			activity = ?, activity_ts = ?, pr_number = ?, pr_state = ?, ci_state = ?,
 			prompt = ?, pending_quiz = ?, pr_checked_at = ?, profile = ?, model = ?, effort = ?,
+			task_id = ?, subtask_id = ?,
 			updated_at = ?
 		 WHERE id = ?`,
 		sess.Kind, sess.ProjectID, sess.RepoID, sess.FeatureSlug, nullIfEmpty(sess.ParentID),
@@ -181,7 +188,8 @@ func (s *Store) UpdateSession(sess Session) error {
 		nullIfEmpty(sess.Activity), nullIfZero(sess.ActivityTS),
 		nullIfZero(int64(sess.PRNumber)), nullIfEmpty(sess.PRState), nullIfEmpty(sess.CIState),
 		nullIfEmpty(sess.Prompt), nullIfEmpty(sess.PendingQuiz), nullIfZero(sess.PRCheckedAt),
-		sess.Profile, sess.Model, sess.Effort, time.Now().Unix(), sess.ID,
+		sess.Profile, sess.Model, sess.Effort, nullIfZero(sess.TaskID), nullIfZero(sess.SubtaskID),
+		time.Now().Unix(), sess.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update session: %w", err)
@@ -224,7 +232,8 @@ func (s *Store) ListSessionsForPRPoll() ([]Session, error) {
 	rows, err := s.db.Query(
 		`SELECT id, kind, project_id, repo_id, feature_slug, parent_id, agent, branch,
 		        worktree_path, tmux_name, state, activity, activity_ts, pr_number, pr_state,
-		        ci_state, prompt, pending_quiz, pr_checked_at, profile, model, effort, created_at, updated_at
+		        ci_state, prompt, pending_quiz, pr_checked_at, profile, model, effort, created_at, updated_at,
+		        task_id, subtask_id
 		 FROM sessions
 		 WHERE kind = 'worker'
 		   AND (state IN ('spawning', 'running')
@@ -310,14 +319,14 @@ func (s *Store) ClearPendingQuiz(id string) error {
 func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 	var sess Session
 	var parentID, activity, prState, ciState, prompt, pendingQuiz sql.NullString
-	var activityTS, prNumber, prCheckedAt sql.NullInt64
+	var activityTS, prNumber, prCheckedAt, taskID, subtaskID sql.NullInt64
 
 	err := row.Scan(
 		&sess.ID, &sess.Kind, &sess.ProjectID, &sess.RepoID, &sess.FeatureSlug,
 		&parentID, &sess.Agent, &sess.Branch, &sess.WorktreePath, &sess.TmuxName,
 		&sess.State, &activity, &activityTS, &prNumber, &prState, &ciState, &prompt,
 		&pendingQuiz, &prCheckedAt, &sess.Profile, &sess.Model, &sess.Effort,
-		&sess.CreatedAt, &sess.UpdatedAt,
+		&sess.CreatedAt, &sess.UpdatedAt, &taskID, &subtaskID,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, ErrNotFound
@@ -335,6 +344,8 @@ func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 	sess.CIState = ciState.String
 	sess.PendingQuiz = pendingQuiz.String
 	sess.PRCheckedAt = prCheckedAt.Int64
+	sess.TaskID = taskID.Int64
+	sess.SubtaskID = subtaskID.Int64
 
 	return sess, nil
 }
