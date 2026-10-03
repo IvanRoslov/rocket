@@ -20,6 +20,27 @@ type ActivityRef struct {
 	WorktreePath string
 }
 
+// Tokens holds token usage for one actual model in an agent transcript.
+// Reasoning is a subset of Output, not an additional chargeable category.
+type Tokens struct {
+	Input, CacheWrite, CacheRead, Output, Reasoning, Messages int64
+}
+
+// Usage is the token usage of all transcripts belonging to one worktree.
+// Found reports whether a matching transcript was found, even if it has no
+// token usage records.
+type Usage struct {
+	Models          map[string]Tokens
+	FirstAt, LastAt time.Time
+	Found           bool
+}
+
+// UsageReader is an optional adapter capability for reading native session
+// transcripts. Since excludes records from an earlier use of the worktree.
+type UsageReader interface {
+	Usage(ctx context.Context, worktreePath string, since time.Time) (Usage, error)
+}
+
 // ChatEntry is one entry in a session's chat transcript, as returned by
 // Agent.TranscriptTail.
 type ChatEntry struct {
