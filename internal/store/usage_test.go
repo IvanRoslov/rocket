@@ -232,6 +232,135 @@ func TestResolveSessionTaskFromDirectTaskAndLog(t *testing.T) {
 	}
 }
 
+func TestUsageRowsFiltersExclusiveEndAndSnapshotTime(t *testing.T) {
+	s := openTestStore(t)
+	rootID, err := s.AddTask(Task{Title: "feature", ProjectID: "p", Status: "review"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subID, err := s.AddTask(Task{Title: "worker task", ParentID: rootID, ProjectID: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		id, project string
+		final       bool
+		ended, at   int64
+	}{
+		{"at-start", "p", true, 100, 300},
+		{"at-end", "p", true, 200, 300},
+		{"snapshot", "p", false, 0, 150},
+		{"other-project", "q", true, 150, 300},
+	} {
+		addUsageTestSession(t, s, Session{ID: tc.id, Kind: "worker", ProjectID: tc.project, RepoID: "r", Agent: "codex", Profile: "fast", Effort: "high", State: "done", TaskID: rootID, SubtaskID: subID, PRNumber: 12, PRState: "merged"})
+		st := SessionStats{SessionID: tc.id, TaskID: rootID, SubtaskID: subID, Status: "ok", Final: tc.final, StartedAt: 10, CollectedAt: tc.at}
+		if tc.final {
+			st.EndedAt = &tc.ended
+		}
+		if err := s.ReplaceSessionUsage(st, []ModelUsage{{Model: "m", Tokens: UsageTokens{Input: 4, CacheRead: 5, Output: 6}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := s.UsageRows(100, 200, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.SessionID)
+		if row.TaskID != rootID || row.SubtaskID != subID || row.TaskTitle != "feature" || row.SubtaskTitle != "worker task" || row.TaskStatus != "review" || row.Tokens.Input != 4 || row.Tokens.CacheRead != 5 || row.PRNumber != 12 {
+			t.Errorf("incomplete usage row: %+v", row)
+		}
+	}
+	sort.Strings(ids)
+	if !reflect.DeepEqual(ids, []string{"at-start", "snapshot"}) {
+		t.Fatalf("UsageRows IDs = %v, want at-start and snapshot", ids)
+	}
+}
+
+func TestTaskUsageRowsIncludesRunningAndMissingSessions(t *testing.T) {
+	s := openTestStore(t)
+	rootID, err := s.AddTask(Task{Title: "root", ProjectID: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	addUsageTestSession(t, s, Session{ID: "running", Kind: "orchestrator", State: "running", TaskID: rootID, CreatedAt: 100})
+	addUsageTestSession(t, s, Session{ID: "missing", Kind: "worker", State: "done", TaskID: rootID, CreatedAt: 110})
+	if err := s.ReplaceSessionUsage(SessionStats{SessionID: "missing", TaskID: rootID, Status: "missing", Final: true, StartedAt: 110, CollectedAt: 200}, nil); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.TaskUsageRows(rootID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].SessionID != "running" || rows[0].Status != "" || rows[0].StartedAt != 100 || rows[1].SessionID != "missing" || rows[1].Status != "missing" || rows[1].Model != "" {
+		t.Fatalf("TaskUsageRows = %+v", rows)
+	}
+}
+
+func TestCountPendingUsageCountsTerminalUncollectedAndSnapshots(t *testing.T) {
+	s := openTestStore(t)
+	for _, tc := range []struct {
+		id, state string
+		updated   int64
+	}{
+		{"uncollected", "done", 100},
+		{"snapshot", "killed", 150},
+		{"at-end", "done", 200},
+		{"live", "running", 100},
+		{"final", "done", 100},
+	} {
+		addUsageTestSession(t, s, Session{ID: tc.id, Kind: "worker", State: tc.state, CreatedAt: 10, UpdatedAt: tc.updated})
+	}
+	if err := s.ReplaceSessionUsage(SessionStats{SessionID: "snapshot", Status: "ok", Final: false, StartedAt: 10, CollectedAt: 140}, nil); err != nil {
+		t.Fatal(err)
+	}
+	end := int64(100)
+	if err := s.ReplaceSessionUsage(SessionStats{SessionID: "final", Status: "ok", Final: true, StartedAt: 10, EndedAt: &end, CollectedAt: 101}, nil); err != nil {
+		t.Fatal(err)
+	}
+	count, err := s.CountPendingUsage(100, 200)
+	if err != nil || count != 2 {
+		t.Fatalf("CountPendingUsage = %d, err=%v; want 2", count, err)
+	}
+}
+
+func TestModelPricesAndObservedModels(t *testing.T) {
+	s := openTestStore(t)
+	addUsageTestSession(t, s, Session{ID: "s", Kind: "worker", State: "done"})
+	if err := s.ReplaceSessionUsage(SessionStats{SessionID: "s", Status: "ok", Final: true, StartedAt: 1, CollectedAt: 2}, []ModelUsage{{Model: "unpriced"}}); err != nil {
+		t.Fatal(err)
+	}
+	zero, two := 0.0, 2.0
+	price := ModelPrice{Model: "priced", Input: &zero, Output: &two, UpdatedAt: 123}
+	if err := s.UpsertModelPrice(price); err != nil {
+		t.Fatal(err)
+	}
+	prices, err := s.ListModelPrices()
+	if err != nil || len(prices) != 1 || !reflect.DeepEqual(prices[0], price) {
+		t.Fatalf("ListModelPrices = %+v, err=%v", prices, err)
+	}
+	models, err := s.UsageModels()
+	if err != nil || !reflect.DeepEqual(models, []string{"unpriced"}) {
+		t.Fatalf("UsageModels = %v, err=%v", models, err)
+	}
+	price.Input = &two
+	if err := s.UpsertModelPrice(price); err != nil {
+		t.Fatal(err)
+	}
+	prices, err = s.ListModelPrices()
+	if err != nil || len(prices) != 1 || *prices[0].Input != two {
+		t.Fatalf("price upsert = %+v, err=%v", prices, err)
+	}
+	if err := s.DeleteModelPrice("priced"); err != nil {
+		t.Fatal(err)
+	}
+	prices, err = s.ListModelPrices()
+	if err != nil || len(prices) != 0 {
+		t.Fatalf("price deletion = %+v, err=%v", prices, err)
+	}
+}
+
 func addUsageTestSession(t *testing.T, s *Store, sess Session) {
 	t.Helper()
 	if err := s.AddSession(sess); err != nil {
