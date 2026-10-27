@@ -16,7 +16,6 @@
 // the decision instead of dropping it.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
   useAnswerThread,
   useAskThread,
@@ -24,14 +23,13 @@ import {
   useThreads,
   type ThreadRef,
 } from '../../lib/queries'
-import { isStorm, stormGroups, stormHref } from '../../lib/storm'
+import { isStorm } from '../../lib/storm'
 import type { ThreadInboxEntry } from '../../lib/types'
 import { AskComposer } from './AskComposer'
 import { BrowseMode } from './BrowseMode'
 import { createDeferredQueue } from './deferred'
 import { FocusMode } from './FocusMode'
 import { queueOf, type BrowseFilter } from './model'
-import { StormCard } from './StormRows'
 import { ThreadCard } from './ThreadCard'
 import { useThreadDetail } from './useThreadDetail'
 import './questions.css'
@@ -81,15 +79,7 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
   const ask = useAskThread()
 
   const [mode, setMode] = useState<Mode>('focus')
-  // The rail's cursor is a thread or a task storm, never both: picking one
-  // clears the other.
-  const [threadId, setThreadId] = useState<number>()
-  const [stormId, setStormId] = useState<number>()
-  function setCurrentId(id: number | undefined) {
-    setStormId(undefined)
-    setThreadId(id)
-  }
-  const navigate = useNavigate()
+  const [currentId, setCurrentId] = useState<number>()
   const [later, setLater] = useState<ReadonlySet<number>>(new Set())
   // Threads the human has acted on whose API call has not fired yet: the
   // screen must show them closed at once, or the undo window would look like
@@ -139,9 +129,8 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
   }
 
   // The list every view works off: the server's threads with the not-yet-sent
-  // local closes folded in. Storm threads are not in it: a storm question is
-  // answered only in its task's Brainstorm tab (task #4901, spec v2 §3.1), and
-  // the inbox shows one row per task for them instead — `storms`.
+  // local closes folded in. Storm threads are not in it: brainstorm
+  // questions live in the Brainstorms section, never here.
   const rows: ThreadInboxEntry[] = useMemo(
     () =>
       (threads ?? [])
@@ -153,17 +142,13 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
         ),
     [threads, pending],
   )
-  const storms = useMemo(() => stormGroups(threads ?? []), [threads])
 
   const queue = queueOf(rows, later)
   const mine = rows.filter((t) => t.status === 'open' && t.your_turn)
   const waitingOnAgents = rows.filter((t) => t.status === 'open' && !t.your_turn).length
   const notes = rows.filter((t) => t.type === 'fyi').length
   const staleCount = mine.filter((t) => t.stale).length
-  const pickedStorm = stormId === undefined ? undefined : storms.find((g) => g.taskId === stormId)
-  const current = pickedStorm ? undefined : (rows.find((t) => t.id === threadId) ?? queue[0])
-  // With no thread left on you, the pane holds the first storm row.
-  const currentStorm = pickedStorm ?? (current ? undefined : storms[0])
+  const current = rows.find((t) => t.id === currentId) ?? queue[0]
   const detail = useThreadDetail(current)
 
   // A thread that arrives on your turn while you are looking at the page is
@@ -190,21 +175,11 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
     setCurrentId(next?.id)
   }
 
-  // J/K walk the rail as it is drawn: storm rows first, then the queue.
+  // J/K walk the rail as it is drawn.
   function step(delta: number) {
-    const rail = [
-      ...storms.map((g) => ({ storm: g.taskId })),
-      ...queue.map((t) => ({ thread: t.id })),
-    ]
-    const i = rail.findIndex((r) =>
-      'storm' in r ? r.storm === currentStorm?.taskId : r.thread === current?.id,
-    )
-    const next = rail[Math.min(rail.length - 1, Math.max(0, i + delta))]
-    if (!next) return
-    if ('storm' in next) {
-      setThreadId(undefined)
-      setStormId(next.storm)
-    } else setCurrentId(next.thread)
+    const i = queue.findIndex((t) => t.id === current?.id)
+    const next = queue[Math.min(queue.length - 1, Math.max(0, i + delta))]
+    if (next) setCurrentId(next.id)
   }
 
   function select(id: number) {
@@ -321,7 +296,7 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
         runUndo()
         return
       }
-      if (mode !== 'focus' || (!current && !currentStorm)) return
+      if (mode !== 'focus' || !current) return
       if (k === 'j') {
         e.preventDefault()
         step(1)
@@ -332,15 +307,7 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
         step(-1)
         return
       }
-      // A storm is answered in its Brainstorm tab: Enter or a number goes there.
-      if (currentStorm) {
-        if (k === 'enter' || /^[1-9]$/.test(k)) {
-          e.preventDefault()
-          navigate(stormHref(currentStorm))
-        }
-        return
-      }
-      if (!current || current.status !== 'open') return
+      if (current.status !== 'open') return
       if (/^[1-9]$/.test(k)) {
         e.preventDefault()
         choose(current, Number(k) - 1)
@@ -367,17 +334,14 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
     }
   }
 
-  // A task's storm is one item on you, however many questions it holds.
-  const onYou = mine.length + storms.length
+  const onYou = mine.length
   const headline = onYou > 0 ? `${onYou} decisions on you` : 'Nothing on you'
   const subline =
     staleCount > 0 ? `${staleCount} stale · ${cleared} cleared today` : `${cleared} cleared today`
   const total = onYou + cleared
   const progress = total > 0 ? Math.round((cleared / total) * 100) : 100
 
-  const card = currentStorm ? (
-    <StormCard storm={currentStorm} />
-  ) : current ? (
+  const card = current ? (
     <ThreadCard
       key={current.id}
       entry={current}
@@ -457,9 +421,7 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
       {mode === 'focus' ? (
         <FocusMode
           queue={queue}
-          storms={storms}
           currentId={current?.id}
-          currentStormId={currentStorm?.taskId}
           onSelect={select}
           waitingOnAgents={waitingOnAgents}
           notes={notes}
@@ -471,7 +433,6 @@ export function QuestionsScreen({ undoMs = UNDO_MS }: QuestionsScreenProps = {})
       ) : (
         <BrowseMode
           threads={rows}
-          storms={storms}
           query={query}
           onQuery={setQuery}
           filter={filter}
