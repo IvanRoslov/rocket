@@ -13,6 +13,11 @@
   flex-direction: column;
   gap: 14px;
 }
+.bm--embedded {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
 .bm__title {
   margin: 0;
   font: 700 22px var(--font-ui);
