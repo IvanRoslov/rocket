@@ -861,6 +861,8 @@ func TestPostSessionSpawnFailureCancelsAutoSubtask(t *testing.T) {
 	d := sessionsTestDepsWithErrorWorkspace(t)
 	srv := newTestServer(t, d)
 	orchID, rootID := seedOrchestratorWithTask(t, d, "proj1", "myfeat")
+	evCh, evCancel := d.Bus.Subscribe()
+	defer evCancel()
 
 	// Spawn without subtask_id: auto-creates a subtask.
 	resp := postJSONWithHeader(t, srv.URL+"/v1/sessions", orchID,
@@ -886,6 +888,26 @@ func TestPostSessionSpawnFailureCancelsAutoSubtask(t *testing.T) {
 	}
 	if sub.SessionID != "" {
 		t.Errorf("auto-created subtask SessionID should be empty but got %q", sub.SessionID)
+	}
+
+	// The cancel must be announced to clients.
+	timeout := time.After(2 * time.Second)
+	for found := false; !found; {
+		select {
+		case ev := <-evCh:
+			if ev.Type != "task.status_changed" || ev.Data["to"] != "cancelled" {
+				continue
+			}
+			if ev.Data["task_id"] != sub.ID || ev.Data["from"] != "in_progress" {
+				t.Errorf("unexpected payload: %+v", ev.Data)
+			}
+			if _, ok := ev.Data["by"].(string); !ok {
+				t.Errorf("by missing: %+v", ev.Data)
+			}
+			found = true
+		case <-timeout:
+			t.Fatal("no task.status_changed(cancelled) event")
+		}
 	}
 }
 

@@ -279,7 +279,12 @@ func handlePostSession(w http.ResponseWriter, r *http.Request, d Deps) {
 	})
 	if err != nil {
 		if autoCreated {
-			_ = d.Store.UpdateTaskStatus(sub.ID, "cancelled")
+			from := sub.Status
+			if err := d.Store.UpdateTaskStatus(sub.ID, "cancelled"); err == nil {
+				d.Bus.Publish("task.status_changed", sub.SessionID, map[string]any{
+					"task_id": sub.ID, "from": from, "to": "cancelled", "by": callerLabel(caller),
+				})
+			}
 		}
 		writeManagerErr(w, err)
 		return
