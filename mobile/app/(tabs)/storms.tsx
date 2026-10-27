@@ -64,6 +64,9 @@ export default function StormsScreen() {
           onChange={(k) => setFilter(k as BrainstormFilter)}
         />
         <View style={{ height: 12 }} />
+        {data && data.length > 0 && rows.length === 0 ? (
+          <EmptyState text={filter === 'go' ? 'Nothing needs a Go' : 'Nothing needs an answer'} />
+        ) : null}
         {rows.map((e) => (
           <StormCard key={e.task_id} e={e} />
         ))}

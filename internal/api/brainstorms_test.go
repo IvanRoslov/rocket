@@ -26,6 +26,25 @@ func (f gateFixture) askStorm(t *testing.T, taskID int64) questionResponse {
 	return decodeQuestion(t, resp)
 }
 
+// askAgedStorm opens a storm thread on taskID directly in the store, dated age
+// ago — the API cannot backdate a question, so ordering tests seed it here.
+func (f gateFixture) askAgedStorm(t *testing.T, taskID int64, age time.Duration) {
+	t.Helper()
+	id, err := f.d.Store.AddQuestion(store.Question{
+		TaskID: taskID, AskedBy: "orch-1", Body: "Какую схему?", Type: store.QuestionTypeBrainstorm,
+		Options: []string{"A", "B", "C"}, RecommendedOption: 2, AskedAt: time.Now().Add(-age).Unix(),
+	})
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+	if err := f.d.Store.AddParticipants(id, store.ParticipantHuman, "orch-1"); err != nil {
+		t.Fatalf("AddParticipants: %v", err)
+	}
+	if err := f.d.Store.SetAttention(id, []string{store.ParticipantHuman}); err != nil {
+		t.Fatalf("SetAttention: %v", err)
+	}
+}
+
 func (f gateFixture) brainstorms(t *testing.T) []brainstormEntry {
 	t.Helper()
 	resp := getJSON(t, f.url+"/v1/brainstorms")
@@ -173,7 +192,8 @@ func TestBrainstorms_HiddenStatuses(t *testing.T) {
 
 func TestBrainstorms_BothOneEntry(t *testing.T) {
 	f := newGateFixture(t, "brainstorm")
-	f.askStorm(t, f.taskID)
+	// The question is older than the gate, so min and max differ.
+	f.askAgedStorm(t, f.taskID, 100*time.Second)
 	f.putDoc(t, "spec")
 	g := f.request(t, "orch-1")
 
@@ -187,26 +207,24 @@ func TestBrainstorms_BothOneEntry(t *testing.T) {
 	}
 	threads, _ := f.d.Store.ListThreads(false)
 	asked := threads[0].Question.AskedAt
-	want := asked
-	if g.RequestedAt < want {
-		want = g.RequestedAt
+	if asked >= g.RequestedAt {
+		t.Fatalf("precondition: asked %d should predate the gate %d", asked, g.RequestedAt)
 	}
-	if e.WaitingSince != want {
-		t.Errorf("waiting_since = %d, want min(asked %d, gate %d)", e.WaitingSince, asked, g.RequestedAt)
+	if e.WaitingSince != asked {
+		t.Errorf("waiting_since = %d, want the earlier wait (asked %d, gate %d)", e.WaitingSince, asked, g.RequestedAt)
 	}
 }
 
 func TestBrainstorms_Order(t *testing.T) {
 	f := newGateFixture(t, "brainstorm")
-	f.d.Cfg.QuestionStaleAfter = 1500 * time.Millisecond
+	f.d.Cfg.QuestionStaleAfter = time.Hour
 	second, err := f.d.Store.AddTask(store.Task{Title: "T2", ProjectID: "proj1", SessionID: "orch-1", Status: "brainstorm"})
 	if err != nil {
 		t.Fatalf("AddTask: %v", err)
 	}
-	// The higher-id task's question ages past the threshold (timestamps are
-	// whole seconds, hence the margins); the lower-id task's is fresh.
-	f.askStorm(t, second)
-	time.Sleep(2 * time.Second)
+	// The higher-id task's question aged past the threshold; the lower-id
+	// task's is fresh.
+	f.askAgedStorm(t, second, 2*time.Hour)
 	f.askStorm(t, f.taskID)
 
 	got := f.brainstorms(t)

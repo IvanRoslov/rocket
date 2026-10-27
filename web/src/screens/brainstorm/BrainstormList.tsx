@@ -1,5 +1,5 @@
-// "Waiting on you": every storm that needs an answer or a Go, newest wait
-// first as the daemon sorts them. A row opens the task's Brainstorm tab.
+// "Waiting on you": every storm that needs an answer or a Go, stale ones first,
+// then the longest wait first, as the daemon sorts them. A row opens the task's Brainstorm tab.
 
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -31,6 +31,9 @@ export function BrainstormList() {
           { id: 'go', label: `Needs Go (${counts.go})` },
         ]}
       />
+      {rows.length === 0 && (
+        <p className="brainstorms__note">{filter === 'go' ? 'Nothing needs a Go' : 'Nothing needs an answer'}</p>
+      )}
       <ul className="brainstorms__rows">
         {rows.map((e) => (
           <li key={e.task_id}>

@@ -101,6 +101,19 @@ describe('BrainstormScreen waiting list', () => {
     expect(link).toHaveAttribute('href', '/p/billing/tasks/17?tab=brainstorm')
   })
 
+  it('says so when the selected filter matches nothing', async () => {
+    useEntries([entries[0]])
+    renderScreen()
+    await screen.findByText('#17 Metering')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Needs Go (0)' }))
+    expect(screen.getByText('Nothing needs a Go')).toBeInTheDocument()
+    expect(screen.queryAllByRole('link')).toHaveLength(0)
+
+    fireEvent.click(screen.getByRole('button', { name: 'All' }))
+    expect(screen.queryByText('Nothing needs a Go')).not.toBeInTheDocument()
+  })
+
   it('says so when nothing is waiting', async () => {
     useEntries([])
     renderScreen()

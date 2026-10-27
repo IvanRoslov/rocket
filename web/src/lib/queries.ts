@@ -1404,6 +1404,9 @@ function eventQueryKeys(event: RocketEvent): unknown[][] {
     // Task status shows in the Usage screen's By task table.
     return [['tasks'], ['task'], ['questions'], ['threads'], ['stats'], ['usage'], ['brainstorms']]
   }
+  // `question.stale` flips the thread's `stale` flag in the inbox and the
+  // STALE tag on the brainstorms list.
+  if (type.startsWith('question.')) return [['threads'], ['brainstorms']]
   if (type.startsWith('milestone.')) {
     // `milestone.quiet` (subtask #1032) flips the quiet flag the milestone
     // cards render, on both the board and the holder's agent card.

@@ -24,6 +24,8 @@ export function parseEventType(type: string): string[] {
       return ['tasks', 'task', 'sessions', 'brainstorms']
     case 'orchestrator':
       return ['sessions']
+    case 'question':
+      return ['threads', 'brainstorms']
     case 'agent':
       return ['agents', 'agent', 'threads']
     case 'repo':

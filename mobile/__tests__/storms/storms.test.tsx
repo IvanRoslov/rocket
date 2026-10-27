@@ -71,6 +71,15 @@ describe('Storms tab', () => {
     expect(router.navigate).toHaveBeenCalledWith('/task/11?tab=brainstorm')
   })
 
+  it('says so when the selected filter matches nothing', async () => {
+    mockApi([ASK])
+    await renderScreen()
+    await screen.findByText('#11 Ask me')
+    fireEvent.press(screen.getByText('Needs Go (0)'))
+    expect(await screen.findByText('Nothing needs a Go')).toBeTruthy()
+    expect(screen.queryByText('#11 Ask me')).toBeNull()
+  })
+
   it('says so when nothing waits', async () => {
     mockApi([])
     await renderScreen()

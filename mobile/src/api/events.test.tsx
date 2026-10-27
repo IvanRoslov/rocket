@@ -52,6 +52,9 @@ describe('parseEventType', () => {
     expect(parseEventType('task.question_asked')).toContain('threads')
     expect(parseEventType('agent.question_resolved')).toContain('threads')
   })
+  it('question.stale refreshes the threads inbox and the storms list', () => {
+    expect(parseEventType('question.stale')).toEqual(['threads', 'brainstorms'])
+  })
   it('storm events refresh the task (outcome override, gates, docs)', () => {
     for (const t of [
       'task.question_outcome_set',
