@@ -10,18 +10,16 @@ import {
   View,
   type LayoutChangeEvent,
 } from 'react-native'
-import { router } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useThreadAnswer, useThreads, type ThreadAnswer } from '../../src/api/queries'
 import type { ThreadInboxEntry } from '../../src/api/types'
 import { ConnectionBanner } from '../../src/components/ConnectionBanner'
 import { ThreadCard } from '../../src/components/ThreadCard'
 import { useToast } from '../../src/components/Toast'
-import { Card, EmptyState, SectionTitle } from '../../src/components/ui'
+import { EmptyState, SectionTitle } from '../../src/components/ui'
 import { isBrainstorm } from '../../src/lib/brainstorm'
 import { createDeferredQueue } from '../../src/lib/deferred'
 import { otherOpen, revealOffset, waitingOnYou } from '../../src/lib/questions'
-import { stormGroups, stormHref, stormLabel } from '../../src/lib/storm'
 import { colors } from '../../src/theme'
 
 /** How long a tap can be taken back before the answer goes to the daemon (it has no undo). */
@@ -99,12 +97,10 @@ export default function QuestionsScreen() {
   }
 
   const data = threads.data
-  // Storm threads are answered only in the task's Brainstorm tab (task #4901,
-  // spec v2 §3.1): none is listed here, one row per task stands for them.
+  // Storm threads live in the Storms tab: none is listed here.
   const all = useMemo(() => (data ?? []).filter((t) => !isBrainstorm(t)), [data])
-  const storms = useMemo(() => stormGroups(data ?? []), [data])
   const mine = useMemo(() => waitingOnYou(all), [all])
-  const visible = mine.filter((t) => !hidden.has(t.id)).length + storms.length
+  const visible = mine.filter((t) => !hidden.has(t.id)).length
   const others = useMemo(() => otherOpen(all), [all])
 
   return (
@@ -132,14 +128,6 @@ export default function QuestionsScreen() {
           >
             <Text style={styles.h1}>Questions</Text>
             <SectionTitle>{`Waiting on you (${visible})`}</SectionTitle>
-            {storms.map((g) => (
-              <Pressable key={`storm-${g.taskId}`} onPress={() => router.navigate(stormHref(g) as never)}>
-                <Card style={styles.stormRow}>
-                  <Text style={styles.stormText}>{stormLabel(g)}</Text>
-                  <Text style={styles.stormHint}>Answer in the Brainstorm tab →</Text>
-                </Card>
-              </Pressable>
-            ))}
             {/* Answered cards stay mounted (display none) so typed text survives a failed send. */}
             {mine.map((t) => (
               <View
@@ -188,9 +176,6 @@ export default function QuestionsScreen() {
 
 const styles = StyleSheet.create({
   h1: { fontSize: 22, fontWeight: '700', letterSpacing: -0.3, marginBottom: 12 },
-  stormRow: { padding: 14, marginBottom: 12, gap: 4 },
-  stormText: { fontSize: 14, fontWeight: '600', color: colors.text },
-  stormHint: { fontSize: 12, color: colors.amberDeep },
   othersToggle: { fontSize: 13, fontWeight: '600', color: colors.textDim },
   undoBar: {
     position: 'absolute', left: 14, right: 14, bottom: 14, flexDirection: 'row', alignItems: 'center', gap: 12,

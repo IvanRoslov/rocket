@@ -117,7 +117,7 @@ export default function TabsLayout() {
   const agents = useAgents()
   const awaiting = awaitingUser(agents.data ?? [])
   const threads = useThreads()
-  // A task's storm counts once: the inbox shows it as one row (task #4901).
+  // Storm threads are not counted here: they have their own Storms tab badge.
   const yourTurn = inboxCount(threads.data ?? [])
 
   const storms = useBrainstorms().data?.length ?? 0
