@@ -96,6 +96,7 @@ func NewHandler(d Deps) http.Handler {
 	registerTermRoutes(mux, d)
 	registerTaskRoutes(mux, d)
 	registerGateRoutes(mux, d)
+	registerBrainstormRoutes(mux, d)
 	registerStatsRoutes(mux, d)
 	registerUsageCollectRoutes(mux, d)
 	registerUsageRoutes(mux, d)
