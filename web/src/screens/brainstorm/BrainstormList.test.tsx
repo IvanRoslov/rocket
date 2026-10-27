@@ -72,26 +72,26 @@ describe('BrainstormScreen waiting list', () => {
     renderScreen()
     expect(await screen.findAllByRole('link')).toHaveLength(3)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Needs answer (2)' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Needs answer\s*2$/ }))
     expect(screen.getAllByRole('link')).toHaveLength(2)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Needs Go (2)' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Needs Go\s*2$/ }))
     expect(screen.getAllByRole('link')).toHaveLength(2)
 
-    fireEvent.click(screen.getByRole('button', { name: 'All' }))
+    fireEvent.click(screen.getByRole('button', { name: /^All\s*\d+$/ }))
     expect(screen.getAllByRole('link')).toHaveLength(3)
   })
 
   it('describes what each row waits on', async () => {
     useEntries(entries)
     renderScreen()
-    await screen.findByText('#17 Metering')
-    expect(screen.getByText('2 questions waiting')).toBeInTheDocument()
-    expect(screen.getByText('1 question waiting')).toBeInTheDocument()
+    await screen.findByRole('link', { name: /#17 Metering/ })
+    expect(screen.getByText('2 questions')).toBeInTheDocument()
+    expect(screen.getByText('1 question')).toBeInTheDocument()
     expect(screen.getByText('STALE')).toBeInTheDocument()
-    expect(screen.getByText('Needs Go · spec v2')).toBeInTheDocument()
+    expect(screen.getByText('Go · spec v2')).toBeInTheDocument()
     // Only the in-progress gate is a spec change mid-work.
-    expect(screen.getAllByText('spec change mid-work')).toHaveLength(1)
+    expect(screen.getAllByText('mid-work')).toHaveLength(1)
   })
 
   it('links a row to the Brainstorm tab of its task', async () => {
@@ -104,13 +104,13 @@ describe('BrainstormScreen waiting list', () => {
   it('says so when the selected filter matches nothing', async () => {
     useEntries([entries[0]])
     renderScreen()
-    await screen.findByText('#17 Metering')
+    await screen.findByRole('link', { name: /#17 Metering/ })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Needs Go (0)' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Needs Go\s*0$/ }))
     expect(screen.getByText('Nothing needs a Go')).toBeInTheDocument()
     expect(screen.queryAllByRole('link')).toHaveLength(0)
 
-    fireEvent.click(screen.getByRole('button', { name: 'All' }))
+    fireEvent.click(screen.getByRole('button', { name: /^All\s*\d+$/ }))
     expect(screen.queryByText('Nothing needs a Go')).not.toBeInTheDocument()
   })
 
@@ -126,7 +126,7 @@ describe('BrainstormScreen tabs', () => {
     useEntries(entries)
     renderScreen()
     expect(screen.getByRole('tab', { name: 'Waiting on you' })).toHaveAttribute('aria-selected', 'true')
-    await screen.findByText('#17 Metering')
+    await screen.findByRole('link', { name: /#17 Metering/ })
 
     fireEvent.click(screen.getByRole('tab', { name: 'Metrics' }))
     expect(await screen.findByRole('figure', { name: /Accepted recommendations/ })).toBeInTheDocument()

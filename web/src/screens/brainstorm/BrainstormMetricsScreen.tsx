@@ -188,15 +188,20 @@ function ParticipantWeeks({ weeks: wire }: { weeks: BrainstormWeek[] }) {
   )
 }
 
-export function BrainstormMetricsScreen() {
+/** `embedded`: rendered under the /brainstorm page header — no frame, title or lede of its own. */
+export function BrainstormMetricsScreen({ embedded = false }: { embedded?: boolean } = {}) {
   const { data, isLoading, isError, error } = useBrainstormStats()
 
   return (
-    <main className="bm">
-      <h1 className="bm__title">Brainstorm metrics</h1>
-      <p className="bm__lede">
-        How often the orchestrator's recommendation was taken — counted from storm answers, per storm skill.
-      </p>
+    <main className={embedded ? 'bm bm--embedded' : 'bm'}>
+      {!embedded && (
+        <>
+          <h1 className="bm__title">Brainstorm metrics</h1>
+          <p className="bm__lede">
+            How often the orchestrator's recommendation was taken — counted from storm answers, per storm skill.
+          </p>
+        </>
+      )}
       {isLoading && <p className="bm-empty">Loading…</p>}
       {isError && (
         <p className="bm-error" role="alert">
