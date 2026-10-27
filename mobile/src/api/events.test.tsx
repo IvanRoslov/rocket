@@ -29,13 +29,17 @@ describe('parseEventType', () => {
     expect(parseEventType('session.spawned')).toContain('sessions')
   })
   it('task events touch tasks and task detail', () => {
-    expect(parseEventType('task.question_asked')).toEqual(['tasks', 'task', 'projects', 'threads'])
+    expect(parseEventType('task.question_asked')).toEqual(['tasks', 'task', 'projects', 'threads', 'brainstorms'])
   })
   it('message events touch messages and system', () => {
     expect(parseEventType('message.delivered')).toEqual(['messages', 'system'])
   })
   it('pr events touch tasks and sessions', () => {
-    expect(parseEventType('pr.merged')).toEqual(['tasks', 'task', 'sessions'])
+    expect(parseEventType('pr.merged')).toEqual(['tasks', 'task', 'sessions', 'brainstorms'])
+  })
+  it('gate and merge events refresh the brainstorms list', () => {
+    expect(parseEventType('task.gate_requested')).toContain('brainstorms')
+    expect(parseEventType('pr.merged')).toContain('brainstorms')
   })
   it('chat pings do not invalidate anything', () => {
     expect(parseEventType('session.chat_updated')).toEqual([])

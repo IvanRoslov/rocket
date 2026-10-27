@@ -5,6 +5,7 @@ import { addresseePayload } from '../lib/threads'
 import { useServers } from '../servers/ServerContext'
 import type {
   Agent,
+  BrainstormEntry,
   BrainstormOutcome,
   BrainstormStorm,
   AgentInboxMessage,
@@ -690,6 +691,18 @@ export function useThreads() {
   return useQuery({
     queryKey: [baseUrl, 'threads'],
     queryFn: async () => (await api.get<{ threads: ThreadInboxEntry[] }>(baseUrl, '/v1/threads')).threads ?? [],
+    refetchInterval,
+  })
+}
+
+/** Storms waiting on the human (answers or a Go), already sorted by the daemon. */
+export function useBrainstorms() {
+  const baseUrl = useBaseUrl()
+  const refetchInterval = usePoll(10000)
+  return useQuery({
+    queryKey: [baseUrl, 'brainstorms'],
+    queryFn: async () =>
+      (await api.get<{ brainstorms: BrainstormEntry[] }>(baseUrl, '/v1/brainstorms')).brainstorms ?? [],
     refetchInterval,
   })
 }

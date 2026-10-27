@@ -574,3 +574,17 @@ export interface Health {
   version: string
   uptime: string
 }
+
+/** One row of `GET /v1/brainstorms` — internal/api/brainstorms.go. A storm waiting on the human. */
+export interface BrainstormEntry {
+  task_id: number
+  /** Omitted for milestones. */
+  project_id?: string
+  task_title: string
+  task_status: string
+  questions_waiting: number
+  questions_stale: boolean
+  pending_gate: { id: number; spec_version: number; requested_at: number } | null
+  /** Unix seconds. */
+  waiting_since: number
+}
