@@ -37,6 +37,7 @@ import {
   chatEntries,
   githubIssues,
   githubRepos,
+  brainstorms,
   messages,
   projects,
   questions,
@@ -857,6 +858,9 @@ export const handlers = [
       }),
     })
   }),
+
+  // GET /v1/brainstorms — internal/api/brainstorms.go. Storms waiting on the human.
+  http.get('/v1/brainstorms', () => HttpResponse.json({ brainstorms: brainstorms })),
 
   // GET /v1/threads — internal/api/thread_inbox.go. The unified inbox of task
   // AND role threads. Derived from the same state the per-subject endpoints

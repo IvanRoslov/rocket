@@ -446,6 +446,20 @@ describe('brainstorm (task #4901)', () => {
     expect(all.result.current.data?.storms.length).toBeGreaterThan(0)
   })
 
+  it('question.stale refreshes the inbox and the brainstorms list', () => {
+    vi.useFakeTimers()
+    try {
+      const queryClient = new QueryClient()
+      const spy = vi.spyOn(queryClient, 'invalidateQueries')
+      wireInvalidation(queryClient)({ id: 1, ts: 1, type: 'question.stale' })
+      vi.advanceTimersByTime(INVALIDATION_WINDOW_MS)
+      expect(spy).toHaveBeenCalledWith({ queryKey: ['threads'] }, { cancelRefetch: false })
+      expect(spy).toHaveBeenCalledWith({ queryKey: ['brainstorms'] }, { cancelRefetch: false })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('task.* events refresh the brainstorm metric', () => {
     vi.useFakeTimers()
     try {

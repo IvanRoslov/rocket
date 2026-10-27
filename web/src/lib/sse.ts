@@ -57,6 +57,8 @@ export const EVENT_TYPES = [
   'task.gate_superseded',
   // The human corrected a storm answer's outcome (task #4901).
   'task.question_outcome_set',
+  // The stale-thread reminder pass flagged an unanswered question.
+  'question.stale',
   // Role lifecycle and role Q&A (docs/10-agents.md). `agent.issue_opened` /
   // `agent.issue_comment` come from the GitHub poller's role subscriptions.
   'agent.instance_spawned',

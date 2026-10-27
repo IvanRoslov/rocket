@@ -14,6 +14,7 @@ import { api } from './api'
 import type { Device, PairingCode } from './auth'
 import type {
   Agent,
+  BrainstormEntry,
   AgentDelivery,
   AgentInboxMessage,
   AgentCatalog,
@@ -278,6 +279,17 @@ export function useOpenQuestions(): UseQueryResult<GlobalQuestion[]> {
     queryFn: async () => {
       const res = await api.get<{ questions: GlobalQuestion[] }>('/v1/questions')
       return res.questions
+    },
+  })
+}
+
+/** Storms waiting on the human, server-sorted (`GET /v1/brainstorms`). */
+export function useBrainstorms(): UseQueryResult<BrainstormEntry[]> {
+  return useQuery({
+    queryKey: ['brainstorms'],
+    queryFn: async () => {
+      const res = await api.get<{ brainstorms: BrainstormEntry[] }>('/v1/brainstorms')
+      return res.brainstorms
     },
   })
 }
@@ -1390,8 +1402,11 @@ function eventQueryKeys(event: RocketEvent): unknown[][] {
   if (type.startsWith('task.')) {
     // Answers, outcome overrides and gate decisions all move the storm metric.
     // Task status shows in the Usage screen's By task table.
-    return [['tasks'], ['task'], ['questions'], ['threads'], ['stats'], ['usage']]
+    return [['tasks'], ['task'], ['questions'], ['threads'], ['stats'], ['usage'], ['brainstorms']]
   }
+  // `question.stale` flips the thread's `stale` flag in the inbox and the
+  // STALE tag on the brainstorms list.
+  if (type.startsWith('question.')) return [['threads'], ['brainstorms']]
   if (type.startsWith('milestone.')) {
     // `milestone.quiet` (subtask #1032) flips the quiet flag the milestone
     // cards render, on both the board and the holder's agent card.
@@ -1419,7 +1434,7 @@ function eventQueryKeys(event: RocketEvent): unknown[][] {
   if (type.startsWith('pr.')) {
     // PR state changes (phase 4): re-fetch the sessions carrying pr_*
     // fields plus the task/board views that surface PR badges.
-    return [['sessions'], ['tasks'], ['task'], ['taskUsage']]
+    return [['sessions'], ['tasks'], ['task'], ['taskUsage'], ['brainstorms']]
   }
   return []
 }

@@ -74,42 +74,32 @@ const storm = (id: number, taskId: number, over: Record<string, unknown> = {}) =
   asked_at: 1, updated_at: 1, ...over,
 })
 
-// Storm questions (task #4901, spec v2 §3.1) are answered only in the task's
-// Brainstorm tab: the inbox lists no storm thread, one row per task instead.
+// Storm questions live in the Storms tab: the Questions tab renders no storm
+// row and counts none.
 describe('Questions tab — storms', () => {
   afterEach(() => jest.restoreAllMocks())
 
-  it('shows one row per task storm, counted once, and lists no storm thread', async () => {
+  it('lists no storm thread or row, and counts only ordinary questions', async () => {
     mockApi({
       threads: [
         MINE,
         storm(21, 30),
         storm(22, 30),
-        storm(23, 30, { status: 'resolved', resolution: 'answered', your_turn: false, attention: [], waiting_on: [] }),
         storm(24, 31),
         storm(25, 32, { your_turn: false, attention: ['orch'], waiting_on: ['orch'] }),
       ],
     })
     await renderScreen()
-    await waitFor(() => expect(screen.getByText('Storm #30 «Task 30»: 2 questions waiting')).toBeTruthy())
-    expect(screen.getByText('Storm #31 «Task 31»: 1 question waiting')).toBeTruthy()
-    expect(screen.queryByText(/Storm #32/)).toBeNull()
-    // MINE + two task storms.
-    expect(screen.getByText('Waiting on you (3)')).toBeTruthy()
-    expect(screen.queryByText(/Storm question/)).toBeNull()
-    // A storm waiting on the agent is not listed among the others either.
+    await waitFor(() => expect(screen.getByText('Waiting on you (1)')).toBeTruthy())
+    expect(screen.queryByText(/Storm/)).toBeNull()
     expect(screen.queryByText(/Other open/)).toBeNull()
   })
 
-  it('a storm row opens the task on its Brainstorm tab', async () => {
-    const { router } = jest.requireMock('expo-router') as { router: { navigate: jest.Mock } }
-    router.navigate.mockClear()
+  it('shows the empty state when only storms wait on you', async () => {
     mockApi({ threads: [storm(21, 30)] })
     await renderScreen()
-    await waitFor(() => expect(screen.getByText(/Storm #30/)).toBeTruthy())
-    await fireEvent.press(screen.getByText(/Storm #30/))
-    expect(router.navigate).toHaveBeenCalledWith('/task/30?tab=brainstorm')
-    expect(screen.queryByText('No questions waiting on you.')).toBeNull()
+    await waitFor(() => expect(screen.getByText('Waiting on you (0)')).toBeTruthy())
+    expect(screen.getByText('No questions waiting on you.')).toBeTruthy()
   })
 })
 

@@ -1,6 +1,6 @@
 import { Tabs } from 'expo-router'
 import { View } from 'react-native'
-import { useAgents, useThreads } from '../../src/api/queries'
+import { useAgents, useBrainstorms, useThreads } from '../../src/api/queries'
 import { awaitingUser } from '../../src/lib/agents'
 import { inboxCount } from '../../src/lib/storm'
 import { colors } from '../../src/theme'
@@ -33,6 +33,16 @@ function QuestionsIcon({ color }: { color: import('react-native').ColorValue }) 
     <View style={{ width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }}>
       <View style={{ width: 17, height: 13, borderRadius: 4, borderWidth: 1.7, borderColor: color }} />
       <View style={{ width: 5, height: 5, marginTop: -2, marginLeft: -8, borderLeftWidth: 1.7, borderBottomWidth: 1.7, borderColor: color, transform: [{ skewY: '-30deg' }] }} />
+    </View>
+  )
+}
+
+/** A storm: a lightning bolt, drawn as two skewed bars. */
+function StormsIcon({ color }: { color: import('react-native').ColorValue }) {
+  return (
+    <View style={{ width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ width: 7, height: 11, marginLeft: 3, backgroundColor: color, transform: [{ skewX: '-20deg' }] }} />
+      <View style={{ width: 7, height: 9, marginTop: -2, marginRight: 3, backgroundColor: color, transform: [{ skewX: '-20deg' }] }} />
     </View>
   )
 }
@@ -107,8 +117,10 @@ export default function TabsLayout() {
   const agents = useAgents()
   const awaiting = awaitingUser(agents.data ?? [])
   const threads = useThreads()
-  // A task's storm counts once: the inbox shows it as one row (task #4901).
+  // Storm threads are not counted here: they have their own Storms tab badge.
   const yourTurn = inboxCount(threads.data ?? [])
+
+  const storms = useBrainstorms().data?.length ?? 0
 
   return (
     <Tabs
@@ -150,6 +162,14 @@ export default function TabsLayout() {
           title: 'Questions',
           tabBarIcon: ({ color }) => <QuestionsIcon color={color} />,
           ...(yourTurn > 0 ? { tabBarBadge: yourTurn } : {}),
+        }}
+      />
+      <Tabs.Screen
+        name="storms"
+        options={{
+          title: 'Storms',
+          tabBarIcon: ({ color }) => <StormsIcon color={color} />,
+          ...(storms > 0 ? { tabBarBadge: storms } : {}),
         }}
       />
       <Tabs.Screen

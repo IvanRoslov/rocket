@@ -17,13 +17,15 @@ export function parseEventType(type: string): string[] {
     case 'session':
       return ['sessions', 'system', 'task', 'projects']
     case 'task':
-      return ['tasks', 'task', 'projects', 'threads']
+      return ['tasks', 'task', 'projects', 'threads', 'brainstorms']
     case 'message':
       return ['messages', 'system']
     case 'pr':
-      return ['tasks', 'task', 'sessions']
+      return ['tasks', 'task', 'sessions', 'brainstorms']
     case 'orchestrator':
       return ['sessions']
+    case 'question':
+      return ['threads', 'brainstorms']
     case 'agent':
       return ['agents', 'agent', 'threads']
     case 'repo':

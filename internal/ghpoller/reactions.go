@@ -111,6 +111,17 @@ func (r *Reactions) Stop() {
 	r.timers = nil
 }
 
+// publishStatusChanged announces a task status transition made by the poller,
+// in the same shape as the API's task.status_changed events.
+func (r *Reactions) publishStatusChanged(task store.Task, from, to string) {
+	if r.bus == nil {
+		return
+	}
+	r.bus.Publish("task.status_changed", task.SessionID, map[string]any{
+		"task_id": task.ID, "from": from, "to": to, "by": "github",
+	})
+}
+
 // PROpened moves sess's subtask (if any, and if currently in_progress) to
 // review and logs the transition.
 func (r *Reactions) PROpened(sess store.Session, pr *github.PR) {
@@ -125,6 +136,7 @@ func (r *Reactions) PROpened(sess store.Session, pr *github.PR) {
 		slog.Error("ghpoller: reactions: update task status to review", "task_id", task.ID, "error", err)
 		return
 	}
+	r.publishStatusChanged(task, "in_progress", "review")
 	if _, err := r.st.AddTaskLog(store.TaskLogEntry{
 		TaskID: task.ID,
 		Kind:   "status",
@@ -166,12 +178,15 @@ func (r *Reactions) Merged(sess store.Session, pr *github.PR) {
 	if err == nil && (task.Status == "in_progress" || task.Status == "review") {
 		if err := r.st.UpdateTaskStatus(task.ID, "done"); err != nil {
 			slog.Error("ghpoller: reactions: update task status to done", "task_id", task.ID, "error", err)
-		} else if _, err := r.st.AddTaskLog(store.TaskLogEntry{
-			TaskID: task.ID,
-			Kind:   "status",
-			Body:   fmt.Sprintf("PR #%d merged → done", pr.Number),
-		}); err != nil {
-			slog.Error("ghpoller: reactions: add task log", "task_id", task.ID, "error", err)
+		} else {
+			r.publishStatusChanged(task, task.Status, "done")
+			if _, err := r.st.AddTaskLog(store.TaskLogEntry{
+				TaskID: task.ID,
+				Kind:   "status",
+				Body:   fmt.Sprintf("PR #%d merged → done", pr.Number),
+			}); err != nil {
+				slog.Error("ghpoller: reactions: add task log", "task_id", task.ID, "error", err)
+			}
 		}
 	}
 

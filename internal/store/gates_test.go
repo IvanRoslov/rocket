@@ -226,3 +226,45 @@ func TestRequestTaskGateConcurrent(t *testing.T) {
 		t.Errorf("gates = %d, pending = %d; want %d and 1", len(gates), pending, n)
 	}
 }
+
+func TestListPendingGates(t *testing.T) {
+	s := openTestStore(t)
+	first := addGateTestTask(t, s)
+	second, err := s.AddTask(Task{Title: "T2", ProjectID: "p", Status: "brainstorm"})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+	putGateTestDoc(t, s, first, "spec")
+	putGateTestDoc(t, s, second, "spec")
+
+	g1, _, err := s.RequestTaskGate(first, "orch")
+	if err != nil {
+		t.Fatalf("RequestTaskGate first: %v", err)
+	}
+	if _, err := s.DecideTaskGate(g1.ID, "go", "", "user"); err != nil {
+		t.Fatalf("DecideTaskGate: %v", err)
+	}
+	if _, _, err := s.RequestTaskGate(second, "orch"); err != nil {
+		t.Fatalf("RequestTaskGate second: %v", err)
+	}
+
+	got, err := s.ListPendingGates()
+	if err != nil {
+		t.Fatalf("ListPendingGates: %v", err)
+	}
+	if len(got) != 1 || got[0].TaskID != second || got[0].Status != "pending" {
+		t.Fatalf("pending gates = %+v, want exactly the second task's", got)
+	}
+
+	// A repeated request supersedes the old gate; still one pending.
+	if _, _, err := s.RequestTaskGate(second, "orch"); err != nil {
+		t.Fatalf("RequestTaskGate again: %v", err)
+	}
+	got, err = s.ListPendingGates()
+	if err != nil {
+		t.Fatalf("ListPendingGates: %v", err)
+	}
+	if len(got) != 1 || got[0].TaskID != second {
+		t.Fatalf("after re-request = %+v, want one gate on the second task", got)
+	}
+}

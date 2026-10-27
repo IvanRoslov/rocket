@@ -189,6 +189,53 @@ func TestPROpened_TransitionsSubtaskToReview(t *testing.T) {
 	}
 }
 
+// waitStatusChanged waits for a task.status_changed event on ch and checks
+// its payload.
+func waitStatusChanged(t *testing.T, ch <-chan store.Event, taskID int64, from, to string) {
+	t.Helper()
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-ch:
+			if ev.Type != "task.status_changed" {
+				continue
+			}
+			if ev.Data["task_id"] != taskID || ev.Data["from"] != from || ev.Data["to"] != to || ev.Data["by"] != "github" {
+				t.Fatalf("unexpected payload: %+v", ev.Data)
+			}
+			return
+		case <-timeout:
+			t.Fatalf("no task.status_changed event (%s -> %s)", from, to)
+		}
+	}
+}
+
+func TestReactions_PROpenedPublishesStatusChanged(t *testing.T) {
+	e := setupReactEnv(t, time.Minute, true)
+	sess := e.addWorker(t, "w1")
+	task := e.addSubtask(t, sess.ID, "in_progress")
+	ch, cancel := e.b.Subscribe()
+	defer cancel()
+
+	r := newTestReactions(e, func(string) {}, alwaysUnknownActivity)
+	r.PROpened(sess, fakePR(5, "sha1"))
+
+	waitStatusChanged(t, ch, task.ID, "in_progress", "review")
+}
+
+func TestReactions_MergedPublishesStatusChanged(t *testing.T) {
+	e := setupReactEnv(t, time.Minute, true)
+	sess := e.addWorker(t, "w1")
+	task := e.addSubtask(t, sess.ID, "review")
+	ch, cancel := e.b.Subscribe()
+	defer cancel()
+
+	r := newTestReactions(e, func(string) {}, alwaysUnknownActivity)
+	r.Merged(sess, fakePR(5, "sha1"))
+
+	waitStatusChanged(t, ch, task.ID, "review", "done")
+}
+
 func TestPROpened_NoSubtask_NoOp(t *testing.T) {
 	e := setupReactEnv(t, time.Minute, true)
 	sess := e.addWorker(t, "w1")

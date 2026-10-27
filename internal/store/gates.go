@@ -276,6 +276,26 @@ func (s *Store) ListTaskGates(taskID int64) ([]TaskGate, error) {
 	return out, rows.Err()
 }
 
+// ListPendingGates returns every pending gate across all tasks, oldest request
+// first. A task has at most one pending gate.
+func (s *Store) ListPendingGates() ([]TaskGate, error) {
+	rows, err := s.db.Query(`SELECT ` + gateColumns + ` FROM task_gates
+		WHERE status = 'pending' ORDER BY requested_at, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list pending gates: %w", err)
+	}
+	defer rows.Close()
+	out := []TaskGate{}
+	for rows.Next() {
+		g, err := scanTaskGate(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan pending gate: %w", err)
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
 // DecideTaskGate records the human's decision (go | changes) on a pending
 // gate. A gate that is no longer pending fails with ErrGateNotPending; an
 // unknown id with ErrNotFound. A gate whose spec version is no longer the

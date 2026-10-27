@@ -7,6 +7,7 @@
 
 import type {
   Agent,
+  BrainstormEntry,
   AgentInboxMessage,
   AgentQuestion,
   BrainstormStats,
@@ -1528,4 +1529,27 @@ export const modelPrices: ModelPrice[] = [
   { model: 'claude-haiku-4-5', input: 1, cache_write: 1.25, cache_read: 0.1, output: 5, updated_at: NOW - 5 * DAY },
   { model: 'claude-opus-5-5', input: 5, cache_write: 6.25, cache_read: 0.5, output: 25, updated_at: NOW - 5 * DAY },
   { model: 'gpt-6-sol', input: null, cache_write: null, cache_read: null, output: null, updated_at: null },
+]
+
+export const brainstorms: BrainstormEntry[] = [
+  {
+    task_id: 17,
+    project_id: 'billing',
+    task_title: 'Metering',
+    task_status: 'brainstorm',
+    questions_waiting: 2,
+    questions_stale: true,
+    pending_gate: null,
+    waiting_since: 1_760_000_000,
+  },
+  {
+    task_id: 21,
+    project_id: 'billing',
+    task_title: 'Invoices export',
+    task_status: 'in_progress',
+    questions_waiting: 0,
+    questions_stale: false,
+    pending_gate: { id: 4, spec_version: 2, requested_at: 1_760_000_500 },
+    waiting_since: 1_760_000_500,
+  },
 ]
