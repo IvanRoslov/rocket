@@ -127,9 +127,9 @@ test('the Questions tab counts the threads whose turn is yours', async () => {
   await waitFor(() => expect(questions).toHaveTextContent('3'))
 })
 
-// Storm questions (task #4901, spec v2 §3.1) live in the Brainstorm tab; the
-// inbox shows one row per task for them, and the badge counts that row once.
-test('a task storm counts as one item in the Questions badge', async () => {
+// Storm questions live in the Brainstorms section, with their own badge; the
+// Questions badge no longer counts them.
+test('storm threads do not count in the Questions badge', async () => {
   const storm = (id: number, taskId: number, yours = true) => ({
     id, kind: 'task', task_id: taskId, local_ref: `${taskId}/Q${id}`, ordinal: id, type: 'brainstorm', status: 'open',
     your_turn: yours, attention: [yours ? 'human' : 'orch'], messages: [],
@@ -151,8 +151,18 @@ test('a task storm counts as one item in the Questions badge', async () => {
   renderShell()
 
   const questions = await screen.findByRole('link', { name: /Questions/ })
-  // One decision thread + storm #17 + storm #18.
-  await waitFor(() => expect(questions).toHaveTextContent('3'))
+  // Only the decision thread; the storms are not counted here.
+  await waitFor(() => expect(questions).toHaveTextContent('1'))
+  expect(questions).not.toHaveTextContent('3')
+})
+
+test('the Brainstorm tab badge counts the storms waiting on the human', async () => {
+  renderShell()
+  const brainstorm = await screen.findByRole('link', { name: /Brainstorm/ })
+  // The /v1/brainstorms mock has two entries.
+  await waitFor(() => expect(brainstorm).toHaveTextContent('2'))
+  const questions = screen.getByRole('link', { name: /Questions/ })
+  expect(questions).not.toHaveTextContent('2')
 })
 
 test('an unauthenticated status redirects to /login with next', async () => {

@@ -2,7 +2,7 @@ import { useEffect, type CSSProperties } from 'react'
 import { Link, NavLink, Outlet, useParams, useLocation } from 'react-router-dom'
 import { fetchAuthStatus, onUnauthorized } from '../lib/auth'
 import { useLastProjectId } from '../lib/lastProject'
-import { useThreads } from '../lib/queries'
+import { useBrainstorms, useThreads } from '../lib/queries'
 import { inboxCount } from '../lib/storm'
 import { ProjectSwitcher } from './ProjectSwitcher'
 
@@ -28,6 +28,7 @@ export function AppShell() {
   const location = useLocation()
   const navProjectId = useLastProjectId(projectId)
   const { data: threads } = useThreads()
+  const { data: brainstorms } = useBrainstorms()
   // Project-scoped tabs use plain <Link>: NavLink's own prefix matching would
   // light up Kanban on /p/:id/agents too, so we derive both the highlight and
   // aria-current from the pathname ourselves.
@@ -42,9 +43,9 @@ export function AppShell() {
   // only task threads, so a role thread waiting on the human never reached
   // this badge. `your_turn` is the caller-relative field; `whose_turn` cannot
   // distinguish "waiting on you" from "waiting on another participant".
-  // A task's storm counts once: its questions are one row in the inbox
-  // (task #4901, spec v2 §3.1).
+  // Storm questions are not counted here: they have their own section and badge.
   const awaitingCount = inboxCount(threads ?? [])
+  const brainstormCount = brainstorms?.length ?? 0
 
   return (
     <div style={{ minHeight: '100vh' }}>
@@ -130,6 +131,20 @@ export function AppShell() {
           </NavLink>
           <NavLink to="/brainstorm" style={navLinkStyle}>
             Brainstorm
+            {brainstormCount > 0 && (
+              <span
+                style={{
+                  marginLeft: 6,
+                  padding: '1px 7px',
+                  borderRadius: 999,
+                  background: 'var(--q-amber)',
+                  color: 'var(--surface)',
+                  font: '700 11px var(--font-mono)',
+                }}
+              >
+                {brainstormCount}
+              </span>
+            )}
           </NavLink>
           <NavLink to="/usage" style={navLinkStyle}>
             Usage

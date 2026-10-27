@@ -95,8 +95,7 @@ export function stormsByTask(threads: ThreadInboxEntry[]): Map<number, TaskStorm
   return byTask
 }
 
-/** What the inbox badge shows: threads on your turn, each task's storm counted once. */
+/** What the inbox badge shows: threads on your turn. Storms live in the Brainstorms section. */
 export function inboxCount(threads: ThreadInboxEntry[]): number {
-  const plain = threads.filter((t) => waitingOnYou(t) && !isStorm(t)).length
-  return plain + stormGroups(threads).length
+  return threads.filter((t) => waitingOnYou(t) && !isStorm(t)).length
 }

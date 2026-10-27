@@ -73,7 +73,7 @@ test('stormHref opens the task on its Brainstorm tab', () => {
   )
 })
 
-test('inboxCount counts every task storm as one item', () => {
+test('inboxCount ignores storm threads', () => {
   expect(
     inboxCount([
       thread({}),
@@ -81,9 +81,8 @@ test('inboxCount counts every task storm as one item', () => {
       thread({ type: 'brainstorm', task_id: 5 }),
       thread({ type: 'brainstorm', task_id: 5 }),
       thread({ type: 'brainstorm', task_id: 6 }),
-      thread({ type: 'brainstorm', task_id: 7, status: 'resolved' }),
     ]),
-  ).toBe(3)
+  ).toBe(1)
 })
 
 test('isStorm', () => {
