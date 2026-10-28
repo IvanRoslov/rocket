@@ -163,10 +163,11 @@ CREATE TABLE messages (
   from_session TEXT,                       -- NULL = человек/система
   to_session   TEXT NOT NULL,
   body         TEXT NOT NULL,
-  status       TEXT NOT NULL DEFAULT 'queued',  -- queued|delivering|delivered|failed
+  status       TEXT NOT NULL DEFAULT 'queued',  -- queued|delivering|accepted|delivered|failed
   attempts     INTEGER NOT NULL DEFAULT 0,
   created_at   INTEGER NOT NULL,
-  delivered_at INTEGER
+  delivered_at INTEGER,
+  inject_at    INTEGER NOT NULL DEFAULT 0       -- unix-мс момента перед вставкой (путь accepted, миграция 0024); 0 — не применимо
 );
 
 CREATE TABLE tasks (
