@@ -102,11 +102,4 @@ func (k *KimiCode) SetupWorkspace(spec agent.LaunchSpec) error {
 func (k *KimiCode) Activity(context.Context, agent.ActivityRef) (activity.State, time.Time, error) {
 	return "", time.Time{}, agent.ErrNoSignal
 }
-func (k *KimiCode) TranscriptTail(context.Context, agent.ActivityRef, string) ([]agent.ChatEntry, string, error) {
-	return nil, "", agent.ErrNoSignal
-}
-func (k *KimiCode) TranscriptStat(context.Context, agent.ActivityRef) (int64, int64, error) {
-	return 0, 0, agent.ErrNoSignal
-}
-
 func init() { agent.Register("kimi-code", New) }
