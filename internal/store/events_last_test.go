@@ -22,3 +22,23 @@ func TestLastSessionEventTS(t *testing.T) {
 		t.Errorf("LastSessionEventTS = %d, %v, %v; want 200, true, nil", ts, ok, err)
 	}
 }
+
+func TestLastSessionEventData(t *testing.T) {
+	s := openTestStore(t)
+	if _, ok, err := s.LastSessionEventData("sess1", "session.turn_failed"); err != nil || ok {
+		t.Fatalf("empty: ok=%v err=%v, want none", ok, err)
+	}
+	for _, e := range []Event{
+		{TS: 100, Type: "session.turn_failed", SessionID: "sess1", Data: map[string]any{"turn": "a"}},
+		{TS: 200, Type: "session.turn_failed", SessionID: "sess1", Data: map[string]any{"turn": "b"}},
+		{TS: 300, Type: "session.turn_failed", SessionID: "other", Data: map[string]any{"turn": "c"}},
+	} {
+		if _, err := s.AppendEvent(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, ok, err := s.LastSessionEventData("sess1", "session.turn_failed")
+	if err != nil || !ok || data["turn"] != "b" {
+		t.Errorf("LastSessionEventData = %v, %v, %v; want turn b", data, ok, err)
+	}
+}

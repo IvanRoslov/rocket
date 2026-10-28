@@ -82,6 +82,9 @@ type Monitor struct {
 	permNext map[string]permissionCandidate
 	// startScreens is checkStartScreen's per-session memory.
 	startScreens map[string]*startScreenState
+	// turnFailures is the last failed turn reportTurnFailure told someone
+	// about, per session: a backstop for its journal event.
+	turnFailures map[string]string
 	// wake wakes a recipient's delivery worker (the queue's Wake); see
 	// SetWake.
 	wake func(sessionID string)
@@ -252,6 +255,11 @@ func (m *Monitor) sweep(ctx context.Context) {
 			delete(m.startScreens, id)
 		}
 	}
+	for id := range m.turnFailures {
+		if !sessionIDs[id] {
+			delete(m.turnFailures, id)
+		}
+	}
 	m.mu.Unlock()
 }
 
@@ -403,7 +411,13 @@ func (m *Monitor) pollSession(ctx context.Context, sess store.Session, liveSet m
 			return
 		}
 
-		rawState, rawTS, err := ag.Activity(ctx, agent.ActivityRef{SessionID: sess.ID, WorktreePath: sess.WorktreePath})
+		// Since = this launch, so an adapter can tell its own run's journal
+		// from an earlier one in the same worktree (Kimi after a restore).
+		ref := agent.ActivityRef{SessionID: sess.ID, WorktreePath: sess.WorktreePath}
+		if launched := m.sessionLaunchedAt(sess); launched > 0 {
+			ref.Since = time.Unix(launched, 0)
+		}
+		rawState, rawTS, err := ag.Activity(ctx, ref)
 		switch {
 		case errors.Is(err, agent.ErrNoSignal):
 			state = activity.State(sess.Activity)
@@ -430,6 +444,9 @@ func (m *Monitor) pollSession(ctx context.Context, sess store.Session, liveSet m
 			return
 		default:
 			state, ts = rawState, rawTS
+			if state == activity.Blocked {
+				m.reportTurnFailure(ctx, sess, ag, ref)
+			}
 		}
 	}
 

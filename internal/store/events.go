@@ -156,3 +156,25 @@ func (s *Store) LastSessionEventTS(sessionID, typ string) (int64, bool, error) {
 	}
 	return ts, true, nil
 }
+
+// LastSessionEventData returns the data of the newest event of type typ for
+// sessionID, and whether there is one (same index walk as
+// LastSessionEventTS).
+func (s *Store) LastSessionEventData(sessionID, typ string) (map[string]any, bool, error) {
+	var raw string
+	err := s.db.QueryRow(
+		`SELECT data FROM events WHERE session_id = ? AND type = ? ORDER BY id DESC LIMIT 1`,
+		sessionID, typ,
+	).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("last session event data: %w", err)
+	}
+	data := map[string]any{}
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		return nil, false, fmt.Errorf("last session event data: %w", err)
+	}
+	return data, true, nil
+}

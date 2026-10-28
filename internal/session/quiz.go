@@ -69,6 +69,7 @@ const (
 	keySpace   quizKeyKind = "space"
 	keyTab     quizKeyKind = "tab"
 	keyDown    quizKeyKind = "down"
+	keyUp      quizKeyKind = "up"
 	keyLiteral quizKeyKind = "literal"
 	keyEnter   quizKeyKind = "enter"
 	keyEscape  quizKeyKind = "escape"
@@ -228,6 +229,8 @@ func quizKeyName(s keyStep) string {
 		return "Tab"
 	case keyDown:
 		return "Down"
+	case keyUp:
+		return "Up"
 	case keyEnter:
 		return "Enter"
 	case keyEscape:

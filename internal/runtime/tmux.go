@@ -267,7 +267,13 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 	// -e keeps the pane's escape sequences: the dim attribute is the only
 	// thing that tells a typed draft from Claude Code's ghost-text
 	// autosuggestion, which renders identically without it.
-	if out, _, err := t.run(ctx, "capture-pane", "-p", "-e", "-t", paneTarget(h.Name)); err == nil {
+	clearKeys := []string{"C-u"}
+	out, _, capErr := t.run(ctx, "capture-pane", "-p", "-e", "-t", paneTarget(h.Name))
+	if capErr != nil && opts.Dialect == PaneDialectKimi {
+		// Kimi: no blind typing into a pane we could not read.
+		return fmt.Errorf("%w: session %q: capture: %v", ErrComposerBusy, h.Name, capErr)
+	}
+	if capErr == nil {
 		// 0a. Held-dialog guard. While Claude Code's held-peer-message
 		// approval dialog is on screen, keystrokes drive its selector rather
 		// than the composer: the paste+Enter below would dismiss the dialog
@@ -278,7 +284,16 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 		if LooksLikeHeldPeerDialog(out) {
 			return fmt.Errorf("%w: session %q", ErrHeldDialog, h.Name)
 		}
-		if !opts.Force && LooksLikeUserDraft(out) {
+		if opts.Dialect == PaneDialectKimi {
+			// Kimi: type only into its recognized composer — never into a
+			// question widget or dialog, where Enter picks an option, not
+			// even when forced (Force is for an abandoned draft).
+			k, ok := parseKimiComposer(out)
+			if !ok || (!opts.Force && k.state == KimiDraft) {
+				return fmt.Errorf("%w: session %q", ErrComposerBusy, h.Name)
+			}
+			clearKeys = kimiClearKeys(k.rows)
+		} else if !opts.Force && LooksLikeUserDraft(out) {
 			return fmt.Errorf("%w: session %q", ErrComposerBusy, h.Name)
 		}
 	}
@@ -287,7 +302,7 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 	// paste-buffer address a pane, not a session, so they need the
 	// colon-suffixed pane target even though has-session/kill-session
 	// accept the bare session target.
-	if _, _, err := t.run(ctx, "send-keys", "-t", paneTarget(h.Name), "C-u"); err != nil {
+	if _, _, err := t.run(ctx, append([]string{"send-keys", "-t", paneTarget(h.Name)}, clearKeys...)...); err != nil {
 		return fmt.Errorf("clear draft: %w", err)
 	}
 
@@ -315,7 +330,11 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 	if _, _, err := t.run(ctx, "load-buffer", "-b", bufName, tmpPath); err != nil {
 		return fmt.Errorf("load buffer: %w", err)
 	}
-	if _, _, err := t.run(ctx, "paste-buffer", "-d", "-b", bufName, "-t", paneTarget(h.Name)); err != nil {
+	pasteArgs := []string{"paste-buffer", "-d", "-b", bufName, "-t", paneTarget(h.Name)}
+	if opts.Bracketed {
+		pasteArgs = []string{"paste-buffer", "-p", "-d", "-b", bufName, "-t", paneTarget(h.Name)}
+	}
+	if _, _, err := t.run(ctx, pasteArgs...); err != nil {
 		return fmt.Errorf("paste buffer: %w", err)
 	}
 
@@ -372,6 +391,13 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 				markerSeen = true
 				break
 			}
+			// Kimi shows a multi-line paste as «[paste #N +M lines]»: the
+			// marker never renders, but the composer holding it is enough.
+			if err == nil && opts.Dialect == PaneDialectKimi {
+				if c, ok := ParseKimiComposer(out); ok && c == KimiDraft {
+					break
+				}
+			}
 			if time.Now().After(deadline) {
 				break
 			}
@@ -415,6 +441,11 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 				if LooksLikeQuizWidget(tailLines(trimTrailingBlank(out), confirmWindow)) {
 					return nil
 				}
+				// Kimi: the composer no longer holds the text — the previous
+				// Enter submitted it (or queued it); another would be stray.
+				if kimiSubmitted(out, opts.Dialect) {
+					return nil
+				}
 				// The previous Enter queued the text after all: another
 				// Enter would only hit an empty composer.
 				if LooksLikeAgentQueued(out, text) {
@@ -441,6 +472,13 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 			// «…», often before its last line.
 			if LooksLikeAgentQueued(full, text) {
 				return fmt.Errorf("%w: session %q", ErrQueuedByAgent, h.Name)
+			}
+			// Kimi shows a multi-line paste as «[paste #N +M lines]», so
+			// neither the marker nor a line-count change proves the submit;
+			// its composer emptying does (idle, or busy with Kimi's own
+			// queue — delivery is then confirmed from its journal).
+			if kimiSubmitted(full, opts.Dialect) {
+				return nil
 			}
 			out := tailLines(trimTrailingBlank(full), confirmWindow)
 			// marker-absent: the injected text's last line no longer
@@ -527,7 +565,13 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 			// line and kill-buffer drops the paste buffer so a stray
 			// paste cannot resurrect the text. Both are best-effort; the
 			// honest non-delivery is what the caller must see.
-			_, _, _ = t.run(ctx, "send-keys", "-t", paneTarget(h.Name), "C-u")
+			cleanup := []string{"C-u"}
+			if opts.Dialect == PaneDialectKimi {
+				if k, ok := parseKimiComposer(full); ok {
+					cleanup = kimiClearKeys(k.rows)
+				}
+			}
+			_, _, _ = t.run(ctx, append([]string{"send-keys", "-t", paneTarget(h.Name)}, cleanup...)...)
 			_, _, _ = t.run(ctx, "kill-buffer", "-b", bufName)
 			return fmt.Errorf("%w: after %d attempts", ErrNotDelivered, maxAttempts)
 		}
@@ -924,4 +968,17 @@ func LooksLikeQuizWidget(tail string) bool {
 	return strings.Contains(tail, "Enter to select · ") ||
 		strings.Contains(tail, "✔ Submit") ||
 		strings.Contains(tail, "Ready to submit your answers?")
+}
+
+// kimiSubmitted reports, for the Kimi dialect only, that the text left
+// Kimi's composer after a paste+Enter: the composer is empty (idle, or busy
+// with Kimi's own queue), or something else replaced it — a question widget
+// renders only mid-turn, so the text went in, and another Enter would pick
+// one of its options. Delivery is then proven from Kimi's journal.
+func kimiSubmitted(pane, dialect string) bool {
+	if dialect != PaneDialectKimi {
+		return false
+	}
+	c, ok := ParseKimiComposer(pane)
+	return !ok || c != KimiDraft
 }

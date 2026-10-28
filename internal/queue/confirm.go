@@ -178,7 +178,8 @@ func (q *Queue) confirmRecipient(ctx context.Context, st *confirmState, to strin
 			}
 			if confirmer != nil {
 				pane, capErr := q.rt.Capture(ctx, runtime.Handle{Name: sess.TmuxName}, acceptedPaneLines)
-				if capErr == nil && runtime.LooksLikeAgentQueued(pane, text) {
+				if capErr == nil && (runtime.LooksLikeAgentQueued(pane, text) ||
+					q.injectOpts(sess).Dialect == runtime.PaneDialectKimi && runtime.LooksLikeKimiQueued(pane, text)) {
 					// The text is visibly parked in the agent's own queue:
 					// it will reach the model, pasting again would duplicate.
 					pending++

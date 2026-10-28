@@ -2,14 +2,11 @@
 package kimicode
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"time"
 
-	"github.com/IvanRoslov/rocket/internal/activity"
 	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/prompts"
 )
@@ -99,7 +96,4 @@ func (k *KimiCode) SetupWorkspace(spec agent.LaunchSpec) error {
 	return nil
 }
 
-func (k *KimiCode) Activity(context.Context, agent.ActivityRef) (activity.State, time.Time, error) {
-	return "", time.Time{}, agent.ErrNoSignal
-}
 func init() { agent.Register("kimi-code", New) }
