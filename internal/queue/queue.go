@@ -98,11 +98,11 @@ type Queue struct {
 // New builds a Queue. getActivity is typically Monitor.Activity.
 func New(st *store.Store, b *bus.Bus, rt runtime.Runtime, cfg *config.Config, getActivity func(sessionID string) (activity.State, bool)) *Queue {
 	return &Queue{
-		st:          st,
-		bus:         b,
-		rt:          rt,
-		cfg:         cfg,
-		getActivity: getActivity,
+		st:           st,
+		bus:          b,
+		rt:           rt,
+		cfg:          cfg,
+		getActivity:  getActivity,
 		getSession:   st.GetSession,
 		backoff:      defaultBackoff,
 		resolveAgent: agent.Get,
@@ -408,6 +408,11 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 		// the recipient's socket.
 		viaSocket := q.socketReady(sess)
 
+		// Optional agent capabilities (Codex): busyOK makes an active
+		// recipient ready; confirmer turns a successful paste into
+		// "accepted" instead of "delivered" (see attemptDelivery).
+		busyOK, confirmer := q.recipientCaps(sess)
+
 		if sess.PendingQuiz != "" && !viaSocket {
 			// Recipient has a pending AskUserQuestion quiz on screen: text
 			// injected now would corrupt the TUI widget, and no socket is
@@ -433,6 +438,10 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 			return
 		case known && (state == activity.Ready || state == activity.Idle || state == activity.WaitingInput):
 			// proceed to delivery
+		case known && state == activity.Active && busyOK:
+			// The agent takes input mid-turn into its own queue (Codex:
+			// «Messages to be submitted after next tool call»), so a busy
+			// recipient is as good as a ready one.
 		default:
 			// active, or unknown — wait and re-check.
 			if !q.waitForReady(ctx, msg.ToSession) {
@@ -517,7 +526,7 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 			}
 		}
 
-		if !q.attemptDelivery(ctx, msg, sess, force, viaSocket) {
+		if !q.attemptDelivery(ctx, msg, sess, force, viaSocket, confirmer) {
 			// Inject hit the draft guard after all (the human started
 			// typing between the probe above and the C-u): the message is
 			// back to "queued" untouched. Wait a tick and re-evaluate from
@@ -584,7 +593,13 @@ func (q *Queue) waitForReady(ctx context.Context, to string) bool {
 // and returns true.
 // viaSocket selects the Claude Code socket transport for the first attempt;
 // it is cleared as soon as the socket fails, so retries fall to tmux.
-func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess store.Session, force, viaSocket bool) bool {
+//
+// confirmer, when non-nil, is the recipient agent's journal-backed proof of
+// delivery: a successful paste (submitted, or taken into the agent's own
+// queue) then ends in status "accepted" rather than "delivered", with
+// inject_at taken right before the paste, and the confirmer loop
+// (confirm.go) finishes the job. nil keeps the historical behaviour.
+func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess store.Session, force, viaSocket bool, confirmer agent.DeliveryConfirmer) bool {
 	handle := runtime.Handle{Name: sess.TmuxName}
 	text := q.prepareText(msg, sess)
 
@@ -671,20 +686,38 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 			}
 		}
 
+		if confirmer != nil {
+			// The journal search starts here, BEFORE the paste: an idle
+			// Codex can record the user message before Inject returns, and
+			// a since taken afterwards would never find it. Persisted first
+			// so a crash between the two leaves a bounded, not a missing,
+			// reference point.
+			if err := q.st.SetMessageInjectAt(msg.ID, q.now().UnixMilli()); err != nil {
+				slog.Error("queue: set message inject_at", "id", msg.ID, "error", err)
+			}
+		}
+
 		err := q.rt.Inject(ctx, handle, text, runtime.InjectOpts{Force: force})
 
 		var retryEligible bool
 		switch {
 		case err == nil:
+			if confirmer != nil {
+				q.accept(msg)
+				return true
+			}
 			q.deliverSuccess(msg)
 			return true
 		case errors.Is(err, runtime.ErrQueuedByAgent):
 			// The agent (Codex, busy) took the text into its own queue and
 			// will hand it to the model itself. Re-injecting would queue a
-			// duplicate, so this counts as delivered — as it did before
-			// Inject could tell this case apart.
-			// TODO(#5707 T4): replace with the accepted status, confirmed
-			// from the transcript (agent.DeliveryConfirmer).
+			// duplicate, so this never retries: with a confirmer it is
+			// "accepted" until the journal proves it; without one (no way
+			// to tell) it counts as delivered, as before.
+			if confirmer != nil {
+				q.accept(msg)
+				return true
+			}
 			q.deliverSuccess(msg)
 			return true
 		case errors.Is(err, runtime.ErrHeldDialog):
@@ -734,6 +767,13 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 			} else {
 				// Marker gone (or capture failed): treat as delivered —
 				// submission likely went through and confirmation was missed.
+				// A confirmer recipient gets "accepted" instead: its journal
+				// settles the doubt, and an unconfirmed message is retried
+				// by the confirmer's rules rather than trusted.
+				if confirmer != nil {
+					q.accept(msg)
+					return true
+				}
 				q.deliverSuccess(msg)
 				return true
 			}
@@ -759,6 +799,31 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 		if !sleepCtx(ctx, q.backoff(msg.Attempts)) {
 			return true
 		}
+	}
+}
+
+// accept marks a message accepted — pasted into a recipient whose agent
+// will confirm the delivery from its journal — publishes message.accepted
+// and nudges the confirmer loop. Attempts are kept: a later requeue counts
+// this paste as one of them.
+func (q *Queue) accept(msg store.Message) {
+	if err := q.st.UpdateMessageStatus(msg.ID, "accepted", msg.Attempts, 0, ""); err != nil {
+		slog.Error("queue: update message accepted", "id", msg.ID, "error", err)
+	}
+	q.bus.Publish("message.accepted", msg.ToSession, map[string]any{
+		"id":   msg.ID,
+		"to":   msg.ToSession,
+		"from": msg.FromSession,
+	})
+	q.kickConfirmer()
+}
+
+// kickConfirmer wakes the confirmer loop without blocking; a kick already
+// pending is enough.
+func (q *Queue) kickConfirmer() {
+	select {
+	case q.confirmKick <- struct{}{}:
+	default:
 	}
 }
 

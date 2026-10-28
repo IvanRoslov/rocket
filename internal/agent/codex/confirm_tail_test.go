@@ -101,3 +101,15 @@ func TestConfirmDeliveredHonorsCancelledContext(t *testing.T) {
 	}
 	_ = time.Second
 }
+
+func TestScanTailRecordExactlyAtSinceIsNotVisited(t *testing.T) {
+	journal := strings.Join([]string{
+		userLine("2026-10-28T12:09:59.999Z", "before"),
+		userLine("2026-10-28T12:10:00.000Z", "at since"),
+		userLine("2026-10-28T12:10:00.001Z", "after"),
+	}, "\n") + "\n"
+	visited, _ := scanAll(t, journal, "2026-10-28T12:10:00Z")
+	if len(visited) != 1 || !strings.Contains(visited[0], `"after"`) {
+		t.Fatalf("visited = %q, want only the record after since", visited)
+	}
+}
