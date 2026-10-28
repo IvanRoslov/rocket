@@ -112,3 +112,18 @@ func TestParseStartScreenIdentityIncludesFolder(t *testing.T) {
 		t.Error("trust screens for different folders compare as the same dialog")
 	}
 }
+
+func TestStartScreenCursor(t *testing.T) {
+	cases := map[string]int{
+		"codex-start-trust.pane":            0,
+		"codex-start-update.pane":           0,
+		"codex-start-daemon.pane":           2,
+		"codex-start-daemon-unmanaged.pane": 1,
+		"codex-start-neg-idle.pane":         -1,
+	}
+	for fixture, want := range cases {
+		if got := StartScreenCursor(readPane(t, fixture)); got != want {
+			t.Errorf("%s: StartScreenCursor = %d, want %d", fixture, got, want)
+		}
+	}
+}

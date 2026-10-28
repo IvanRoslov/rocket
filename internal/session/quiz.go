@@ -87,6 +87,10 @@ type keyStep struct {
 	Kind   quizKeyKind
 	Value  string
 	Settle time.Duration
+	// When, if set, is asked right before the step: false skips it. The
+	// Codex start-screen answer uses it to confirm with Enter only when
+	// the digit merely moved the cursor.
+	When func() bool
 }
 
 // validateQuizAnswers checks answers against quiz, returning a descriptive
@@ -252,6 +256,10 @@ func (m *Manager) sendQuizKeys(ctx context.Context, h runtime.Handle, steps []ke
 		case <-abort:
 			return nil
 		default:
+		}
+
+		if s.When != nil && !s.When() {
+			continue
 		}
 
 		var err error

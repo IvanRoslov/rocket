@@ -50,9 +50,25 @@ var startHeadingLabels = map[string]bool{"Folder access": true}
 // composer row («› Ask Codex …»), and a header right above it. Claude
 // Code's dialogs use ❯ and never match.
 func ParseStartScreen(pane string) (PermissionPrompt, bool) {
+	p, _, ok := parseStartScreen(pane)
+	return p, ok
+}
+
+// StartScreenCursor returns the index into Options of the choice the ›
+// cursor of the start screen on pane sits on, or -1 when pane shows no
+// start screen.
+func StartScreenCursor(pane string) int {
+	_, cursor, ok := parseStartScreen(pane)
+	if !ok {
+		return -1
+	}
+	return cursor
+}
+
+func parseStartScreen(pane string) (PermissionPrompt, int, bool) {
 	rows := visiblePaneRows(pane)
 	if len(rows) == 0 {
-		return PermissionPrompt{}, false
+		return PermissionPrompt{}, -1, false
 	}
 
 	last := -1
@@ -68,15 +84,15 @@ func ParseStartScreen(pane string) (PermissionPrompt, bool) {
 		}
 		if strings.HasPrefix(t, "›") || isFrameRule(rows[i]) {
 			// the composer or a frame below the list: not a start screen
-			return PermissionPrompt{}, false
+			return PermissionPrompt{}, -1, false
 		}
 		trailer++
 		if trailer > startTrailerRows {
-			return PermissionPrompt{}, false
+			return PermissionPrompt{}, -1, false
 		}
 	}
 	if last < 0 {
-		return PermissionPrompt{}, false
+		return PermissionPrompt{}, -1, false
 	}
 
 	// Walk up over the list: numbered rows and their indented
@@ -95,18 +111,18 @@ func ParseStartScreen(pane string) (PermissionPrompt, bool) {
 	}
 
 	width := maxRowWidth(rows)
-	options, ok := readStartOptions(rows[top:last+1], width)
+	options, cursor, ok := readStartOptions(rows[top:last+1], width)
 	if !ok {
-		return PermissionPrompt{}, false
+		return PermissionPrompt{}, -1, false
 	}
 
 	header := startHeader(rows[:top], width)
 	if len(header) == 0 {
-		return PermissionPrompt{}, false
+		return PermissionPrompt{}, -1, false
 	}
 	title, context := startTitle(header)
 	if title == "" {
-		return PermissionPrompt{}, false
+		return PermissionPrompt{}, -1, false
 	}
 
 	return PermissionPrompt{
@@ -114,7 +130,7 @@ func ParseStartScreen(pane string) (PermissionPrompt, bool) {
 		Context: context,
 		Options: options,
 		Raw:     strings.Join(tailRows(rows, startRawRows), "\n"),
-	}, true
+	}, cursor, true
 }
 
 // isStartContinuation matches a non-numbered row inside a list: indented
@@ -126,22 +142,24 @@ func isStartContinuation(row string) bool {
 	return strings.HasPrefix(row, "   ")
 }
 
-// readStartOptions folds the list rows into labels. Numbered rows must run
+// readStartOptions folds the list rows into labels and the cursor's index. Numbered rows must run
 // 1..n (n ≥ 2) with exactly one cursor. A continuation row is joined to the
 // label only when it is the TUI's wrap of it; any other sub-row (a disabled
 // choice, a description) is skipped — it has no digit of its own.
-func readStartOptions(rows []string, width int) ([]string, bool) {
+func readStartOptions(rows []string, width int) ([]string, int, bool) {
 	var labels []string
 	cursors := 0
+	cursor := -1
 	prev := ""
 	for _, r := range rows {
 		if m := startOptionRow.FindStringSubmatch(r); m != nil {
 			n, err := strconv.Atoi(m[3])
 			if err != nil || n != len(labels)+1 {
-				return nil, false
+				return nil, -1, false
 			}
 			if m[2] != "" {
 				cursors++
+				cursor = len(labels)
 			}
 			labels = append(labels, strings.TrimSpace(m[4]))
 			prev = r
@@ -157,9 +175,9 @@ func readStartOptions(rows []string, width int) ([]string, bool) {
 		prev = ""
 	}
 	if len(labels) < 2 || cursors != 1 {
-		return nil, false
+		return nil, -1, false
 	}
-	return labels, true
+	return labels, cursor, true
 }
 
 // startHeader returns the screen's header above the list as paragraphs of
