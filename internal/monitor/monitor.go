@@ -403,7 +403,13 @@ func (m *Monitor) pollSession(ctx context.Context, sess store.Session, liveSet m
 			return
 		}
 
-		rawState, rawTS, err := ag.Activity(ctx, agent.ActivityRef{SessionID: sess.ID, WorktreePath: sess.WorktreePath})
+		// Since = this launch, so an adapter can tell its own run's journal
+		// from an earlier one in the same worktree (Kimi after a restore).
+		ref := agent.ActivityRef{SessionID: sess.ID, WorktreePath: sess.WorktreePath}
+		if launched := m.sessionLaunchedAt(sess); launched > 0 {
+			ref.Since = time.Unix(launched, 0)
+		}
+		rawState, rawTS, err := ag.Activity(ctx, ref)
 		switch {
 		case errors.Is(err, agent.ErrNoSignal):
 			state = activity.State(sess.Activity)

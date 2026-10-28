@@ -134,12 +134,16 @@ func (m *Monitor) checkStartScreen(ctx context.Context, sess store.Session, ag a
 		return state, ts
 	}
 
-	if p, ok := runtime.ParseStartScreen(out); ok {
+	parse, build, screenName := runtime.ParseStartScreen, session.NewStartScreenQuiz, "Codex"
+	if agent.PaneDialectOf(ag) == runtime.PaneDialectKimi {
+		parse, build, screenName = runtime.ParseKimiStartScreen, session.NewKimiStartScreenQuiz, "Kimi Code"
+	}
+	if p, ok := parse(out); ok {
 		st.miss = 0
 		switch {
 		case !startPending:
 			st.next = permissionCandidate{}
-			m.publishStartScreen(sess, p, false)
+			m.publishStartScreen(sess, p, false, build, screenName)
 		case pending.PermissionPrompt().SameDialog(p):
 			st.next = permissionCandidate{}
 		default:
@@ -150,7 +154,7 @@ func (m *Monitor) checkStartScreen(ctx context.Context, sess store.Session, ag a
 			}
 			if st.next.seen >= permissionChangeThreshold {
 				st.next = permissionCandidate{}
-				m.publishStartScreen(sess, p, true)
+				m.publishStartScreen(sess, p, true, build, screenName)
 			}
 		}
 		return activity.Blocked, time.Now()
@@ -171,10 +175,11 @@ func (m *Monitor) checkStartScreen(ctx context.Context, sess store.Session, ag a
 
 // publishStartScreen makes screen p the session's pending quiz and, when its
 // journal row is new, raises the alert.
-func (m *Monitor) publishStartScreen(sess store.Session, p runtime.PermissionPrompt, replacing bool) {
-	published, fresh := m.publishPromptQuiz(sess, p, replacing, session.NewStartScreenQuiz)
+func (m *Monitor) publishStartScreen(sess store.Session, p runtime.PermissionPrompt, replacing bool,
+	build func(runtime.PermissionPrompt, int64, int64) session.Quiz, screenName string) {
+	published, fresh := m.publishPromptQuiz(sess, p, replacing, build)
 	if published && fresh {
-		m.alertStartScreen(sess, p)
+		m.alertStartScreen(sess, p, screenName)
 	}
 }
 
@@ -198,22 +203,22 @@ func (m *Monitor) closeStartScreen(sess store.Session, pending session.Quiz) {
 
 // startScreenAlert is the text of the alert about session id stuck on
 // screen p.
-func startScreenAlert(id string, p runtime.PermissionPrompt) string {
+func startScreenAlert(id string, p runtime.PermissionPrompt, screenName string) string {
 	opts := make([]string, len(p.Options))
 	for i, o := range p.Options {
 		opts[i] = fmt.Sprintf("%d. %s", i+1, o)
 	}
 	return fmt.Sprintf(
-		"[rocket] session %s is stuck on a Codex start screen: «%s». Options: %s. "+
+		"[rocket] session %s is stuck on a %s start screen: «%s». Options: %s. "+
 			"Answer it from the dashboard (the session's question card) or in the session's terminal; rocket does not press keys on its own.",
-		id, p.Title, strings.Join(opts, "; "),
+		id, screenName, p.Title, strings.Join(opts, "; "),
 	)
 }
 
 // alertStartScreen tells someone that sess is stuck: a system message to
 // its live parent, else a problem entry on the session's own task.
-func (m *Monitor) alertStartScreen(sess store.Session, p runtime.PermissionPrompt) {
-	body := startScreenAlert(sess.ID, p)
+func (m *Monitor) alertStartScreen(sess store.Session, p runtime.PermissionPrompt, screenName string) {
+	body := startScreenAlert(sess.ID, p, screenName)
 
 	if sess.ParentID != "" {
 		parent, err := m.st.GetSession(sess.ParentID)

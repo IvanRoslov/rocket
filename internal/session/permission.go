@@ -35,6 +35,10 @@ type PermissionRef struct {
 	// the pane with the matching parser and may confirm the digit with
 	// Enter.
 	StartScreen bool `json:"start_screen,omitempty"`
+	// Unnumbered marks a Kimi Code start screen
+	// (runtime.ParseKimiStartScreen): its options carry no digits, so the
+	// answer path moves the cursor with arrow keys and confirms with Enter.
+	Unnumbered bool `json:"unnumbered,omitempty"`
 }
 
 // NewPermissionQuiz builds the pending quiz for dialog p journalled as row
@@ -72,6 +76,18 @@ func NewStartScreenQuiz(p runtime.PermissionPrompt, promptID, askedAt int64) Qui
 	q := NewPermissionQuiz(p, promptID, askedAt)
 	q.Questions[0].Header = startScreenQuizHeader
 	q.Permission.StartScreen = true
+	return q
+}
+
+// kimiStartScreenQuizHeader is the badge of a Kimi Code start-screen quiz.
+const kimiStartScreenQuizHeader = "Экран Kimi Code"
+
+// NewKimiStartScreenQuiz builds the pending quiz for Kimi Code start screen
+// p (runtime.ParseKimiStartScreen): a start-screen quiz flagged Unnumbered.
+func NewKimiStartScreenQuiz(p runtime.PermissionPrompt, promptID, askedAt int64) Quiz {
+	q := NewStartScreenQuiz(p, promptID, askedAt)
+	q.Questions[0].Header = kimiStartScreenQuizHeader
+	q.Permission.Unnumbered = true
 	return q
 }
 
