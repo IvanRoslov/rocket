@@ -188,6 +188,11 @@ func (q *Queue) runCtx() context.Context {
 // silently lost, breaking FIFO for anything queued behind them), then wakes
 // a delivery worker for every recipient with a queued message.
 //
+// Messages in status "accepted" are deliberately left alone: the paste did
+// happen, so requeueing them blindly would duplicate; the confirmer loop
+// (started by Run) picks them up and confirms, requeues or fails them by
+// its own rules. Recover only kicks it so the first pass is prompt.
+//
 // Callers MUST call Recover synchronously (not in a goroutine) and have it
 // complete BEFORE the API starts serving requests. Otherwise an early
 // POST /v1/messages could call Wake for a recipient whose delivery worker
@@ -213,6 +218,13 @@ func (q *Queue) Recover(ctx context.Context) {
 			q.Wake(to)
 		}
 	}
+
+	if accepted, err := q.st.ListAcceptedMessages(); err != nil {
+		slog.Error("queue: list accepted messages", "error", err)
+	} else if len(accepted) > 0 {
+		slog.Info("queue: accepted messages left for the confirmer after restart", "count", len(accepted))
+		q.kickConfirmer()
+	}
 }
 
 // Run runs housekeeping (timeout expiry every minute, retention purge once a
@@ -222,6 +234,10 @@ func (q *Queue) Run(ctx context.Context) {
 	q.ctxMu.Lock()
 	q.runCtxVal = ctx
 	q.ctxMu.Unlock()
+
+	// Accepted messages (Codex path) are finished by the confirmer, which
+	// lives as long as Run does.
+	go q.confirmLoop(ctx)
 
 	housekeeping := time.NewTicker(time.Minute)
 	defer housekeeping.Stop()
@@ -847,6 +863,12 @@ func (q *Queue) fail(msg store.Message, reason string) {
 	if err := q.st.UpdateMessageStatus(msg.ID, "failed", msg.Attempts, 0, reason); err != nil {
 		slog.Error("queue: update message failed", "id", msg.ID, "error", err)
 	}
+	q.announceFailure(msg, reason)
+}
+
+// announceFailure publishes message.failed and notifies a live sender; the
+// status itself has already been written by the caller.
+func (q *Queue) announceFailure(msg store.Message, reason string) {
 	q.bus.Publish("message.failed", msg.ToSession, map[string]any{
 		"id":     msg.ID,
 		"to":     msg.ToSession,
@@ -924,8 +946,7 @@ func formatBody(msg store.Message) string {
 // inbox file fails for any reason, prepareText logs a warning and falls
 // back to the original full-body injection.
 func (q *Queue) prepareText(msg store.Message, sess store.Session) string {
-	large := len(msg.Body) > q.cfg.LargeMessageThreshold || lineCount(msg.Body) > largeMessageLineThreshold
-	if !large || sess.WorktreePath == "" {
+	if !q.isLarge(msg) || sess.WorktreePath == "" {
 		return formatBody(msg)
 	}
 
@@ -934,7 +955,22 @@ func (q *Queue) prepareText(msg store.Message, sess store.Session) string {
 		slog.Warn("queue: write inbox file failed, falling back to full-body injection", "id", msg.ID, "to", msg.ToSession, "worktree", sess.WorktreePath, "error", err)
 		return formatBody(msg)
 	}
+	return inboxPointer(msg, relPath)
+}
 
+// isLarge reports whether msg's body goes through the inbox file.
+func (q *Queue) isLarge(msg store.Message) bool {
+	return len(msg.Body) > q.cfg.LargeMessageThreshold || lineCount(msg.Body) > largeMessageLineThreshold
+}
+
+// inboxRelPath is where writeInboxFile puts message id, relative to the
+// recipient's worktree.
+func inboxRelPath(id int64) string {
+	return filepath.Join(".rocket", "inbox", fmt.Sprintf("msg-%d.md", id))
+}
+
+// inboxPointer is the short text injected instead of a large body.
+func inboxPointer(msg store.Message, relPath string) string {
 	prefix := ""
 	if msg.FromSession != "" {
 		prefix = "[from " + msg.FromSession + "] "
@@ -963,7 +999,7 @@ func writeInboxFile(worktreePath string, id int64, body string) (string, error) 
 		return "", fmt.Errorf("mkdir inbox dir: %w", err)
 	}
 
-	relPath := filepath.Join(".rocket", "inbox", fmt.Sprintf("msg-%d.md", id))
+	relPath := inboxRelPath(id)
 	fullPath := filepath.Join(worktreePath, relPath)
 
 	tmp, err := os.CreateTemp(dir, "msg-*.tmp")

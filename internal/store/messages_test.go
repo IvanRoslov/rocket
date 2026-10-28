@@ -445,7 +445,7 @@ func TestAcceptedTransitionsAreCAS(t *testing.T) {
 		t.Fatalf("RequeueAccepted ok=%v err=%v", ok, err)
 	}
 	m, _ := s.GetMessage(id)
-	if m.Status != "queued" || m.Attempts != 2 || m.InjectAt != 0 {
+	if m.Status != "queued" || m.Attempts != 1 || m.InjectAt != 0 {
 		t.Fatalf("after requeue: %+v", m)
 	}
 	if ok, _ := s.RequeueAccepted(id); ok {

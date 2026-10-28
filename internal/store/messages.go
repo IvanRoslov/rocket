@@ -193,11 +193,12 @@ func (s *Store) ConfirmAccepted(id int64, deliveredAt int64) (bool, error) {
 }
 
 // RequeueAccepted atomically moves message id from "accepted" back to
-// "queued", consuming one attempt and clearing inject_at so the next paste
-// takes a fresh one. False means the message was no longer accepted.
+// "queued" and clears inject_at so the next paste takes a fresh one.
+// Attempts are left alone: they count pastes, and the worker increments
+// them when it pastes again. False means the message was no longer accepted.
 func (s *Store) RequeueAccepted(id int64) (bool, error) {
 	return s.casAccepted(id,
-		`UPDATE messages SET status = 'queued', attempts = attempts + 1, inject_at = 0 WHERE id = ? AND status = 'accepted'`,
+		`UPDATE messages SET status = 'queued', inject_at = 0 WHERE id = ? AND status = 'accepted'`,
 		id)
 }
 
