@@ -124,3 +124,60 @@ func TestQueue_DefaultInjectOptsUnchanged(t *testing.T) {
 		t.Fatalf("InjectOpts = %+v, want zero", opts)
 	}
 }
+
+// A message parked in Kimi's own queue (rows «❯ …» above the composer) is
+// not requeued while it waits there, even if Kimi stays blocked on a
+// question for longer than the grace period.
+func TestQueue_KimiAcceptedKeptWhileInKimisQueue(t *testing.T) {
+	h := newTestQueue(t)
+	h.startConfirmer()
+	addKimiSession(t, h, "kimi", activity.Active)
+	busy := kimiPane(t, "kimi-busy-queued.pane")
+	h.rt.setCaptureEscaped(func(_ runtime.Handle, _ int) (string, error) { return kimiPane(t, "kimi-idle.pane"), nil })
+	h.rt.setCapture(func(_ runtime.Handle, _ int) (string, error) { return busy, nil })
+	id := addMsg(t, h, "kimi", "reply QUEUED_OK")
+	h.q.Wake("kimi")
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "accepted" }, "accepted")
+
+	h.activityTo("kimi", activity.Blocked)
+	h.clock.advance(2 * time.Minute)
+	h.q.kickConfirmer()
+	time.Sleep(150 * time.Millisecond)
+	if got := messageStatus(t, h.st, id); got != "accepted" || h.rt.callCount() != 1 {
+		t.Fatalf("status=%q injects=%d, want accepted/1 while Kimi's queue holds the text", got, h.rt.callCount())
+	}
+}
+
+// The monitor can flip a Kimi session to blocked on a start screen (and set
+// its start-screen quiz) between the queue's session read and its activity
+// read. The brief must wait for the human's answer, not fail.
+func TestQueue_KimiBriefHeldWhenBlockedOnStartScreen(t *testing.T) {
+	h := newTestQueue(t)
+	addKimiSession(t, h, "kimi", activity.Ready)
+	h.rt.setCaptureEscaped(func(_ runtime.Handle, _ int) (string, error) { return kimiPane(t, "kimi-trust.pane"), nil })
+	stale, err := h.st.GetSession("kimi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.st.SetPendingQuiz("kimi", `{"questions":[{"question":"Trust this folder?"}],"source":"permission","permission":{"prompt_id":1,"start_screen":true,"unnumbered":true}}`); err != nil {
+		t.Fatal(err)
+	}
+	h.ac.set("kimi", activity.Blocked)
+	first := true
+	h.q.getSession = func(id string) (store.Session, error) {
+		if first {
+			first = false
+			return stale, nil // read before the monitor's sweep
+		}
+		return h.st.GetSession(id)
+	}
+	id := addMsg(t, h, "kimi", "brief")
+	h.q.Wake("kimi")
+	time.Sleep(200 * time.Millisecond)
+	if got := messageStatus(t, h.st, id); got != "queued" {
+		t.Fatalf("status = %q, want queued until the start screen is answered", got)
+	}
+	if n := h.rt.callCount(); n != 0 {
+		t.Fatalf("Inject called %d times", n)
+	}
+}

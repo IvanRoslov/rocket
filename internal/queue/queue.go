@@ -466,6 +466,18 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 		}
 
 		state, known := q.getActivity(msg.ToSession)
+		if known && state == activity.Blocked && q.injectOpts(sess).Dialect == runtime.PaneDialectKimi {
+			// Kimi's first message (the brief) is queued at spawn. The
+			// monitor may have put a start screen on the session (quiz +
+			// blocked) since sess was read: re-read, and if a quiz is now
+			// pending, wait for the human's answer instead of failing it.
+			if fresh, err := q.getSession(msg.ToSession); err == nil && fresh.PendingQuiz != "" {
+				if !q.waitForReady(ctx, msg.ToSession) {
+					return // ctx cancelled
+				}
+				continue
+			}
+		}
 		switch {
 		case known && (state == activity.Blocked || state == activity.Exited):
 			q.fail(msg, "recipient_unavailable")
