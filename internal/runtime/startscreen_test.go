@@ -17,10 +17,12 @@ func readPane(t *testing.T, name string) string {
 	return string(b)
 }
 
-// The trust fixtures are live captures of codex-cli 0.160.0 (--no-daemon,
-// untrusted folder); update and daemon are the TUI's own insta snapshots at
-// tag rust-v0.160.0 (update_prompt_modal, daemon_recovery_menu,
-// unmanaged_daemon_recovery_menu).
+// Trust and update are live captures of codex-cli 0.160.0 (--no-daemon;
+// untrusted folder; update via an isolated CODEX_HOME whose version.json
+// names 0.165.0); trust-compact is the orchestrator's probe capture with
+// blank rows dropped. The background-server screens were not reproducible
+// and are the TUI's own insta snapshots at tag rust-v0.160.0
+// (daemon_recovery_menu, unmanaged_daemon_recovery_menu).
 func TestParseStartScreen(t *testing.T) {
 	trustOptions := []string{"Trust and continue", "Quit"}
 	cases := []struct {
@@ -32,8 +34,9 @@ func TestParseStartScreen(t *testing.T) {
 		{"codex-start-trust.pane", "Trust this folder?", trustOptions, "untrusted-proj"},
 		{"codex-start-trust-subdir.pane", "Trust this folder?", trustOptions, "Trusting will apply to the repository root"},
 		{"codex-start-trust-80col.pane", "Trust this folder?", trustOptions, "untrusted-proj"},
-		{"codex-start-update.pane", "Update available · 0.0.0 → 9.9.9",
-			[]string{"Update now (runs `npm install -g @openai/codex`)", "Skip", "Skip until next version"}, "Release notes"},
+		{"codex-start-trust-compact.pane", "Trust this folder?", trustOptions, "codexprobe"},
+		{"codex-start-update.pane", "Update available · 0.160.0 → 0.165.0",
+			[]string{"Update now (runs `brew upgrade --cask codex`)", "Skip", "Skip until next version"}, "Release notes"},
 		{"codex-start-daemon.pane", "Background server has incompatible feature settings",
 			[]string{"Run without daemon this time", "Restart with these settings", "Cancel"}, "api_key_model_discovery = true"},
 		{"codex-start-daemon-unmanaged.pane", "Background server has incompatible feature settings",
@@ -64,6 +67,8 @@ func TestParseStartScreen(t *testing.T) {
 func TestParseStartScreenNegatives(t *testing.T) {
 	for _, fixture := range []string{
 		"codex-start-neg-idle.pane",           // ordinary Codex screen with the composer
+		"codex-start-neg-update-banner.pane",  // non-blocking update banner above the normal screen
+		"codex-start-neg-busy-queue.pane",     // busy Codex with its own queue block (↳)
 		"permission-neg-idle.pane",            // Claude Code idle
 		"permission-neg-trust.pane",           // Claude Code's own trust dialog
 		"permission-bash-rm.pane",             // Claude Code permission dialog
