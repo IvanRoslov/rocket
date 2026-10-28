@@ -1,7 +1,6 @@
 package codex
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -52,6 +51,13 @@ var userRoleMark = []byte(`"role":"user"`)
 // when a run of whole lines inside it does: Codex joins messages queued back
 // to back into one user record with "\n" (observed with codex-cli 0.160.0),
 // so one record can carry several of rocket's messages.
+//
+// The journal is read from its end backwards and the scan stops at the
+// first record stamped at or before since: the queue calls this every few
+// seconds for every accepted message with since = the moment of the paste,
+// and a Codex journal can be tens of megabytes, so only the tail written
+// after the paste is ever read. Records are chronological, so nothing
+// matching can precede that stop point.
 func (c *Codex) ConfirmDelivered(ctx context.Context, ref agent.ActivityRef, text string, since time.Time) (bool, time.Time, error) {
 	want := normalizeSpace(text)
 	if want == "" {
@@ -66,25 +72,104 @@ func (c *Codex) ConfirmDelivered(ctx context.Context, ref agent.ActivityRef, tex
 		return false, time.Time{}, agent.ErrNoSignal
 	}
 	defer f.Close()
-
-	// bufio.Reader, not Scanner: tool output can make one line megabytes
-	// long, past any fixed Scanner limit.
-	r := bufio.NewReaderSize(f, 64*1024)
-	for {
-		if err := ctx.Err(); err != nil {
-			return false, time.Time{}, err
-		}
-		line, readErr := r.ReadBytes('\n')
-		if at, ok := matchUserRecord(line, want, since); ok {
-			return true, at, nil
-		}
-		if readErr != nil {
-			if errors.Is(readErr, io.EOF) {
-				return false, time.Time{}, nil
-			}
-			return false, time.Time{}, readErr
-		}
+	st, err := f.Stat()
+	if err != nil {
+		return false, time.Time{}, agent.ErrNoSignal
 	}
+
+	// The scan yields newest first; the answer is the earliest match, so
+	// keep overwriting until the scan ends.
+	var at time.Time
+	found := false
+	err = scanTailSince(ctx, f, st.Size(), since, func(line []byte) {
+		if t, ok := matchUserRecord(line, want, since); ok {
+			at, found = t, true
+		}
+	})
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	return found, at, nil
+}
+
+// tailChunk is how many bytes scanTailSince reads per step from the end of
+// the journal. Lines longer than this (tool output) are reassembled across
+// steps.
+const tailChunk = 64 * 1024
+
+// timestampKey opens the timestamp field every rollout record starts with.
+var timestampKey = []byte(`"timestamp":"`)
+
+// recordTimestamp extracts a record's timestamp without decoding the whole
+// line (which can be megabytes). ok is false for a line without a parsable
+// timestamp.
+func recordTimestamp(line []byte) (time.Time, bool) {
+	i := bytes.Index(line, timestampKey)
+	if i < 0 {
+		return time.Time{}, false
+	}
+	rest := line[i+len(timestampKey):]
+	j := bytes.IndexByte(rest, '"')
+	if j < 0 {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339Nano, string(rest[:j]))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// scanTailSince walks the lines of a size-byte journal from the last one
+// backwards and calls visit for each, until it meets a record whose
+// timestamp is not after since (that record is not visited). Lines without
+// a parsable timestamp are visited and do not stop the scan. An empty last
+// line (trailing newline) is skipped.
+func scanTailSince(ctx context.Context, r io.ReaderAt, size int64, since time.Time, visit func(line []byte)) error {
+	// carry holds the bytes of the (possibly partial) first line of the
+	// region read so far; it grows until its line start is found.
+	var carry []byte
+	off := size
+	handle := func(line []byte) bool {
+		if len(line) == 0 {
+			return false
+		}
+		if t, ok := recordTimestamp(line); ok && !t.After(since) {
+			return true
+		}
+		visit(line)
+		return false
+	}
+	for off > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		n := int64(tailChunk)
+		if off < n {
+			n = off
+		}
+		off -= n
+		buf := make([]byte, n, n+int64(len(carry)))
+		if _, err := r.ReadAt(buf, off); err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+		buf = append(buf, carry...)
+		// Everything after the first newline is complete lines, newest last.
+		cut := bytes.IndexByte(buf, '\n')
+		if cut < 0 {
+			carry = buf
+			continue
+		}
+		lines := bytes.Split(buf[cut+1:], []byte{'\n'})
+		for i := len(lines) - 1; i >= 0; i-- {
+			if handle(lines[i]) {
+				return nil
+			}
+		}
+		carry = append([]byte(nil), buf[:cut]...)
+	}
+	handle(carry)
+	return nil
 }
 
 // matchUserRecord reports whether line is a user message recorded strictly
