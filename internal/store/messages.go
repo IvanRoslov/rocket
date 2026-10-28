@@ -13,11 +13,16 @@ type Message struct {
 	FromSession string // empty = human/system
 	ToSession   string
 	Body        string
-	Status      string // queued|delivering|delivered|failed
+	Status      string // queued|delivering|accepted|delivered|failed
 	Attempts    int
 	CreatedAt   int64
 	DeliveredAt int64  // 0 = not delivered
-	Reason      string // empty = none; set on status "failed" (e.g. "timeout", "delivery_failed", "recipient_gone")
+	Reason      string // empty = none; set on status "failed" (e.g. "timeout", "delivery_failed", "recipient_gone", "not_confirmed")
+	// InjectAt is the unix-millisecond moment right before the text was
+	// pasted into a recipient whose agent confirms delivery from its journal
+	// (status "accepted"); 0 otherwise. It bounds the journal search and the
+	// "turn ended without confirmation" rule.
+	InjectAt int64
 }
 
 // AddMessage inserts a new message with status "queued" (unless already set)
@@ -44,7 +49,7 @@ func (s *Store) AddMessage(m Message) (int64, error) {
 // GetMessage returns the message with the given id, or ErrNotFound.
 func (s *Store) GetMessage(id int64) (Message, error) {
 	row := s.db.QueryRow(
-		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason
+		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at
 		 FROM messages WHERE id = ?`, id,
 	)
 	return scanMessage(row)
@@ -54,7 +59,7 @@ func (s *Store) GetMessage(id int64) (Message, error) {
 // or from_session = sessionID, in ascending id order. A limit <= 0 means no
 // limit.
 func (s *Store) ListMessages(sessionID string, limit int) ([]Message, error) {
-	query := `SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason
+	query := `SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at
 	          FROM messages WHERE to_session = ? OR from_session = ? ORDER BY id DESC`
 	args := []any{sessionID, sessionID}
 	if limit > 0 {
@@ -92,7 +97,7 @@ func (s *Store) ListMessages(sessionID string, limit int) ([]Message, error) {
 // message for to.
 func (s *Store) NextQueuedMessage(to string) (Message, bool, error) {
 	row := s.db.QueryRow(
-		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason
+		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at
 		 FROM messages WHERE to_session = ? AND status = 'queued' ORDER BY id LIMIT 1`, to,
 	)
 	m, err := scanMessage(row)
@@ -144,6 +149,78 @@ func (s *Store) UpdateMessageStatus(id int64, status string, attempts int, deliv
 	return checkRowsAffected(res)
 }
 
+// SetMessageInjectAt records the unix-millisecond moment right before the
+// text of message id is pasted (see Message.InjectAt).
+func (s *Store) SetMessageInjectAt(id int64, injectAt int64) error {
+	if _, err := s.db.Exec(`UPDATE messages SET inject_at = ? WHERE id = ?`, injectAt, id); err != nil {
+		return fmt.Errorf("set message inject_at: %w", err)
+	}
+	return nil
+}
+
+// ListAcceptedMessages returns every message in status "accepted", ordered
+// by recipient and then by id, so a confirmer can walk one recipient's
+// messages oldest-first in a single pass.
+func (s *Store) ListAcceptedMessages() ([]Message, error) {
+	rows, err := s.db.Query(
+		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at
+		 FROM messages WHERE status = 'accepted' ORDER BY to_session, id`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query accepted messages: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Message
+	for rows.Next() {
+		m, err := scanMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// ConfirmAccepted atomically moves message id from "accepted" to
+// "delivered" with delivered_at = deliveredAt. It reports false when the
+// message was no longer accepted (already requeued, failed or confirmed by a
+// concurrent pass), so a stale decision never overwrites a newer status.
+func (s *Store) ConfirmAccepted(id int64, deliveredAt int64) (bool, error) {
+	return s.casAccepted(id,
+		`UPDATE messages SET status = 'delivered', delivered_at = ? WHERE id = ? AND status = 'accepted'`,
+		deliveredAt, id)
+}
+
+// RequeueAccepted atomically moves message id from "accepted" back to
+// "queued", consuming one attempt and clearing inject_at so the next paste
+// takes a fresh one. False means the message was no longer accepted.
+func (s *Store) RequeueAccepted(id int64) (bool, error) {
+	return s.casAccepted(id,
+		`UPDATE messages SET status = 'queued', attempts = attempts + 1, inject_at = 0 WHERE id = ? AND status = 'accepted'`,
+		id)
+}
+
+// FailAccepted atomically moves message id from "accepted" to "failed" with
+// the given reason. False means the message was no longer accepted.
+func (s *Store) FailAccepted(id int64, reason string) (bool, error) {
+	return s.casAccepted(id,
+		`UPDATE messages SET status = 'failed', reason = ? WHERE id = ? AND status = 'accepted'`,
+		nullIfEmpty(reason), id)
+}
+
+func (s *Store) casAccepted(id int64, query string, args ...any) (bool, error) {
+	res, err := s.db.Exec(query, args...)
+	if err != nil {
+		return false, fmt.Errorf("update accepted message %d: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("update accepted message %d rows affected: %w", id, err)
+	}
+	return n == 1, nil
+}
+
 // ExpireQueuedBefore sets status = 'failed' on all queued messages with
 // created_at < ts, and returns the affected messages (post-update, i.e. with
 // status "failed").
@@ -163,7 +240,7 @@ func (s *Store) ExpireQueuedBefore(ts int64) ([]Message, error) {
 	rows, err := tx.Query(
 		`UPDATE messages SET status = 'failed', reason = 'timeout'
 		 WHERE status = 'queued' AND created_at < ?
-		 RETURNING id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason`, ts,
+		 RETURNING id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at`, ts,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("expire messages: %w", err)
@@ -280,7 +357,7 @@ func scanMessage(row interface{ Scan(...any) error }) (Message, error) {
 	var reason sql.NullString
 
 	err := row.Scan(
-		&m.ID, &fromSession, &m.ToSession, &m.Body, &m.Status, &m.Attempts, &m.CreatedAt, &deliveredAt, &reason,
+		&m.ID, &fromSession, &m.ToSession, &m.Body, &m.Status, &m.Attempts, &m.CreatedAt, &deliveredAt, &reason, &m.InjectAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Message{}, ErrNotFound

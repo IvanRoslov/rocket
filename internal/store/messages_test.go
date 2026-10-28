@@ -402,3 +402,117 @@ func TestPurgeOld(t *testing.T) {
 		t.Error("new event wrongly purged")
 	}
 }
+
+func TestMessageInjectAtRoundTrip(t *testing.T) {
+	s := openTestStore(t)
+	id, err := s.AddMessage(Message{ToSession: "r", Body: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ := s.GetMessage(id)
+	if m.InjectAt != 0 {
+		t.Fatalf("fresh InjectAt = %d, want 0", m.InjectAt)
+	}
+	if err := s.SetMessageInjectAt(id, 1700000000123); err != nil {
+		t.Fatal(err)
+	}
+	m, _ = s.GetMessage(id)
+	if m.InjectAt != 1700000000123 {
+		t.Fatalf("InjectAt = %d", m.InjectAt)
+	}
+	// Every message SELECT must carry the column, not only GetMessage.
+	if n, ok, _ := s.NextQueuedMessage("r"); !ok || n.InjectAt != 1700000000123 {
+		t.Fatalf("NextQueuedMessage InjectAt = %d ok=%v", n.InjectAt, ok)
+	}
+	list, _ := s.ListMessages("r", 0)
+	if len(list) != 1 || list[0].InjectAt != 1700000000123 {
+		t.Fatalf("ListMessages = %+v", list)
+	}
+}
+
+func TestAcceptedTransitionsAreCAS(t *testing.T) {
+	s := openTestStore(t)
+	id, _ := s.AddMessage(Message{ToSession: "r", Body: "x"})
+	if ok, err := s.ConfirmAccepted(id, 5); ok || err != nil {
+		t.Fatalf("queued must not confirm: ok=%v err=%v", ok, err)
+	}
+	if err := s.UpdateMessageStatus(id, "accepted", 1, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.SetMessageInjectAt(id, 42)
+	ok, err := s.RequeueAccepted(id)
+	if err != nil || !ok {
+		t.Fatalf("RequeueAccepted ok=%v err=%v", ok, err)
+	}
+	m, _ := s.GetMessage(id)
+	if m.Status != "queued" || m.Attempts != 2 || m.InjectAt != 0 {
+		t.Fatalf("after requeue: %+v", m)
+	}
+	if ok, _ := s.RequeueAccepted(id); ok {
+		t.Fatal("queued must not requeue again")
+	}
+	_ = s.UpdateMessageStatus(id, "accepted", 2, 0, "")
+	if ok, _ := s.FailAccepted(id, "not_confirmed"); !ok {
+		t.Fatal("FailAccepted")
+	}
+	m, _ = s.GetMessage(id)
+	if m.Status != "failed" || m.Reason != "not_confirmed" || m.Attempts != 2 {
+		t.Fatalf("after fail: %+v", m)
+	}
+	if ok, _ := s.ConfirmAccepted(id, 5); ok {
+		t.Fatal("failed must not confirm")
+	}
+	_ = s.UpdateMessageStatus(id, "accepted", 2, 0, "")
+	if ok, _ := s.ConfirmAccepted(id, 5); !ok {
+		t.Fatal("ConfirmAccepted")
+	}
+	m, _ = s.GetMessage(id)
+	if m.Status != "delivered" || m.DeliveredAt != 5 {
+		t.Fatalf("after confirm: %+v", m)
+	}
+}
+
+func TestListAcceptedMessagesOrderedByRecipientThenID(t *testing.T) {
+	s := openTestStore(t)
+	var ids []int64
+	for _, to := range []string{"b", "a", "a", "c"} {
+		id, _ := s.AddMessage(Message{ToSession: to, Body: "x"})
+		ids = append(ids, id)
+	}
+	for _, id := range ids[:3] {
+		_ = s.UpdateMessageStatus(id, "accepted", 1, 0, "")
+	}
+	got, err := s.ListAcceptedMessages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0].ID != ids[1] || got[1].ID != ids[2] || got[2].ID != ids[0] {
+		t.Fatalf("order = %+v", got)
+	}
+}
+
+func TestResetDeliveringKeepsAccepted(t *testing.T) {
+	s := openTestStore(t)
+	d, _ := s.AddMessage(Message{ToSession: "r", Body: "x"})
+	a, _ := s.AddMessage(Message{ToSession: "r", Body: "y"})
+	_ = s.UpdateMessageStatus(d, "delivering", 1, 0, "")
+	_ = s.UpdateMessageStatus(a, "accepted", 1, 0, "")
+	n, err := s.ResetDelivering()
+	if err != nil || n != 1 {
+		t.Fatalf("ResetDelivering = %d, %v", n, err)
+	}
+	m, _ := s.GetMessage(a)
+	if m.Status != "accepted" {
+		t.Fatalf("accepted row changed: %+v", m)
+	}
+	// Expiry only looks at queued rows: an accepted one is never timed out here.
+	exp, _ := s.ExpireQueuedBefore(m.CreatedAt + 10)
+	for _, e := range exp {
+		if e.ID == a {
+			t.Fatalf("expired accepted row: %+v", e)
+		}
+	}
+	if m, _ = s.GetMessage(a); m.Status != "accepted" {
+		t.Fatalf("accepted row after expiry: %+v", m)
+	}
+}
