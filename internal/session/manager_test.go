@@ -210,9 +210,13 @@ type fakeAgent struct {
 	launchCalls  []agent.LaunchSpec
 	envOverrides map[string]string // optional env overrides to merge with defaults
 	shipsSkill   bool              // reports ShipsBrainstormSkill, like claude-code
+	firstByInput bool
+	bracketed    bool
 }
 
 func (a *fakeAgent) ShipsBrainstormSkill() bool { return a.shipsSkill }
+func (a *fakeAgent) FirstMessageByInput() bool  { return a.firstByInput }
+func (a *fakeAgent) BracketedPaste() bool       { return a.bracketed }
 
 func (a *fakeAgent) Name() string      { return "fake" }
 func (a *fakeAgent) Efforts() []string { return nil }

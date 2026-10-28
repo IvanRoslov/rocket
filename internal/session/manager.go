@@ -464,6 +464,10 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 		m.markErrored(id, err)
 		return store.Session{}, err
 	}
+	if err := m.queueFirstMessage(ag, &spec); err != nil {
+		m.markErrored(id, err)
+		return store.Session{}, err
+	}
 
 	env := mergeEnv(repo.Env, ag.Env(spec))
 	m.injectToken(env)
@@ -664,6 +668,10 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 	}
 
 	if err := ag.SetupWorkspace(spec); err != nil {
+		m.markErrored(id, err)
+		return store.Session{}, err
+	}
+	if err := m.queueFirstMessage(ag, &spec); err != nil {
 		m.markErrored(id, err)
 		return store.Session{}, err
 	}
@@ -1000,6 +1008,10 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 		m.markErrored(id, err)
 		return err
 	}
+	if err := m.queueFirstMessage(ag, &spec); err != nil {
+		m.markErrored(id, err)
+		return err
+	}
 
 	env := mergeEnv(repo.Env, ag.Env(spec))
 	m.injectToken(env)
@@ -1021,6 +1033,22 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 	}
 	m.bus.Publish("session.restored", id, nil)
 
+	return nil
+}
+
+// queueFirstMessage transfers the launch prompt to the persistent delivery
+// queue before the runtime starts. A spawning session is not eligible for
+// delivery yet, so the prompt is ready when the session becomes running.
+func (m *Manager) queueFirstMessage(ag agent.Agent, spec *agent.LaunchSpec) error {
+	if !agent.TakesFirstMessageByInput(ag) || spec.FirstMessage == "" {
+		return nil
+	}
+	if _, err := m.st.AddMessage(store.Message{
+		FromSession: "rocket", ToSession: spec.SessionID, Body: spec.FirstMessage,
+	}); err != nil {
+		return fmt.Errorf("queue first message: %w", err)
+	}
+	spec.FirstMessage = ""
 	return nil
 }
 
