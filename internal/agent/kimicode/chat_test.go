@@ -3,6 +3,7 @@ package kimicode
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -51,6 +52,53 @@ func TestTranscriptTailReadsRealMessagesAndOneToolCall(t *testing.T) {
 	more, nextCursor, err = New().TranscriptTail(context.Background(), agent.ActivityRef{WorktreePath: wt}, cursor)
 	if err != nil || !reflect.DeepEqual(more, []agent.ChatEntry{{Role: "assistant", Text: "NEXT", TS: time.UnixMilli(1793194546000).Unix()}}) || nextCursor == cursor {
 		t.Fatalf("resume after append = %+v, %q, %v", more, nextCursor, err)
+	}
+}
+
+func TestTranscriptTailShowsFailedTurnErrorFromFixture(t *testing.T) {
+	home, wt := t.TempDir(), t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", home)
+	session := writeState(t, home, "wd_"+filepath.Base(wt)+"_failed", "session_failed", wt, 1793195010000)
+	copyWireFixture(t, session, "main", "failed-turn-synthetic.wire.jsonl")
+
+	entries, _, err := New().TranscriptTail(context.Background(), agent.ActivityRef{WorktreePath: wt}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []agent.ChatEntry{{
+		Role: "assistant",
+		Text: "⚠ Kimi turn failed: HTTP 429: quota exhausted (synthetic)",
+		TS:   time.UnixMilli(1793195011001).Unix(),
+	}}
+	if !reflect.DeepEqual(entries, want) {
+		t.Fatalf("failed turn entries = %+v; want %+v", entries, want)
+	}
+}
+
+func TestTranscriptTailShowsOnlyFailedOrBlockedTurnsWithError(t *testing.T) {
+	home, wt := t.TempDir(), t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", home)
+	session := writeState(t, home, "wd_"+filepath.Base(wt)+"_errors", "session_errors", wt, 1000)
+	path := mainWire(session)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	longError := strings.Repeat("quota exhausted; ", 10)
+	data := `{"type":"turn.ended","reason":"completed","error":{"message":"ignored"},"time":1000}` + "\n" +
+		`{"type":"turn.ended","reason":"cancelled","error":{"message":"ignored"},"time":2000}` + "\n" +
+		`{"type":"turn.ended","reason":"failed","error":{"message":""},"time":3000}` + "\n" +
+		fmt.Sprintf(`{"type":"turn.ended","reason":"blocked","error":{"message":%q},"time":4000}`, longError) + "\n"
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, _, err := New().TranscriptTail(context.Background(), agent.ActivityRef{WorktreePath: wt}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []agent.ChatEntry{{Role: "assistant", Text: "⚠ Kimi turn failed: " + longError, TS: 4}}
+	if !reflect.DeepEqual(entries, want) {
+		t.Fatalf("terminal turn entries = %+v; want %+v", entries, want)
 	}
 }
 

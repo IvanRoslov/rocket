@@ -19,8 +19,12 @@ import (
 const kimiChatDigestMaxRunes = 120
 
 type kimiChatRecord struct {
-	Type    string `json:"type"`
-	Time    int64  `json:"time"`
+	Type   string `json:"type"`
+	Time   int64  `json:"time"`
+	Reason string `json:"reason"`
+	Error  struct {
+		Message string `json:"message"`
+	} `json:"error"`
 	Message struct {
 		Message struct {
 			Role    string `json:"role"`
@@ -86,6 +90,11 @@ func kimiChatEntry(line []byte) (agent.ChatEntry, bool) {
 			}
 		}
 		return agent.ChatEntry{Role: "tool", ToolName: rec.Event.Name, Text: kimiChatDigest(input), TS: ts}, true
+	case "turn.ended":
+		if (rec.Reason == "failed" || rec.Reason == "blocked") && strings.TrimSpace(rec.Error.Message) != "" {
+			return agent.ChatEntry{Role: "assistant", Text: "⚠ Kimi turn failed: " + rec.Error.Message, TS: ts}, true
+		}
+		return agent.ChatEntry{}, false
 	default:
 		return agent.ChatEntry{}, false
 	}
