@@ -2,6 +2,7 @@
 #   make build   — собрать дашборд + бинарь bin/rocket (дашборд встроен)
 #   make start   — собрать и запустить демон в фоне
 #   make stop    — остановить демон
+#   make restart — собрать, затем перезапустить демон и проверить, что он новый
 #   make status  — статус демона
 #   make test    — go-тесты + web-тесты
 #   make apk     — собрать Android APK мобильного приложения (mobile/)
@@ -50,10 +51,17 @@ start: build
 stop:
 	$(BIN) daemon stop 2>/dev/null || { [ -x $(BIN) ] || go build -o $(BIN) ./cmd/rocket; $(BIN) daemon stop; }
 
+# Порядок критичен: сначала build (~40 с), и только потом stop/start. Если
+# останавливать демон до сборки, за это окно любой вызов CLI автостартует СТАРЫЙ
+# bin/rocket, и новый бинарь так и не подхватывается.
 # `daemon stop` blocks until rocketd has actually exited (see internal/daemon.WaitForExit),
 # so start can run right after without racing a socket/pid file that hasn't been cleaned up yet.
-restart: stop
-	$(MAKE) start
+# В конце проверяем, что работающий демон стартовал позже сборки bin/rocket.
+restart: build
+	$(BIN) daemon stop
+	$(BIN) daemon start
+	$(BIN) daemon status
+	scripts/check-daemon-fresh.sh $(BIN) "$${ROCKET_HOME:-$$HOME/.rocket}/rocketd.pid"
 
 status:
 	$(BIN) daemon status
