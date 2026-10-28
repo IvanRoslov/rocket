@@ -290,8 +290,17 @@ func lockFile(lockPath string) (func(), error) {
 // Without it the pane has no scrollback to show and the dashboard's browser
 // terminal cannot scroll a codex session (task #5073). Like every flag it
 // precedes `--`, or it would become part of the first user message.
+//
+// `--no-daemon` keeps codex 0.160+ from running shell commands through the
+// shared `codex app-server --managed-daemon`, whose own environment would
+// hide the session's ROCKET_* variables (feature #5707, Q1).
+// `-c check_for_update_on_startup=false` removes the interactive update
+// screen that would otherwise swallow the first message.
 func (c *Codex) LaunchCommand(spec agent.LaunchSpec) []string {
-	cmd := []string{"codex", "--no-alt-screen", "--sandbox", "danger-full-access", "--ask-for-approval", "never"}
+	cmd := []string{
+		"codex", "--no-alt-screen", "--sandbox", "danger-full-access", "--ask-for-approval", "never",
+		"--no-daemon", "-c", "check_for_update_on_startup=false",
+	}
 
 	if spec.Model != "" {
 		cmd = append(cmd, "-m", spec.Model)

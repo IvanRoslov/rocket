@@ -37,8 +37,9 @@ type LaunchSpec struct {
 
 ## Адаптер codex
 
-- **Launch:** `codex --no-alt-screen --sandbox danger-full-access --ask-for-approval never [-m X] [-c model_reasoning_effort=E] -- "<first message>"`; системный промпт — через `AGENTS.md`-механику или флаг (уточнить при реализации по актуальной версии codex CLI).
+- **Launch:** `codex --no-alt-screen --sandbox danger-full-access --ask-for-approval never --no-daemon -c check_for_update_on_startup=false [-m X] [-c model_reasoning_effort=E] -- "<first message>"`; системный промпт — через `AGENTS.md`-механику или флаг (уточнить при реализации по актуальной версии codex CLI).
 - **`--no-alt-screen`:** codex рисует TUI в обычном экране, а не в альтернативном. Иначе его вывод не попадает в историю панели tmux, и в браузерном терминале дашборда сессию codex нечем прокручивать — колесо и свайп вместо прокрутки листают прошлые промпты (задача #5073). Флаг, как и остальные, стоит до `--`, иначе он станет частью первого сообщения. Распознавание экрана (доставка через `Inject`, захват `capture-pane -S -N`) от режима не зависит: оно смотрит на последние строки захвата; проверено вживую на codex-cli 0.160.0 (`#{alternate_on}` = 0, `#{history_size}` растёт).
+- **`--no-daemon` и `-c check_for_update_on_startup=false`:** оба флага всегда, до `--`. Codex 0.160+ без них исполняет shell-команды через общий `codex app-server --managed-daemon` со своим окружением — переменные `ROCKET_*` сессии там не видны (фича #5707, Q1). Проверка обновлений на старте открывает интерактивный экран, который перехватывает первое сообщение.
 - **Activity:** сессионные JSONL codex в `~/.codex/sessions/` (аналогичный принцип: mtime + последняя запись); минимум — процесс жив/мёртв + пороги по mtime.
 - Уточнение деталей — задача фазы 5; интерфейс рассчитан на то, что адаптер знает только свои источники.
 
