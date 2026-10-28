@@ -37,6 +37,11 @@ const largeMessageLineThreshold = 20
 // well inside this; runtime.LooksLikeUserDraft narrows further on its own.
 const composerWindow = 10
 
+// kimiComposerWindow is composerWindow for Kimi Code recipients: its
+// composer box sits under its own queue rows and above a two-row status
+// bar, and runtime.ParseKimiComposer needs the whole box.
+const kimiComposerWindow = 20
+
 // defaultBackoff returns the real backoff schedule: 1s, 2s, 4s, 8s, 16s for
 // attempt 1..5 (attempt is 1-based, the number of the attempt that just
 // failed).
@@ -132,6 +137,19 @@ func (q *Queue) recipientCaps(sess store.Session) (busyOK bool, confirmer agent.
 	}
 	confirmer, _ = a.(agent.DeliveryConfirmer)
 	return agent.AcceptsInputWhileBusy(a), confirmer
+}
+
+// injectOpts returns the pane options sess's agent needs (bracketed paste,
+// pane dialect); zero for Claude Code, Codex and unresolved agents.
+func (q *Queue) injectOpts(sess store.Session) runtime.InjectOpts {
+	if q.resolveAgent == nil {
+		return runtime.InjectOpts{}
+	}
+	a, err := q.resolveAgent(sess.Agent)
+	if err != nil || a == nil {
+		return runtime.InjectOpts{}
+	}
+	return runtime.InjectOpts{Bracketed: agent.WantsBracketedPaste(a), Dialect: agent.PaneDialectOf(a)}
 }
 
 // runCtx returns the context passed to Run, or context.Background() if Run
@@ -492,10 +510,40 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 		if viaSocket {
 			busySince = time.Time{}
 		} else {
-			out, capErr := q.rt.CaptureEscaped(ctx, runtime.Handle{Name: sess.TmuxName}, composerWindow)
+			dialect := q.injectOpts(sess).Dialect
+			window := composerWindow
+			if dialect == runtime.PaneDialectKimi {
+				window = kimiComposerWindow
+			}
+			out, capErr := q.rt.CaptureEscaped(ctx, runtime.Handle{Name: sess.TmuxName}, window)
+			draft, composerUp := false, true
+			if capErr == nil {
+				if dialect == runtime.PaneDialectKimi {
+					var c runtime.KimiComposer
+					c, composerUp = runtime.ParseKimiComposer(out)
+					draft = composerUp && c == runtime.KimiDraft
+				} else {
+					draft = runtime.LooksLikeUserDraft(out)
+				}
+			}
 			switch {
 			case capErr != nil:
 				busySince = time.Time{}
+
+			case !composerUp:
+				// Kimi readiness. Kimi writes no journal before its first
+				// prompt, so its activity reads ready from the start; only
+				// the pane tells whether its composer is up. Until it shows
+				// (TUI still drawing, a start screen, a question widget),
+				// typing would land elsewhere — hold, never force; the
+				// queue_timeout is the backstop.
+				busySince = time.Time{}
+				slog.Info("queue: recipient composer not up yet, deferring delivery",
+					"id", msg.ID, "to", msg.ToSession)
+				if !q.waitForReady(ctx, msg.ToSession) {
+					return // ctx cancelled
+				}
+				continue
 
 			case runtime.LooksLikeHeldPeerDialog(out):
 				// Held-dialog blocker. The recipient is showing Claude Code's
@@ -521,7 +569,7 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 				}
 				continue
 
-			case runtime.LooksLikeUserDraft(out):
+			case draft:
 				if busySince.IsZero() {
 					busySince = time.Now()
 				}
@@ -713,7 +761,9 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 			}
 		}
 
-		err := q.rt.Inject(ctx, handle, text, runtime.InjectOpts{Force: force})
+		opts := q.injectOpts(sess)
+		opts.Force = force
+		err := q.rt.Inject(ctx, handle, text, opts)
 
 		var retryEligible bool
 		switch {

@@ -128,6 +128,20 @@ func WantsBracketedPaste(a Agent) bool {
 	return ok && v.BracketedPaste()
 }
 
+// PaneDialecter is implemented by agents whose TUI needs rocket's
+// agent-specific pane parsers (runtime.PaneDialect*): Kimi Code's composer
+// box and unnumbered start screens. The queue, the injector and the monitor
+// read such panes with those parsers.
+type PaneDialecter interface{ PaneDialect() string }
+
+// PaneDialectOf returns a's pane dialect, "" for the default parsers.
+func PaneDialectOf(a Agent) string {
+	if v, ok := a.(PaneDialecter); ok {
+		return v.PaneDialect()
+	}
+	return ""
+}
+
 // BusyInputAccepter is implemented by agents whose composer takes new input
 // while a turn is running and keeps it in the agent's own queue (Codex). For
 // them the message queue treats an active session as ready to receive.

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/agent"
+	"github.com/IvanRoslov/rocket/internal/runtime"
 )
 
 func promptLine(t *testing.T, kind, text string, at int64) string {
@@ -154,5 +155,14 @@ func TestConfirmNoJournal(t *testing.T) {
 	_, _, err := New().(agent.DeliveryConfirmer).ConfirmDelivered(context.Background(), agent.ActivityRef{WorktreePath: t.TempDir()}, "x", time.Time{})
 	if !errors.Is(err, agent.ErrNoSignal) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestPaneDialectAndBracketedPaste(t *testing.T) {
+	if got := agent.PaneDialectOf(New()); got != runtime.PaneDialectKimi {
+		t.Fatalf("PaneDialectOf = %q", got)
+	}
+	if !agent.WantsBracketedPaste(New()) {
+		t.Fatal("kimi-code must want bracketed paste")
 	}
 }

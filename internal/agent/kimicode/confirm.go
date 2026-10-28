@@ -7,17 +7,23 @@ import (
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/agent"
+	"github.com/IvanRoslov/rocket/internal/runtime"
 )
 
 var (
 	_ agent.BusyInputAccepter = (*KimiCode)(nil)
 	_ agent.DeliveryConfirmer = (*KimiCode)(nil)
+	_ agent.PaneDialecter     = (*KimiCode)(nil)
 )
 
 // AcceptsInputWhileBusy implements agent.BusyInputAccepter: Enter during a
 // turn puts the text into Kimi's own queue (the «❯ …» row above the
 // composer) and Kimi starts a turn for it when the current one ends.
 func (k *KimiCode) AcceptsInputWhileBusy() bool { return true }
+
+// PaneDialect implements agent.PaneDialecter: Kimi's composer box and
+// unnumbered start screens need the Kimi pane parsers.
+func (k *KimiCode) PaneDialect() string { return runtime.PaneDialectKimi }
 
 // userPrompt decodes rec as a user-origin turn.prompt and returns its text
 // parts. Skill-activation steers (turn.steer) and system-triggered prompts
