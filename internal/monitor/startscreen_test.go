@@ -3,13 +3,18 @@ package monitor
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/IvanRoslov/rocket/internal/activity"
 	"github.com/IvanRoslov/rocket/internal/agent"
+	_ "github.com/IvanRoslov/rocket/internal/agent/codex"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -23,13 +28,21 @@ type startupAgent struct {
 	started bool
 	err     error
 	calls   int
+	since   time.Time
 }
 
 func (a *startupAgent) HasStartedTurn(ctx context.Context, ref agent.ActivityRef) (bool, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.calls++
+	a.since = ref.Since
 	return a.started, a.err
+}
+
+func (a *startupAgent) lastSince() time.Time {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.since
 }
 
 func (a *startupAgent) setStarted(v bool) {
@@ -253,5 +266,93 @@ func TestStartScreenIgnoresAgentsWithoutProber(t *testing.T) {
 	}
 	if got := activityOf(t, st, "sess1"); got == string(activity.Blocked) {
 		t.Error("claude-code session marked blocked by the start-screen check")
+	}
+}
+
+// A restored session relaunches in the same worktree: the cached «started»
+// of the previous run must not hide a start screen of the new one.
+func TestStartScreenCheckedAgainAfterRestore(t *testing.T) {
+	m, st, rt, ag, _ := startMonitor(t, "codex-start-neg-idle.pane", true)
+	ag.setStarted(true)
+	ag.err = nil
+	m.sweep(context.Background())
+	if n := rt.captured(40); n != 0 {
+		t.Fatalf("setup: captured %d times, want 0", n)
+	}
+
+	// Restore: a session.restored event after the launch, the old journal
+	// no longer counts, and the new process shows the trust screen.
+	if _, err := st.AppendEvent(store.Event{Type: "session.restored", SessionID: "sess1", TS: time.Now().Unix() + 5}); err != nil {
+		t.Fatal(err)
+	}
+	ag.setStarted(false)
+	rt.setPane(pane(t, "codex-start-trust.pane"))
+	m.sweep(context.Background())
+
+	if got := activityOf(t, st, "sess1"); got != string(activity.Blocked) {
+		t.Errorf("activity = %q, want blocked", got)
+	}
+	if q, ok := pendingOf(t, st); !ok || !q.IsStartScreen() {
+		t.Errorf("pending = %+v, want a start-screen quiz", q)
+	}
+	if got, want := ag.lastSince(), time.Unix(time.Now().Unix()+5, 0); !got.Equal(want) {
+		t.Errorf("HasStartedTurn got Since = %v, want the restore time %v", got, want)
+	}
+}
+
+// The monitor bounds the probe by the session's launch: created_at when it
+// was never restored.
+func TestStartScreenProbeSinceIsCreatedAt(t *testing.T) {
+	m, st, _, ag, _ := startMonitor(t, "codex-start-trust.pane", true)
+	m.sweep(context.Background())
+	sess, _ := st.GetSession("sess1")
+	if got := ag.lastSince(); !got.Equal(time.Unix(sess.CreatedAt, 0)) {
+		t.Errorf("Since = %v, want created_at %v", got, time.Unix(sess.CreatedAt, 0))
+	}
+}
+
+// End to end with the real codex adapter: the previous run's journal (turn
+// before the relaunch) and no new journal yet, trust on the pane.
+func TestStartScreenRestoredCodexWithOldJournal(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	wt := t.TempDir()
+	old := time.Now().Add(-2 * time.Hour)
+	dir := filepath.Join(home, "sessions", old.Format("2006"), old.Format("01"), old.Format("02"))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	journal := fmt.Sprintf(`{"type":"session_meta","timestamp":%q,"payload":{"cwd":%q}}`+"\n"+
+		`{"type":"event_msg","timestamp":%q,"payload":{"type":"task_started","turn_id":"t1"}}`+"\n",
+		old.UTC().Format(time.RFC3339Nano), wt, old.UTC().Format(time.RFC3339Nano))
+	path := filepath.Join(dir, "rollout-old.jsonl")
+	if err := os.WriteFile(path, []byte(journal), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := &permFakeRuntime{fakeRuntime: fakeRuntime{names: []string{"sess1", "orch1"}}, pane: pane(t, "codex-start-trust.pane")}
+	m, st, _ := testMonitor(t, rt, &fakeProber{onlyShell: map[string]bool{}}, map[string]*fakeAgent{})
+	cx, err := agent.Get(codexAgent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.resolveAgent = func(name string) (agent.Agent, error) { return cx, nil }
+	seedSession(t, st, store.Session{ID: "orch1", Kind: "orchestrator", Agent: codexAgent, TmuxName: "orch1", WorktreePath: t.TempDir()})
+	seedSession(t, st, store.Session{ID: "sess1", Agent: codexAgent, TmuxName: "sess1", ParentID: "orch1",
+		WorktreePath: wt, CreatedAt: old.Add(-time.Hour).Unix()})
+	if _, err := st.AppendEvent(store.Event{Type: "session.restored", SessionID: "sess1", TS: time.Now().Unix()}); err != nil {
+		t.Fatal(err)
+	}
+
+	m.sweep(context.Background())
+
+	if got := activityOf(t, st, "sess1"); got != string(activity.Blocked) {
+		t.Errorf("activity = %q, want blocked", got)
+	}
+	if q, ok := pendingOf(t, st); !ok || !q.IsStartScreen() {
+		t.Errorf("pending = %+v, want a start-screen quiz", q)
 	}
 }

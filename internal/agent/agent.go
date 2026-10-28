@@ -18,6 +18,11 @@ var ErrNoSignal = errors.New("no activity signal")
 type ActivityRef struct {
 	SessionID    string
 	WorktreePath string
+	// Since, when set, is when the session's current agent process was
+	// launched (spawn or the latest restore). Probes that must ignore an
+	// earlier run's transcript in the same worktree (StartupProber) count
+	// only records at or after it. Zero means no bound.
+	Since time.Time
 }
 
 // Tokens holds token usage for one actual model in an agent transcript.

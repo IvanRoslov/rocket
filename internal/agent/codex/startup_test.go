@@ -49,3 +49,26 @@ func TestHasStartedTurnWithTaskStarted(t *testing.T) {
 		t.Errorf("HasStartedTurn = %v, %v; want true, nil", started, err)
 	}
 }
+
+// After a restore, the worktree's newest journal may still be the previous
+// run's: its turns predate the relaunch and must not count.
+func TestHasStartedTurnIgnoresTurnsBeforeSince(t *testing.T) {
+	home := withCodexHome(t)
+	wt := t.TempDir()
+	now := time.Now()
+	writeSessionFile(t, home, now, "rollout-old", wt,
+		[]string{`{"type":"event_msg","timestamp":"2026-10-28T09:00:00.000Z","payload":{"type":"task_started","turn_id":"t1"}}`},
+		now.Add(-time.Hour))
+	c := New().(*Codex)
+
+	since := time.Date(2026, 10, 28, 10, 0, 0, 0, time.UTC)
+	started, err := c.HasStartedTurn(context.TODO(), agent.ActivityRef{WorktreePath: wt, Since: since})
+	if err != nil || started {
+		t.Errorf("before relaunch: HasStartedTurn = %v, %v; want false, nil", started, err)
+	}
+
+	started, err = c.HasStartedTurn(context.TODO(), agent.ActivityRef{WorktreePath: wt, Since: since.Add(-2 * time.Hour)})
+	if err != nil || !started {
+		t.Errorf("after launch: HasStartedTurn = %v, %v; want true, nil", started, err)
+	}
+}

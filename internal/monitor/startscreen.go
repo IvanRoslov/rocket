@@ -22,9 +22,12 @@ const startScreenMissThreshold = 2
 
 // startScreenState is the monitor's per-session memory for checkStartScreen.
 type startScreenState struct {
-	// started: the journal holds a task_started; the check is over for
-	// this session (until the daemon restarts, when one cheap read
-	// re-establishes it).
+	// launchedAt is the launch (sessionLaunchedAt) the rest of the state
+	// belongs to; a restore changes it and resets everything.
+	launchedAt int64
+	// started: the journal holds a task_started of this launch; the check
+	// is over until the next restore (or daemon restart, when one cheap
+	// read re-establishes it).
 	started bool
 	// miss counts sweeps without the screen while its quiz is pending.
 	miss int
@@ -41,25 +44,46 @@ func (m *Monitor) SetWake(wake func(sessionID string)) {
 	m.mu.Unlock()
 }
 
-func (m *Monitor) startState(sessionID string) *startScreenState {
+// startState returns the session's state for launch launchedAt, starting
+// afresh when the session was relaunched since it was recorded.
+func (m *Monitor) startState(sessionID string, launchedAt int64) *startScreenState {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.startScreens == nil {
 		m.startScreens = make(map[string]*startScreenState)
 	}
 	s, ok := m.startScreens[sessionID]
-	if !ok {
-		s = &startScreenState{}
+	if !ok || s.launchedAt != launchedAt {
+		s = &startScreenState{launchedAt: launchedAt}
 		m.startScreens[sessionID] = s
 	}
 	return s
+}
+
+// sessionLaunchedAt is when sess's current agent process was launched: the
+// latest session.restored event (Restore relaunches the agent in the same
+// worktree and publishes it), else created_at. The sessions table has no
+// launch column; the event log is indexed by session, so this is one cheap
+// lookup per sweep.
+func (m *Monitor) sessionLaunchedAt(sess store.Session) int64 {
+	launched := sess.CreatedAt
+	ts, ok, err := m.st.LastSessionEventTS(sess.ID, "session.restored")
+	if err != nil {
+		slog.Warn("monitor: read last restore", "session", sess.ID, "error", err)
+	}
+	if ok && ts > launched {
+		launched = ts
+	}
+	return launched
 }
 
 // checkStartScreen catches a session whose agent CLI stopped on an
 // interactive start screen before its first turn (Codex: «Trust this
 // folder?», «Update available», «Background server has incompatible feature
 // settings»). It applies only to adapters implementing agent.StartupProber,
-// and only while HasStartedTurn is false.
+// and only while HasStartedTurn is false for the current launch
+// (sessionLaunchedAt): a restored session in the same worktree is checked
+// afresh, since the previous run's journal there already has turns.
 //
 // A screen on the pane (runtime.ParseStartScreen) makes the session
 // blocked and its pending quiz a permission quiz flagged StartScreen, so
@@ -84,11 +108,16 @@ func (m *Monitor) checkStartScreen(ctx context.Context, sess store.Session, ag a
 		return state, ts
 	}
 
-	st := m.startState(sess.ID)
+	launchedAt := m.sessionLaunchedAt(sess)
+	st := m.startState(sess.ID, launchedAt)
 	if st.started {
 		return state, ts
 	}
-	started, err := prober.HasStartedTurn(ctx, agent.ActivityRef{SessionID: sess.ID, WorktreePath: sess.WorktreePath})
+	ref := agent.ActivityRef{SessionID: sess.ID, WorktreePath: sess.WorktreePath}
+	if launchedAt > 0 {
+		ref.Since = time.Unix(launchedAt, 0)
+	}
+	started, err := prober.HasStartedTurn(ctx, ref)
 	switch {
 	case err == nil && started:
 		st.started = true
