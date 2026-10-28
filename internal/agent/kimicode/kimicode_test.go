@@ -57,6 +57,7 @@ func TestLaunchCommandUsesModelAndNeverPassesFirstMessage(t *testing.T) {
 
 func TestResolveBinaryRejectsMissingOrNonExecutable(t *testing.T) {
 	home := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("KIMI_CODE_HOME", home)
 	t.Setenv("PATH", "")
 	if _, err := resolveBinary(); err == nil {
@@ -71,6 +72,24 @@ func TestResolveBinaryRejectsMissingOrNonExecutable(t *testing.T) {
 	}
 	if err := New().Available(); err == nil {
 		t.Fatal("non executable binary is available")
+	}
+}
+
+func TestResolveBinaryFallsBackFromOverrideToDefaultHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("KIMI_CODE_HOME", t.TempDir())
+	t.Setenv("PATH", "")
+	bin := filepath.Join(home, ".kimi-code", "bin", "kimi")
+	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveBinary()
+	if err != nil || got != bin {
+		t.Fatalf("resolveBinary = %q, %v; want %q", got, err, bin)
 	}
 }
 

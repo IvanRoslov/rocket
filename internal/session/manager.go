@@ -468,6 +468,11 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 		m.markErrored(id, err)
 		return store.Session{}, err
 	}
+	argv, err := launchArgs(ag, spec)
+	if err != nil {
+		m.markErrored(id, err)
+		return store.Session{}, err
+	}
 	queuedFirst := agent.TakesFirstMessageByInput(ag) && spec.FirstMessage != ""
 	if err := m.queueFirstMessage(ag, &spec); err != nil {
 		m.markErrored(id, err)
@@ -476,7 +481,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 
 	env := mergeEnv(repo.Env, ag.Env(spec))
 	m.injectToken(env)
-	cmd := shellJoin(ag.LaunchCommand(spec))
+	cmd := shellJoin(argv)
 
 	if _, err := m.rt.Create(ctx, runtime.CreateSpec{
 		Name:    id,
@@ -679,6 +684,11 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 		m.markErrored(id, err)
 		return store.Session{}, err
 	}
+	argv, err := launchArgs(ag, spec)
+	if err != nil {
+		m.markErrored(id, err)
+		return store.Session{}, err
+	}
 	queuedFirst := agent.TakesFirstMessageByInput(ag) && spec.FirstMessage != ""
 	if err := m.queueFirstMessage(ag, &spec); err != nil {
 		m.markErrored(id, err)
@@ -687,7 +697,7 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 
 	env := mergeEnv(repo.Env, ag.Env(spec))
 	m.injectToken(env)
-	cmd := shellJoin(ag.LaunchCommand(spec))
+	cmd := shellJoin(argv)
 
 	if _, err := m.rt.Create(ctx, runtime.CreateSpec{
 		Name:    id,
@@ -976,6 +986,13 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 	if err != nil {
 		return err
 	}
+	ag, err := agent.Get(sess.Agent)
+	if err != nil {
+		return err
+	}
+	if err := ag.Available(); err != nil {
+		return validationErr("agent_unavailable", "agent unavailable: "+err.Error())
+	}
 
 	if destroyTmux {
 		// Create would fail on the name still held by the stale tmux session.
@@ -990,11 +1007,6 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 		path, restoreErr = m.ws.Restore(ctx, repo, id, sess.Branch)
 		return restoreErr
 	})
-	if err != nil {
-		return err
-	}
-
-	ag, err := agent.Get(sess.Agent)
 	if err != nil {
 		return err
 	}
@@ -1020,6 +1032,11 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 		m.markErrored(id, err)
 		return err
 	}
+	argv, err := launchArgs(ag, spec)
+	if err != nil {
+		m.markErrored(id, err)
+		return err
+	}
 	queuedFirst := agent.TakesFirstMessageByInput(ag) && spec.FirstMessage != ""
 	if err := m.queueFirstMessage(ag, &spec); err != nil {
 		m.markErrored(id, err)
@@ -1028,7 +1045,7 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 
 	env := mergeEnv(repo.Env, ag.Env(spec))
 	m.injectToken(env)
-	cmd := shellJoin(ag.LaunchCommand(spec))
+	cmd := shellJoin(argv)
 
 	if _, err := m.rt.Create(ctx, runtime.CreateSpec{
 		Name:    id,
@@ -1050,6 +1067,21 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 	}
 
 	return nil
+}
+
+// launchArgs validates the interactive command before queueing a prompt.
+// Availability can change between its earlier check and this call; an empty
+// command would otherwise start a bare tmux shell while marking the session
+// running. Input-first agents receive an argv copy without the first message.
+func launchArgs(ag agent.Agent, spec agent.LaunchSpec) ([]string, error) {
+	if agent.TakesFirstMessageByInput(ag) {
+		spec.FirstMessage = ""
+	}
+	argv := ag.LaunchCommand(spec)
+	if len(argv) == 0 || argv[0] == "" {
+		return nil, fmt.Errorf("%s launch command is empty", ag.Name())
+	}
+	return argv, nil
 }
 
 // queueFirstMessage transfers the launch prompt to the persistent delivery

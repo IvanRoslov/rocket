@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -21,6 +22,51 @@ func TestFirstMessageCapabilityDefaultsOff(t *testing.T) {
 	}
 	if !agent.WantsBracketedPaste(&fakeAgent{bracketed: true}) {
 		t.Fatal("opted-in agent does not want bracketed paste")
+	}
+}
+
+func TestRestoreUnavailableAgentDoesNotDestroyRuntimeOrQueueNotice(t *testing.T) {
+	m, st, _, rt, ws := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	testFakeAgent.firstByInput = true
+	testFakeAgent.availableErr = errors.New("missing binary")
+	sess := seedRunningSession(t, st, "worker")
+	if _, err := st.AddTask(store.Task{Title: "work", ProjectID: "proj1", RepoID: "repo1", SessionID: sess.ID}); err != nil {
+		t.Fatal(err)
+	}
+	rt.aliveMap = map[string]bool{sess.ID: true}
+	if err := m.Restore(context.Background(), sess.ID, RestoreOpts{Force: true}); err == nil {
+		t.Fatal("Restore succeeded with unavailable agent")
+	}
+	if len(rt.destroyed) != 0 || len(rt.created) != 0 || ws.restoreCalls != 0 {
+		t.Fatalf("unavailable restore mutated runtime/workspace: destroyed=%v created=%v restores=%d", rt.destroyed, rt.created, ws.restoreCalls)
+	}
+	if _, ok, err := st.NextQueuedMessage(sess.ID); err != nil || ok {
+		t.Fatalf("restore queue: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestRestoreEmptyLaunchCommandDoesNotQueueNotice(t *testing.T) {
+	m, st, _, rt, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	testFakeAgent.firstByInput = true
+	testFakeAgent.launchEmpty = true
+	sess := seedRunningSession(t, st, "worker")
+	sess.State = "errored"
+	if err := st.UpdateSession(sess); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddTask(store.Task{Title: "work", ProjectID: "proj1", RepoID: "repo1", SessionID: sess.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Restore(context.Background(), sess.ID, RestoreOpts{}); err == nil {
+		t.Fatal("Restore succeeded with empty launch command")
+	}
+	if len(rt.created) != 0 {
+		t.Fatalf("runtime created with empty command: %+v", rt.created)
+	}
+	if _, ok, err := st.NextQueuedMessage(sess.ID); err != nil || ok {
+		t.Fatalf("restore queue: ok=%v err=%v", ok, err)
 	}
 }
 

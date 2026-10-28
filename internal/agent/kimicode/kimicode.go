@@ -38,19 +38,20 @@ func resolveBinary() (string, error) {
 	if bin, err := exec.LookPath("kimi"); err == nil {
 		return filepath.Abs(bin)
 	}
-	home := kimiHome()
-	if home == "" {
-		return "", fmt.Errorf("resolve Kimi home directory")
+	var candidates []string
+	if override := os.Getenv("KIMI_CODE_HOME"); override != "" {
+		candidates = append(candidates, filepath.Join(override, "bin", "kimi"))
 	}
-	bin := filepath.Join(home, "bin", "kimi")
-	info, err := os.Stat(bin)
-	if err != nil {
-		return "", fmt.Errorf("find kimi binary: %w", err)
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, filepath.Join(home, ".kimi-code", "bin", "kimi"))
 	}
-	if info.IsDir() || info.Mode().Perm()&0o111 == 0 {
-		return "", fmt.Errorf("kimi binary is not executable: %s", bin)
+	for _, bin := range candidates {
+		info, err := os.Stat(bin)
+		if err == nil && !info.IsDir() && info.Mode().Perm()&0o111 != 0 {
+			return filepath.Abs(bin)
+		}
 	}
-	return filepath.Abs(bin)
+	return "", fmt.Errorf("kimi binary not found or not executable in PATH or %v", candidates)
 }
 
 func (k *KimiCode) Available() error { _, err := resolveBinary(); return err }

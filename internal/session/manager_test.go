@@ -212,6 +212,7 @@ type fakeAgent struct {
 	shipsSkill   bool              // reports ShipsBrainstormSkill, like claude-code
 	firstByInput bool
 	bracketed    bool
+	launchEmpty  bool
 }
 
 func (a *fakeAgent) ShipsBrainstormSkill() bool { return a.shipsSkill }
@@ -230,6 +231,9 @@ func (a *fakeAgent) SetupWorkspace(spec agent.LaunchSpec) error {
 
 func (a *fakeAgent) LaunchCommand(spec agent.LaunchSpec) []string {
 	a.launchCalls = append(a.launchCalls, spec)
+	if a.launchEmpty {
+		return nil
+	}
 	return []string{"fake-agent", "--session", spec.SessionID, "--msg", spec.FirstMessage}
 }
 
