@@ -29,6 +29,17 @@ type testAgentWithoutInput struct{ agent.Agent }
 func TestSpawnQueuesInitialMessageForInputAgent(t *testing.T) {
 	m, st, _, _, _ := testManager(t)
 	testFakeAgent.firstByInput = true
+	var woken []string
+	m.SetWake(func(id string) {
+		woken = append(woken, id)
+		stored, err := st.GetSession(id)
+		if err != nil || stored.State != "running" {
+			t.Fatalf("wake state = %+v, err %v", stored, err)
+		}
+		if msg, ok, err := st.NextQueuedMessage(id); err != nil || !ok || msg.Body != "first brief" {
+			t.Fatalf("wake queue = %+v, ok %v, err %v", msg, ok, err)
+		}
+	})
 	seedProjectRepo(t, st, "project", "repo")
 	sess, err := m.Spawn(context.Background(), SpawnReq{Project: "project", Repo: "repo", Task: "work", Prompt: "first brief", AgentName: "fake"})
 	if err != nil {
@@ -38,11 +49,16 @@ func TestSpawnQueuesInitialMessageForInputAgent(t *testing.T) {
 		t.Fatalf("launch FirstMessage = %q, want empty", got)
 	}
 	assertFirstQueuedMessage(t, st, sess.ID, "first brief")
+	if len(woken) != 1 || woken[0] != sess.ID {
+		t.Fatalf("woken = %v", woken)
+	}
 }
 
 func TestStartQueuesKickoffForInputAgent(t *testing.T) {
 	m, st, _, _, _ := testManager(t)
 	testFakeAgent.firstByInput = true
+	var woken []string
+	m.SetWake(func(id string) { woken = append(woken, id) })
 	seedProjectRepo(t, st, "project", "repo")
 	project, err := st.GetProject("project")
 	if err != nil {
@@ -60,11 +76,16 @@ func TestStartQueuesKickoffForInputAgent(t *testing.T) {
 	if !strings.Contains(msg.Body, task.Title) || !strings.Contains(msg.Body, task.Description) {
 		t.Fatalf("queued kickoff = %q, want title and description", msg.Body)
 	}
+	if len(woken) != 1 || woken[0] != sess.ID {
+		t.Fatalf("woken = %v", woken)
+	}
 }
 
 func TestRestoreQueuesNoticeForInputAgent(t *testing.T) {
 	m, st, _, _, _ := testManager(t)
 	testFakeAgent.firstByInput = true
+	var woken []string
+	m.SetWake(func(id string) { woken = append(woken, id) })
 	seedProjectRepo(t, st, "proj1", "repo1")
 	sess := seedRunningSession(t, st, "worker")
 	sess.State = "errored"
@@ -75,20 +96,38 @@ func TestRestoreQueuesNoticeForInputAgent(t *testing.T) {
 	if _, err := st.AddTask(store.Task{Title: "worker", ProjectID: "proj1", RepoID: "repo1", SessionID: sess.ID}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := st.AddMessage(store.Message{FromSession: "orch", ToSession: sess.ID, Body: "pending before restore"}); err != nil {
+		t.Fatal(err)
+	}
 	if err := m.Restore(context.Background(), sess.ID, RestoreOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := testFakeAgent.launchCalls[0].FirstMessage; got != "" {
 		t.Fatalf("launch FirstMessage = %q, want empty", got)
 	}
-	msg := assertQueuedMessage(t, st, sess.ID)
+	msgs, err := st.ListMessages(sess.ID, 0)
+	if err != nil || len(msgs) != 2 {
+		t.Fatalf("messages = %+v, err = %v", msgs, err)
+	}
+	if msgs[0].Body != "pending before restore" || msgs[0].Status != "queued" {
+		t.Fatalf("pending message order changed: %+v", msgs)
+	}
+	msg := msgs[1]
+	if msg.FromSession != "rocket" || msg.Status != "queued" {
+		t.Fatalf("restore message = %+v", msg)
+	}
 	if !strings.Contains(msg.Body, "[rocket restore]") || !strings.Contains(msg.Body, sess.Prompt) {
 		t.Fatalf("queued restore message = %q", msg.Body)
+	}
+	if len(woken) != 1 || woken[0] != sess.ID {
+		t.Fatalf("woken = %v", woken)
 	}
 }
 
 func TestSpawnKeepsFirstMessageInLegacyLaunch(t *testing.T) {
 	m, st, _, _, _ := testManager(t)
+	var woken []string
+	m.SetWake(func(id string) { woken = append(woken, id) })
 	seedProjectRepo(t, st, "project", "repo")
 	sess, err := m.Spawn(context.Background(), SpawnReq{Project: "project", Repo: "repo", Task: "work", Prompt: "first brief", AgentName: "fake"})
 	if err != nil {
@@ -99,6 +138,9 @@ func TestSpawnKeepsFirstMessageInLegacyLaunch(t *testing.T) {
 	}
 	if _, ok, err := st.NextQueuedMessage(sess.ID); err != nil || ok {
 		t.Fatalf("legacy queue: ok=%v err=%v", ok, err)
+	}
+	if len(woken) != 0 {
+		t.Fatalf("legacy launch woke queue: %v", woken)
 	}
 }
 

@@ -36,11 +36,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"syscall"
 
 	"github.com/IvanRoslov/rocket/internal/agent"
-	"github.com/IvanRoslov/rocket/internal/prompts"
 )
 
 type Codex struct{}
@@ -84,71 +82,9 @@ func (c *Codex) SetupWorkspace(spec agent.LaunchSpec) error {
 	if err := seedCodexTrust(spec.WorktreePath); err != nil {
 		return fmt.Errorf("seed codex trust: %w", err)
 	}
-	if err := upsertAgentsMD(spec.WorktreePath, spec.SystemPrompt); err != nil {
+	if err := agent.UpsertAgentsMD(spec.WorktreePath, spec.SystemPrompt, true); err != nil {
 		return fmt.Errorf("upsert AGENTS.md: %w", err)
 	}
-	return nil
-}
-
-// rocketBlockRe matches a "<!-- rocket:start -->" ... "<!-- rocket:end -->"
-// block (markers and content included) in AGENTS.md.
-var rocketBlockRe = regexp.MustCompile(`(?s)<!-- rocket:start -->.*?<!-- rocket:end -->\n?`)
-
-// upsertAgentsMD idempotently writes spec's skills-stripped system prompt
-// into <worktreePath>/AGENTS.md, wrapped in rocket block markers:
-//
-//   - file absent: create it, content is just the rocket block.
-//   - file exists without our markers: prepend the rocket block, a blank
-//     line, then the existing content untouched.
-//   - file exists with our markers: replace the block's content in place
-//     (idempotent — re-running with the same prompt is a no-op diff).
-//
-// No-ops entirely if spec.SystemPrompt is empty (mirrors claudecode's
-// SetupWorkspace, which skips writing .rocket-prompt.md in that case).
-func upsertAgentsMD(worktreePath, systemPrompt string) error {
-	if systemPrompt == "" {
-		return nil
-	}
-
-	stripped := prompts.StripSkills(systemPrompt)
-	block := "<!-- rocket:start -->\n" + stripped + "\n<!-- rocket:end -->\n"
-
-	path := filepath.Join(worktreePath, "AGENTS.md")
-
-	perm := os.FileMode(0o644)
-	var existing []byte
-	if data, err := os.ReadFile(path); err == nil {
-		existing = data
-		if info, statErr := os.Stat(path); statErr == nil {
-			perm = info.Mode().Perm()
-		}
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-
-	var out []byte
-	switch {
-	case len(existing) == 0:
-		out = []byte(block)
-	case rocketBlockRe.Match(existing):
-		out = rocketBlockRe.ReplaceAll(existing, []byte(block))
-	default:
-		out = append([]byte(block+"\n"), existing...)
-	}
-
-	if err := atomicWriteFile(worktreePath, path, out, perm); err != nil {
-		return err
-	}
-
-	// Mitigation for repos where AGENTS.md is not already tracked by git:
-	// exclude it from the worktree's git status so the rocket-managed block
-	// doesn't show up as an untracked file / accidental diff in the
-	// worker's own git status. If AGENTS.md is already tracked by git, this
-	// intentionally leaves it (and info/exclude) alone — see
-	// docs/testing/phase-5-live-multiagent.md for the known limitation that
-	// repos with a pre-existing tracked AGENTS.md will see the rocket block
-	// show up in worker diffs, and reviewers should strip it.
-	agent.ExcludeFromGit(worktreePath, []string{"AGENTS.md"})
 	return nil
 }
 

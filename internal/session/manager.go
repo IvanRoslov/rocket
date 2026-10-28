@@ -75,11 +75,12 @@ type LaunchProfile struct {
 
 // Manager owns session lifecycle: spawn, kill, restore.
 type Manager struct {
-	st  *store.Store
-	bus *bus.Bus
-	rt  runtime.Runtime
-	ws  workspace.Workspace
-	cfg *config.Config
+	st   *store.Store
+	bus  *bus.Bus
+	rt   runtime.Runtime
+	ws   workspace.Workspace
+	cfg  *config.Config
+	wake func(string) // wakes queued first-message delivery after launch
 
 	// mu serializes Spawn, Kill, Restore, and Reconcile end-to-end. Without
 	// it, a Kill racing a concurrent Spawn between the session's
@@ -132,6 +133,9 @@ type Manager struct {
 	// sequence into the same tmux pane.
 	quizInFlight map[string]bool
 }
+
+// SetWake installs the queue's wake function before sessions are launched.
+func (m *Manager) SetWake(wake func(string)) { m.wake = wake }
 
 // NewManager builds a Manager wired to the given dependencies.
 func NewManager(st *store.Store, b *bus.Bus, rt runtime.Runtime, ws workspace.Workspace, cfg *config.Config) *Manager {
@@ -464,6 +468,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 		m.markErrored(id, err)
 		return store.Session{}, err
 	}
+	queuedFirst := agent.TakesFirstMessageByInput(ag) && spec.FirstMessage != ""
 	if err := m.queueFirstMessage(ag, &spec); err != nil {
 		m.markErrored(id, err)
 		return store.Session{}, err
@@ -488,6 +493,9 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 		return store.Session{}, err
 	}
 	m.bus.Publish("session.state_changed", id, map[string]any{"from": "spawning", "to": "running"})
+	if queuedFirst && m.wake != nil {
+		m.wake(id)
+	}
 
 	return sess, nil
 }
@@ -671,6 +679,7 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 		m.markErrored(id, err)
 		return store.Session{}, err
 	}
+	queuedFirst := agent.TakesFirstMessageByInput(ag) && spec.FirstMessage != ""
 	if err := m.queueFirstMessage(ag, &spec); err != nil {
 		m.markErrored(id, err)
 		return store.Session{}, err
@@ -695,6 +704,9 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 		return store.Session{}, err
 	}
 	m.bus.Publish("session.state_changed", id, map[string]any{"from": "spawning", "to": "running"})
+	if queuedFirst && m.wake != nil {
+		m.wake(id)
+	}
 
 	return sess, nil
 }
@@ -1008,6 +1020,7 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 		m.markErrored(id, err)
 		return err
 	}
+	queuedFirst := agent.TakesFirstMessageByInput(ag) && spec.FirstMessage != ""
 	if err := m.queueFirstMessage(ag, &spec); err != nil {
 		m.markErrored(id, err)
 		return err
@@ -1032,6 +1045,9 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 		return err
 	}
 	m.bus.Publish("session.restored", id, nil)
+	if queuedFirst && m.wake != nil {
+		m.wake(id)
+	}
 
 	return nil
 }
@@ -1039,6 +1055,10 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 // queueFirstMessage transfers the launch prompt to the persistent delivery
 // queue before the runtime starts. A spawning session is not eligible for
 // delivery yet, so the prompt is ready when the session becomes running.
+// Restore appends its notice after any pending messages, preserving their FIFO
+// order; SetupWorkspace has already rewritten the role prompt in AGENTS.md.
+// The queue's Kimi composer-readiness gate is implemented in Task 3; this
+// method only persists the message and the caller wakes delivery after launch.
 func (m *Manager) queueFirstMessage(ag agent.Agent, spec *agent.LaunchSpec) error {
 	if !agent.TakesFirstMessageByInput(ag) || spec.FirstMessage == "" {
 		return nil

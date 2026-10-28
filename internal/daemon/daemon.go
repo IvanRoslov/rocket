@@ -16,6 +16,7 @@ import (
 	"github.com/IvanRoslov/rocket/internal/agent"
 	_ "github.com/IvanRoslov/rocket/internal/agent/claudecode" // register the claude-code agent
 	_ "github.com/IvanRoslov/rocket/internal/agent/codex"      // register the codex agent
+	_ "github.com/IvanRoslov/rocket/internal/agent/kimicode"   // register the kimi-code agent
 	"github.com/IvanRoslov/rocket/internal/agentwatch"
 	"github.com/IvanRoslov/rocket/internal/api"
 	"github.com/IvanRoslov/rocket/internal/bus"
@@ -86,6 +87,7 @@ func Run(cfg *config.Config) error {
 
 	mon := monitor.New(st, b, rt, cfg, agent.Get)
 	q := queue.New(st, b, rt, cfg, mon.Activity)
+	mgr.SetWake(q.Wake)
 	// The monitor alerts a parent orchestrator when a session is stuck on
 	// an agent start screen; wake its delivery worker right away.
 	mon.SetWake(q.Wake)
