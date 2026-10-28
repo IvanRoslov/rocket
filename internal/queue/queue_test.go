@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/activity"
+	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/runtime"
@@ -162,6 +163,10 @@ type testHarness struct {
 	b  *bus.Bus
 	rt *fakeRuntime
 	ac *fakeActivity
+	// ag is what the resolver returns for sessions whose Agent is "codex";
+	// every other agent name resolves to an error, i.e. the Claude path.
+	ag    *fakeAgent
+	clock *fakeClock
 
 	// ctx is the context every delivery worker in this harness runs under,
 	// and cancel stops them. The harness owns this lifecycle so that no
@@ -192,6 +197,15 @@ func newTestQueue(t *testing.T) *testHarness {
 
 	q := New(st, b, rt, cfg, ac.get)
 	q.backoff = func(attempt int) time.Duration { return time.Millisecond }
+	ag := &fakeAgent{}
+	clock := newFakeClock()
+	q.SetAgentResolver(func(name string) (agent.Agent, error) {
+		if name == "codex" {
+			return ag, nil
+		}
+		return nil, errors.New("unknown agent " + name)
+	})
+	q.now = clock.now
 
 	// Give delivery workers a cancellable context and stop them when the test
 	// ends. Without this, Wake-spawned goroutines outlive the test (runCtx
@@ -217,7 +231,7 @@ func newTestQueue(t *testing.T) *testHarness {
 		}, "delivery workers to exit after context cancellation")
 	})
 
-	return &testHarness{q: q, st: st, b: b, rt: rt, ac: ac, ctx: ctx, cancel: cancel}
+	return &testHarness{q: q, st: st, b: b, rt: rt, ac: ac, ag: ag, clock: clock, ctx: ctx, cancel: cancel}
 }
 
 // addRunningSession inserts a session row in state "running" with the given
@@ -231,6 +245,42 @@ func (h *testHarness) addRunningSession(t *testing.T, id string, state activity.
 		t.Fatalf("AddSession: %v", err)
 	}
 	h.ac.set(id, state)
+}
+
+// addCodexSession is addRunningSession for a recipient whose agent is
+// "codex" (resolves to h.ag: busy-input accepter and delivery confirmer).
+func (h *testHarness) addCodexSession(t *testing.T, id string, state activity.State) {
+	t.Helper()
+	if err := h.st.AddSession(store.Session{
+		ID: id, Kind: "worker", ProjectID: "p", RepoID: "r", Agent: "codex",
+		Branch: "main", WorktreePath: filepath.Join(t.TempDir(), id), TmuxName: id, State: "running",
+	}); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+	h.ac.set(id, state)
+}
+
+// addMsg enqueues body for to and returns the message id.
+func addMsg(t *testing.T, h *testHarness, to, body string) int64 {
+	t.Helper()
+	id, err := h.st.AddMessage(store.Message{ToSession: to, Body: body})
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+	return id
+}
+
+func TestRecipientCapsResolvesCodexOnly(t *testing.T) {
+	h := newTestQueue(t)
+	h.ag.setBusy(true)
+	busy, conf := h.q.recipientCaps(store.Session{Agent: "codex"})
+	if !busy || conf == nil {
+		t.Fatal("codex must be busy-ok and a confirmer")
+	}
+	busy, conf = h.q.recipientCaps(store.Session{Agent: "claude-code"})
+	if busy || conf != nil {
+		t.Fatal("claude-code must keep the old path")
+	}
 }
 
 func waitUntil(t *testing.T, cond func() bool, msg string) {

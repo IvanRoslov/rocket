@@ -334,3 +334,42 @@ func TestBuildSendBodyEmptyStdin(t *testing.T) {
 		t.Fatal("expected an error for an empty piped body, got nil")
 	}
 }
+
+// TestWaitForMessageAcceptedPrintedOnce: "accepted" (pasted into a Codex
+// recipient, journal confirmation pending) is an intermediate status: it is
+// announced once on stdout and polling continues until "delivered".
+func TestWaitForMessageAcceptedPrintedOnce(t *testing.T) {
+	restore := setPollIntervalForTest(t, 10*time.Millisecond)
+	defer restore()
+
+	statuses := []string{"delivering", "accepted", "accepted", "accepted", "delivered"}
+	var seq int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/messages/9", func(w http.ResponseWriter, r *http.Request) {
+		i := atomic.AddInt32(&seq, 1) - 1
+		status := statuses[len(statuses)-1]
+		if int(i) < len(statuses) {
+			status = statuses[i]
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(msgResp{ID: 9, Status: status})
+	})
+	c := newUnixSocketTestServer(t, mux)
+
+	cmd := &cobra.Command{}
+	var out, errBuf bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errBuf)
+	if err := waitForMessage(cmd, c, 9); err != nil {
+		t.Fatalf("waitForMessage: %v", err)
+	}
+	if n := strings.Count(out.String(), "message 9 accepted"); n != 1 {
+		t.Fatalf("accepted announced %d times, want 1; stdout=%q", n, out.String())
+	}
+	if !strings.HasSuffix(strings.TrimSpace(out.String()), "message 9 delivered") {
+		t.Fatalf("stdout = %q, want to end with the delivered line", out.String())
+	}
+	if strings.Contains(errBuf.String(), "unrecognized status") {
+		t.Fatalf("accepted treated as unknown: %q", errBuf.String())
+	}
+}

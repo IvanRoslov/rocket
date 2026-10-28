@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/activity"
+	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/runtime"
@@ -70,6 +71,20 @@ type Queue struct {
 	// (1-based attempt number that just failed). Overridable by tests.
 	backoff func(attempt int) time.Duration
 
+	// resolveAgent looks up a recipient's agent adapter by sess.Agent, to
+	// learn its optional delivery capabilities (agent.BusyInputAccepter,
+	// agent.DeliveryConfirmer). Defaults to agent.Get; a lookup error means
+	// "no capabilities", i.e. the plain tmux/socket path.
+	resolveAgent func(name string) (agent.Agent, error)
+
+	// now is the clock behind inject_at and the accepted-message deadlines.
+	// Overridable by tests.
+	now func() time.Time
+
+	// confirmKick wakes the confirmer loop ahead of its ticker: sent (non-
+	// blocking) when a message becomes accepted and after Recover.
+	confirmKick chan struct{}
+
 	mu      sync.Mutex
 	workers map[string]bool
 
@@ -83,15 +98,40 @@ type Queue struct {
 // New builds a Queue. getActivity is typically Monitor.Activity.
 func New(st *store.Store, b *bus.Bus, rt runtime.Runtime, cfg *config.Config, getActivity func(sessionID string) (activity.State, bool)) *Queue {
 	return &Queue{
-		st:          st,
-		bus:         b,
-		rt:          rt,
-		cfg:         cfg,
-		getActivity: getActivity,
-		getSession:  st.GetSession,
-		backoff:     defaultBackoff,
-		workers:     make(map[string]bool),
+		st:           st,
+		bus:          b,
+		rt:           rt,
+		cfg:          cfg,
+		getActivity:  getActivity,
+		getSession:   st.GetSession,
+		backoff:      defaultBackoff,
+		resolveAgent: agent.Get,
+		now:          time.Now,
+		confirmKick:  make(chan struct{}, 1),
+		workers:      make(map[string]bool),
 	}
+}
+
+// SetAgentResolver replaces the agent lookup used for recipient
+// capabilities (tests; the daemon keeps agent.Get). Call before Recover/Run.
+func (q *Queue) SetAgentResolver(f func(name string) (agent.Agent, error)) { q.resolveAgent = f }
+
+// recipientCaps resolves the optional delivery capabilities of sess's agent:
+// busyOK — the agent takes input while a turn runs (activity "active" counts
+// as ready); confirmer — the agent proves delivery from its own journal, so
+// a successful paste ends in status "accepted" rather than "delivered".
+// Both are false/nil for Claude Code and for any agent that fails to
+// resolve, which keeps that path exactly as it was.
+func (q *Queue) recipientCaps(sess store.Session) (busyOK bool, confirmer agent.DeliveryConfirmer) {
+	if q.resolveAgent == nil {
+		return false, nil
+	}
+	a, err := q.resolveAgent(sess.Agent)
+	if err != nil || a == nil {
+		return false, nil
+	}
+	confirmer, _ = a.(agent.DeliveryConfirmer)
+	return agent.AcceptsInputWhileBusy(a), confirmer
 }
 
 // runCtx returns the context passed to Run, or context.Background() if Run
@@ -148,6 +188,11 @@ func (q *Queue) runCtx() context.Context {
 // silently lost, breaking FIFO for anything queued behind them), then wakes
 // a delivery worker for every recipient with a queued message.
 //
+// Messages in status "accepted" are deliberately left alone: the paste did
+// happen, so requeueing them blindly would duplicate; the confirmer loop
+// (started by Run) picks them up and confirms, requeues or fails them by
+// its own rules. Recover only kicks it so the first pass is prompt.
+//
 // Callers MUST call Recover synchronously (not in a goroutine) and have it
 // complete BEFORE the API starts serving requests. Otherwise an early
 // POST /v1/messages could call Wake for a recipient whose delivery worker
@@ -173,6 +218,13 @@ func (q *Queue) Recover(ctx context.Context) {
 			q.Wake(to)
 		}
 	}
+
+	if accepted, err := q.st.ListAcceptedMessages(); err != nil {
+		slog.Error("queue: list accepted messages", "error", err)
+	} else if len(accepted) > 0 {
+		slog.Info("queue: accepted messages left for the confirmer after restart", "count", len(accepted))
+		q.kickConfirmer()
+	}
 }
 
 // Run runs housekeeping (timeout expiry every minute, retention purge once a
@@ -182,6 +234,10 @@ func (q *Queue) Run(ctx context.Context) {
 	q.ctxMu.Lock()
 	q.runCtxVal = ctx
 	q.ctxMu.Unlock()
+
+	// Accepted messages (Codex path) are finished by the confirmer, which
+	// lives as long as Run does.
+	go q.confirmLoop(ctx)
 
 	housekeeping := time.NewTicker(time.Minute)
 	defer housekeeping.Stop()
@@ -368,6 +424,11 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 		// the recipient's socket.
 		viaSocket := q.socketReady(sess)
 
+		// Optional agent capabilities (Codex): busyOK makes an active
+		// recipient ready; confirmer turns a successful paste into
+		// "accepted" instead of "delivered" (see attemptDelivery).
+		busyOK, confirmer := q.recipientCaps(sess)
+
 		if sess.PendingQuiz != "" && !viaSocket {
 			// Recipient has a pending AskUserQuestion quiz on screen: text
 			// injected now would corrupt the TUI widget, and no socket is
@@ -393,6 +454,10 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 			return
 		case known && (state == activity.Ready || state == activity.Idle || state == activity.WaitingInput):
 			// proceed to delivery
+		case known && state == activity.Active && busyOK:
+			// The agent takes input mid-turn into its own queue (Codex:
+			// «Messages to be submitted after next tool call»), so a busy
+			// recipient is as good as a ready one.
 		default:
 			// active, or unknown — wait and re-check.
 			if !q.waitForReady(ctx, msg.ToSession) {
@@ -477,7 +542,7 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 			}
 		}
 
-		if !q.attemptDelivery(ctx, msg, sess, force, viaSocket) {
+		if !q.attemptDelivery(ctx, msg, sess, force, viaSocket, confirmer) {
 			// Inject hit the draft guard after all (the human started
 			// typing between the probe above and the C-u): the message is
 			// back to "queued" untouched. Wait a tick and re-evaluate from
@@ -544,7 +609,13 @@ func (q *Queue) waitForReady(ctx context.Context, to string) bool {
 // and returns true.
 // viaSocket selects the Claude Code socket transport for the first attempt;
 // it is cleared as soon as the socket fails, so retries fall to tmux.
-func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess store.Session, force, viaSocket bool) bool {
+//
+// confirmer, when non-nil, is the recipient agent's journal-backed proof of
+// delivery: a successful paste (submitted, or taken into the agent's own
+// queue) then ends in status "accepted" rather than "delivered", with
+// inject_at taken right before the paste, and the confirmer loop
+// (confirm.go) finishes the job. nil keeps the historical behaviour.
+func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess store.Session, force, viaSocket bool, confirmer agent.DeliveryConfirmer) bool {
 	handle := runtime.Handle{Name: sess.TmuxName}
 	text := q.prepareText(msg, sess)
 
@@ -631,20 +702,38 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 			}
 		}
 
+		if confirmer != nil {
+			// The journal search starts here, BEFORE the paste: an idle
+			// Codex can record the user message before Inject returns, and
+			// a since taken afterwards would never find it. Persisted first
+			// so a crash between the two leaves a bounded, not a missing,
+			// reference point.
+			if err := q.st.SetMessageInjectAt(msg.ID, q.now().UnixMilli()); err != nil {
+				slog.Error("queue: set message inject_at", "id", msg.ID, "error", err)
+			}
+		}
+
 		err := q.rt.Inject(ctx, handle, text, runtime.InjectOpts{Force: force})
 
 		var retryEligible bool
 		switch {
 		case err == nil:
+			if confirmer != nil {
+				q.accept(msg)
+				return true
+			}
 			q.deliverSuccess(msg)
 			return true
 		case errors.Is(err, runtime.ErrQueuedByAgent):
 			// The agent (Codex, busy) took the text into its own queue and
 			// will hand it to the model itself. Re-injecting would queue a
-			// duplicate, so this counts as delivered — as it did before
-			// Inject could tell this case apart.
-			// TODO(#5707 T4): replace with the accepted status, confirmed
-			// from the transcript (agent.DeliveryConfirmer).
+			// duplicate, so this never retries: with a confirmer it is
+			// "accepted" until the journal proves it; without one (no way
+			// to tell) it counts as delivered, as before.
+			if confirmer != nil {
+				q.accept(msg)
+				return true
+			}
 			q.deliverSuccess(msg)
 			return true
 		case errors.Is(err, runtime.ErrHeldDialog):
@@ -694,6 +783,13 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 			} else {
 				// Marker gone (or capture failed): treat as delivered —
 				// submission likely went through and confirmation was missed.
+				// A confirmer recipient gets "accepted" instead: its journal
+				// settles the doubt, and an unconfirmed message is retried
+				// by the confirmer's rules rather than trusted.
+				if confirmer != nil {
+					q.accept(msg)
+					return true
+				}
 				q.deliverSuccess(msg)
 				return true
 			}
@@ -722,6 +818,31 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 	}
 }
 
+// accept marks a message accepted — pasted into a recipient whose agent
+// will confirm the delivery from its journal — publishes message.accepted
+// and nudges the confirmer loop. Attempts are kept: a later requeue counts
+// this paste as one of them.
+func (q *Queue) accept(msg store.Message) {
+	if err := q.st.UpdateMessageStatus(msg.ID, "accepted", msg.Attempts, 0, ""); err != nil {
+		slog.Error("queue: update message accepted", "id", msg.ID, "error", err)
+	}
+	q.bus.Publish("message.accepted", msg.ToSession, map[string]any{
+		"id":   msg.ID,
+		"to":   msg.ToSession,
+		"from": msg.FromSession,
+	})
+	q.kickConfirmer()
+}
+
+// kickConfirmer wakes the confirmer loop without blocking; a kick already
+// pending is enough.
+func (q *Queue) kickConfirmer() {
+	select {
+	case q.confirmKick <- struct{}{}:
+	default:
+	}
+}
+
 // deliverSuccess marks a message delivered and publishes message.delivered.
 func (q *Queue) deliverSuccess(msg store.Message) {
 	now := time.Now().Unix()
@@ -742,6 +863,12 @@ func (q *Queue) fail(msg store.Message, reason string) {
 	if err := q.st.UpdateMessageStatus(msg.ID, "failed", msg.Attempts, 0, reason); err != nil {
 		slog.Error("queue: update message failed", "id", msg.ID, "error", err)
 	}
+	q.announceFailure(msg, reason)
+}
+
+// announceFailure publishes message.failed and notifies a live sender; the
+// status itself has already been written by the caller.
+func (q *Queue) announceFailure(msg store.Message, reason string) {
 	q.bus.Publish("message.failed", msg.ToSession, map[string]any{
 		"id":     msg.ID,
 		"to":     msg.ToSession,
@@ -819,8 +946,7 @@ func formatBody(msg store.Message) string {
 // inbox file fails for any reason, prepareText logs a warning and falls
 // back to the original full-body injection.
 func (q *Queue) prepareText(msg store.Message, sess store.Session) string {
-	large := len(msg.Body) > q.cfg.LargeMessageThreshold || lineCount(msg.Body) > largeMessageLineThreshold
-	if !large || sess.WorktreePath == "" {
+	if !q.isLarge(msg) || sess.WorktreePath == "" {
 		return formatBody(msg)
 	}
 
@@ -829,7 +955,22 @@ func (q *Queue) prepareText(msg store.Message, sess store.Session) string {
 		slog.Warn("queue: write inbox file failed, falling back to full-body injection", "id", msg.ID, "to", msg.ToSession, "worktree", sess.WorktreePath, "error", err)
 		return formatBody(msg)
 	}
+	return inboxPointer(msg, relPath)
+}
 
+// isLarge reports whether msg's body goes through the inbox file.
+func (q *Queue) isLarge(msg store.Message) bool {
+	return len(msg.Body) > q.cfg.LargeMessageThreshold || lineCount(msg.Body) > largeMessageLineThreshold
+}
+
+// inboxRelPath is where writeInboxFile puts message id, relative to the
+// recipient's worktree.
+func inboxRelPath(id int64) string {
+	return filepath.Join(".rocket", "inbox", fmt.Sprintf("msg-%d.md", id))
+}
+
+// inboxPointer is the short text injected instead of a large body.
+func inboxPointer(msg store.Message, relPath string) string {
 	prefix := ""
 	if msg.FromSession != "" {
 		prefix = "[from " + msg.FromSession + "] "
@@ -858,7 +999,7 @@ func writeInboxFile(worktreePath string, id int64, body string) (string, error) 
 		return "", fmt.Errorf("mkdir inbox dir: %w", err)
 	}
 
-	relPath := filepath.Join(".rocket", "inbox", fmt.Sprintf("msg-%d.md", id))
+	relPath := inboxRelPath(id)
 	fullPath := filepath.Join(worktreePath, relPath)
 
 	tmp, err := os.CreateTemp(dir, "msg-*.tmp")

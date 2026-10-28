@@ -164,7 +164,9 @@ export interface Repo {
 // Messages — internal/api/messages.go
 // ---------------------------------------------------------------------------
 
-export type MessageStatus = 'queued' | 'delivered' | 'failed'
+// accepted: pasted into a Codex recipient, confirmation from its journal pending
+// (docs/06-messaging.md, «Статус accepted»).
+export type MessageStatus = 'queued' | 'delivering' | 'accepted' | 'delivered' | 'failed'
 
 export interface Message {
   id: number

@@ -200,7 +200,10 @@ func TestSocketSkippedForNonClaudeAgent(t *testing.T) {
 	}
 	h.q.Wake("recv")
 
-	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" }, "delivered via tmux")
+	// The test harness resolves "codex" to a delivery confirmer, so a tmux
+	// paste ends in "accepted" (the journal confirms it later); what matters
+	// here is that the paste happened and the socket was never consulted.
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "accepted" }, "pasted via tmux")
 
 	if sock.sendCount() != 0 {
 		t.Errorf("socket sends = %d, want 0 for a non-claude-code agent", sock.sendCount())
