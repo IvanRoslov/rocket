@@ -884,7 +884,7 @@ func TestRestoreFromErrored(t *testing.T) {
 	ch, cancel := b.Subscribe()
 	defer cancel()
 
-	if err := m.Restore(context.Background(), "sess1"); err != nil {
+	if err := m.Restore(context.Background(), "sess1", RestoreOpts{}); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -945,7 +945,7 @@ func TestRestoreRepopulatesOrchestratorPrompt(t *testing.T) {
 		t.Fatalf("AddTask: %v", err)
 	}
 
-	if err := m.Restore(context.Background(), "orch1"); err != nil {
+	if err := m.Restore(context.Background(), "orch1", RestoreOpts{}); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -1005,7 +1005,7 @@ func TestRestoreRepopulatesWorkerPrompt(t *testing.T) {
 		t.Fatalf("AddTask: %v", err)
 	}
 
-	if err := m.Restore(context.Background(), "worker1"); err != nil {
+	if err := m.Restore(context.Background(), "worker1", RestoreOpts{}); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -1042,15 +1042,98 @@ func TestRestoreRejectedWhenRunningAndAlive(t *testing.T) {
 	}
 	rt.aliveMap["sess1"] = true
 	rt.mu.Unlock()
+	m.SetPaneProber((&fakePaneProber{}).probe)
 
-	err := m.Restore(context.Background(), "sess1")
+	err := m.Restore(context.Background(), "sess1", RestoreOpts{})
 	assertValidationCode(t, err, "restore_not_allowed")
 }
 
 func TestRestoreUnknownSession(t *testing.T) {
 	m, _, _, _, _ := testManager(t)
-	err := m.Restore(context.Background(), "nope")
+	err := m.Restore(context.Background(), "nope", RestoreOpts{})
 	assertValidationCode(t, err, "session_not_found")
+}
+
+// fakePaneProber is a fake pane probe: onlyShell per tmux name, err when set.
+type fakePaneProber struct {
+	onlyShell map[string]bool
+	err       error
+}
+
+func (f *fakePaneProber) probe(ctx context.Context, name string) (bool, error) {
+	return f.onlyShell[name], f.err
+}
+
+func markAlive(rt *fakeRuntime, name string) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.aliveMap == nil {
+		rt.aliveMap = map[string]bool{}
+	}
+	rt.aliveMap[name] = true
+}
+
+func TestRestoreRunningAliveShellOnly(t *testing.T) {
+	m, st, _, rt, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	seedRunningSession(t, st, "sess1")
+	markAlive(rt, "sess1")
+	m.SetPaneProber((&fakePaneProber{onlyShell: map[string]bool{"sess1": true}}).probe)
+
+	if err := m.Restore(context.Background(), "sess1", RestoreOpts{}); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if len(rt.destroyed) != 1 || rt.destroyed[0] != "sess1" {
+		t.Errorf("destroyed = %v, want [sess1] (stale shell-only tmux must go before relaunch)", rt.destroyed)
+	}
+	if len(rt.created) != 1 {
+		t.Errorf("created = %d, want 1", len(rt.created))
+	}
+}
+
+func TestRestoreRunningAgentAliveWithoutForceRejected(t *testing.T) {
+	m, st, _, rt, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	seedRunningSession(t, st, "sess1")
+	markAlive(rt, "sess1")
+	m.SetPaneProber((&fakePaneProber{onlyShell: map[string]bool{"sess1": false}}).probe)
+
+	err := m.Restore(context.Background(), "sess1", RestoreOpts{})
+	assertValidationCode(t, err, "restore_not_allowed")
+	if !strings.Contains(err.Error(), "--force") {
+		t.Errorf("error %q should hint at --force", err)
+	}
+	if len(rt.destroyed) != 0 || len(rt.created) != 0 {
+		t.Errorf("nothing may be touched: destroyed=%v created=%d", rt.destroyed, len(rt.created))
+	}
+}
+
+func TestRestoreProbeErrorWithoutForceRejected(t *testing.T) {
+	m, st, _, rt, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	seedRunningSession(t, st, "sess1")
+	markAlive(rt, "sess1")
+	m.SetPaneProber((&fakePaneProber{err: errors.New("tmux boom")}).probe)
+
+	assertValidationCode(t, m.Restore(context.Background(), "sess1", RestoreOpts{}), "restore_not_allowed")
+}
+
+func TestRestoreForceKillsLiveAgent(t *testing.T) {
+	m, st, _, rt, _ := testManager(t)
+	seedProjectRepo(t, st, "proj1", "repo1")
+	seedRunningSession(t, st, "sess1")
+	markAlive(rt, "sess1")
+	m.SetPaneProber((&fakePaneProber{onlyShell: map[string]bool{"sess1": false}}).probe)
+
+	if err := m.Restore(context.Background(), "sess1", RestoreOpts{Force: true}); err != nil {
+		t.Fatalf("Restore force: %v", err)
+	}
+	if len(rt.destroyed) != 1 || rt.destroyed[0] != "sess1" {
+		t.Errorf("destroyed = %v, want [sess1]", rt.destroyed)
+	}
+	if len(rt.created) != 1 {
+		t.Errorf("created = %d, want 1", len(rt.created))
+	}
 }
 
 // --- slugFromTitle -------------------------------------------------------
@@ -1407,7 +1490,7 @@ func TestRestoreInjectsGHToken(t *testing.T) {
 	// Set a token source
 	m.SetTokenSource(func() string { return "ghp_restore_token_789" })
 
-	err := m.Restore(context.Background(), "worker1")
+	err := m.Restore(context.Background(), "worker1", RestoreOpts{})
 	if err != nil {
 		t.Fatalf("Restore: %v", err)
 	}

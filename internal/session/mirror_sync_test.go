@@ -239,7 +239,7 @@ func TestRestoreSyncsMirror(t *testing.T) {
 		return mirror.SyncResult{}, nil
 	})
 
-	if err := m.Restore(context.Background(), "sess1"); err != nil {
+	if err := m.Restore(context.Background(), "sess1", RestoreOpts{}); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 

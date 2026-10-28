@@ -110,7 +110,7 @@ CLI: `rocket pair [--web]`, `rocket devices ls|revoke <id>` — см. [04-cli.md
 | POST | `/v1/orchestrators` | `{description, project, agent?}` → спавн оркестратора; ответ `{id, feature_slug}` |
 | POST | `/v1/workers` | `{caller, task, repo, prompt, agent?}` → спавн воркера; caller обязан быть живым оркестратором, repo ∈ репозитории проекта caller (main + linked) |
 | POST | `/v1/sessions/{id}/kill` | Убить сессию: tmux destroy + `state=killed`; `?cleanup=true` — ещё и worktree |
-| POST | `/v1/sessions/{id}/restore` | Восстановить упавшую сессию (worktree restore + перезапуск агента) |
+| POST | `/v1/sessions/{id}/restore` | Восстановить упавшую сессию (worktree restore + перезапуск агента). `?force=true` — убить живой tmux и перезапустить (человек или родитель, иначе 403) |
 | GET | `/v1/sessions/{id}/output?lines=N` | capture-pane (одноразовый снимок) |
 | GET | `/v1/sessions/{id}/chat?cursor=&limit=` | Лента чата — зеркало нативного транскрипта агента, см. [13-chat.md](13-chat.md) |
 | POST | `/v1/sessions/{id}/quiz/answer` | Удалённый ответ на pending-квиз AskUserQuestion: `{answers:[{question_index, option_indices?[], text?}]}` → `202 {status:"answering"}`; `409 no_pending_quiz|quiz_answer_in_flight`, `400 quiz_answer_invalid`. Для `pending_quiz.source = "permission"` (диалог разрешения Claude Code): ровно один индекс, `-1` = Esc, одно нажатие цифры без Enter; `400 invalid_answer`, `409 prompt_changed` (на панели уже другой диалог — клавиши не отправлены). См. [13-chat.md](13-chat.md), разделы «Квизы» и «Разрешения» |

@@ -249,7 +249,8 @@ func newKillCmd() *cobra.Command {
 }
 
 func newRestoreCmd() *cobra.Command {
-	return &cobra.Command{
+	var force bool
+	cmd := &cobra.Command{
 		Use:   "restore <session>",
 		Short: "Восстановить упавшую сессию",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -263,7 +264,11 @@ func newRestoreCmd() *cobra.Command {
 			}
 
 			var resp map[string]any
-			if err := c.Post(apiPath("v1", "sessions", args[0], "restore"), nil, &resp); err != nil {
+			path := apiPath("v1", "sessions", args[0], "restore")
+			if force {
+				path += "?force=true"
+			}
+			if err := c.Post(path, nil, &resp); err != nil {
 				return err
 			}
 
@@ -274,4 +279,6 @@ func newRestoreCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&force, "force", false, "убить живой tmux и перезапустить агента (только человек или родитель сессии)")
+	return cmd
 }

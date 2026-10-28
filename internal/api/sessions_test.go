@@ -857,6 +857,58 @@ func TestRestoreSessionOrchestratorCanRestoreOwnWorker(t *testing.T) {
 	}
 }
 
+func seedKilledWorker(t *testing.T, d Deps, parent string) {
+	t.Helper()
+	if err := d.Store.AddSession(store.Session{
+		ID: "myfeat-w1", Kind: "worker", ProjectID: "proj1", RepoID: "proj1-repo",
+		FeatureSlug: "myfeat", ParentID: parent, Agent: "fake",
+		Branch: "feature/myfeat/w1", TmuxName: "myfeat-w1", State: "killed",
+	}); err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+}
+
+func TestRestoreSessionForce(t *testing.T) {
+	d := sessionsTestDeps(t)
+	srv := newTestServer(t, d)
+	orchID, _ := seedOrchestratorWithTask(t, d, "proj1", "myfeat")
+	seedKilledWorker(t, d, orchID)
+	url := srv.URL + "/v1/sessions/myfeat-w1/restore?force=true"
+
+	cases := []struct {
+		name   string
+		caller string
+		want   int
+	}{
+		{"human", "", http.StatusOK},
+		{"parent", orchID, http.StatusOK},
+		{"self", "myfeat-w1", http.StatusForbidden},
+		{"non-parent orchestrator", "other-orch", http.StatusForbidden},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.caller == "other-orch" {
+				if err := d.Store.AddSession(store.Session{
+					ID: "other-orch", Kind: "orchestrator", ProjectID: "proj1", RepoID: "proj1-repo",
+					Agent: "fake", TmuxName: "other-orch", State: "running",
+				}); err != nil {
+					t.Fatalf("AddSession: %v", err)
+				}
+			}
+			var resp *http.Response
+			if tc.caller == "" {
+				resp = postJSON(t, url, nil)
+			} else {
+				resp = postJSONWithHeader(t, url, tc.caller, nil)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != tc.want {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tc.want)
+			}
+		})
+	}
+}
+
 func TestPostSessionSpawnFailureCancelsAutoSubtask(t *testing.T) {
 	d := sessionsTestDepsWithErrorWorkspace(t)
 	srv := newTestServer(t, d)
