@@ -205,8 +205,12 @@ func (m *Manager) answerPermission(ctx context.Context, sess store.Session, quiz
 	if err != nil {
 		return fmt.Errorf("re-read pane before answering permission prompt: %w", err)
 	}
+	unnumbered := quiz.IsStartScreen() && quiz.Permission.Unnumbered
 	parse := runtime.ParsePermissionPrompt
-	if quiz.IsStartScreen() {
+	switch {
+	case unnumbered:
+		parse = runtime.ParseKimiStartScreen
+	case quiz.IsStartScreen():
 		parse = runtime.ParseStartScreen
 	}
 	if p, ok := parse(pane); !ok || !p.SameDialog(quiz.PermissionPrompt()) {
@@ -216,10 +220,15 @@ func (m *Manager) answerPermission(ctx context.Context, sess store.Session, quiz
 	steps := []keyStep{{Kind: keyEscape, Settle: quizKeySettle}}
 	label := permissionEscLabel
 	if idx != permissionEscIndex {
-		steps = []keyStep{{Kind: keyDigit, Value: strconv.Itoa(idx + 1), Settle: quizKeySettle}}
 		label = quiz.Questions[0].Options[idx].Label
-		if quiz.IsStartScreen() {
-			steps = append(steps, keyStep{Kind: keyEnter, Settle: quizKeySettle, When: m.startScreenNeedsEnter(sess, quiz, idx)})
+		switch {
+		case unnumbered:
+			steps = unnumberedStartScreenSteps(runtime.KimiStartScreenCursor(pane), idx, m.kimiStartScreenCursorOn(sess, quiz, idx))
+		default:
+			steps = []keyStep{{Kind: keyDigit, Value: strconv.Itoa(idx + 1), Settle: quizKeySettle}}
+			if quiz.IsStartScreen() {
+				steps = append(steps, keyStep{Kind: keyEnter, Settle: quizKeySettle, When: m.startScreenNeedsEnter(sess, quiz, idx)})
+			}
 		}
 	}
 
@@ -260,6 +269,36 @@ func (m *Manager) startScreenNeedsEnter(sess store.Session, quiz Quiz, idx int) 
 		}
 		p, ok := runtime.ParseStartScreen(pane)
 		return ok && p.SameDialog(quiz.PermissionPrompt()) && runtime.StartScreenCursor(pane) == idx
+	}
+}
+
+// unnumberedStartScreenSteps answers a Kimi start screen, whose options
+// carry no digits: arrow keys from the cursor (read off the re-read pane) to
+// option idx, then Enter — only if, right before it, the same screen still
+// shows with the cursor on idx (cursorOn), so a lost arrow or a screen that
+// changed under us never confirms the wrong choice.
+func unnumberedStartScreenSteps(cursor, idx int, cursorOn func() bool) []keyStep {
+	var steps []keyStep
+	move, n := keyDown, idx-cursor
+	if n < 0 {
+		move, n = keyUp, -n
+	}
+	for i := 0; i < n; i++ {
+		steps = append(steps, keyStep{Kind: move, Settle: quizKeySettle})
+	}
+	return append(steps, keyStep{Kind: keyEnter, Settle: quizKeySettle, When: cursorOn})
+}
+
+// kimiStartScreenCursorOn reports, when called, whether the pane still
+// shows quiz's Kimi start screen with the cursor on option idx.
+func (m *Manager) kimiStartScreenCursorOn(sess store.Session, quiz Quiz, idx int) func() bool {
+	return func() bool {
+		pane, err := m.rt.Capture(context.Background(), runtime.Handle{Name: sess.TmuxName}, runtime.PermissionCaptureLines)
+		if err != nil {
+			return false
+		}
+		p, ok := runtime.ParseKimiStartScreen(pane)
+		return ok && p.SameDialog(quiz.PermissionPrompt()) && runtime.KimiStartScreenCursor(pane) == idx
 	}
 }
 
