@@ -1,0 +1,40 @@
+
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │                                                                                                │
+ │  ▐█▛█▛█▌  Welcome to Kimi Code!                                                                │
+ │  ▐█████▌  Send /help for help information.                                                     │
+ │                                                                                                │
+ │  Directory: /Users/ivanroslov/.rocket/worktrees/rocket/kimi-code-support-kimi-recon/.rocket/sc…│
+ │  Session:   session_7fb7a77e-4986-4b58-8f92-0ef57b6f37a1                                       │
+ │  Model:     K3.1 Pro                                                                           │
+ │  Version:   2.4.0                                                                              │
+ │                                                                                                │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ ✦ Kimi K3.1 Pro is ready - use the model in a fresh session for the best results
+   Standard: Plus/Moderato and above; Highspeed: Pro/Allegretto and above
+
+   No session yet — one will be created on your first message.
+   tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to
+ ~/.tmux.conf and restart tmux.
+
+ ❯ Call AskUserQuestion with the question Proceed? and choices Yes, No. Wait for my choice.
+
+ ● I'll respond with the tool only. Skills? User explicitly wants Ask, skill using-superpowers must
+   invoke before any response but direct user explicit simple perhaps Skill using-superpowers would
+   … (2 more lines, ctrl+o to expand)
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+  question
+
+   Q1    Submit
+
+  ? Proceed?
+
+   → [1] Yes
+     [2] No
+     [3] Other
+
+   ↑↓ select  1-3 / ↵ choose  ←/→/tab switch  esc cancel
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+ K3.1 Pro thinking: high  …/scratch/kimi-recon/profile  main
+                                                                             context: 3% (22.8k/1M)

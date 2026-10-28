@@ -1,0 +1,2 @@
+{"type":"metadata","protocol_version":"1.5","created_at":1793194755335}
+{"type":"llm.request","agentId":"main","kind":"loop","provider":"openai","model":"k3.1-pro","modelAlias":"kimi-code/k3.1-pro","thinkingEffort":"max","thinkingKeep":"all","toolSelect":false,"systemPromptHash":"1eae3ee863d08efec253ce176c93b64c7ef60b525381b4207cd5f0b446385460","toolsHash":"8341adfe428caf7d0a86f79b828e9396a4aa636214659d112fa822a1c0cea135","messageCount":4,"turnStep":"0.1","time":1793194755427}

@@ -1,0 +1,6 @@
+{"type":"metadata","protocol_version":"1.5","created_at":1793195833185}
+{"type":"turn.prompt","agentId":"main","input":[{"type":"text","text":"Delegate to an explore subagent to calculate 1+1, then reply OK."}],"origin":{"kind":"user"},"promptId":"msg_01M61CSXWNNTXD6NV3EX57CEQK","turnId":0,"time":1793195833805}
+{"type":"subagent.spawned","subagentId":"agent-0","subagentName":"explore","parentToolCallId":"tool_hpewW1XTW5eU5CdnNSHeSS34","parentAgentId":"main","callerAgentId":"main","description":"Calculate simple sum","runInBackground":false,"model":"kimi-code/k3.1-pro","thinkingEffort":"low","taskId":"agent-xmehdjro","time":1793195848464}
+{"type":"subagent.started","subagentId":"agent-0","time":1793195848464}
+{"type":"subagent.completed","subagentId":"agent-0","resultSummary":"2","usage":{"inputOther":1437,"output":26,"inputCacheRead":6912,"inputCacheCreation":0},"contextTokens":8375,"time":1793195855099}
+{"type":"turn.ended","agentId":"main","turnId":0,"reason":"completed","durationMs":25733,"traceId":"8683172b1cc8c02565685e798efa5615","time":1793195859538}
