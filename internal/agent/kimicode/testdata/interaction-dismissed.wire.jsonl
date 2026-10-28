@@ -1,0 +1,4 @@
+{"type":"metadata","protocol_version":"1.5","created_at":1793194979834}
+{"type":"interaction.request","agentId":"main","id":"question_b7e82c21-0849-4476-a8d8-74a22735be3d","kind":"question","toolCallId":"tool_ItYHXZVMPuevLGC59eckDY9w","request":{"turnId":0,"toolCallId":"tool_ItYHXZVMPuevLGC59eckDY9w","questions":[{"question":"Proceed?","options":[{"label":"Yes"},{"label":"No"}]}]},"time":1793194987558}
+{"type":"interaction.resolved","agentId":"main","id":"question_b7e82c21-0849-4476-a8d8-74a22735be3d","response":null,"time":1793195001565}
+{"type":"turn.ended","agentId":"main","turnId":0,"reason":"completed","durationMs":26508,"traceId":"20758420761a30b4f673f43fbbd8d99d","time":1793195007045}

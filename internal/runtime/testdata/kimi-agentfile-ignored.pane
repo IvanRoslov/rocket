@@ -1,0 +1,33 @@
+
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │                                                                                                │
+ │  ▐█▛█▛█▌  Welcome to Kimi Code!                                                                │
+ │  ▐█████▌  Send /help for help information.                                                     │
+ │                                                                                                │
+ │  Directory: /Users/ivanroslov/.rocket/worktrees/rocket/kimi-code-support-kimi-recon/.rocket/sc…│
+ │  Session:   session_5d9d77c5-5a41-49fe-9f9c-709413adf7b4                                       │
+ │  Model:     K3.1 Pro                                                                           │
+ │  Version:   2.4.0                                                                              │
+ │                                                                                                │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ ✦ Kimi K3.1 Pro is ready - use the model in a fresh session for the best results
+   Standard: Plus/Moderato and above; Highspeed: Pro/Allegretto and above
+
+   No session yet — one will be created on your first message.
+   tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to
+ ~/.tmux.conf and restart tmux.
+
+ ❯ What is the agent-file marker? Reply only the marker.
+
+ ● I'll respond only marker. Should figure "agent-file marker" likely AGENTS.md? User asks "What is
+   the agent-file marker?" Could be "AGENTS.md" indeed. Perhaps skill check before response
+   … (3 more lines, ctrl+o to expand)
+
+ ● AGENTS.md
+
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │ >                                                                                              │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+ Never Ask  K3.1 Pro thinking: high  …/scratch/kimi-recon/profile  main
+                                                                             context: 3% (22.8k/1M)

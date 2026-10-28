@@ -1,0 +1,14 @@
+[
+  {
+    "id": "session_7fb7a77e-4986-4b58-8f92-0ef57b6f37a1",
+    "title": "Ask user question with Yes/No options",
+    "lastPrompt": "Call AskUserQuestion with the question Proceed? and choices Yes, No. Wait for my choice.",
+    "workDir": "/Users/ivanroslov/.rocket/worktrees/rocket/kimi-code-support-kimi-recon/.rocket/scratch/kimi-recon/profile",
+    "sessionDir": "/Users/ivanroslov/.kimi-code/sessions/wd_profile_f3c1bd6259d6/session_7fb7a77e-4986-4b58-8f92-0ef57b6f37a1",
+    "createdAt": 1793194979721,
+    "updatedAt": 1793195007047,
+    "archived": false,
+    "metadata": {},
+    "lastTurnReason": "completed"
+  }
+]

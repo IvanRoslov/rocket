@@ -1,0 +1,54 @@
+
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │                                                                                                │
+ │  ▐█▛█▛█▌  Welcome to Kimi Code!                                                                │
+ │  ▐█████▌  Send /help for help information.                                                     │
+ │                                                                                                │
+ │  Directory: /Users/ivanroslov/.rocket/worktrees/rocket/kimi-code-support-kimi-recon/.rocket/sc…│
+ │  Session:   session_3df4260f-3c18-4fbe-a02a-f2788102bc6f                                       │
+ │  Model:     K3.1 Pro                                                                           │
+ │  Version:   2.4.0                                                                              │
+ │                                                                                                │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ ✦ Kimi K3.1 Pro is ready - use the model in a fresh session for the best results
+   Standard: Plus/Moderato and above; Highspeed: Pro/Allegretto and above
+
+   No session yet — one will be created on your first message.
+   tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to
+ ~/.tmux.conf and restart tmux.
+
+ ❯ Use shell to run sleep 12 then printf tool-ok; reply DONE.
+
+ ● I need respond to user simple shell sleep 12 then printf tool-ok reply DONE. Should comply.
+   There is superpowers using skill mandatory any response action. Should invoke skill before tool?
+   … (4 more lines, ctrl+o to expand)
+
+ ● Used Skill (superpowers:using-superpowers)
+   Skill "superpowers:using-superpowers" loaded inline. Follow its instructions.
+
+ ▶ Activated skill: superpowers:using-superpowers
+
+ ● Now bash. No need announce? Skill says announce using skill purpose, but user wants DONE in
+   response. I already invoked no announce. Could commentary "Using superpowers..." unnecessary and
+   weird. Direct Bash.
+
+ ● Ran a command · $ sleep 12 && printf tool-ok
+   tool-ok
+
+ ● Respond DONE.
+
+ ● DONE
+
+ ❯ reply QUEUED_OK
+
+ ● I need just respond QUEUED_OK. Do I need skill invocation? Already same skill loaded args
+   present; do not re-invoke. Simple.
+
+ ● QUEUED_OK
+
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │ >                                                                                              │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+ Never Ask  K3.1 Pro thinking: high  …/scratch/kimi-recon/trusted  main
+                                                                             context: 3% (24.4k/1M)

@@ -1,0 +1,34 @@
+
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │                                                                                                │
+ │  ▐█▛█▛█▌  Welcome to Kimi Code!                                                                │
+ │  ▐█████▌  Send /help for help information.                                                     │
+ │                                                                                                │
+ │  Directory: /Users/ivanroslov/.rocket/worktrees/rocket/kimi-code-support-kimi-recon/.rocket/sc…│
+ │  Session:   session_3df4260f-3c18-4fbe-a02a-f2788102bc6f                                       │
+ │  Model:     K3.1 Pro                                                                           │
+ │  Version:   2.4.0                                                                              │
+ │                                                                                                │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ ✦ Kimi K3.1 Pro is ready - use the model in a fresh session for the best results
+   Standard: Plus/Moderato and above; Highspeed: Pro/Allegretto and above
+
+   No session yet — one will be created on your first message.
+   tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to
+ ~/.tmux.conf and restart tmux.
+
+ ❯ Use shell to run sleep 12 then printf tool-ok; reply DONE.
+
+ ⠴ thinking…
+   I need respond to user simple shell sleep 12 then printf tool-ok reply DONE. Should
+
+  ⠴ Working… · Tip: ask Kimi to schedule tasks, e.g. "remind me at 5pm"
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+   ❯ reply QUEUED_OK
+   ↑ to edit · ctrl-s to steer immediately
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │ >                                                                                              │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+ Never Ask  K3.1 Pro thinking: high  …/scratch/kimi-recon/trusted  main
+                                                                                 context: 0% (0/1M)
