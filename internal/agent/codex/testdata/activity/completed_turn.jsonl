@@ -1,0 +1,4 @@
+{"timestamp":"2026-10-28T11:52:57.368Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-A","model_context_window":258400}}
+{"timestamp":"2026-10-28T11:52:57.400Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"run the long command"}]}}
+{"timestamp":"2026-10-28T11:53:09.838Z","type":"event_msg","payload":{"type":"token_count","info":null}}
+{"timestamp":"2026-10-28T12:08:12.524Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-A","last_agent_message":"done"}}

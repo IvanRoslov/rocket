@@ -2,6 +2,7 @@ package codex
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -280,39 +281,153 @@ func isErrorRecord(top map[string]json.RawMessage) bool {
 	return strings.Contains(strings.ToLower(pt), "error")
 }
 
-// classify determines the activity state from the last session-file line
-// and the file's mtime. mtime within freshWindow always wins (Active).
-// Otherwise, if the record parses as JSON, it classifies strictly by its
-// actual type field (isErrorRecord) — a record whose text content happens
-// to mention `"type":"error"` is not enough on its own to flip it to
-// Blocked. Only when the record fails to parse as JSON at all does the raw
-// substring check apply, as a best-effort fallback for malformed/unknown
-// line shapes. Everything else (including task_complete/turn-end records
-// and any type this adapter doesn't recognize) is Ready.
-func classify(raw string, mtime time.Time) activity.State {
+// Turn events: Codex brackets every turn in its session journal with an
+// event_msg task_started record and, when the turn ends, a task_complete
+// (or turn_aborted, on interrupt) record.
+const (
+	turnStarted  = "task_started"
+	turnComplete = "task_complete"
+	turnAborted  = "turn_aborted"
+)
+
+// turnEventRecord is the part of a JSONL record lastTurnEvent looks at.
+type turnEventRecord struct {
+	Type    string `json:"type"`
+	Payload struct {
+		Type string `json:"type"`
+	} `json:"payload"`
+}
+
+// lastTurnEvent returns the payload type of the last turn event
+// (task_started, task_complete or turn_aborted event_msg record) in the
+// session file at path. It reads the file backwards in tailReadSize blocks
+// and stops at the first turn event it meets, so a turn whose start lies
+// far behind a long run of command output is still found; only a file
+// with no turn events at all is read to its start. found is false when the
+// file has no turn event.
+func lastTurnEvent(path string) (kind string, found bool, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false, err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return "", false, err
+	}
+
+	// pos is where the next block (read backwards) ends. carry holds the
+	// head of the earliest line seen so far: everything before its first
+	// newline may be cut off by the block boundary, so it is only parsed
+	// once the preceding block (or the file start) completes it.
+	pos := info.Size()
+	var carry []byte
+	buf := make([]byte, tailReadSize)
+	for pos > 0 {
+		n := int64(tailReadSize)
+		if pos < n {
+			n = pos
+		}
+		pos -= n
+		if _, err := f.ReadAt(buf[:n], pos); err != nil && err != io.EOF {
+			return "", false, err
+		}
+		chunk := make([]byte, 0, int(n)+len(carry))
+		chunk = append(chunk, buf[:n]...)
+		chunk = append(chunk, carry...)
+
+		lines := bytes.Split(chunk, []byte("\n"))
+		first := 0
+		if pos > 0 {
+			// lines[0] may be the tail of a line that starts in an
+			// earlier block.
+			carry = lines[0]
+			first = 1
+		} else {
+			carry = nil
+		}
+		for i := len(lines) - 1; i >= first; i-- {
+			if kind, ok := turnEventKind(lines[i]); ok {
+				return kind, true, nil
+			}
+		}
+	}
+	return "", false, nil
+}
+
+// turnEventKind reports whether line is a turn event record and, if so,
+// its payload type. Lines that do not even mention a turn event are
+// skipped without JSON parsing, which keeps backward scans over large
+// command output cheap.
+func turnEventKind(line []byte) (string, bool) {
+	if !bytes.Contains(line, []byte(turnStarted)) &&
+		!bytes.Contains(line, []byte(turnComplete)) &&
+		!bytes.Contains(line, []byte(turnAborted)) {
+		return "", false
+	}
+	var rec turnEventRecord
+	if err := json.Unmarshal(bytes.TrimSpace(line), &rec); err != nil {
+		return "", false
+	}
+	if rec.Type != "event_msg" {
+		return "", false
+	}
+	switch rec.Payload.Type {
+	case turnStarted, turnComplete, turnAborted:
+		return rec.Payload.Type, true
+	}
+	return "", false
+}
+
+// classify determines the activity state from the last session-file line,
+// the last turn event (lastTurnEvent; turnOpen is true when it is a
+// task_started) and the file's mtime.
+//
+// An open turn means Codex is working even when the journal has been quiet
+// for a long time (a long-running command writes nothing until it ends), so
+// it is Active regardless of mtime — unless the last record is an error,
+// which stays Blocked. Without an open turn the previous rules apply: mtime
+// within freshWindow wins (Active). Otherwise, if the record parses as
+// JSON, it classifies strictly by its actual type field (isErrorRecord) —
+// a record whose text content happens to mention `"type":"error"` is not
+// enough on its own to flip it to Blocked. Only when the record fails to
+// parse as JSON at all does the raw substring check apply, as a best-effort
+// fallback for malformed/unknown line shapes. Everything else (including
+// task_complete/turn_aborted records and any type this adapter doesn't
+// recognize) is Ready.
+func classify(raw string, turnOpen bool, mtime time.Time) activity.State {
+	if turnOpen {
+		if isErrorLine(raw) {
+			return activity.Blocked
+		}
+		return activity.Active
+	}
+
 	if time.Since(mtime) < freshWindow {
 		return activity.Active
 	}
 
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(raw), &top); err != nil {
-		if strings.Contains(raw, `"type":"error"`) {
-			return activity.Blocked
-		}
-		return activity.Ready
-	}
-
-	if isErrorRecord(top) {
+	if isErrorLine(raw) {
 		return activity.Blocked
 	}
-
 	return activity.Ready
+}
+
+// isErrorLine applies isErrorRecord to a raw JSONL line, falling back to a
+// raw substring check when the line is not valid JSON (see classify).
+func isErrorLine(raw string) bool {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &top); err != nil {
+		return strings.Contains(raw, `"type":"error"`)
+	}
+	return isErrorRecord(top)
 }
 
 // Activity implements agent.Agent. It locates the newest session file whose
 // recorded cwd matches ref.WorktreePath (searching the last sessionScanDays
 // date-sharded session directories) and classifies activity state from its
-// mtime and last record, same shape as claudecode.Activity.
+// last turn event, mtime and last record (see classify).
 func (c *Codex) Activity(ctx context.Context, ref agent.ActivityRef) (activity.State, time.Time, error) {
 	path, mtime, err := findMatchingSession(ref.WorktreePath)
 	if err != nil {
@@ -324,5 +439,10 @@ func (c *Codex) Activity(ctx context.Context, ref agent.ActivityRef) (activity.S
 		return "", time.Time{}, agent.ErrNoSignal
 	}
 
-	return classify(line, mtime), mtime, nil
+	// A failed turn scan only loses the open-turn signal; fall back to the
+	// mtime/last-record rules rather than dropping the whole signal.
+	kind, found, err := lastTurnEvent(path)
+	turnOpen := err == nil && found && kind == turnStarted
+
+	return classify(line, turnOpen, mtime), mtime, nil
 }

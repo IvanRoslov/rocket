@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -305,5 +306,127 @@ func TestActivityResolvesSymlinksInSessionCwd(t *testing.T) {
 	}
 	if !mtime.Equal(old) {
 		t.Errorf("mtime = %v, want %v", mtime, old)
+	}
+}
+
+// turnFixtureLines reads testdata/activity/<name>.jsonl and returns its
+// non-empty lines, to be appended after the session_meta line by
+// writeSessionFile (the cwd in session_meta depends on the test's temp
+// worktree, so it cannot live in the fixture itself).
+func turnFixtureLines(t *testing.T, name string) []string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", "activity", name+".jsonl"))
+	if err != nil {
+		t.Fatalf("read fixture %s: %v", name, err)
+	}
+	var lines []string
+	for _, l := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines
+}
+
+// activityFromFixture writes a session file built from lines with an mtime
+// 10 minutes in the past (well outside freshWindow, so the turn events are
+// the only thing that can make the session Active) and returns Activity's
+// state.
+func activityFromFixture(t *testing.T, lines []string) activity.State {
+	t.Helper()
+	home := withCodexHome(t)
+	wt := t.TempDir()
+	now := time.Now()
+	writeSessionFile(t, home, now, "rollout-1", wt, lines, now.Add(-10*time.Minute))
+
+	state, _, err := New().Activity(context.TODO(), agent.ActivityRef{WorktreePath: wt})
+	if err != nil {
+		t.Fatalf("Activity failed: %v", err)
+	}
+	return state
+}
+
+func TestActivityActiveDuringOpenTurn(t *testing.T) {
+	if got := activityFromFixture(t, turnFixtureLines(t, "open_turn")); got != activity.Active {
+		t.Errorf("state = %v, want Active (task_started without task_complete, stale mtime)", got)
+	}
+}
+
+func TestActivityReadyAfterTaskComplete(t *testing.T) {
+	if got := activityFromFixture(t, turnFixtureLines(t, "completed_turn")); got != activity.Ready {
+		t.Errorf("state = %v, want Ready", got)
+	}
+}
+
+func TestActivityReadyAfterTurnAborted(t *testing.T) {
+	if got := activityFromFixture(t, turnFixtureLines(t, "aborted_turn")); got != activity.Ready {
+		t.Errorf("state = %v, want Ready", got)
+	}
+}
+
+func TestActivityActiveWhenTurnStartBeyondTail(t *testing.T) {
+	lines := turnFixtureLines(t, "open_turn")
+	// A long command with lots of output: well over two 64 KB blocks of
+	// records after task_started, none of them a turn event. One record is
+	// itself larger than a block, so it straddles block boundaries.
+	out := strings.Repeat("x", 2000)
+	for i := 0; i < 80; i++ {
+		lines = append(lines, fmt.Sprintf(`{"timestamp":"x","type":"response_item","payload":{"type":"function_call_output","call_id":"call-%d","output":%q}}`, i, out))
+	}
+	lines = append(lines, fmt.Sprintf(`{"timestamp":"x","type":"response_item","payload":{"type":"function_call_output","call_id":"big","output":%q}}`, strings.Repeat("y", 3*tailReadSize)))
+	lines = append(lines, `{"timestamp":"x","type":"event_msg","payload":{"type":"token_count","info":null}}`)
+
+	if got := activityFromFixture(t, lines); got != activity.Active {
+		t.Errorf("state = %v, want Active (turn start lies beyond the 64 KB tail)", got)
+	}
+}
+
+func TestActivityBlockedOnErrorStillWins(t *testing.T) {
+	if got := activityFromFixture(t, turnFixtureLines(t, "open_turn_error")); got != activity.Blocked {
+		t.Errorf("state = %v, want Blocked (error record wins over an open turn)", got)
+	}
+}
+
+func TestLastTurnEvent(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string, lines ...string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	started := `{"type":"event_msg","payload":{"type":"task_started","turn_id":"A"}}`
+	complete := `{"type":"event_msg","payload":{"type":"task_complete","turn_id":"A"}}`
+	// A response_item whose text merely mentions a turn event must not count.
+	mention := `{"type":"response_item","payload":{"type":"message","content":[{"type":"output_text","text":"{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\"}}"}]}}`
+
+	cases := []struct {
+		name      string
+		path      string
+		wantKind  string
+		wantFound bool
+	}{
+		{"open", write("open.jsonl", started, `{"type":"event_msg","payload":{"type":"token_count"}}`), "task_started", true},
+		{"complete", write("complete.jsonl", started, complete), "task_complete", true},
+		{"no trailing newline partial", write("partial.jsonl", started, complete, `{"type":"event_msg","pay`), "task_complete", true},
+		{"mention ignored", write("mention.jsonl", started, mention), "task_started", true},
+		{"none", write("none.jsonl", `{"type":"session_meta","payload":{}}`), "", false},
+		{"empty", write("empty.jsonl"), "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			kind, found, err := lastTurnEvent(tc.path)
+			if err != nil {
+				t.Fatalf("err = %v", err)
+			}
+			if kind != tc.wantKind || found != tc.wantFound {
+				t.Errorf("got (%q, %v), want (%q, %v)", kind, found, tc.wantKind, tc.wantFound)
+			}
+		})
+	}
+
+	if _, _, err := lastTurnEvent(filepath.Join(dir, "missing.jsonl")); err == nil {
+		t.Error("missing file: want error")
 	}
 }
