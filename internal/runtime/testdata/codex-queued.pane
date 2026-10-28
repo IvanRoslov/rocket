@@ -1,0 +1,40 @@
+
+  >_ OpenAI Codex (v0.160.0)
+     /tmp/codexprobe
+
+  Any loose ends? Semicolons count.
+
+
+› Run the shell command: sleep 90 ; then run: sleep 5 ; then reply DONE
+
+
+• I’ll run the two commands in order, then reply DONE.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+• Working (24s • esc to interrupt) · 1 background terminal running · /ps to view · /stop to close
+
+• Messages to be submitted after next tool call (press esc to interrupt and send immediately)
+  ↳ [from probe-orch] MARKER-QUEUE-LONG this is a deliberately long probe message that must wrap
+    across several rows of the Codex queue block so the wrapped rendering can be captured exactly;
+    please reply ACK-LONG when you see it
+
+
+› Ask Codex to do anything
+
+  GPT-6-Astra medium · /tmp/codexprobe…
+  ? for shortcuts

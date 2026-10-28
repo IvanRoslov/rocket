@@ -1,0 +1,11 @@
+{"timestamp":"2026-10-28T12:18:32.100Z","type":"session_meta","payload":{"id":"01a18272-9ef5-76b3-93fb-acccdeb94bb9","cwd":"__WORKTREE__","originator":"codex_cli_rs","cli_version":"0.160.0"}}
+{"timestamp":"2026-10-28T12:18:45.646Z","ordinal":5,"type":"response_item","payload":{"type":"message","id":"msg_1","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>__WORKTREE__</cwd>\n</environment_context>"}]}}
+{"timestamp":"2026-10-28T12:18:45.700Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-a"}}
+{"timestamp":"2026-10-28T12:19:00.000Z","ordinal":8,"type":"response_item","payload":{"type":"message","id":"msg_2","role":"user","content":[{"type":"input_text","text":"[from orch] first message ALPHA"}]}}
+{"timestamp":"2026-10-28T12:19:00.010Z","type":"event_msg","payload":{"type":"user_message","message":"[from orch] ghost GHOST"}}
+{"timestamp":"2026-10-28T12:19:05.000Z","type":"response_item","payload":{"type":"message","id":"msg_3","role":"assistant","content":[{"type":"output_text","text":"[from orch] ghost GHOST"}]}}
+{"timestamp":"2026-10-28T12:20:00.000Z","type":"response_item","payload":{"type":"message","id":"msg_4","role":"user","content":[{"type":"input_text","text":"[from orch] multi\nline   message\twith spaces"}]}}
+{"timestamp":"2026-10-28T12:21:00.000Z","type":"response_item","payload":{"type":"message","id":"msg_5","role":"user","content":[{"type":"input_text","text":"Run: sleep 60 ; then reply DONE2\n[from orch] second BETA\nline two\n\nlast line BETA-END"}]}}
+{"timestamp":"2026-10-28T12:22:00.000Z","type":"response_item","payload":{"type":"message","id":"msg_6","role":"user","content":[{"type":"input_text","text":"[from orch] [large message] Full text written to .rocket/inbox/msg-42.md — read that file now."}]}}
+{"timestamp":"2026-10-28T12:23:00.000Z","type":"response_item","payload":{"type":"message","id":"msg_7","role":"user","content":[{"type":"input_text","text":"[from orch] first message ALPHA"}]}}
+{"timestamp":"2026-10-28T12:23:30.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-a"}}

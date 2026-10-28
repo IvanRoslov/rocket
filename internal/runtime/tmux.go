@@ -231,6 +231,11 @@ func (t *tmuxRuntime) Create(ctx context.Context, spec CreateSpec) (Handle, erro
 //     echoed line, and cases where the marker never rendered in the first
 //     place.
 //
+// Before either signal is consulted, a live agent-queue block holding the
+// text (LooksLikeAgentQueued — Codex busy with a turn) ends Inject with
+// ErrQueuedByAgent: no further Enter, nothing cleared. The same check runs
+// before every retry Enter and in the final whole-pane check.
+//
 // If attempts are exhausted without either signal firing, Inject returns
 // ErrSubmitUnconfirmed (wrapped with context) rather than a generic
 // error, since by that point the text has very likely already been
@@ -410,6 +415,11 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 				if LooksLikeQuizWidget(tailLines(trimTrailingBlank(out), confirmWindow)) {
 					return nil
 				}
+				// The previous Enter queued the text after all: another
+				// Enter would only hit an empty composer.
+				if LooksLikeAgentQueued(out, text) {
+					return fmt.Errorf("%w: session %q", ErrQueuedByAgent, h.Name)
+				}
 			}
 		}
 		if _, _, err := t.run(ctx, "send-keys", "-t", paneTarget(h.Name), "Enter"); err != nil {
@@ -421,6 +431,16 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 			full, _, err := t.run(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name))
 			if err != nil {
 				return fmt.Errorf("poll capture-pane: %w", err)
+			}
+			// Agent queue first: Codex, busy with a turn, moves the text
+			// into a block above its composer instead of submitting it.
+			// That block grows the tail, so count-growth below would
+			// misread it as a plain submit. The block can be taller than
+			// confirmWindow, hence the whole visible screen. Matching the
+			// whole text, not marker: Codex cuts a long item short with
+			// «…», often before its last line.
+			if LooksLikeAgentQueued(full, text) {
+				return fmt.Errorf("%w: session %q", ErrQueuedByAgent, h.Name)
 			}
 			out := tailLines(trimTrailingBlank(full), confirmWindow)
 			// marker-absent: the injected text's last line no longer
@@ -485,6 +505,13 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 		full, _, err := t.run(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name),
 			"-S", fmt.Sprintf("-%d", finalCheckScrollback))
 		if err == nil {
+			// Queued by the agent: the text left the composer and waits
+			// in the agent's own queue. Neither delivered nor stuck —
+			// clearing would wipe nothing useful, and a retry would
+			// queue a duplicate.
+			if LooksLikeAgentQueued(full, text) {
+				return fmt.Errorf("%w: session %q", ErrQueuedByAgent, h.Name)
+			}
 			// StripHeldPeerBanner first: a session that ever held one of our
 			// messages keeps a banner quoting that message's text back in its
 			// «preview» forever. Left in, it makes this check confirm a
