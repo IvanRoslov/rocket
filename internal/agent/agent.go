@@ -96,6 +96,27 @@ func ShipsBrainstormSkill(a Agent) bool {
 	return ok && s.ShipsBrainstormSkill()
 }
 
+// BusyInputAccepter is implemented by agents whose composer takes new input
+// while a turn is running and keeps it in the agent's own queue (Codex). For
+// them the message queue treats an active session as ready to receive.
+type BusyInputAccepter interface{ AcceptsInputWhileBusy() bool }
+
+// AcceptsInputWhileBusy reports whether a takes input while busy.
+func AcceptsInputWhileBusy(a Agent) bool {
+	b, ok := a.(BusyInputAccepter)
+	return ok && b.AcceptsInputWhileBusy()
+}
+
+// DeliveryConfirmer is implemented by agents whose transcript proves that
+// injected text reached the model, so the queue can mark a message
+// delivered only once it is recorded there.
+type DeliveryConfirmer interface {
+	// ConfirmDelivered reports whether the session's transcript holds a user
+	// message whose text equals text (whitespace-normalized), recorded
+	// strictly after since; at is the timestamp of the first such record.
+	ConfirmDelivered(ctx context.Context, ref ActivityRef, text string, since time.Time) (found bool, at time.Time, err error)
+}
+
 // Catalog sources (Catalog.Source).
 const (
 	CatalogSourceCLI     = "cli"
