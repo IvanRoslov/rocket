@@ -37,7 +37,11 @@ type Runtime interface {
 	// spec.Env set, and returns a Handle referring to it.
 	Create(ctx context.Context, spec CreateSpec) (Handle, error)
 	// Inject types text into the session's active pane and submits it.
-	// Beyond nil (submitted) it reports three distinct failure outcomes:
+	// Beyond nil (submitted) it reports ErrQueuedByAgent — the agent took
+	// the text into its own pending queue (Codex while busy) after one
+	// Enter; nothing was cleared, re-injecting would queue a duplicate,
+	// and delivery is confirmed later from the agent's transcript
+	// (agent.DeliveryConfirmer) — and three distinct failure outcomes:
 	// ErrNotDelivered — nothing was submitted and the composer has been
 	// cleared, so re-injecting is safe and the message must not be
 	// recorded as delivered; ErrSubmitUnconfirmed — delivery could
