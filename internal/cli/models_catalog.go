@@ -66,7 +66,7 @@ func newModelsCatalogCmd(dial func() (modelsClient, error)) *cobra.Command {
 			return printCatalog(cmd.OutOrStdout(), reply, all)
 		},
 	}
-	cmd.Flags().StringVar(&agentName, "agent", "", "только этот агент: claude-code | codex")
+	cmd.Flags().StringVar(&agentName, "agent", "", "только этот агент: claude-code | codex | kimi-code")
 	cmd.Flags().BoolVar(&all, "all", false, "с предыдущими моделями")
 	cmd.Flags().BoolVar(&refresh, "refresh", false, "перечитать источники, минуя кэш демона (10 мин)")
 	return cmd
@@ -137,6 +137,8 @@ func catalogSourceLabel(agentName, source string) string {
 			return "из кэша Claude Code"
 		case "codex":
 			return "из кэша Codex"
+		case "kimi-code":
+			return "из конфига Kimi Code"
 		}
 		return "из кэша агента"
 	case "builtin":
@@ -197,7 +199,7 @@ func newModelsImportCmd(dial func() (modelsClient, error)) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&agentName, "agent", "", "только этот агент: claude-code | codex")
+	cmd.Flags().StringVar(&agentName, "agent", "", "только этот агент: claude-code | codex | kimi-code")
 	cmd.Flags().BoolVar(&legacy, "legacy", false, "включая предыдущие модели")
 	return cmd
 }

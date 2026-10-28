@@ -227,7 +227,7 @@ func newModelsAddCmd(dial func() (modelsClient, error)) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&agentName, "agent", "", "агент профиля: claude-code | codex (обязательно)")
+	cmd.Flags().StringVar(&agentName, "agent", "", "агент профиля: claude-code | codex | kimi-code (обязательно)")
 	cmd.Flags().StringVar(&model, "model", "", "модель (пусто — модель агента по умолчанию)")
 	cmd.Flags().StringVar(&effort, "effort", "", "уровень усилия (пусто — по умолчанию)")
 	cmd.Flags().StringVar(&description, "description", "", "для чего подходит профиль — это читает оркестратор")
