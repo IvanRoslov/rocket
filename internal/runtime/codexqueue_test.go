@@ -9,6 +9,8 @@ import (
 // The codex-*.pane fixtures are raw `tmux capture-pane -p` output from a live
 // codex-cli 0.160.0 session (--no-daemon, 100x40 pane) recorded 2026-10-28 for
 // task #5713, with the probe directory path shortened to /tmp/codexprobe.
+// codex-queued-hidden.pane is codex-queued-multi.pane with the item's
+// visible rows replaced by an earlier message's.
 
 // longProbeText is the message pasted into the busy Codex for
 // codex-queued.pane and codex-history.pane: one logical line that Codex wraps
@@ -50,6 +52,23 @@ func TestLooksLikeAgentQueuedTruncatedItem(t *testing.T) {
 	}
 	if LooksLikeAgentQueued(pane, "[from probe-orch] first line MULTI-ONE\nsomething entirely different") {
 		t.Fatal("a visible prefix must match the text itself, not merely share its first row")
+	}
+}
+
+func TestLooksLikeAgentQueuedMultiMessageBlock(t *testing.T) {
+	// codex-queued-multi.pane: two messages queued back to back share one ↳
+	// item. The first is shown whole and counts as queued too.
+	if !LooksLikeAgentQueued(fixture(t, "codex-queued-multi.pane"), "Run: sleep 60 ; then reply DONE2") {
+		t.Fatal("the first message of a shared queue item was not recognised")
+	}
+}
+
+func TestLooksLikeAgentQueuedHiddenUnderEllipsis(t *testing.T) {
+	// Our message was appended behind a long item and fell entirely under
+	// «…»: nothing of it is visible, so the screen proves nothing and Inject
+	// falls back to its usual signals.
+	if LooksLikeAgentQueued(fixture(t, "codex-queued-hidden.pane"), "[from orch] our message hidden under the ellipsis entirely") {
+		t.Fatal("a message hidden under «…» was treated as visibly queued")
 	}
 }
 

@@ -114,6 +114,9 @@ type DeliveryConfirmer interface {
 	// ConfirmDelivered reports whether the session's transcript holds a user
 	// message whose text equals text (whitespace-normalized), recorded
 	// strictly after since; at is the timestamp of the first such record.
+	// A record also matches when a contiguous run of its whole lines equals
+	// text: Codex joins messages queued back to back into one record, so one
+	// record may confirm several different messages.
 	ConfirmDelivered(ctx context.Context, ref ActivityRef, text string, since time.Time) (found bool, at time.Time, err error)
 }
 

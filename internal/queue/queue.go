@@ -643,6 +643,8 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 			// will hand it to the model itself. Re-injecting would queue a
 			// duplicate, so this counts as delivered — as it did before
 			// Inject could tell this case apart.
+			// TODO(#5707 T4): replace with the accepted status, confirmed
+			// from the transcript (agent.DeliveryConfirmer).
 			q.deliverSuccess(msg)
 			return true
 		case errors.Is(err, runtime.ErrHeldDialog):
