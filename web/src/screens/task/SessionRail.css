@@ -250,7 +250,7 @@
   cursor: pointer;
 }
 
-/* Which agent runs this session (claude-code, codex, ...) — workers can be
+/* Which agent runs this session (claude-code, codex, kimi-code, ...) — workers can be
    spawned on a different agent than their orchestrator. */
 .session-rail__agent {
   margin-left: 6px;

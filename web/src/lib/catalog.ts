@@ -22,12 +22,13 @@ export function effortsFor(
   return { efforts: m.efforts, disabled: m.efforts.length === 0 }
 }
 
-const AGENT_TITLE: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex' }
+const AGENT_TITLE: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex', 'kimi-code': 'Kimi Code' }
 
 /** «from Codex CLI» / «from Claude Code cache» / «built-in». */
 export function catalogSourceText(c: AgentCatalog): string {
   const title = AGENT_TITLE[c.agent] ?? c.agent
   if (c.source === 'cli') return `from ${title} CLI`
-  if (c.source === 'cache') return `from ${title} cache`
+  // Kimi Code reads its models from the user's config.toml, not a cache file.
+  if (c.source === 'cache') return c.agent === 'kimi-code' ? `from ${title} config` : `from ${title} cache`
   return 'built-in'
 }

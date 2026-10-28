@@ -826,7 +826,7 @@ export interface AgentQuestion {
 
 // Agent kinds — internal/api/agent_kinds.go
 
-/** One registered agent implementation (claude-code, codex, ...). `available`
+/** One registered agent implementation (claude-code, codex, kimi-code, ...). `available`
  * says whether its executable is usable on the daemon's machine right now;
  * `error` carries the reason when it is not. */
 export interface AgentKind {

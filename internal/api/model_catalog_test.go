@@ -351,10 +351,14 @@ func TestImportCatalogErrors(t *testing.T) {
 
 func TestImportProfileName(t *testing.T) {
 	cases := map[[2]string]string{
-		{"claude-code", "claude-opus-5-5"}: "claude-opus-5-5",
-		{"codex", "gpt-5.6-sol"}:           "codex-gpt-5-6-sol",
-		{"codex", "gpt_6.astra"}:           "codex-gpt-6-astra",
-		{"codex", "GPT-X"}:                 "codex-gpt-x",
+		{"claude-code", "claude-opus-5-5"}:                   "claude-opus-5-5",
+		{"codex", "gpt-5.6-sol"}:                             "codex-gpt-5-6-sol",
+		{"codex", "gpt_6.astra"}:                             "codex-gpt-6-astra",
+		{"codex", "GPT-X"}:                                   "codex-gpt-x",
+		{"kimi-code", "kimi-code/k3.1-pro"}:                  "kimi-k3-1-pro",
+		{"kimi-code", "kimi-code/kimi-for-coding"}:           "kimi-for-coding",
+		{"kimi-code", "kimi-code/k3"}:                        "kimi-k3",
+		{"kimi-code", "kimi-code/kimi-for-coding-highspeed"}: "kimi-for-coding-highspeed",
 	}
 	for in, want := range cases {
 		if got := importProfileName(in[0], in[1]); got != want {

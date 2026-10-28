@@ -201,7 +201,7 @@ CREATE TABLE tasks (
 
 CREATE TABLE model_profiles (                  -- реестр профилей запуска (миграция 0021)
   name        TEXT PRIMARY KEY,                -- [a-z0-9][a-z0-9-]{0,39}
-  agent       TEXT NOT NULL,                   -- claude-code | codex
+  agent       TEXT NOT NULL,                   -- claude-code | codex | kimi-code
   model       TEXT NOT NULL DEFAULT '',        -- '' = модель агента по умолчанию
   effort      TEXT NOT NULL DEFAULT '',        -- '' = по умолчанию; иначе из Agent.Efforts()
   description TEXT NOT NULL DEFAULT '',        -- «для чего подходит» — это читает оркестратор

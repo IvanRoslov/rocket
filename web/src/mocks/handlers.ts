@@ -88,10 +88,11 @@ export function resetModelProfiles(): void {
   profilesState = modelProfiles.map((p) => ({ ...p }))
 }
 
-// Mirrors Agent.Efforts() (internal/agent/claudecode, internal/agent/codex).
+// Mirrors Agent.Efforts() (internal/agent/claudecode, internal/agent/codex, internal/agent/kimicode).
 const AGENT_EFFORTS: Record<string, string[]> = {
   'claude-code': ['low', 'medium', 'high', 'xhigh', 'max'],
   codex: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+  'kimi-code': ['low', 'high', 'max'],
 }
 
 function profileError(status: number, code: string, message: string) {
@@ -1688,7 +1689,15 @@ export const handlers = [
           skipped.push({ model: m.id, reason: `profile ${owner.name} already uses it` })
           continue
         }
-        const base = (cat.agent === 'codex' ? `codex-${m.id}` : m.id).replace(/[^a-z0-9-]/g, '-')
+        // Mirrors importProfileName (internal/api/model_catalog.go).
+        const kimiBase = m.id.replace(/^kimi-code\//, '')
+        const named =
+          cat.agent === 'codex'
+            ? `codex-${m.id}`
+            : cat.agent === 'kimi-code'
+              ? kimiBase.startsWith('kimi-') ? kimiBase : `kimi-${kimiBase}`
+              : m.id
+        const base = named.replace(/[^a-z0-9-]/g, '-')
         let name = base
         for (let i = 2; profilesState.some((p) => p.name === name); i++) name = `${base}-${i}`
         profilesState = [

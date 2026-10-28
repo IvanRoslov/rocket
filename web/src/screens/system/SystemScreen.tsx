@@ -207,7 +207,7 @@ export function SystemScreen() {
       <div className="system-stats">
         {/* liveCount is intentionally used for both tiles until the API distinguishes session vs agent counts */}
         <StatTile label="Live sessions" value={liveCount} unit="tmux" />
-        <StatTile label="Agents running" value={liveCount} unit="claude/codex" />
+        <StatTile label="Agents running" value={liveCount} unit="claude/codex/kimi" />
         <StatTile label="Orphans" value={orphanCount} unit="reconcile" highlight={orphanCount > 0} />
         <StatTile
           label="Queue depth"

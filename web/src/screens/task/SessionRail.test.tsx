@@ -138,7 +138,7 @@ describe('SessionRail agent badges', () => {
     const orchestrator = { ...sessions.find((s) => s.kind === 'orchestrator')!, agent: 'claude-code' }
     const workers = sessions
       .filter((s) => s.kind === 'worker')
-      .map((w, i) => ({ ...w, agent: i === 0 ? 'codex' : 'claude-code' }))
+      .map((w, i) => ({ ...w, agent: i === 0 ? 'codex' : i === 1 ? 'kimi-code' : 'claude-code' }))
     render(
       <QueryClientProvider client={queryClient}>
         <SessionRail orchestrator={orchestrator} workers={workers} />
@@ -151,8 +151,8 @@ describe('SessionRail agent badges', () => {
     const codexCard = screen.getByText(workers[0].tmux_name).closest<HTMLElement>('.session-rail__worker')!
     expect(within(codexCard).getByText('codex')).toBeInTheDocument()
 
-    const claudeCard = screen.getByText(workers[1].tmux_name).closest<HTMLElement>('.session-rail__worker')!
-    expect(within(claudeCard).getByText('claude-code')).toBeInTheDocument()
+    const kimiCard = screen.getByText(workers[1].tmux_name).closest<HTMLElement>('.session-rail__worker')!
+    expect(within(kimiCard).getByText('kimi-code')).toBeInTheDocument()
   })
 })
 

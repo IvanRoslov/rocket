@@ -44,6 +44,7 @@ describe('catalogSourceText', () => {
     expect(catalogSourceText({ ...claude, source: 'cache' })).toBe('from Claude Code cache')
     expect(catalogSourceText({ ...claude, agent: 'codex', source: 'cli' })).toBe('from Codex CLI')
     expect(catalogSourceText({ ...claude, agent: 'codex', source: 'cache' })).toBe('from Codex cache')
+    expect(catalogSourceText({ ...claude, agent: 'kimi-code', source: 'cache' })).toBe('from Kimi Code config')
     expect(catalogSourceText({ ...claude, source: 'builtin' })).toBe('built-in')
   })
 })

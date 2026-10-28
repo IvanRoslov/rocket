@@ -110,3 +110,12 @@ func TestModelsImportHumanOnly(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestCatalogSourceLabel_KimiCode(t *testing.T) {
+	if got := catalogSourceLabel("kimi-code", "cache"); got != "из конфига Kimi Code" {
+		t.Errorf("kimi-code cache label = %q", got)
+	}
+	if got := catalogSourceLabel("kimi-code", "builtin"); got != "встроенный список" {
+		t.Errorf("kimi-code builtin label = %q", got)
+	}
+}

@@ -290,12 +290,19 @@ func handleImportCatalog(w http.ResponseWriter, r *http.Request, d Deps) {
 }
 
 // importProfileName is the profile name an imported model gets: the model
-// id for claude-code, "codex-" + slug with "." and "_" as "-" for codex;
-// lowercased, any other character outside [a-z0-9-] becomes "-".
+// id for claude-code, "codex-" + slug with "." and "_" as "-" for codex,
+// "kimi-" + slug of the id without its "kimi-code/" prefix for kimi-code
+// (no doubled "kimi-"); lowercased, any other character outside [a-z0-9-] becomes "-".
 func importProfileName(agentName, modelID string) string {
 	base := modelID
-	if agentName == "codex" {
+	switch agentName {
+	case "codex":
 		base = "codex-" + modelID
+	case "kimi-code":
+		base = strings.TrimPrefix(modelID, "kimi-code/")
+		if !strings.HasPrefix(base, "kimi-") {
+			base = "kimi-" + base
+		}
 	}
 	var b strings.Builder
 	for _, r := range strings.ToLower(base) {
