@@ -1,0 +1,4 @@
+{"timestamp":"2026-10-28T11:52:57.368Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-A","model_context_window":258400}}
+{"timestamp":"2026-10-28T11:52:57.400Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"run the long command"}]}}
+{"timestamp":"2026-10-28T11:53:01.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"sleep 1800\"}","call_id":"call-1"}}
+{"timestamp":"2026-10-28T11:54:00.000Z","type":"event_msg","payload":{"type":"turn_aborted","turn_id":"turn-A","reason":"interrupted"}}
