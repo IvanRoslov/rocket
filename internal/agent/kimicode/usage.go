@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -49,36 +48,6 @@ func kimiUsageWorktreePath(path string) string {
 			return filepath.Clean(filepath.Join(append([]string{resolved}, suffix...)...))
 		}
 	}
-}
-
-func kimiUsageAgentWires(sessionDir string) ([]string, error) {
-	root := filepath.Join(sessionDir, "agents")
-	agents, err := os.ReadDir(root)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read Kimi agents %s: %w", root, err)
-	}
-	var paths []string
-	for _, entry := range agents {
-		if !entry.IsDir() {
-			continue
-		}
-		path := filepath.Join(root, entry.Name(), "wire.jsonl")
-		info, err := os.Stat(path)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("stat Kimi journal %s: %w", path, err)
-		}
-		if info.Mode().IsRegular() {
-			paths = append(paths, path)
-		}
-	}
-	sort.Strings(paths)
-	return paths, nil
 }
 
 // Usage sums usage.record rows from every matching native session and agent
@@ -132,7 +101,7 @@ func (k *KimiCode) Usage(ctx context.Context, worktreePath string, since time.Ti
 			if json.Unmarshal(stateBytes, &state) != nil || filepath.Clean(state.Cwd) != physical {
 				continue
 			}
-			paths, err := kimiUsageAgentWires(dir)
+			paths, err := agentWires(dir)
 			if err != nil {
 				return agent.Usage{}, err
 			}
