@@ -79,6 +79,20 @@ func TestFindSessionResolvesSymlinkAndFallsBackToAllShards(t *testing.T) {
 	}
 }
 
+func TestFindSessionFallsBackWhenPreferredShardHasNoMatchingCwd(t *testing.T) {
+	home := t.TempDir()
+	wt := filepath.Join(t.TempDir(), "myrepo")
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeState(t, home, "wd_myrepo_wrong", "session_other", t.TempDir(), 30)
+	want := writeState(t, home, "wd_other_name_hash", "session_right", wt, 20)
+	got, err := findSession(home, wt, time.UnixMilli(20))
+	if err != nil || got != want {
+		t.Fatalf("findSession = %q, %v; want %q", got, err, want)
+	}
+}
+
 func TestFindSessionNoCurrentSession(t *testing.T) {
 	home := t.TempDir()
 	wt := t.TempDir()

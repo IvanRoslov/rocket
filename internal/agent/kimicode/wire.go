@@ -36,37 +36,43 @@ func findSession(home, worktree string, since time.Time) (string, error) {
 			preferred = append(preferred, shard.Name())
 		}
 	}
-	if len(preferred) == 0 {
-		preferred = all
-	}
-	var bestDir string
-	var bestCreated int64
-	for _, shard := range preferred {
-		base := filepath.Join(root, shard)
-		entries, err := os.ReadDir(base)
-		if err != nil {
-			continue
-		}
-		for _, entry := range entries {
-			if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "session_") {
-				continue
-			}
-			dir := filepath.Join(base, entry.Name())
-			b, err := os.ReadFile(filepath.Join(dir, "state.json"))
+	findIn := func(shardNames []string) string {
+		var bestDir string
+		var bestCreated int64
+		for _, shard := range shardNames {
+			base := filepath.Join(root, shard)
+			entries, err := os.ReadDir(base)
 			if err != nil {
 				continue
 			}
-			var state struct {
-				Cwd       string `json:"cwd"`
-				CreatedAt int64  `json:"createdAt"`
-			}
-			if json.Unmarshal(b, &state) != nil || filepath.Clean(state.Cwd) != physical || state.CreatedAt < since.UnixMilli() {
-				continue
-			}
-			if bestDir == "" || state.CreatedAt > bestCreated || state.CreatedAt == bestCreated && dir > bestDir {
-				bestDir, bestCreated = dir, state.CreatedAt
+			for _, entry := range entries {
+				if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "session_") {
+					continue
+				}
+				dir := filepath.Join(base, entry.Name())
+				b, err := os.ReadFile(filepath.Join(dir, "state.json"))
+				if err != nil {
+					continue
+				}
+				var state struct {
+					Cwd       string `json:"cwd"`
+					CreatedAt int64  `json:"createdAt"`
+				}
+				if json.Unmarshal(b, &state) != nil || filepath.Clean(state.Cwd) != physical || state.CreatedAt < since.UnixMilli() {
+					continue
+				}
+				if bestDir == "" || state.CreatedAt > bestCreated || state.CreatedAt == bestCreated && dir > bestDir {
+					bestDir, bestCreated = dir, state.CreatedAt
+				}
 			}
 		}
+		return bestDir
+	}
+	bestDir := findIn(preferred)
+	if bestDir == "" && len(preferred) < len(all) {
+		// A basename match can belong to another worktree. Search all shards
+		// when it yields no current session for this physical cwd.
+		bestDir = findIn(all)
 	}
 	if bestDir == "" {
 		return "", agent.ErrNoSignal

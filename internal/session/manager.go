@@ -1095,8 +1095,10 @@ func (m *Manager) queueFirstMessage(ag agent.Agent, spec *agent.LaunchSpec) erro
 	if !agent.TakesFirstMessageByInput(ag) || spec.FirstMessage == "" {
 		return nil
 	}
+	// An empty FromSession is Rocket's system sender. The queue displays it
+	// as "rocket" without treating it as a session for failure notices.
 	if _, err := m.st.AddMessage(store.Message{
-		FromSession: "rocket", ToSession: spec.SessionID, Body: spec.FirstMessage,
+		ToSession: spec.SessionID, Body: spec.FirstMessage,
 	}); err != nil {
 		return fmt.Errorf("queue first message: %w", err)
 	}

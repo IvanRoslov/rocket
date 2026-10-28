@@ -159,7 +159,7 @@ func TestRestoreQueuesNoticeForInputAgent(t *testing.T) {
 		t.Fatalf("pending message order changed: %+v", msgs)
 	}
 	msg := msgs[1]
-	if msg.FromSession != "rocket" || msg.Status != "queued" {
+	if msg.FromSession != "" || msg.Status != "queued" {
 		t.Fatalf("restore message = %+v", msg)
 	}
 	if !strings.Contains(msg.Body, "[rocket restore]") || !strings.Contains(msg.Body, sess.Prompt) {
@@ -196,8 +196,8 @@ func assertQueuedMessage(t *testing.T, st *store.Store, id string) store.Message
 	if err != nil || !ok {
 		t.Fatalf("NextQueuedMessage: ok=%v err=%v", ok, err)
 	}
-	if msg.FromSession != "rocket" || msg.Status != "queued" {
-		t.Fatalf("queued message = %+v, want rocket sender and queued status", msg)
+	if msg.FromSession != "" || msg.Status != "queued" {
+		t.Fatalf("queued message = %+v, want system sender and queued status", msg)
 	}
 	return msg
 }
