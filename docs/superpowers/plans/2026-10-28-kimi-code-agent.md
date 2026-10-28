@@ -8,14 +8,15 @@
 
 **Tech Stack:** Go (daemon, CLI), TypeScript/React (web dashboard), tmux.
 
-**Spec:** `docs/superpowers/specs/2026-10-28-kimi-code-agent-design.md` (task #5757 spec v1). Every worker reads it in full.
+**Spec:** `docs/superpowers/specs/2026-10-28-kimi-code-agent-design.md` (task #5757 spec v2). Recon facts and fixtures: `docs/superpowers/kimi-recon-report.md`, `internal/agent/kimicode/testdata/`, `internal/runtime/testdata/kimi-*.pane` (merged in PR #142) — every worker reads the report too.. Every worker reads it in full.
 
 ## Global Constraints
 
 - Agent name (registry key, profiles, API, UI): `kimi-code`. Go package: `internal/agent/kimicode`.
 - Kimi Code CLI 2.4.0; binary lookup: `kimi` in PATH → `$KIMI_CODE_HOME/bin/kimi` → `~/.kimi-code/bin/kimi`; LaunchCommand uses the resolved absolute path.
 - Kimi home: `$KIMI_CODE_HOME`, default `~/.kimi-code`. Never write to Kimi's global files (`config.toml`, `tui.toml`, hooks, plugins). Read-only access to them is fine.
-- Launch: `<kimi> --auto [-m <model>] --agent-file <worktree>/.rocket/kimi-agent.md` (fallback `AGENTS.md` rocket block only if Task 1 says so).
+- Launch: `<kimi> --auto [-m <model>]`. System prompt: rocket block in `<worktree>/AGENTS.md`, same mechanism as codex (`--agent-file` is ignored by the 2.4.0 TUI — do not use it).
+- Text injection into a kimi-code pane: bracketed paste (`tmux paste-buffer -p`) then Enter; non-bracketed paste trips Kimi's paste-burst heuristic (Enter → newline).
 - Env always: `KIMI_CODE_TRUST_WORKSPACE=1`, `KIMI_CODE_NO_AUTO_UPDATE=1`, `KIMI_DISABLE_TELEMETRY=1`; `KIMI_MODEL_THINKING_EFFORT=<effort>` only when effort set.
 - `Efforts()` = `low, high, max`.
 - Skills sections (`{{#if skills}}`) are NOT stripped for kimi-code.
@@ -26,15 +27,15 @@
 
 ## Review Focus
 
-1. Kimi creates its session journal only after the first prompt → before the brief is injected, Activity must return `ErrNoSignal` (not `ready`/`idle`), and first-message delivery must rely on the pane parser. Test owner: Task 3 (activity) and Task 2 (manager queues first message).
-2. A previous Kimi session in the same worktree (after `restore`) must not be taken as the current one: journal selection respects `ActivityRef.Since`. Test owner: Task 2 (`wire.go` locator).
-3. Messages typed while Kimi is busy are queued by Kimi; delivery confirmation must still find them (possibly joined or recorded later as a new `turn.prompt`). Test owner: Task 3.
+1. Kimi creates its session journal only after the first prompt (confirmed by recon) → before the brief is injected, Activity must return `ErrNoSignal` (not `ready`/`idle`), and first-message delivery must rely on the pane parser. Test owner: Task 3 (activity) and Task 2 (manager queues first message).
+2. A previous Kimi session in the same worktree (after `restore`) must not be taken as the current one: journal selection respects `ActivityRef.Since`. Test owner: Task 2 (`wire.go` locator: `state.json.createdAt` vs `Since`).
+3. Messages typed while Kimi is busy are queued by Kimi and recorded only when their turn starts, as a separate user-origin `turn.prompt` (fixture `queued-second-message.wire.jsonl`); skill-activation `turn.steer` records must not count as delivery. Test owner: Task 3.
 4. Quota exhaustion (429) → `turn.ended reason=failed` with error → `blocked`, error text preserved. Test owner: Task 3.
 5. `kimi` not in the daemon's PATH but present at `~/.kimi-code/bin/kimi` → spawn works. Test owner: Task 2.
 
 ---
 
-### Task 1: Live recon spike — pin Kimi facts and capture fixtures (`kimi-recon`)
+### Task 1: Live recon spike — pin Kimi facts and capture fixtures (`kimi-recon`) — DONE, PR #142
 
 **Files:**
 - Create: `docs/superpowers/kimi-recon-report.md` (facts, each with how it was observed)
@@ -58,7 +59,7 @@ Depends on Task 1 merged.
 
 **Files:**
 - Create: `internal/agent/kimicode/kimicode.go`, `kimicode_test.go`, `wire.go`, `wire_test.go`, `catalog.go`, `catalog_test.go`, `effort_test.go`, `skill_test.go`
-- Modify: `internal/agent/agent.go` (new interface), `internal/session/manager.go` (first message via queue for start/spawn/restore), its tests
+- Modify: `internal/agent/agent.go` (new interfaces `FirstMessageByInput`, `BracketedPaster`), `internal/session/manager.go` (first message via queue for start/spawn/restore), its tests
 - Modify: `internal/cli/doctor.go` (blank import registering `kimi-code`) and wherever else adapters are blank-imported (grep `agent/codex"`)
 
 **Interfaces:**
@@ -69,20 +70,28 @@ Depends on Task 1 merged.
   // as the session's first delivery instead.
   type FirstMessageByInput interface{ FirstMessageByInput() bool }
   func TakesFirstMessageByInput(a Agent) bool
+  // BracketedPaster is implemented by agents whose TUI must receive injected text
+  // as a bracketed paste (Kimi: a fast non-bracketed paste turns the next Enter into a newline).
+  type BracketedPaster interface{ BracketedPaste() bool }
+  func WantsBracketedPaste(a Agent) bool
   ```
 - Produces in `kimicode`:
   ```go
   func New() agent.Agent              // registered as "kimi-code"
   func kimiHome() string               // $KIMI_CODE_HOME or ~/.kimi-code
   func resolveBinary() (string, error)
-  // findSession returns the wire.jsonl of the newest Kimi session whose workDir is
-  // worktree (symlinks resolved) and created at/after since; agent.ErrNoSignal if none.
-  func findSession(home, worktree string, since time.Time) (wirePath string, err error)
+  // findSession scans <home>/sessions/wd_<basename(worktree)>_*/session_*/state.json
+  // (falling back to all wd_* dirs), picks the newest session whose state.json "cwd"
+  // equals EvalSymlinks(worktree) and whose "createdAt" (unix ms) >= since, and returns
+  // its directory; agent.ErrNoSignal if none. Never runs kimi.
+  func findSession(home, worktree string, since time.Time) (sessionDir string, err error)
+  func mainWire(sessionDir string) string        // <sessionDir>/agents/main/wire.jsonl
+  func agentWires(sessionDir string) []string     // all <sessionDir>/agents/*/wire.jsonl
   type wireRecord struct { Type string; Time time.Time; Raw json.RawMessage }
   func readTail(path string, stop func(wireRecord) bool) ([]wireRecord, error) // newest first
   ```
-  `Activity`, `TranscriptTail`, `TranscriptStat` are stubs returning `agent.ErrNoSignal` (Tasks 3–4 replace them). Implements `BrainstormSkillShipper` (true) and `FirstMessageByInput` (true).
-- [ ] Tests: `LaunchCommand` exact argv for (no model/effort), (model), and that FirstMessage never appears in argv; `Env` contains the three fixed vars and the effort var only when set; `Available`/`resolveBinary` with PATH empty and fake `~/.kimi-code/bin/kimi` (HOME in temp dir); `SetupWorkspace` writes `.rocket/kimi-agent.md` with `${base_prompt}` + prompt incl. skills sections, path git-excluded, idempotent; orchestrator with `BrainstormSkill="orchestrator-brainstorming"` gets `.kimi-code/skills/orchestrator-brainstorming/` (scripts executable, git-excluded), without it the dir is removed; `Catalog` from fixture config (6 models, efforts, defaults), broken TOML and missing file → builtin + warning; `findSession` picks newest matching workDir, ignores other dirs, honours `since`, falls back to dir walk without index.
+  `Activity`, `TranscriptTail`, `TranscriptStat` are stubs returning `agent.ErrNoSignal` (Tasks 3–4 replace them). Implements `BrainstormSkillShipper` (true), `FirstMessageByInput` (true), `BracketedPaster` (true).
+- [ ] Tests: `LaunchCommand` exact argv for (no model/effort), (model), and that FirstMessage never appears in argv; `Env` contains the three fixed vars and the effort var only when set; `Available`/`resolveBinary` with PATH empty and fake `~/.kimi-code/bin/kimi` (HOME in temp dir); `SetupWorkspace` upserts the rocket block into `AGENTS.md` exactly like codex's `upsertAgentsMD` but WITHOUT `prompts.StripSkills` (skills sections kept), git-excluded when untracked, idempotent, foreign content preserved (reuse/extract codex's helper rather than copy it); orchestrator with `BrainstormSkill="orchestrator-brainstorming"` gets `.kimi-code/skills/orchestrator-brainstorming/` (scripts executable, git-excluded), without it the dir is removed; `Catalog` from fixture config (6 models, efforts, defaults), broken TOML and missing file → builtin + warning; `findSession` on a fake home built from fixtures (`state.json`): picks newest matching `cwd`, symlinked worktree path matches physical `cwd`, other cwds ignored, `createdAt < since` ignored, missing basename prefix falls back to all `wd_*`, no sessions → `ErrNoSignal`.
 - [ ] Session manager tests: for an agent with `FirstMessageByInput`, Start/Spawn/Restore put FirstMessage as the first queued message (sender `rocket`) and LaunchSpec passed to LaunchCommand has empty FirstMessage; other agents unchanged.
 - [ ] Implement, `make test`, commit, PR.
 
@@ -92,14 +101,15 @@ Depends on Task 2 merged.
 
 **Files:**
 - Create: `internal/agent/kimicode/activity.go`, `activity_test.go`, `confirm.go`, `confirm_test.go`, `startup.go`, `startup_test.go`
-- Create/Modify: `internal/runtime/` Kimi composer parser (new file `kimipane.go` + test) and `startscreen.go` extended for Kimi screens; queue/runtime hook-up so draft guard and readiness use the Kimi parser for `kimi-code` sessions (follow how Codex's composer detection is selected).
+- Create/Modify: `internal/runtime/` Kimi composer parser (new file `kimipane.go` + test), Kimi start-screen parser (new file `kimistartscreen.go` + test) used by the monitor for `kimi-code` sessions; `runtime.InjectOpts.Bracketed bool` → `paste-buffer -p`; queue sets it via `agent.WantsBracketedPaste`; draft guard and readiness use the Kimi parser for `kimi-code` sessions (follow how Codex's composer detection is selected); start-screen answer for unnumbered options = arrow keys to the chosen option + Enter, re-reading the screen first (409 `prompt_changed` if it changed).
 
 **Interfaces:**
 - Consumes: `findSession`, `readTail`, `wireRecord` (Task 2).
-- Produces: `Activity` (real), `ConfirmDelivered`, `AcceptsInputWhileBusy() bool { return true }`, `HasStartedTurn`; runtime: `ParseKimiComposer(pane string) (state KimiComposer, ok bool)` with states `Empty`, `Draft`, `Busy`.
+- Produces: `Activity` (real), `ConfirmDelivered`, `AcceptsInputWhileBusy() bool { return true }`, `HasStartedTurn` (user-origin `turn.prompt` at/after `Since`); runtime: `ParseKimiComposer(pane string) (state KimiComposer, ok bool)` with states `Empty`, `Draft`, `Busy`; `ParseKimiStartScreen(pane string) (PermissionPrompt, bool)`.
 - [ ] Activity tests on fixtures: open `turn.prompt` + old mtime → `active`; `turn.ended completed` + old mtime → `ready`; `turn.ended failed` with 429 error → `blocked` with error text; open `interaction.request` → `blocked`; no journal → `ErrNoSignal`.
-- [ ] Confirm tests: exact match after `since`; whitespace-normalized; record before `since` not matched; queued/joined messages (per Task 1 facts); large body matched by inbox-file reference text; long lines.
-- [ ] Pane tests on Task 1 snapshots: empty composer, draft, busy+queue; negatives — Claude and Codex panes. Start screen: Kimi trust screen parsed with title and options; normal Kimi screen not a start screen; existing Codex snapshots still pass.
+- [ ] Confirm tests: exact match after `since` on user-origin `turn.prompt`; whitespace-normalized; record before `since` not matched; queued message confirmed by the later `turn.prompt` (fixture `queued-second-message.wire.jsonl`), not by `turn.steer` with `origin.kind=skill_activation`; large body matched by inbox-file reference text; long lines.
+- [ ] Pane tests on recon snapshots: `kimi-idle.pane` → Empty, `kimi-draft.pane` → Draft, `kimi-busy-queued.pane` → Busy, `kimi-finished.pane` → Empty; negatives — Claude and Codex panes. Start screen: `kimi-trust.pane` → title `Trust this folder?`, options `Trust and continue`, `Exit`; `kimi-idle.pane`/`kimi-question.pane` handling documented (question = blocked via journal interaction, not a start screen); existing Codex snapshots still pass.
+- [ ] Runtime test: `Inject` with `Bracketed: true` issues `paste-buffer -p`; without it the argv is unchanged.
 - [ ] Queue test: first message for a kimi-code session waits until the composer is `Empty`, then injects.
 - [ ] Implement, `make test`, commit, PR.
 
@@ -113,8 +123,8 @@ Depends on Task 2 merged; parallel with Task 3.
 **Interfaces:**
 - Consumes: `findSession`, `wireRecord` (Task 2).
 - Produces: `Usage(ctx, worktreePath, since) (agent.Usage, error)`, real `TranscriptTail`, `TranscriptStat`.
-- [ ] Usage tests: per-model sums with mapping `inputOther→Input`, `inputCacheRead→CacheRead`, `inputCacheCreation→CacheWrite`, `output→Output`, `Messages` = record count; records before `since` excluded; several sessions in one worktree summed; `Found=false` without journal; sub-agent journals (`agents/agent-N/wire.jsonl`) included.
-- [ ] Chat tests: user/assistant text entries, tool entries with `ToolName` and ≤120-rune digest, TS from record time, cursor resume returns only new entries, `TranscriptStat` mtime/size.
+- [ ] Usage tests: per-model sums with mapping `inputOther→Input`, `inputCacheRead→CacheRead`, `inputCacheCreation→CacheWrite`, `output→Output`, `Messages` = record count; records before `since` excluded; several sessions in one worktree summed; `Found=false` without journal; sub-agent journals (`agents/agent-N/wire.jsonl`, fixtures `subagent-parent/child`) included and `subagent.completed.usage` NOT added (total equals parent records + child records exactly once).
+- [ ] Chat tests on `completed-tool-turn.wire.jsonl`: user and assistant text entries from `agent.message.appended` (`context.append_message` alone would show only user messages), a `Bash` tool entry with ≤120-rune digest of `sleep 12 && printf tool-ok`, TS from record time, cursor resume returns only new entries, `TranscriptStat` mtime/size of `agents/main/wire.jsonl`.
 - [ ] Implement, `make test`, commit, PR.
 
 ### Task 5: CLI/API/doctor/web/docs surface (`kimi-surface`)

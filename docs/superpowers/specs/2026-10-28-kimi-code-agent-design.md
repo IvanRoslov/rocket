@@ -1,6 +1,6 @@
 # Агент Kimi Code в Rocket — дизайн
 
-Задача #5757. Статус: спека v1.
+Задача #5757. Статус: спека v2 (уточнена по итогам живой разведки, `docs/superpowers/kimi-recon-report.md`, PR #142).
 
 ## Коротко (для гейта)
 
@@ -14,6 +14,16 @@
 
 **Как поймём, что готово.** Вы создаёте профиль Kimi, разрешаете его задаче — оркестратор спавнит воркера на Kimi, тот получает бриф, Rocket видит его статус и токены, воркер делает PR. И отдельно: задача, стартованная с профилем Kimi, проходит брейншторм → гейт → спавн.
 
+## Что изменилось в v2
+
+Цель и объём те же. Разведка на живом Kimi 2.4.0 поправила технические детали:
+- системный промпт — через блок в `AGENTS.md` (флаг `--agent-file` в интерактивном режиме Kimi молча игнорируется);
+- сообщения в Kimi вставляются «bracketed paste» (`paste-buffer -p`): при обычной быстрой вставке Kimi принимает следующий Enter за перевод строки;
+- индекса сессий у Kimi нет — сессия ищется по папкам `sessions/wd_*/session_*/state.json`;
+- ответы и инструменты Kimi пишет в записи `agent.message.appended`, а не в `context.append_message`;
+- токены помощников Kimi считаются по их собственным журналам, итог в журнале основного агента не прибавляется (иначе двойной счёт);
+- варианты на экране доверия не пронумерованы — нужен отдельный распознаватель экранов Kimi.
+
 ## Решения брейншторма
 
 - 5757/Q1 — Kimi и для воркеров, и для оркестраторов.
@@ -22,19 +32,20 @@
 
 ## Исходные факты (Kimi Code CLI 2.4.0)
 
-Источник — документация https://moonshotai.github.io/kimi-code/ и исходники `MoonshotAI/kimi-code` 2.4.0, плюс осмотр `~/.kimi-code` на этой машине. Пункты с пометкой **[спайк]** подтверждаются вживую в первой подзадаче, прежде чем на них опирается код.
+Источник — документация https://moonshotai.github.io/kimi-code/ и исходники `MoonshotAI/kimi-code` 2.4.0, плюс осмотр `~/.kimi-code` на этой машине. Ключевые пункты подтверждены живой разведкой (отчёт `docs/superpowers/kimi-recon-report.md`, фикстуры `internal/agent/kimicode/testdata/`, `internal/runtime/testdata/kimi-*.pane`).
 
 - Бинарь `kimi`, ставится в `~/.kimi-code/bin/kimi`; в PATH демона его может не быть.
 - Домашний каталог `~/.kimi-code`, переопределяется `KIMI_CODE_HOME`. Там же учётные данные — поэтому все сессии используют один общий каталог (отдельный на воркера = отдельный логин).
 - Модели подписки — алиасы `kimi-code/<id>` в `config.toml` (`[models."kimi-code/k3.1-pro"]`: `display_name`, `support_efforts = ["low","high","max"]`, `default_effort`). Выбор — `-m <алиас>`.
-- Усилие — переменная `KIMI_MODEL_THINKING_EFFORT` **[спайк: действует на managed-провайдер подписки]**.
+- Усилие — переменная `KIMI_MODEL_THINKING_EFFORT`: `low/high/max` доходят до `llm.request.thinkingEffort` (проверено); подпись внизу TUI и `profile.bind` могут показывать другое значение.
 - Без подтверждений — `--auto` («Never Ask»); останавливается только на утверждении плана в Plan mode (`--plan` не передаём).
 - Первое сообщение позиционным аргументом передать нельзя (TUI отвергает), `-p` — только неинтерактивный режим.
-- Системный промпт: `--agent-file <path.md>` с `${base_prompt}` в теле дописывает к штатному промпту (только для новой сессии); `AGENTS.md` от git-корня до cwd читается автоматически.
+- Системный промпт: `AGENTS.md` от git-корня до cwd читается автоматически и попадает в `systemPrompt` (проверено вживую в TUI `--auto`). `--agent-file` в TUI 2.4.0 не действует (работает только с `-p`) — не используем.
 - Экраны старта: доверие к папке → `KIMI_CODE_TRUST_WORKSPACE=1`; автообновление → `KIMI_CODE_NO_AUTO_UPDATE=1`; телеметрия → `KIMI_DISABLE_TELEMETRY=1`. Опрос «feedback survey», «cache expired», «model upgrade» флагами не гасятся — ловятся детектором экранов.
 - TUI по умолчанию не на альтернативном экране — история tmux работает.
-- Ввод во время хода: Enter ставит сообщение в собственную очередь Kimi.
-- Журнал сессии: `sessions/<wd_…>/<sessionId>/agents/main/wire.jsonl`, индекс `sessions/session_index.jsonl` (`sessionId`, `sessionDir`, `workDir`). Записи `{type, time, …}`: `turn.prompt` (ввод пользователя, `turnId`), `turn.ended` (`reason: completed|cancelled|failed|blocked`, `error`), `context.append_message` (сообщения user/assistant/tool), `usage.record` (`model`, `usage.inputOther/output/inputCacheRead/inputCacheCreation`), `interaction.request/resolved`. **[спайк: реальные образцы, как в журнал попадает сообщение, поставленное в очередь во время хода]**
+- Ввод: обычная (не bracketed) быстрая вставка включает эвристику paste-burst — Enter в течение 120 мс после неё вставляет перевод строки вместо отправки. Bracketed paste (`tmux paste-buffer -p`) + Enter отправляет текст как одно сообщение байт-в-байт (проверено на 5 007 байтах).
+- Ввод во время хода: Enter ставит сообщение в собственную очередь Kimi (видна строкой `❯ …` над полем ввода). В журнал оно попадает только когда начинается его ход — отдельным `turn.prompt` с `origin.kind = "user"`.
+- Журнал сессии: папка сессии `sessions/wd_<имя-папки-проекта>_<hash12>/session_<uuid>/` создаётся только после первого отправленного сообщения; в ней `state.json` (`cwd` — физический путь без симлинков, `createdAt`, `updatedAt`, `lastTurnReason`) и `agents/main/wire.jsonl`; помощники Kimi — `agents/agent-N/wire.jsonl`. Индекса `session_index.jsonl` у сессий 2.4.0 нет. Записи `{type, time, …}`: `turn.prompt` (ввод, `origin.kind`, `turnId`), `turn.ended` (`reason: completed|cancelled|failed|blocked`, `error`), `agent.message.appended` (сообщения user/assistant/tool), `context.append_loop_event` (`tool.call`, `tool.result`), `usage.record` (`model`, `usage.inputOther/output/inputCacheRead/inputCacheCreation`), `interaction.request` / `interaction.resolved` (по `id`). `subagent.completed.usage` повторяет итог журнала помощника.
 - Хуки только глобальные — не используем.
 - Скиллы: проектные `.kimi-code/skills/<name>/SKILL.md` от git-корня ворктри; формат совместим с Claude Code.
 - Плагины: `~/.kimi-code/plugins/installed.json` — список с `id`, `enabled`.
@@ -46,8 +57,8 @@
 ### Запуск
 
 - `Available()`: `kimi` в PATH, иначе `$KIMI_CODE_HOME/bin/kimi` / `~/.kimi-code/bin/kimi`. `LaunchCommand` использует найденный абсолютный путь.
-- Команда: `<kimi> --auto [-m <model>] --agent-file <worktree>/.rocket/kimi-agent.md`.
-- Системный промпт: `SetupWorkspace` пишет `.rocket/kimi-agent.md` — agent-файл, тело которого `${base_prompt}` + промпт Rocket (разделы про скиллы сохраняются). Путь исключается из git (`agent.ExcludeFromGit`). Если спайк покажет, что `--agent-file` не подходит (формат, ограничения), — запасной путь как у codex: блок `<!-- rocket:start -->` в `AGENTS.md`; выбор фиксируется в отчёте спайка, спека в этом месте не меняется.
+- Команда: `<kimi> --auto [-m <model>]`.
+- Системный промпт: `SetupWorkspace` пишет промпт Rocket (разделы про скиллы сохраняются) в блок `<!-- rocket:start -->…<!-- rocket:end -->` в `<worktree>/AGENTS.md` — тем же способом, что адаптер codex (идемпотентно, чужое содержимое файла не трогается, неотслеживаемый `AGENTS.md` исключается из git).
 - Env: `KIMI_CODE_TRUST_WORKSPACE=1`, `KIMI_CODE_NO_AUTO_UPDATE=1`, `KIMI_DISABLE_TELEMETRY=1`, `KIMI_MODEL_THINKING_EFFORT=<effort>` (если задано) + стандартные `ROCKET_*`.
 - `Efforts()`: `low, high, max`. Проверка усилия профиля идёт по каталогу модели (у модели без `support_efforts` усилие должно быть пустым) — существующий механизм.
 - **Первое сообщение.** Новый необязательный интерфейс `agent.FirstMessageByInput` (`FirstMessageByInput() bool`). Для такого агента `LaunchCommand` не получает первое сообщение; менеджер сессий кладёт `FirstMessage` в очередь доставки первым сообщением сессии (тот же путь, что `rocket send`, отправитель — `rocket`). Очередь вставляет его, когда TUI готов принять ввод (см. «Готовность ввода»). То же для restore (`fillRestorePrompt`).
@@ -56,13 +67,14 @@
 
 ### Наблюдение
 
-- **Журнал сессии** (`wire.go`): самый свежий по времени создания сессии с `workDir` = ворктри (через `session_index.jsonl`, с откатом на обход каталогов `sessions/wd_*`), не раньше `ActivityRef.Since`. Чтение с конца блоками по 64 КиБ, строки любой длины, битые строки пропускаются.
+- **Журнал сессии** (`wire.go`): обход `sessions/wd_<basename ворктри>_*/session_*/state.json` (с откатом на все `wd_*`, если такого префикса нет); берётся сессия с `cwd` = физический путь ворктри (`filepath.EvalSymlinks`) и `createdAt` не раньше `ActivityRef.Since`, самая свежая. `kimi` для этого не запускается. Чтение с конца блоками по 64 КиБ, строки любой длины, битые строки пропускаются.
 - **Activity:** последний `turn.prompt` без последующего `turn.ended` → `active` при любом mtime; `turn.ended` с `reason=failed` (в т.ч. 429 — исчерпана квота) или `blocked` → `blocked` с текстом ошибки; открытый `interaction.request` → `blocked`; иначе mtime < 30 с → `active`, иначе `ready`. Журнала нет → `ErrNoSignal`.
-- **BusyInputAccepter** → `true`. **DeliveryConfirmer**: в журнале после `since` есть `turn.prompt` (или запись очереди/steer — по итогам спайка) с текстом, равным вставленному после нормализации пробелов; склейка нескольких сообщений учитывается как у codex.
-- **Готовность ввода и черновик.** Парсер панели Kimi (`internal/runtime`, снимки в `testdata/kimi-*.pane`): распознаёт пустое поле ввода (TUI готов), непустой черновик (draft guard очереди) и занятый Kimi с очередью. Очередь использует его так же, как для Claude/Codex.
-- **StartupProber + экраны старта:** `HasStartedTurn` = есть `turn.prompt` не раньше `Since`. Пока нет — монитор ищет на панели экран-вопрос; `ParseStartScreen` расширяется формой экранов Kimi (снимки из спайка: доверие к папке без env, survey/upgrade — если удастся снять, иначе insta-снимки из исходников). Остальная логика (квиз `start_screen`, тревога родителю, ответ человека) — общая, уже есть.
-- **UsageReader:** `usage.record` по фактической `model`: `inputOther → Input`, `inputCacheRead → CacheRead`, `inputCacheCreation → CacheWrite`, `output → Output`; `Messages` — число записей. Записи до `since` не считаются.
-- **TranscriptTail / TranscriptStat:** из `context.append_message` — user/assistant текст, tool — короткий дайджест с именем инструмента; курсор — смещение в файле.
+- **BusyInputAccepter** → `true`. **DeliveryConfirmer**: в журнале после `since` есть `turn.prompt` с `origin.kind = "user"`, чей текст равен вставленному после нормализации пробелов; склейка нескольких строк учитывается как у codex. Сообщение, стоящее в очереди Kimi, ещё не подтверждено — это не ошибка, подтверждение придёт, когда начнётся его ход.
+- **Вставка текста.** Для `kimi-code` рантайм вставляет текст bracketed paste (`paste-buffer -p`) — новый флаг в `runtime.InjectOpts`, который очередь выставляет по адаптеру (необязательный интерфейс `agent.BracketedPaster`). Для Claude/Codex вставка не меняется.
+- **Готовность ввода и черновик.** Парсер панели Kimi (`internal/runtime`, снимки в `testdata/kimi-*.pane`): по устойчивым строкам рамки поля ввода `│ > … │` (не по подсказкам и спиннеру, они меняются) распознаёт пустое поле ввода (TUI готов), непустой черновик (draft guard очереди) и занятый Kimi с очередью (`❯ …` над полем). Очередь использует его так же, как для Claude/Codex.
+- **StartupProber + экраны старта:** `HasStartedTurn` = есть `turn.prompt` не раньше `Since`. Пока нет — монитор ищет на панели экран-вопрос; Отдельный распознаватель экранов Kimi рядом с `ParseStartScreen`: заголовок + варианты под курсором `❯` **без номеров** + подсказка `↑↓ navigate · Enter select` (снимок экрана доверия из разведки); экраны с номерами (опрос `1: Bad … 0: Dismiss`) и прочие (`Model migration available`, `Kimi Code Update Available`, «cache expired») — по разметке из исходников 2.4.0, ссылки в отчёте разведки. Ответ человека на ненумерованный экран — стрелками до выбранного варианта и Enter (с перечитыванием экрана, как у codex). Остальная логика (квиз `start_screen`, тревога родителю, ответ человека) — общая, уже есть.
+- **UsageReader:** сумма `usage.record` из всех `agents/*/wire.jsonl` сессий ворктри по фактической `model`: `inputOther → Input`, `inputCacheRead → CacheRead`, `inputCacheCreation → CacheWrite`, `output → Output`; `Messages` — число записей. `subagent.completed.usage` не учитывается (двойной счёт). Записи до `since` не считаются.
+- **TranscriptTail / TranscriptStat:** по журналу `agents/main/wire.jsonl`: сообщения user/assistant — из `agent.message.appended`, вызовы инструментов — дайджест с именем инструмента (`Bash`, …) из `agent.message.appended` / `context.append_loop_event` `tool.call`; курсор — смещение в файле.
 
 ### Каталог и профили
 
@@ -86,14 +98,14 @@
 
 ## Сценарии
 
-1. **Воркер на Kimi.** Человек: `rocket models import --agent kimi-code`, включает `kimi-k3-1-pro`, разрешает его задаче. Оркестратор: `rocket spawn --task x --profile kimi-k3-1-pro`. Rocket создаёт ворктри, пишет `.rocket/kimi-agent.md`, стартует `kimi --auto -m kimi-code/k3.1-pro --agent-file …` с `KIMI_CODE_TRUST_WORKSPACE=1`. Экрана доверия нет; первое сообщение (бриф) ждёт в очереди, пока парсер не увидит пустое поле ввода, и вставляется. Kimi пишет `turn.prompt` → подтверждение доставки, статус `active`. Оркестратор шлёт `rocket send` посреди хода → вставка в очередь Kimi, подтверждение по журналу. Ход закончен → `ready`, токены во вкладке расхода, чат виден в дашборде. *Пробел:* если Kimi создаёт журнал сессии только после первого промпта, до вставки брифа статус — `ErrNoSignal`; монитор уже трактует это как «стартует», а готовность ввода берётся с панели — покрыто.
+1. **Воркер на Kimi.** Человек: `rocket models import --agent kimi-code`, включает `kimi-k3-1-pro`, разрешает его задаче. Оркестратор: `rocket spawn --task x --profile kimi-k3-1-pro`. Rocket создаёт ворктри, пишет блок Rocket в `AGENTS.md`, стартует `kimi --auto -m kimi-code/k3.1-pro` с `KIMI_CODE_TRUST_WORKSPACE=1`. Экрана доверия нет; первое сообщение (бриф) ждёт в очереди, пока парсер не увидит пустое поле ввода, и вставляется bracketed paste. Kimi создаёт папку сессии и пишет `turn.prompt` → подтверждение доставки, статус `active`. Оркестратор шлёт `rocket send` посреди хода → вставка в очередь Kimi; подтверждение приходит, когда начинается ход этого сообщения. Ход закончен → `ready`, токены во вкладке расхода, чат виден в дашборде. *Пробел:* Kimi создаёт журнал только после первого сообщения (подтверждено), до вставки брифа статус — `ErrNoSignal`; монитор трактует это как «стартует», а готовность ввода берётся с панели — покрыто.
 2. **Квота кончилась посреди работы.** Kimi получает 429, пишет `turn.ended reason=failed` с ошибкой → `blocked`, текст ошибки виден в статусе; через порог heartbeat сообщает оркестратору. Оркестратор переключает подзадачу на другой профиль (kill + respawn). *Пробел:* автоматического переключения на другой профиль нет — сознательно, решает оркестратор.
 3. **Оркестратор на Kimi.** Человек стартует задачу с профилем Kimi. `SetupWorkspace` кладёт `.kimi-code/skills/orchestrator-brainstorming/`; Superpowers — из плагина. Kickoff-сообщение доставляется через очередь. В режиме `--auto` инструкции плагина запрещают `AskUserQuestion`, что совпадает с запретом Rocket на интерактивные вопросы; вопросы идут через `rocket task ask` (Bash). Ответы человека приходят как вставленные сообщения `[#…/Qn answer …]`. *Пробел:* качество ведения шторма моделью Kimi не гарантируется кодом — проверяется в живой приёмке.
 4. **Restore.** `rocket restore <id>`: новый процесс Kimi в том же ворктри, `Since` = момент restore, поэтому старый журнал сессии не принимается за текущий; бриф восстановления доставляется через очередь.
 
 ## Тестирование
 
-- Юнит-тесты на каждый файл адаптера на снимках из спайка (`testdata/*.jsonl`, `*.pane`), по образцу тестов codex: команда/env, agent-файл и исключение из git, скилл оркестратора, каталог (живой конфиг, битый, отсутствует), активность (открытый ход, завершён, failed, interaction), подтверждение доставки (точное, склейка, до `since`), usage, чат, экраны старта (позитив/негатив), парсер поля ввода.
+- Юнит-тесты на каждый файл адаптера на фикстурах разведки (`testdata/*.jsonl`, `*.pane`), по образцу тестов codex: команда/env, блок `AGENTS.md` и исключение из git, скилл оркестратора, каталог (живой конфиг, битый, отсутствует), активность (открытый ход, завершён, failed, interaction), подтверждение доставки (точное, склейка, до `since`, сообщение из очереди Kimi), bracketed-вставка для kimi-code, usage (с помощниками, без двойного счёта), чат, экраны старта (позитив/негатив), парсер поля ввода.
 - Тесты менеджера сессий: агент с `FirstMessageByInput` не получает первое сообщение в argv, оно лежит первым в очереди; restore — так же.
 - `make test` (Go + web) зелёный в CI каждого PR.
 - Живая приёмка (после выкладки сборки и создания профилей человеком): воркер на Kimi делает тривиальный PR; задача на оркестраторе Kimi доходит до гейта.
