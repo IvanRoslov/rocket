@@ -436,6 +436,9 @@ func (m *Monitor) pollSession(ctx context.Context, sess store.Session, liveSet m
 			return
 		default:
 			state, ts = rawState, rawTS
+			if state == activity.Blocked {
+				m.reportTurnFailure(ctx, sess, ag, ref)
+			}
 		}
 	}
 

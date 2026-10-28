@@ -100,18 +100,6 @@ func TestActivityNewTurnAfterFailureIsActive(t *testing.T) {
 	}
 }
 
-func TestLastTurnFailureKeepsErrorText(t *testing.T) {
-	_, path := fakeKimi(t, fixture(t, "failed-turn-synthetic.wire.jsonl"), 1, oldMtime)
-	msg, ok := lastTurnFailure(path)
-	if !ok || msg != "HTTP 429: quota exhausted (synthetic)" {
-		t.Fatalf("lastTurnFailure = %q, %v", msg, ok)
-	}
-	_, path = fakeKimi(t, fixture(t, "completed-tool-turn.wire.jsonl"), 1, oldMtime)
-	if msg, ok := lastTurnFailure(path); ok {
-		t.Fatalf("completed turn reported failure %q", msg)
-	}
-}
-
 func TestActivityNoJournalIsNoSignal(t *testing.T) {
 	t.Setenv("KIMI_CODE_HOME", t.TempDir())
 	_, _, err := New().Activity(context.Background(), agent.ActivityRef{WorktreePath: t.TempDir()})
@@ -127,5 +115,22 @@ func TestActivitySinceSkipsOldSession(t *testing.T) {
 	_, _, err := New().Activity(context.Background(), agent.ActivityRef{WorktreePath: wt, Since: time.UnixMilli(2_000)})
 	if !errors.Is(err, agent.ErrNoSignal) {
 		t.Fatalf("err = %v, want ErrNoSignal", err)
+	}
+}
+
+func TestLastTurnFailureReporter(t *testing.T) {
+	r := New().(agent.TurnFailureReporter)
+	wt, _ := fakeKimi(t, fixture(t, "failed-turn-synthetic.wire.jsonl"), 1, oldMtime)
+	id, msg, ok, err := r.LastTurnFailure(context.Background(), agent.ActivityRef{WorktreePath: wt})
+	if err != nil || !ok || id != "session_x/0" || msg != "HTTP 429: quota exhausted (synthetic)" {
+		t.Fatalf("LastTurnFailure = %q %q %v %v", id, msg, ok, err)
+	}
+	wt, _ = fakeKimi(t, fixture(t, "completed-tool-turn.wire.jsonl"), 1, oldMtime)
+	if _, _, ok, err := r.LastTurnFailure(context.Background(), agent.ActivityRef{WorktreePath: wt}); err != nil || ok {
+		t.Fatalf("completed turn: ok=%v err=%v", ok, err)
+	}
+	t.Setenv("KIMI_CODE_HOME", t.TempDir())
+	if _, _, _, err := r.LastTurnFailure(context.Background(), agent.ActivityRef{WorktreePath: t.TempDir()}); !errors.Is(err, agent.ErrNoSignal) {
+		t.Fatalf("no journal: err = %v", err)
 	}
 }

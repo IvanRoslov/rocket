@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/activity"
@@ -19,6 +21,7 @@ type turnState struct {
 	open            bool   // last turn record is turn.prompt
 	failed          bool   // last turn ended with reason failed or blocked
 	errText         string // error.message of that failed turn
+	turnID          int64  // turnId of the last turn.ended
 	openInteraction bool   // an interaction.request after the last turn boundary is unresolved
 	found           bool   // any turn record or interaction was seen
 }
@@ -50,13 +53,14 @@ func readTurnState(path string) (turnState, error) {
 			return true
 		case "turn.ended":
 			var r struct {
+				TurnID int64  `json:"turnId"`
 				Reason string `json:"reason"`
 				Error  *struct {
 					Message string `json:"message"`
 				} `json:"error"`
 			}
 			if json.Unmarshal(rec.Raw, &r) == nil && (r.Reason == "failed" || r.Reason == "blocked") {
-				st.failed = true
+				st.failed, st.turnID = true, r.TurnID
 				if r.Error != nil {
 					st.errText = r.Error.Message
 				}
@@ -69,14 +73,24 @@ func readTurnState(path string) (turnState, error) {
 	return st, err
 }
 
-// lastTurnFailure returns the error text of the journal's latest turn when
-// that turn ended failed or blocked (e.g. a 429 quota response).
-func lastTurnFailure(path string) (string, bool) {
-	st, err := readTurnState(path)
-	if err != nil || !st.failed {
-		return "", false
+var _ agent.TurnFailureReporter = (*KimiCode)(nil)
+
+// LastTurnFailure implements agent.TurnFailureReporter: the latest turn of
+// the session's main journal ended failed or blocked. The turn ID is
+// «<session dir>/<turnId>», since Kimi numbers turns per session.
+func (k *KimiCode) LastTurnFailure(ctx context.Context, ref agent.ActivityRef) (string, string, bool, error) {
+	dir, err := findSession(kimiHome(), ref.WorktreePath, ref.Since)
+	if err != nil {
+		return "", "", false, agent.ErrNoSignal
 	}
-	return st.errText, true
+	st, err := readTurnState(mainWire(dir))
+	if err != nil {
+		return "", "", false, agent.ErrNoSignal
+	}
+	if !st.failed {
+		return "", "", false, nil
+	}
+	return filepath.Base(dir) + "/" + strconv.FormatInt(st.turnID, 10), st.errText, true, nil
 }
 
 // Activity implements agent.Agent over the main journal of the newest Kimi

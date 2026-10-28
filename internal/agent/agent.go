@@ -128,6 +128,17 @@ func WantsBracketedPaste(a Agent) bool {
 	return ok && v.BracketedPaste()
 }
 
+// TurnFailureReporter is implemented by agents whose journal records why a
+// turn failed (Kimi: turn.ended reason=failed with the provider's error,
+// e.g. an exhausted quota). Activity reports such a session blocked; the
+// monitor uses this to tell the parent once per failed turn.
+type TurnFailureReporter interface {
+	// LastTurnFailure reports whether the latest turn of ref's session
+	// failed, with an ID unique per turn (stable across calls) and the
+	// error text. No journal is ErrNoSignal.
+	LastTurnFailure(ctx context.Context, ref ActivityRef) (turnID, msg string, ok bool, err error)
+}
+
 // PaneDialecter is implemented by agents whose TUI needs rocket's
 // agent-specific pane parsers (runtime.PaneDialect*): Kimi Code's composer
 // box and unnumbered start screens. The queue, the injector and the monitor

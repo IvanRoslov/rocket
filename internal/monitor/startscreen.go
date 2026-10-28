@@ -218,15 +218,20 @@ func startScreenAlert(id string, p runtime.PermissionPrompt, screenName string) 
 // alertStartScreen tells someone that sess is stuck: a system message to
 // its live parent, else a problem entry on the session's own task.
 func (m *Monitor) alertStartScreen(sess store.Session, p runtime.PermissionPrompt, screenName string) {
-	body := startScreenAlert(sess.ID, p, screenName)
+	m.alertParentOrTask(sess, startScreenAlert(sess.ID, p, screenName), "start screen", p.Title)
+}
 
+// alertParentOrTask sends body as a system message to sess's live parent,
+// else logs it as a problem on sess's task. what and detail only label the
+// log lines. It reports whether body reached someone.
+func (m *Monitor) alertParentOrTask(sess store.Session, body, what, detail string) bool {
 	if sess.ParentID != "" {
 		parent, err := m.st.GetSession(sess.ParentID)
 		if err == nil && (parent.State == "running" || parent.State == "spawning") {
 			id, err := m.st.AddMessage(store.Message{ToSession: parent.ID, Body: body})
 			if err != nil {
-				slog.Warn("monitor: alert parent about start screen", "session", sess.ID, "parent", parent.ID, "error", err)
-				return
+				slog.Warn("monitor: alert parent about "+what, "session", sess.ID, "parent", parent.ID, "error", err)
+				return false
 			}
 			m.bus.Publish("message.queued", parent.ID, map[string]any{"id": id, "from": "", "to": parent.ID})
 			m.mu.Lock()
@@ -235,16 +240,19 @@ func (m *Monitor) alertStartScreen(sess store.Session, p runtime.PermissionPromp
 			if wake != nil {
 				wake(parent.ID)
 			}
-			return
+			return true
 		}
 	}
 
 	task, err := m.st.GetTaskBySessionID(sess.ID)
 	if err != nil {
-		slog.Warn("monitor: session stuck on a start screen, nobody to tell", "session", sess.ID, "title", p.Title, "error", err)
-		return
+		slog.Warn("monitor: "+what+", nobody to tell", "session", sess.ID, "detail", detail, "error", err)
+		// Nobody will ever be there to tell: done, unless the lookup itself failed.
+		return errors.Is(err, store.ErrNotFound)
 	}
 	if _, err := m.st.AddTaskLog(store.TaskLogEntry{TaskID: task.ID, Kind: "problem", Body: body, Author: sess.ID}); err != nil {
-		slog.Warn("monitor: log start screen problem", "session", sess.ID, "task", task.ID, "error", err)
+		slog.Warn("monitor: log "+what+" problem", "session", sess.ID, "task", task.ID, "error", err)
+		return false
 	}
+	return true
 }
