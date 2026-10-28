@@ -67,6 +67,18 @@ const (
 // up yet, a start screen or a question widget replaces the composer, or the
 // pane belongs to another agent.
 func ParseKimiComposer(pane string) (KimiComposer, bool) {
+	k, ok := parseKimiComposer(pane)
+	return k.state, ok
+}
+
+// kimiComposer is what parseKimiComposer reads off the pane.
+type kimiComposer struct {
+	state KimiComposer
+	rows  int      // composer content rows (≥ 1)
+	queue []string // Kimi's queued items, top to bottom, «❯ » stripped
+}
+
+func parseKimiComposer(pane string) (kimiComposer, bool) {
 	parsed := trimTrailingBlankLines(parsePane(pane))
 	rows := make([]string, len(parsed))
 	for i, l := range parsed {
@@ -91,11 +103,11 @@ func ParseKimiComposer(pane string) (KimiComposer, bool) {
 		}
 		footer++
 		if footer > kimiFooterRows {
-			return 0, false
+			return kimiComposer{}, false
 		}
 	}
 	if bottom < 0 || !status {
-		return 0, false
+		return kimiComposer{}, false
 	}
 
 	// Box content rows up to the top border; the first one is the prompt.
@@ -108,38 +120,78 @@ func ParseKimiComposer(pane string) (KimiComposer, bool) {
 			break
 		}
 		if !strings.HasPrefix(r, "│") || !strings.HasSuffix(r, "│") || utf8.RuneCountInString(r) < 2 {
-			return 0, false
+			return kimiComposer{}, false
 		}
 		content = append([]string{strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(r, "│"), "│"))}, content...)
 	}
 	if top < 0 || len(content) == 0 {
-		return 0, false
+		return kimiComposer{}, false
 	}
 	first, isPrompt := strings.CutPrefix(content[0], ">")
 	if !isPrompt {
-		return 0, false
+		return kimiComposer{}, false
 	}
 	content[0] = first
+	k := kimiComposer{state: KimiEmpty, rows: len(content)}
 	if strings.TrimSpace(strings.Join(content, " ")) != "" {
-		return KimiDraft, true
+		k.state = KimiDraft
+		return k, true
 	}
 
 	// Kimi's queue: «❯ …» rows directly above the box, under a ─── rule.
-	queued := false
+	var queue []string
 	for i := top - 1; i >= 0 && top-i <= kimiQueueScanRows; i-- {
 		r := rows[i]
 		if r == "" {
 			break
 		}
 		if strings.HasPrefix(r, "────") {
-			if queued {
-				return KimiBusy, true
+			if len(queue) > 0 {
+				k.state, k.queue = KimiBusy, queue
 			}
 			break
 		}
-		if strings.HasPrefix(r, "❯ ") {
-			queued = true
+		if item, ok := strings.CutPrefix(r, "❯ "); ok {
+			queue = append([]string{item}, queue...)
 		}
 	}
-	return KimiEmpty, true
+	return k, true
+}
+
+// LooksLikeKimiQueued reports whether pane shows text waiting in Kimi's own
+// queue (the «❯ …» rows above its composer while a turn runs). Kimi cuts a
+// long item at the screen edge with «…», so an item also matches when it is
+// a visible start of text at least minQueuedPrefix non-space runes long.
+func LooksLikeKimiQueued(pane, text string) bool {
+	want := stripWhitespace(text)
+	if want == "" {
+		return false
+	}
+	k, ok := parseKimiComposer(pane)
+	if !ok {
+		return false
+	}
+	for _, item := range k.queue {
+		got := stripWhitespace(item)
+		if got == want {
+			return true
+		}
+		head, cut := strings.CutSuffix(got, "…")
+		if cut && utf8.RuneCountInString(head) >= minQueuedPrefix && strings.HasPrefix(want, head) {
+			return true
+		}
+	}
+	return false
+}
+
+// kimiClearKeys are the keys that empty Kimi's composer of rows rows: its
+// C-u clears only the current line, and BSpace at a line start joins it to
+// the line above (live, Kimi 2.4.0). Ctrl-C would clear it all at once but
+// cancels a running turn, and a second press exits Kimi.
+func kimiClearKeys(rows int) []string {
+	keys := []string{"C-u"}
+	for i := 1; i < rows; i++ {
+		keys = append(keys, "BSpace", "C-u")
+	}
+	return keys
 }

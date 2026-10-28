@@ -101,3 +101,54 @@ func TestTmux_Inject_KimiConfirmsByComposer(t *testing.T) {
 		t.Fatalf("Enter sent %d times, want 1", enters)
 	}
 }
+
+// An unrecognized Kimi pane (question widget, dialog) is never typed into,
+// not even when forced: Force is for an abandoned draft, not an unknown
+// screen where Enter would pick an option.
+func TestTmux_Inject_KimiUnrecognizedPaneDefersEvenForced(t *testing.T) {
+	f := &fakeTmux{pane: readPane(t, "kimi-question.pane")}
+	err := newFakeRuntime(f).Inject(context.Background(), Handle{Name: "sess"}, "hello", InjectOpts{Force: true, Dialect: PaneDialectKimi})
+	if !errors.Is(err, ErrComposerBusy) {
+		t.Fatalf("Inject = %v, want ErrComposerBusy", err)
+	}
+	if f.sent("send-keys") || f.sent("paste-buffer") {
+		t.Fatal("keys sent to an unrecognized Kimi pane")
+	}
+}
+
+// Kimi's C-u clears only the current composer line (live, 2.4.0); a forced
+// delivery must clear every row of the draft.
+func TestTmux_Inject_KimiForcedClearsEveryDraftRow(t *testing.T) {
+	pane := strings.Join([]string{
+		" ╭──────────────╮",
+		" │ > first      │",
+		" │   second     │",
+		" │   third      │",
+		" ╰──────────────╯",
+		" Never Ask  K3.1 Pro",
+		"            context: 0% (0/1M)",
+	}, "\n")
+	f := &fakeTmux{pane: pane}
+	_ = newFakeRuntime(f).Inject(context.Background(), Handle{Name: "sess"}, "hello", InjectOpts{Force: true, Dialect: PaneDialectKimi})
+	want := []string{"send-keys", "-t", paneTarget("sess"), "C-u", "BSpace", "C-u", "BSpace", "C-u"}
+	if len(f.calls) < 2 || !slices.Equal(f.calls[1], want) {
+		t.Fatalf("clear = %q, want %q", f.calls[1], want)
+	}
+}
+
+func TestLooksLikeKimiQueued(t *testing.T) {
+	busy := readPane(t, "kimi-busy-queued.pane")
+	if !LooksLikeKimiQueued(busy, "reply QUEUED_OK") {
+		t.Error("queued item not recognized")
+	}
+	if LooksLikeKimiQueued(busy, "something else entirely") {
+		t.Error("other text recognized as queued")
+	}
+	if LooksLikeKimiQueued(readPane(t, "kimi-finished.pane"), "reply QUEUED_OK") {
+		t.Error("history echo recognized as queued")
+	}
+	long := strings.Replace(busy, "❯ reply QUEUED_OK", "❯ [from orch] a long message that Kimi cut at the …", 1)
+	if !LooksLikeKimiQueued(long, "[from orch] a long message that Kimi cut at the edge of the screen and more") {
+		t.Error("truncated queue item not recognized")
+	}
+}

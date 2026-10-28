@@ -267,6 +267,7 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 	// -e keeps the pane's escape sequences: the dim attribute is the only
 	// thing that tells a typed draft from Claude Code's ghost-text
 	// autosuggestion, which renders identically without it.
+	clearKeys := []string{"C-u"}
 	if out, _, err := t.run(ctx, "capture-pane", "-p", "-e", "-t", paneTarget(h.Name)); err == nil {
 		// 0a. Held-dialog guard. While Claude Code's held-peer-message
 		// approval dialog is on screen, keystrokes drive its selector rather
@@ -278,7 +279,16 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 		if LooksLikeHeldPeerDialog(out) {
 			return fmt.Errorf("%w: session %q", ErrHeldDialog, h.Name)
 		}
-		if !opts.Force && looksLikeDraft(out, opts.Dialect) {
+		if opts.Dialect == PaneDialectKimi {
+			// Kimi: type only into its recognized composer — never into a
+			// question widget or dialog, where Enter picks an option, not
+			// even when forced (Force is for an abandoned draft).
+			k, ok := parseKimiComposer(out)
+			if !ok || (!opts.Force && k.state == KimiDraft) {
+				return fmt.Errorf("%w: session %q", ErrComposerBusy, h.Name)
+			}
+			clearKeys = kimiClearKeys(k.rows)
+		} else if !opts.Force && LooksLikeUserDraft(out) {
 			return fmt.Errorf("%w: session %q", ErrComposerBusy, h.Name)
 		}
 	}
@@ -287,7 +297,7 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 	// paste-buffer address a pane, not a session, so they need the
 	// colon-suffixed pane target even though has-session/kill-session
 	// accept the bare session target.
-	if _, _, err := t.run(ctx, "send-keys", "-t", paneTarget(h.Name), "C-u"); err != nil {
+	if _, _, err := t.run(ctx, append([]string{"send-keys", "-t", paneTarget(h.Name)}, clearKeys...)...); err != nil {
 		return fmt.Errorf("clear draft: %w", err)
 	}
 
@@ -375,6 +385,13 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 			if err == nil && ContainsMarker(tailLines(trimTrailingBlank(out), confirmWindow), marker) {
 				markerSeen = true
 				break
+			}
+			// Kimi shows a multi-line paste as «[paste #N +M lines]»: the
+			// marker never renders, but the composer holding it is enough.
+			if err == nil && opts.Dialect == PaneDialectKimi {
+				if c, ok := ParseKimiComposer(out); ok && c == KimiDraft {
+					break
+				}
 			}
 			if time.Now().After(deadline) {
 				break
@@ -543,7 +560,13 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 			// line and kill-buffer drops the paste buffer so a stray
 			// paste cannot resurrect the text. Both are best-effort; the
 			// honest non-delivery is what the caller must see.
-			_, _, _ = t.run(ctx, "send-keys", "-t", paneTarget(h.Name), "C-u")
+			cleanup := []string{"C-u"}
+			if opts.Dialect == PaneDialectKimi {
+				if k, ok := parseKimiComposer(full); ok {
+					cleanup = kimiClearKeys(k.rows)
+				}
+			}
+			_, _, _ = t.run(ctx, append([]string{"send-keys", "-t", paneTarget(h.Name)}, cleanup...)...)
 			_, _, _ = t.run(ctx, "kill-buffer", "-b", bufName)
 			return fmt.Errorf("%w: after %d attempts", ErrNotDelivered, maxAttempts)
 		}
@@ -942,21 +965,15 @@ func LooksLikeQuizWidget(tail string) bool {
 		strings.Contains(tail, "Ready to submit your answers?")
 }
 
-// looksLikeDraft is the draft guard's test for the pane's dialect.
-func looksLikeDraft(pane, dialect string) bool {
-	if dialect == PaneDialectKimi {
-		c, ok := ParseKimiComposer(pane)
-		return ok && c == KimiDraft
-	}
-	return LooksLikeUserDraft(pane)
-}
-
-// kimiSubmitted reports, for the Kimi dialect only, that Kimi's composer is
-// recognizably empty after a paste+Enter.
+// kimiSubmitted reports, for the Kimi dialect only, that the text left
+// Kimi's composer after a paste+Enter: the composer is empty (idle, or busy
+// with Kimi's own queue), or something else replaced it — a question widget
+// renders only mid-turn, so the text went in, and another Enter would pick
+// one of its options. Delivery is then proven from Kimi's journal.
 func kimiSubmitted(pane, dialect string) bool {
 	if dialect != PaneDialectKimi {
 		return false
 	}
 	c, ok := ParseKimiComposer(pane)
-	return ok && c != KimiDraft
+	return !ok || c != KimiDraft
 }
