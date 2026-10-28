@@ -152,3 +152,15 @@ func TestLooksLikeKimiQueued(t *testing.T) {
 		t.Error("truncated queue item not recognized")
 	}
 }
+
+// Kimi dialect: an unreadable pane is not typed into blind.
+func TestTmux_Inject_KimiCaptureErrorDefers(t *testing.T) {
+	f := &fakeTmux{captureErr: errors.New("tmux hiccup")}
+	err := newFakeRuntime(f).Inject(context.Background(), Handle{Name: "sess"}, "hello", InjectOpts{Dialect: PaneDialectKimi})
+	if !errors.Is(err, ErrComposerBusy) {
+		t.Fatalf("Inject = %v, want ErrComposerBusy", err)
+	}
+	if f.sent("send-keys") || f.sent("paste-buffer") {
+		t.Fatal("keys sent to an unreadable Kimi pane")
+	}
+}

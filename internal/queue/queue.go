@@ -139,6 +139,37 @@ func (q *Queue) recipientCaps(sess store.Session) (busyOK bool, confirmer agent.
 	return agent.AcceptsInputWhileBusy(a), confirmer
 }
 
+// beforeFirstTurn reports whether sess's agent takes its first message from
+// the queue (agent.FirstMessageByInput) and its current launch has not
+// started a turn yet (agent.StartupProber; no journal counts as not
+// started). The launch is created_at or the latest restore.
+func (q *Queue) beforeFirstTurn(ctx context.Context, sess store.Session) bool {
+	if q.resolveAgent == nil {
+		return false
+	}
+	a, err := q.resolveAgent(sess.Agent)
+	if err != nil || a == nil {
+		return false
+	}
+	prober, ok := a.(agent.StartupProber)
+	if !ok || !agent.TakesFirstMessageByInput(a) {
+		return false
+	}
+	ref := agent.ActivityRef{SessionID: sess.ID, WorktreePath: sess.WorktreePath}
+	launched := sess.CreatedAt
+	if ts, found, err := q.st.LastSessionEventTS(sess.ID, "session.restored"); err == nil && found && ts > launched {
+		launched = ts
+	}
+	if launched > 0 {
+		ref.Since = time.Unix(launched, 0)
+	}
+	started, err := prober.HasStartedTurn(ctx, ref)
+	if err != nil && !errors.Is(err, agent.ErrNoSignal) {
+		return false
+	}
+	return !started
+}
+
 // injectOpts returns the pane options sess's agent needs (bracketed paste,
 // pane dialect); zero for Claude Code, Codex and unresolved agents.
 func (q *Queue) injectOpts(sess store.Session) runtime.InjectOpts {
@@ -466,17 +497,15 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 		}
 
 		state, known := q.getActivity(msg.ToSession)
-		if known && state == activity.Blocked && q.injectOpts(sess).Dialect == runtime.PaneDialectKimi {
-			// Kimi's first message (the brief) is queued at spawn. The
-			// monitor may have put a start screen on the session (quiz +
-			// blocked) since sess was read: re-read, and if a quiz is now
-			// pending, wait for the human's answer instead of failing it.
-			if fresh, err := q.getSession(msg.ToSession); err == nil && fresh.PendingQuiz != "" {
-				if !q.waitForReady(ctx, msg.ToSession) {
-					return // ctx cancelled
-				}
-				continue
+		if known && state == activity.Blocked && q.beforeFirstTurn(ctx, sess) {
+			// Kimi takes its first message (the brief) from the queue, and
+			// before its first turn "blocked" can only come from a start
+			// screen — possibly one the human has just answered, with the
+			// stored activity not yet caught up. Wait instead of failing.
+			if !q.waitForReady(ctx, msg.ToSession) {
+				return // ctx cancelled
 			}
+			continue
 		}
 		switch {
 		case known && (state == activity.Blocked || state == activity.Exited):

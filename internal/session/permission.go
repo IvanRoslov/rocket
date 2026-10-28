@@ -189,6 +189,10 @@ func (m *Manager) answerPermission(ctx context.Context, sess store.Session, quiz
 	if err != nil {
 		return validationErr("invalid_answer", err.Error())
 	}
+	if idx == permissionEscIndex && quiz.IsStartScreen() && quiz.Permission.Unnumbered {
+		// Esc on Kimi's trust screen exits Kimi altogether.
+		return validationErr("invalid_answer", "Esc is not offered on a Kimi Code start screen: it exits Kimi; choose one of the options")
+	}
 
 	if !m.tryStartQuizInFlight(sess.ID) {
 		return validationErr("quiz_answer_in_flight", "an answer is already being sent for session: "+sess.ID)

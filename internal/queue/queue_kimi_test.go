@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -16,11 +17,22 @@ import (
 )
 
 // fakeKimi is fakeAgent with Kimi's pane needs: bracketed paste and the
-// Kimi composer parser.
-type fakeKimi struct{ *fakeAgent }
+// Kimi composer parser, plus a scriptable first-turn probe.
+type fakeKimi struct {
+	*fakeAgent
+	started atomic.Bool
+}
 
-func (fakeKimi) PaneDialect() string  { return runtime.PaneDialectKimi }
-func (fakeKimi) BracketedPaste() bool { return true }
+func (k *fakeKimi) HasStartedTurn(ctx context.Context, ref agent.ActivityRef) (bool, error) {
+	if !k.started.Load() {
+		return false, agent.ErrNoSignal
+	}
+	return true, nil
+}
+
+func (*fakeKimi) PaneDialect() string       { return runtime.PaneDialectKimi }
+func (*fakeKimi) BracketedPaste() bool      { return true }
+func (*fakeKimi) FirstMessageByInput() bool { return true }
 
 func kimiPane(t *testing.T, name string) string {
 	t.Helper()
@@ -180,4 +192,36 @@ func TestQueue_KimiBriefHeldWhenBlockedOnStartScreen(t *testing.T) {
 	if n := h.rt.callCount(); n != 0 {
 		t.Fatalf("Inject called %d times", n)
 	}
+}
+
+// The human answered Kimi's trust screen: the quiz is gone, but the stored
+// activity is still the start screen's blocked (no journal yet, so nothing
+// overrides it) for a sweep. The brief must wait, then go in once the
+// composer is up — not fail as recipient_unavailable.
+func TestQueue_KimiBriefHeldWhileBlockedBeforeFirstTurn(t *testing.T) {
+	h := newTestQueue(t)
+	addKimiSession(t, h, "kimi", activity.Blocked)
+	var pane atomic.Value
+	pane.Store(kimiPane(t, "kimi-trust.pane"))
+	h.rt.setCaptureEscaped(func(_ runtime.Handle, _ int) (string, error) { return pane.Load().(string), nil })
+	id := addMsg(t, h, "kimi", "brief")
+	h.q.Wake("kimi")
+	time.Sleep(200 * time.Millisecond)
+	if got := messageStatus(t, h.st, id); got != "queued" {
+		t.Fatalf("status = %q while blocked before the first turn, want queued", got)
+	}
+	pane.Store(kimiPane(t, "kimi-idle.pane"))
+	h.activityTo("kimi", activity.Ready)
+	waitUntil(t, func() bool { return h.rt.callCount() == 1 }, "brief injected once ready")
+}
+
+// After the first turn a blocked Kimi (failed turn) fails new messages as
+// before.
+func TestQueue_KimiBlockedAfterFirstTurnFails(t *testing.T) {
+	h := newTestQueue(t)
+	k := addKimiSession(t, h, "kimi", activity.Blocked)
+	k.started.Store(true)
+	id := addMsg(t, h, "kimi", "hello")
+	h.q.Wake("kimi")
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "failed" }, "failed as recipient_unavailable")
 }

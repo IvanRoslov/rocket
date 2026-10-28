@@ -54,7 +54,9 @@ func (m *Monitor) reportTurnFailure(ctx context.Context, sess store.Session, ag 
 	if seen && last["turn"] == turnID {
 		return
 	}
-	body := fmt.Sprintf("[rocket] session %s: %s turn failed: %s", sess.ID, agentTurnLabel(sess.Agent), msg)
+	body := fmt.Sprintf("[rocket] session %s: %s turn failed: %s. "+
+		"The session stays blocked and will not take messages; kill and respawn it (possibly on another profile).",
+		sess.ID, agentTurnLabel(sess.Agent), msg)
 	if !m.alertParentOrTask(sess, body, "turn failure", msg) {
 		return
 	}

@@ -115,3 +115,13 @@ func TestAnswerKimiStartScreenPromptChanged(t *testing.T) {
 		t.Fatalf("%d keys sent on a changed screen", n)
 	}
 }
+
+// Esc on Kimi's trust screen exits Kimi: not offered for unnumbered screens.
+func TestAnswerKimiStartScreenRejectsEsc(t *testing.T) {
+	m, rt := seedKimiStartScreenQuiz(t, paneFixture(t, "kimi-trust.pane"))
+	err := m.AnswerQuiz(context.Background(), "sess1", []QuizAnswer{{QuestionIndex: 0, OptionIndices: []int{-1}}})
+	assertValidationCode(t, err, "invalid_answer")
+	if n := len(sentKeysEventually(rt, 1)); n != 0 {
+		t.Fatalf("%d keys sent", n)
+	}
+}

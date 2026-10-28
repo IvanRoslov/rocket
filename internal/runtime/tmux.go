@@ -268,7 +268,12 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 	// thing that tells a typed draft from Claude Code's ghost-text
 	// autosuggestion, which renders identically without it.
 	clearKeys := []string{"C-u"}
-	if out, _, err := t.run(ctx, "capture-pane", "-p", "-e", "-t", paneTarget(h.Name)); err == nil {
+	out, _, capErr := t.run(ctx, "capture-pane", "-p", "-e", "-t", paneTarget(h.Name))
+	if capErr != nil && opts.Dialect == PaneDialectKimi {
+		// Kimi: no blind typing into a pane we could not read.
+		return fmt.Errorf("%w: session %q: capture: %v", ErrComposerBusy, h.Name, capErr)
+	}
+	if capErr == nil {
 		// 0a. Held-dialog guard. While Claude Code's held-peer-message
 		// approval dialog is on screen, keystrokes drive its selector rather
 		// than the composer: the paste+Enter below would dismiss the dialog

@@ -77,7 +77,8 @@ func TestTurnFailureAlertsParentOncePerTurn(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("alerts = %d, want 1: %+v", len(msgs), msgs)
 	}
-	if want := "[rocket] session sess1: Kimi turn failed: HTTP 429: quota exhausted"; msgs[0].Body != want {
+	if want := "[rocket] session sess1: Kimi turn failed: HTTP 429: quota exhausted. " +
+		"The session stays blocked and will not take messages; kill and respawn it (possibly on another profile)."; msgs[0].Body != want {
 		t.Errorf("body = %q, want %q", msgs[0].Body, want)
 	}
 	if got := activityOf(t, st, "sess1"); got != string(activity.Blocked) {
@@ -96,7 +97,7 @@ func TestTurnFailureAlertsParentOncePerTurn(t *testing.T) {
 	m2.sweep(context.Background())
 	m2.sweep(context.Background())
 	msgs = messagesTo(t, st, "orch1")
-	if len(msgs) != 2 || !strings.HasSuffix(msgs[1].Body, "still exhausted") {
+	if len(msgs) != 2 || !strings.Contains(msgs[1].Body, "still exhausted.") {
 		t.Fatalf("alerts = %+v, want a second one for the new turn", msgs)
 	}
 }
