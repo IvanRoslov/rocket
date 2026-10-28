@@ -14,16 +14,16 @@ func TestLaunchCommandModelAndEffort(t *testing.T) {
 		want          []string
 	}{
 		{"model and effort", "gpt-5", "high",
-			[]string{"codex", "--no-alt-screen", "--sandbox", "danger-full-access", "--ask-for-approval", "never",
+			[]string{"codex", "--no-alt-screen", "--sandbox", "danger-full-access", "--ask-for-approval", "never", "--no-daemon", "-c", "check_for_update_on_startup=false",
 				"-m", "gpt-5", "-c", "model_reasoning_effort=high", "--", "go"}},
 		{"model only", "gpt-5", "",
-			[]string{"codex", "--no-alt-screen", "--sandbox", "danger-full-access", "--ask-for-approval", "never",
+			[]string{"codex", "--no-alt-screen", "--sandbox", "danger-full-access", "--ask-for-approval", "never", "--no-daemon", "-c", "check_for_update_on_startup=false",
 				"-m", "gpt-5", "--", "go"}},
 		{"effort only", "", "low",
-			[]string{"codex", "--no-alt-screen", "--sandbox", "danger-full-access", "--ask-for-approval", "never",
+			[]string{"codex", "--no-alt-screen", "--sandbox", "danger-full-access", "--ask-for-approval", "never", "--no-daemon", "-c", "check_for_update_on_startup=false",
 				"-c", "model_reasoning_effort=low", "--", "go"}},
 		{"neither", "", "",
-			[]string{"codex", "--no-alt-screen", "--sandbox", "danger-full-access", "--ask-for-approval", "never", "--", "go"}},
+			[]string{"codex", "--no-alt-screen", "--sandbox", "danger-full-access", "--ask-for-approval", "never", "--no-daemon", "-c", "check_for_update_on_startup=false", "--", "go"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

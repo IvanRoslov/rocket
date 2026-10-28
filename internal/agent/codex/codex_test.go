@@ -39,7 +39,10 @@ func TestLaunchCommandMinimal(t *testing.T) {
 	}
 
 	cmd := c.LaunchCommand(spec)
-	want := []string{"codex", "--no-alt-screen", "--sandbox", "danger-full-access", "--ask-for-approval", "never"}
+	want := []string{
+		"codex", "--no-alt-screen", "--sandbox", "danger-full-access", "--ask-for-approval", "never",
+		"--no-daemon", "-c", "check_for_update_on_startup=false",
+	}
 	if len(cmd) != len(want) {
 		t.Fatalf("expected %d args, got %d: %v", len(want), len(cmd), cmd)
 	}
@@ -62,6 +65,7 @@ func TestLaunchCommandFull(t *testing.T) {
 	cmd := c.LaunchCommand(spec)
 	want := []string{
 		"codex", "--no-alt-screen", "--sandbox", "danger-full-access", "--ask-for-approval", "never",
+		"--no-daemon", "-c", "check_for_update_on_startup=false",
 		"-m", "gpt-5-codex",
 		"--", "Help me write a function.",
 	}
@@ -87,6 +91,7 @@ func TestLaunchCommandFirstMessageStartingWithDashIsSeparated(t *testing.T) {
 	cmd := c.LaunchCommand(spec)
 	want := []string{
 		"codex", "--no-alt-screen", "--sandbox", "danger-full-access", "--ask-for-approval", "never",
+		"--no-daemon", "-c", "check_for_update_on_startup=false",
 		"--", "-fix the login bug",
 	}
 	if len(cmd) != len(want) {
@@ -123,6 +128,52 @@ func TestLaunchCommandNoAltScreenPrecedesPromptSeparator(t *testing.T) {
 	}
 	if sep == -1 || flag > sep {
 		t.Errorf("--no-alt-screen at %d must precede `--` at %d: %v", flag, sep, cmd)
+	}
+}
+
+func TestLaunchCommandAlwaysEmbedded(t *testing.T) {
+	// codex 0.160+ runs shell commands through a shared app-server daemon with
+	// its own env (ROCKET_* lost) unless launched with --no-daemon; the update
+	// check puts an interactive screen in front of the first message.
+	specs := map[string]agent.LaunchSpec{
+		"bare":         {},
+		"model":        {Model: "gpt-5-codex"},
+		"model+effort": {Model: "gpt-5-codex", Effort: "high"},
+		"first":        {Model: "gpt-5-codex", Effort: "high", FirstMessage: "-do the thing"},
+	}
+	for name, spec := range specs {
+		t.Run(name, func(t *testing.T) {
+			cmd := New().LaunchCommand(spec)
+
+			sep := len(cmd)
+			for i, arg := range cmd {
+				if arg == "--" {
+					sep = i
+					break
+				}
+			}
+			if spec.FirstMessage != "" {
+				if sep != len(cmd)-2 || cmd[len(cmd)-1] != spec.FirstMessage {
+					t.Errorf("first message must be the last arg after `--`: %v", cmd)
+				}
+			}
+
+			daemon, update := -1, -1
+			for i := 0; i < sep; i++ {
+				if cmd[i] == "--no-daemon" {
+					daemon = i
+				}
+				if cmd[i] == "-c" && i+1 < sep && cmd[i+1] == "check_for_update_on_startup=false" {
+					update = i
+				}
+			}
+			if daemon == -1 {
+				t.Errorf("no --no-daemon before `--`: %v", cmd)
+			}
+			if update == -1 {
+				t.Errorf("no -c check_for_update_on_startup=false before `--`: %v", cmd)
+			}
+		})
 	}
 }
 
