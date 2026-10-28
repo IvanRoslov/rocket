@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/activity"
+	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/runtime"
@@ -70,6 +71,20 @@ type Queue struct {
 	// (1-based attempt number that just failed). Overridable by tests.
 	backoff func(attempt int) time.Duration
 
+	// resolveAgent looks up a recipient's agent adapter by sess.Agent, to
+	// learn its optional delivery capabilities (agent.BusyInputAccepter,
+	// agent.DeliveryConfirmer). Defaults to agent.Get; a lookup error means
+	// "no capabilities", i.e. the plain tmux/socket path.
+	resolveAgent func(name string) (agent.Agent, error)
+
+	// now is the clock behind inject_at and the accepted-message deadlines.
+	// Overridable by tests.
+	now func() time.Time
+
+	// confirmKick wakes the confirmer loop ahead of its ticker: sent (non-
+	// blocking) when a message becomes accepted and after Recover.
+	confirmKick chan struct{}
+
 	mu      sync.Mutex
 	workers map[string]bool
 
@@ -88,10 +103,35 @@ func New(st *store.Store, b *bus.Bus, rt runtime.Runtime, cfg *config.Config, ge
 		rt:          rt,
 		cfg:         cfg,
 		getActivity: getActivity,
-		getSession:  st.GetSession,
-		backoff:     defaultBackoff,
-		workers:     make(map[string]bool),
+		getSession:   st.GetSession,
+		backoff:      defaultBackoff,
+		resolveAgent: agent.Get,
+		now:          time.Now,
+		confirmKick:  make(chan struct{}, 1),
+		workers:      make(map[string]bool),
 	}
+}
+
+// SetAgentResolver replaces the agent lookup used for recipient
+// capabilities (tests; the daemon keeps agent.Get). Call before Recover/Run.
+func (q *Queue) SetAgentResolver(f func(name string) (agent.Agent, error)) { q.resolveAgent = f }
+
+// recipientCaps resolves the optional delivery capabilities of sess's agent:
+// busyOK — the agent takes input while a turn runs (activity "active" counts
+// as ready); confirmer — the agent proves delivery from its own journal, so
+// a successful paste ends in status "accepted" rather than "delivered".
+// Both are false/nil for Claude Code and for any agent that fails to
+// resolve, which keeps that path exactly as it was.
+func (q *Queue) recipientCaps(sess store.Session) (busyOK bool, confirmer agent.DeliveryConfirmer) {
+	if q.resolveAgent == nil {
+		return false, nil
+	}
+	a, err := q.resolveAgent(sess.Agent)
+	if err != nil || a == nil {
+		return false, nil
+	}
+	confirmer, _ = a.(agent.DeliveryConfirmer)
+	return agent.AcceptsInputWhileBusy(a), confirmer
 }
 
 // runCtx returns the context passed to Run, or context.Background() if Run
