@@ -2,6 +2,7 @@ package kimicode
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -84,24 +85,34 @@ func mainWire(sessionDir string) string {
 	return filepath.Join(sessionDir, "agents", "main", "wire.jsonl")
 }
 
-func agentWires(sessionDir string) []string {
+func agentWires(sessionDir string) ([]string, error) {
 	root := filepath.Join(sessionDir, "agents")
-	entries, err := os.ReadDir(root)
+	agents, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("read Kimi agents %s: %w", root, err)
 	}
 	var paths []string
-	for _, entry := range entries {
+	for _, entry := range agents {
 		if !entry.IsDir() {
 			continue
 		}
 		path := filepath.Join(root, entry.Name(), "wire.jsonl")
-		if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+		info, err := os.Stat(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("stat Kimi journal %s: %w", path, err)
+		}
+		if info.Mode().IsRegular() {
 			paths = append(paths, path)
 		}
 	}
 	sort.Strings(paths)
-	return paths
+	return paths, nil
 }
 
 type wireRecord struct {

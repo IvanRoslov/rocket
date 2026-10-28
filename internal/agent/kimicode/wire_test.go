@@ -117,8 +117,9 @@ func TestWirePathsIncludeMainAndSubagents(t *testing.T) {
 		t.Fatalf("mainWire = %q", got)
 	}
 	want := []string{filepath.Join(dir, "agents", "agent-0", "wire.jsonl"), filepath.Join(dir, "agents", "agent-1", "wire.jsonl"), mainWire(dir)}
-	if got := agentWires(dir); !reflect.DeepEqual(got, want) {
-		t.Fatalf("agentWires = %v, want %v", got, want)
+	got, err := agentWires(dir)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("agentWires = %v, %v; want %v", got, err, want)
 	}
 }
 
