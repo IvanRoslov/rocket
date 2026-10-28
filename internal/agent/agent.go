@@ -41,6 +41,15 @@ type UsageReader interface {
 	Usage(ctx context.Context, worktreePath string, since time.Time) (Usage, error)
 }
 
+// StartupProber is an optional adapter capability for agents whose CLI may
+// stop on an interactive start screen (trust, update, …) before the first
+// turn. While HasStartedTurn is false the monitor reads the pane for such a
+// screen (runtime.ParseStartScreen); once it is true the check stops.
+type StartupProber interface {
+	// HasStartedTurn reports whether the session's transcript records at least one task_started.
+	HasStartedTurn(ctx context.Context, ref ActivityRef) (bool, error)
+}
+
 // ChatEntry is one entry in a session's chat transcript, as returned by
 // Agent.TranscriptTail.
 type ChatEntry struct {
