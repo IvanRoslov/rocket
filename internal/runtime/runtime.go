@@ -26,6 +26,15 @@ type InjectOpts struct {
 	// otherwise one abandoned draft would block that recipient's queue
 	// forever.
 	Force bool
+	// Bracketed pastes the text as a bracketed paste (tmux paste-buffer
+	// -p). Kimi Code needs it: a fast plain paste trips its paste-burst
+	// heuristic and the following Enter inserts a newline instead of
+	// submitting.
+	Bracketed bool
+	// Dialect selects agent-specific pane parsers ("" for the default
+	// Claude Code / Codex rules, PaneDialectKimi for Kimi Code): the draft
+	// guard and the submit confirmation read the composer with them.
+	Dialect string
 }
 
 // Runtime manages agent sessions running inside a terminal multiplexer.

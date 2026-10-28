@@ -278,7 +278,7 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 		if LooksLikeHeldPeerDialog(out) {
 			return fmt.Errorf("%w: session %q", ErrHeldDialog, h.Name)
 		}
-		if !opts.Force && LooksLikeUserDraft(out) {
+		if !opts.Force && looksLikeDraft(out, opts.Dialect) {
 			return fmt.Errorf("%w: session %q", ErrComposerBusy, h.Name)
 		}
 	}
@@ -315,7 +315,11 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 	if _, _, err := t.run(ctx, "load-buffer", "-b", bufName, tmpPath); err != nil {
 		return fmt.Errorf("load buffer: %w", err)
 	}
-	if _, _, err := t.run(ctx, "paste-buffer", "-d", "-b", bufName, "-t", paneTarget(h.Name)); err != nil {
+	pasteArgs := []string{"paste-buffer", "-d", "-b", bufName, "-t", paneTarget(h.Name)}
+	if opts.Bracketed {
+		pasteArgs = []string{"paste-buffer", "-p", "-d", "-b", bufName, "-t", paneTarget(h.Name)}
+	}
+	if _, _, err := t.run(ctx, pasteArgs...); err != nil {
 		return fmt.Errorf("paste buffer: %w", err)
 	}
 
@@ -415,6 +419,11 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 				if LooksLikeQuizWidget(tailLines(trimTrailingBlank(out), confirmWindow)) {
 					return nil
 				}
+				// Kimi: the composer no longer holds the text — the previous
+				// Enter submitted it (or queued it); another would be stray.
+				if kimiSubmitted(out, opts.Dialect) {
+					return nil
+				}
 				// The previous Enter queued the text after all: another
 				// Enter would only hit an empty composer.
 				if LooksLikeAgentQueued(out, text) {
@@ -441,6 +450,13 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 			// «…», often before its last line.
 			if LooksLikeAgentQueued(full, text) {
 				return fmt.Errorf("%w: session %q", ErrQueuedByAgent, h.Name)
+			}
+			// Kimi shows a multi-line paste as «[paste #N +M lines]», so
+			// neither the marker nor a line-count change proves the submit;
+			// its composer emptying does (idle, or busy with Kimi's own
+			// queue — delivery is then confirmed from its journal).
+			if kimiSubmitted(full, opts.Dialect) {
+				return nil
 			}
 			out := tailLines(trimTrailingBlank(full), confirmWindow)
 			// marker-absent: the injected text's last line no longer
@@ -924,4 +940,23 @@ func LooksLikeQuizWidget(tail string) bool {
 	return strings.Contains(tail, "Enter to select · ") ||
 		strings.Contains(tail, "✔ Submit") ||
 		strings.Contains(tail, "Ready to submit your answers?")
+}
+
+// looksLikeDraft is the draft guard's test for the pane's dialect.
+func looksLikeDraft(pane, dialect string) bool {
+	if dialect == PaneDialectKimi {
+		c, ok := ParseKimiComposer(pane)
+		return ok && c == KimiDraft
+	}
+	return LooksLikeUserDraft(pane)
+}
+
+// kimiSubmitted reports, for the Kimi dialect only, that Kimi's composer is
+// recognizably empty after a paste+Enter.
+func kimiSubmitted(pane, dialect string) bool {
+	if dialect != PaneDialectKimi {
+		return false
+	}
+	c, ok := ParseKimiComposer(pane)
+	return ok && c != KimiDraft
 }
