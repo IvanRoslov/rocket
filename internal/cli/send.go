@@ -136,7 +136,7 @@ func newSendCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&filePath, "file", "", "файл с текстом сообщения ('-' — stdin)")
-	cmd.Flags().BoolVar(&wait, "wait", false, "poll until message is delivered or failed")
+	cmd.Flags().BoolVar(&wait, "wait", false, "poll until message is delivered or failed (accepted is announced on the way)")
 
 	return cmd
 }
@@ -151,15 +151,17 @@ type msgResp struct {
 }
 
 // waitForMessage polls GET /v1/messages/{id} every pollInterval until the
-// message reaches a terminal status. "queued" and "delivering" are
-// non-terminal and keep the loop going; "delivered" and "failed" are
-// terminal. Any other status is treated as non-terminal too (logged, not
+// message reaches a terminal status. "queued", "delivering" and "accepted"
+// are non-terminal and keep the loop going — "accepted" (the text is in a
+// Codex recipient's hands, journal confirmation pending) is announced once;
+// "delivered" and "failed" are terminal. Any other status is treated as non-terminal too (logged, not
 // errored) so that future statuses added server-side don't break existing
 // clients.
 func waitForMessage(cmd *cobra.Command, c *client.Client, msgID int64) error {
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
+	announcedAccepted := false
 	for {
 		select {
 		case <-ticker.C:
@@ -190,6 +192,12 @@ func waitForMessage(cmd *cobra.Command, c *client.Client, msgID int64) error {
 					cmd.PrintErrf("message %d failed: %s\n", msgID, reason)
 				}
 				return fmt.Errorf("message delivery failed")
+			case "accepted":
+				if !announcedAccepted && !flags.JSON {
+					cmd.Printf("message %d accepted (the agent has it; waiting for confirmation)\n", msgID)
+				}
+				announcedAccepted = true
+				continue
 			case "queued", "delivering":
 				// Still in flight, continue polling.
 				continue
