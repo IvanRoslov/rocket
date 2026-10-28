@@ -139,3 +139,51 @@ func TestUsageCanceledContext(t *testing.T) {
 		t.Fatalf("Usage err = %v, want canceled", err)
 	}
 }
+
+func TestUsageReadsJournalAfterWorktreeRemoval(t *testing.T) {
+	home, wt := t.TempDir(), filepath.Join(t.TempDir(), "removed")
+	t.Setenv("KIMI_CODE_HOME", home)
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	session := writeState(t, home, "wd_removed_hash", "session_one", wt, 1793194497730)
+	copyWireFixture(t, session, "main", "completed-tool-turn.wire.jsonl")
+	if err := os.Remove(wt); err != nil {
+		t.Fatal(err)
+	}
+	got, err := New().(agent.UsageReader).Usage(context.Background(), wt, time.Time{})
+	if err != nil || !got.Found || got.Models["kimi-code/k3.1-pro"].Input != 4075 {
+		t.Fatalf("Usage after removal = %+v, %v; want historical usage", got, err)
+	}
+}
+
+func TestUsageReturnsErrorForUnreadableMatchingJournalDiscovery(t *testing.T) {
+	for _, broken := range []string{"state", "agents"} {
+		t.Run(broken, func(t *testing.T) {
+			home, wt := t.TempDir(), t.TempDir()
+			t.Setenv("KIMI_CODE_HOME", home)
+			good := writeState(t, home, "wd_"+filepath.Base(wt)+"_good", "session_good", wt, 1793194497730)
+			copyWireFixture(t, good, "main", "completed-tool-turn.wire.jsonl")
+			bad := writeState(t, home, "wd_"+filepath.Base(wt)+"_bad", "session_bad", wt, 1793194497730)
+			var path string
+			if broken == "state" {
+				path = filepath.Join(bad, "state.json")
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(path, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				path = filepath.Join(bad, "agents")
+				if err := os.WriteFile(path, []byte("not a directory"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err := New().(agent.UsageReader).Usage(context.Background(), wt, time.Time{})
+			if err == nil || !strings.Contains(err.Error(), path) {
+				t.Fatalf("Usage err = %v, want discovery error naming %s", err, path)
+			}
+		})
+	}
+}

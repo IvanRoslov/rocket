@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,6 +27,60 @@ type kimiUsageRecord struct {
 	} `json:"usage"`
 }
 
+// Kimi records the physical cwd. If a finished worker's worktree is gone,
+// resolve its nearest surviving parent so old journals remain attributable.
+func kimiUsageWorktreePath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return filepath.Clean(resolved)
+	}
+	var suffix []string
+	for current := abs; ; {
+		parent := filepath.Dir(current)
+		if parent == current {
+			return filepath.Clean(abs)
+		}
+		suffix = append([]string{filepath.Base(current)}, suffix...)
+		current = parent
+		if resolved, err := filepath.EvalSymlinks(current); err == nil {
+			return filepath.Clean(filepath.Join(append([]string{resolved}, suffix...)...))
+		}
+	}
+}
+
+func kimiUsageAgentWires(sessionDir string) ([]string, error) {
+	root := filepath.Join(sessionDir, "agents")
+	agents, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read Kimi agents %s: %w", root, err)
+	}
+	var paths []string
+	for _, entry := range agents {
+		if !entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(root, entry.Name(), "wire.jsonl")
+		info, err := os.Stat(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("stat Kimi journal %s: %w", path, err)
+		}
+		if info.Mode().IsRegular() {
+			paths = append(paths, path)
+		}
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
 // Usage sums usage.record rows from every matching native session and agent
 // journal. A subagent.completed row only repeats its child journal's usage.
 func (k *KimiCode) Usage(ctx context.Context, worktreePath string, since time.Time) (agent.Usage, error) {
@@ -33,11 +88,7 @@ func (k *KimiCode) Usage(ctx context.Context, worktreePath string, since time.Ti
 	if err := ctx.Err(); err != nil {
 		return agent.Usage{}, err
 	}
-	physical, err := filepath.EvalSymlinks(worktreePath)
-	if err != nil {
-		return result, nil
-	}
-	physical = filepath.Clean(physical)
+	physical := kimiUsageWorktreePath(worktreePath)
 	root := filepath.Join(kimiHome(), "sessions")
 	shards, err := os.ReadDir(root)
 	if os.IsNotExist(err) {
@@ -66,9 +117,13 @@ func (k *KimiCode) Usage(ctx context.Context, worktreePath string, since time.Ti
 				continue
 			}
 			dir := filepath.Join(shardDir, session.Name())
-			stateBytes, err := os.ReadFile(filepath.Join(dir, "state.json"))
-			if err != nil {
+			statePath := filepath.Join(dir, "state.json")
+			stateBytes, err := os.ReadFile(statePath)
+			if os.IsNotExist(err) {
 				continue
+			}
+			if err != nil {
+				return agent.Usage{}, fmt.Errorf("read Kimi state %s: %w", statePath, err)
 			}
 			var state struct {
 				Cwd       string `json:"cwd"`
@@ -77,7 +132,11 @@ func (k *KimiCode) Usage(ctx context.Context, worktreePath string, since time.Ti
 			if json.Unmarshal(stateBytes, &state) != nil || filepath.Clean(state.Cwd) != physical {
 				continue
 			}
-			for _, path := range agentWires(dir) {
+			paths, err := kimiUsageAgentWires(dir)
+			if err != nil {
+				return agent.Usage{}, err
+			}
+			for _, path := range paths {
 				if state.CreatedAt >= since.UnixMilli() {
 					result.Found = true // An empty current journal still exists.
 				}
