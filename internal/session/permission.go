@@ -30,6 +30,11 @@ type PermissionRef struct {
 	PromptID int64  `json:"prompt_id"`
 	Title    string `json:"title"`
 	Context  string `json:"context"`
+	// StartScreen marks a Codex start screen (runtime.ParseStartScreen)
+	// rather than a Claude Code permission dialog: the answer path re-reads
+	// the pane with the matching parser and may confirm the digit with
+	// Enter.
+	StartScreen bool `json:"start_screen,omitempty"`
 }
 
 // NewPermissionQuiz builds the pending quiz for dialog p journalled as row
@@ -57,6 +62,19 @@ func NewPermissionQuiz(p runtime.PermissionPrompt, promptID, askedAt int64) Quiz
 	}
 }
 
+// startScreenQuizHeader is the badge of a Codex start-screen quiz.
+const startScreenQuizHeader = "Экран Codex"
+
+// NewStartScreenQuiz builds the pending quiz for Codex start screen p
+// (runtime.ParseStartScreen) journalled as row promptID: a permission quiz
+// flagged StartScreen, so it is answered through answerPermission.
+func NewStartScreenQuiz(p runtime.PermissionPrompt, promptID, askedAt int64) Quiz {
+	q := NewPermissionQuiz(p, promptID, askedAt)
+	q.Questions[0].Header = startScreenQuizHeader
+	q.Permission.StartScreen = true
+	return q
+}
+
 // ParseQuiz decodes a session's stored pending quiz; ok is false when there
 // is none or it does not parse.
 func ParseQuiz(pendingQuiz string) (Quiz, bool) {
@@ -68,6 +86,11 @@ func ParseQuiz(pendingQuiz string) (Quiz, bool) {
 		return Quiz{}, false
 	}
 	return q, true
+}
+
+// IsStartScreen reports whether q was built from a Codex start screen.
+func (q Quiz) IsStartScreen() bool {
+	return q.IsPermission() && q.Permission.StartScreen
 }
 
 // IsPermission reports whether q was built from a permission dialog.
@@ -166,15 +189,22 @@ func (m *Manager) answerPermission(ctx context.Context, sess store.Session, quiz
 	if err != nil {
 		return fmt.Errorf("re-read pane before answering permission prompt: %w", err)
 	}
-	if p, ok := runtime.ParsePermissionPrompt(pane); !ok || !p.SameDialog(quiz.PermissionPrompt()) {
+	parse := runtime.ParsePermissionPrompt
+	if quiz.IsStartScreen() {
+		parse = runtime.ParseStartScreen
+	}
+	if p, ok := parse(pane); !ok || !p.SameDialog(quiz.PermissionPrompt()) {
 		return validationErr("prompt_changed", "the permission dialog on the pane changed or closed; re-read the session")
 	}
 
-	step := keyStep{Kind: keyEscape, Settle: quizKeySettle}
+	steps := []keyStep{{Kind: keyEscape, Settle: quizKeySettle}}
 	label := permissionEscLabel
 	if idx != permissionEscIndex {
-		step = keyStep{Kind: keyDigit, Value: strconv.Itoa(idx + 1), Settle: quizKeySettle}
+		steps = []keyStep{{Kind: keyDigit, Value: strconv.Itoa(idx + 1), Settle: quizKeySettle}}
 		label = quiz.Questions[0].Options[idx].Label
+		if quiz.IsStartScreen() {
+			steps = append(steps, keyStep{Kind: keyEnter, Settle: quizKeySettle, When: m.startScreenNeedsEnter(sess, quiz, idx)})
+		}
 	}
 
 	promptID := quiz.Permission.PromptID
@@ -194,8 +224,27 @@ func (m *Manager) answerPermission(ctx context.Context, sess store.Session, quiz
 	}
 
 	started = true
-	go m.runQuizAnswer(sess.ID, h, []keyStep{step}, sent, withdraw)
+	go m.runQuizAnswer(sess.ID, h, steps, sent, withdraw)
 	return nil
+}
+
+// startScreenNeedsEnter returns the condition for the Enter that follows
+// the digit on a Codex start screen. Codex selects some choices on the
+// digit alone (update, most list rows) but only moves the cursor for
+// others (trust's «Trust and continue», the background server's
+// «Restart»), which then need Enter. So Enter goes only when, after the
+// digit settled, the very same screen is still up with the cursor on the
+// chosen row — never when the screen changed, where it would land on
+// whatever comes next.
+func (m *Manager) startScreenNeedsEnter(sess store.Session, quiz Quiz, idx int) func() bool {
+	return func() bool {
+		pane, err := m.rt.Capture(context.Background(), runtime.Handle{Name: sess.TmuxName}, runtime.PermissionCaptureLines)
+		if err != nil {
+			return false
+		}
+		p, ok := runtime.ParseStartScreen(pane)
+		return ok && p.SameDialog(quiz.PermissionPrompt()) && runtime.StartScreenCursor(pane) == idx
+	}
 }
 
 // clearPendingForTerminal drops what a session that reached a terminal state

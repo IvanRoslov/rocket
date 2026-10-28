@@ -143,24 +143,33 @@ func (m *Monitor) pollPermission(ctx context.Context, sess store.Session) {
 // in-flight wait for the old dialog instead of a false
 // quiz_answer_unconfirmed.
 func (m *Monitor) publishPermission(sess store.Session, p runtime.PermissionPrompt, replacing bool) {
+	m.publishPromptQuiz(sess, p, replacing, session.NewPermissionQuiz)
+}
+
+// publishPromptQuiz is publishPermission with the quiz builder as a
+// parameter (session.NewPermissionQuiz, session.NewStartScreenQuiz). It
+// reports whether the quiz was set and whether its journal row was a fresh
+// one rather than the reopened row of the same dialog.
+func (m *Monitor) publishPromptQuiz(sess store.Session, p runtime.PermissionPrompt, replacing bool,
+	build func(runtime.PermissionPrompt, int64, int64) session.Quiz) (published, fresh bool) {
 	options, err := json.Marshal(p.Options)
 	if err != nil {
-		return
+		return false, false
 	}
 	now := time.Now().Unix()
 	id, reused, err := m.st.OpenPermissionPrompt(sess.ID, p.Title, p.Context, string(options), now)
 	if err != nil {
 		slog.Warn("monitor: journal permission prompt", "session", sess.ID, "error", err)
-		return
+		return false, false
 	}
-	quiz, err := json.Marshal(session.NewPermissionQuiz(p, id, now))
+	quiz, err := json.Marshal(build(p, id, now))
 	if err != nil {
-		return
+		return false, false
 	}
 	swapped, err := m.st.CompareAndSwapPendingQuiz(sess.ID, sess.PendingQuiz, string(quiz))
 	if err != nil {
 		slog.Warn("monitor: set permission quiz", "session", sess.ID, "error", err)
-		return
+		return false, false
 	}
 	if !swapped {
 		// A hook quiz (or another writer) got there first; nothing points
@@ -170,13 +179,14 @@ func (m *Monitor) publishPermission(sess store.Session, p runtime.PermissionProm
 				slog.Warn("monitor: drop unattached permission prompt", "session", sess.ID, "error", err)
 			}
 		}
-		return
+		return false, false
 	}
 	slog.Info("monitor: permission dialog open", "session", sess.ID, "title", p.Title)
 	if replacing {
 		m.bus.Publish("session.quiz_resolved", sess.ID, map[string]any{})
 	}
 	m.bus.Publish("session.quiz_asked", sess.ID, map[string]any{})
+	return true, !reused
 }
 
 func (m *Monitor) forgetPermissionMisses(sessionID string) {

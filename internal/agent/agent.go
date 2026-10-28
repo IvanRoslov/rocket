@@ -18,6 +18,11 @@ var ErrNoSignal = errors.New("no activity signal")
 type ActivityRef struct {
 	SessionID    string
 	WorktreePath string
+	// Since, when set, is when the session's current agent process was
+	// launched (spawn or the latest restore). Probes that must ignore an
+	// earlier run's transcript in the same worktree (StartupProber) count
+	// only records at or after it. Zero means no bound.
+	Since time.Time
 }
 
 // Tokens holds token usage for one actual model in an agent transcript.
@@ -39,6 +44,15 @@ type Usage struct {
 // transcripts. Since excludes records from an earlier use of the worktree.
 type UsageReader interface {
 	Usage(ctx context.Context, worktreePath string, since time.Time) (Usage, error)
+}
+
+// StartupProber is an optional adapter capability for agents whose CLI may
+// stop on an interactive start screen (trust, update, …) before the first
+// turn. While HasStartedTurn is false the monitor reads the pane for such a
+// screen (runtime.ParseStartScreen); once it is true the check stops.
+type StartupProber interface {
+	// HasStartedTurn reports whether the session's transcript records at least one task_started.
+	HasStartedTurn(ctx context.Context, ref ActivityRef) (bool, error)
 }
 
 // ChatEntry is one entry in a session's chat transcript, as returned by

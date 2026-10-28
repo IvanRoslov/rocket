@@ -80,6 +80,11 @@ type Monitor struct {
 	// permNext is the dialog a session's pane shows instead of its pending
 	// one, until it is confirmed — see permissionChangeConfirmed.
 	permNext map[string]permissionCandidate
+	// startScreens is checkStartScreen's per-session memory.
+	startScreens map[string]*startScreenState
+	// wake wakes a recipient's delivery worker (the queue's Wake); see
+	// SetWake.
+	wake func(sessionID string)
 }
 
 // New builds a Monitor. resolveAgent is typically agent.Get.
@@ -99,6 +104,7 @@ func New(st *store.Store, b *bus.Bus, rt runtime.Runtime, cfg *config.Config, re
 		inputWaitMiss: make(map[string]int),
 		permMiss:      make(map[string]int),
 		permNext:      make(map[string]permissionCandidate),
+		startScreens:  make(map[string]*startScreenState),
 	}
 }
 
@@ -241,6 +247,11 @@ func (m *Monitor) sweep(ctx context.Context) {
 			delete(m.permNext, id)
 		}
 	}
+	for id := range m.startScreens {
+		if !sessionIDs[id] {
+			delete(m.startScreens, id)
+		}
+	}
 	m.mu.Unlock()
 }
 
@@ -359,6 +370,7 @@ func (m *Monitor) pollSession(ctx context.Context, sess store.Session, liveSet m
 		state  activity.State
 		ts     time.Time
 		exited bool
+		ag     agent.Agent
 	)
 
 	// For spawning sessions, skip tmux-dead and pane-prober checks; only agent
@@ -384,7 +396,8 @@ func (m *Monitor) pollSession(ctx context.Context, sess store.Session, liveSet m
 	}
 
 	if !exited {
-		ag, err := m.resolveAgent(sess.Agent)
+		var err error
+		ag, err = m.resolveAgent(sess.Agent)
 		if err != nil {
 			slog.Error("monitor: resolve agent", "session", sess.ID, "agent", sess.Agent, "error", err)
 			return
@@ -422,6 +435,7 @@ func (m *Monitor) pollSession(ctx context.Context, sess store.Session, liveSet m
 
 	if !exited {
 		state, ts = m.correctStaleInputWait(ctx, sess, state, ts)
+		state, ts = m.checkStartScreen(ctx, sess, ag, state, ts)
 	}
 
 	m.applyMerge(sess, state, ts, exited, "poll")

@@ -44,6 +44,9 @@ type fakeRuntime struct {
 	captureOut   string
 	captureErr   error
 	captureLines []int
+	// captureAfterKeys, when set, is what Capture returns once any key
+	// has been sent (the screen changed in response).
+	captureAfterKeys string
 }
 
 func (f *fakeRuntime) Create(ctx context.Context, spec runtime.CreateSpec) (runtime.Handle, error) {
@@ -74,6 +77,9 @@ func (f *fakeRuntime) Capture(ctx context.Context, h runtime.Handle, lines int) 
 	f.captureLines = append(f.captureLines, lines)
 	if f.captureErr != nil {
 		return "", f.captureErr
+	}
+	if f.captureAfterKeys != "" && len(f.sentKeys) > 0 {
+		return f.captureAfterKeys, nil
 	}
 	if f.captureOut != "" {
 		return f.captureOut, nil

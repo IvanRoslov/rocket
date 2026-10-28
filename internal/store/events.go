@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -136,4 +137,22 @@ func (s *Store) ListEventsTail(limit int, sessionID string) ([]Event, error) {
 		out[i], out[j] = out[j], out[i]
 	}
 	return out, nil
+}
+
+// LastSessionEventTS returns the ts of the newest event of type typ for
+// sessionID, and whether there is one. It walks idx_events_session
+// backwards, so it stays cheap enough to call on every monitor sweep.
+func (s *Store) LastSessionEventTS(sessionID, typ string) (int64, bool, error) {
+	var ts int64
+	err := s.db.QueryRow(
+		`SELECT ts FROM events WHERE session_id = ? AND type = ? ORDER BY id DESC LIMIT 1`,
+		sessionID, typ,
+	).Scan(&ts)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("last session event: %w", err)
+	}
+	return ts, true, nil
 }
