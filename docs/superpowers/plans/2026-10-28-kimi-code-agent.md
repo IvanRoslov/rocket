@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go (daemon, CLI), TypeScript/React (web dashboard), tmux.
 
-**Spec:** `docs/superpowers/specs/2026-10-28-kimi-code-agent-design.md` (task #5757 spec v2). Recon facts and fixtures: `docs/superpowers/kimi-recon-report.md`, `internal/agent/kimicode/testdata/`, `internal/runtime/testdata/kimi-*.pane` (merged in PR #142) — every worker reads the report too.. Every worker reads it in full.
+**Spec:** `docs/superpowers/specs/2026-10-28-kimi-code-agent-design.md` (task #5757 spec v3). Recon facts and fixtures: `docs/superpowers/kimi-recon-report.md`, `internal/agent/kimicode/testdata/`, `internal/runtime/testdata/kimi-*.pane` (merged in PR #142) — every worker reads the report too.. Every worker reads it in full.
 
 ## Global Constraints
 
@@ -30,7 +30,7 @@
 1. Kimi creates its session journal only after the first prompt (confirmed by recon) → before the brief is injected, Activity must return `ErrNoSignal` (not `ready`/`idle`), and first-message delivery must rely on the pane parser. Test owner: Task 3 (activity) and Task 2 (manager queues first message).
 2. A previous Kimi session in the same worktree (after `restore`) must not be taken as the current one: journal selection respects `ActivityRef.Since`. Test owner: Task 2 (`wire.go` locator: `state.json.createdAt` vs `Since`).
 3. Messages typed while Kimi is busy are queued by Kimi and recorded only when their turn starts, as a separate user-origin `turn.prompt` (fixture `queued-second-message.wire.jsonl`); skill-activation `turn.steer` records must not count as delivery. Test owner: Task 3.
-4. Quota exhaustion (429) → `turn.ended reason=failed` with error → `blocked`, error text preserved. Test owner: Task 3.
+4. Quota exhaustion (429) → `turn.ended reason=failed` with error → `blocked`, and the monitor sends the live parent ONE system message `[rocket] session <id>: Kimi turn failed: <error>` per failed turn (dedup by turnId, survives daemon restart like start-screen alerts); no parent → `problem` log on the session's task. No new status/reason field. Test owner: Task 3.
 5. `kimi` not in the daemon's PATH but present at `~/.kimi-code/bin/kimi` → spawn works. Test owner: Task 2.
 
 ---
