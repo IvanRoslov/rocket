@@ -148,6 +148,8 @@ function buildFeed(entries: ChatEntry[], optimistic: OptimisticMessage[]): FeedI
 const STATUS_LABEL: Record<MessageStatus, string> = {
   delivered: 'delivered',
   queued: 'queued',
+  delivering: 'delivering',
+  accepted: 'accepted · ждём подтверждения',
   failed: 'failed',
 }
 

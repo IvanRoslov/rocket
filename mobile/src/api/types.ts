@@ -48,7 +48,7 @@ export interface Repo {
   created_at: number
 }
 
-export type MessageStatus = 'queued' | 'delivered' | 'failed'
+export type MessageStatus = 'queued' | 'delivering' | 'accepted' | 'delivered' | 'failed'
 
 export interface Message {
   id: number

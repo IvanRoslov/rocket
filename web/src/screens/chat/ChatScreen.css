@@ -115,7 +115,9 @@
 .chat-screen__status--delivered {
   color: var(--ok);
 }
-.chat-screen__status--queued {
+.chat-screen__status--queued,
+.chat-screen__status--delivering,
+.chat-screen__status--accepted {
   color: var(--warn-text);
 }
 .chat-screen__status--failed {
