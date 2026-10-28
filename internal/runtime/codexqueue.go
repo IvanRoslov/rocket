@@ -33,9 +33,9 @@ const minQueuedPrefix = 20
 // queue at the bottom of the screen holding marker — the injected text, or
 // a logical line of it. Today only Codex has such a queue:
 //
-//	• Messages to be submitted after next tool call (press esc to interrupt and send immediately)
-//	  ↳ [from probe] MARKER-ALPHA please reply ACK-ALPHA
-//	› Ask Codex to do anything
+//   - Messages to be submitted after next tool call (press esc to interrupt and send immediately)
+//     ↳ [from probe] MARKER-ALPHA please reply ACK-ALPHA
+//     › Ask Codex to do anything
 //
 // The block must be live: the last header in pane, followed by its ↳ rows
 // and then the composer row near the bottom. The same text echoed in
