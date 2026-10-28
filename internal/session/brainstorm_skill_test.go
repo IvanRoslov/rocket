@@ -86,7 +86,7 @@ func restoreOrchestrator(t *testing.T, taskSkill, setting string, shipsSkill boo
 	if err := st.SetSetting(store.SettingOrchestratorBrainstormCustom, setting); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.Restore(context.Background(), "orch1"); err != nil {
+	if err := m.Restore(context.Background(), "orch1", RestoreOpts{}); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 	return testFakeAgent.setupCalls[len(testFakeAgent.setupCalls)-1], st, id

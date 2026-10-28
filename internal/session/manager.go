@@ -101,6 +101,10 @@ type Manager struct {
 	// token is injected.
 	getToken func() string
 
+	// paneOnlyShell reports whether a tmux session's pane holds only a bare
+	// shell; defaults to runtime.PaneOnlyShell, shared with the monitor.
+	paneOnlyShell func(ctx context.Context, tmuxName string) (bool, error)
+
 	// quizSleepFn is called between each keystroke AnswerQuiz sends (see
 	// quiz.go's sendQuizKeys); defaults to time.Sleep, overridable via
 	// SetQuizTiming so tests don't pay quizKeySettle in wall-clock time.
@@ -133,6 +137,7 @@ type Manager struct {
 func NewManager(st *store.Store, b *bus.Bus, rt runtime.Runtime, ws workspace.Workspace, cfg *config.Config) *Manager {
 	m := &Manager{
 		st: st, bus: b, rt: rt, ws: ws, cfg: cfg,
+		paneOnlyShell:          runtime.PaneOnlyShell,
 		quizSleepFn:            time.Sleep,
 		quizUnconfirmedTimeout: 60 * time.Second,
 	}
@@ -892,10 +897,26 @@ func (m *Manager) KillCascade(ctx context.Context, id string, cleanup bool) erro
 	return m.Kill(ctx, id, cleanup)
 }
 
+// RestoreOpts tunes Manager.Restore.
+type RestoreOpts struct {
+	// Force restores a "running" session whose agent still looks alive: the
+	// tmux session is destroyed and the agent relaunched. Without it such a
+	// session is rejected with restore_not_allowed.
+	Force bool
+}
+
+// SetPaneProber overrides the check that tells whether a live tmux session's
+// pane holds only a bare shell. Tests use it to avoid running tmux/ps.
+func (m *Manager) SetPaneProber(f func(ctx context.Context, tmuxName string) (bool, error)) {
+	m.paneOnlyShell = f
+}
+
 // Restore recreates a dead/errored session's workspace and runtime, then
-// marks it running. It is only allowed from state "errored"/"killed", or
-// from "running" when the runtime handle is no longer alive.
-func (m *Manager) Restore(ctx context.Context, id string) error {
+// marks it running. It is allowed from state "errored"/"killed", or from
+// "running" when the runtime handle is gone or its pane holds only a bare
+// shell (the agent exited and nothing replaced it). A running session whose
+// agent still looks alive is restored only with opts.Force.
+func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -908,8 +929,24 @@ func (m *Manager) Restore(ctx context.Context, id string) error {
 	}
 
 	allowed := sess.State == "errored" || sess.State == "killed"
-	if !allowed && sess.State == "running" && !m.rt.Alive(ctx, runtime.Handle{Name: sess.TmuxName}) {
-		allowed = true
+	destroyTmux := false
+	if !allowed && sess.State == "running" {
+		h := runtime.Handle{Name: sess.TmuxName}
+		switch {
+		case !m.rt.Alive(ctx, h):
+			allowed = true
+		case opts.Force:
+			allowed, destroyTmux = true, true
+		default:
+			// A probe error is inconclusive, never "dead".
+			if only, err := m.paneOnlyShell(ctx, sess.TmuxName); err == nil && only {
+				allowed, destroyTmux = true, true
+			}
+		}
+		if !allowed {
+			return validationErr("restore_not_allowed",
+				"session is running and its agent looks alive; use --force to kill the tmux session and relaunch")
+		}
 	}
 	if !allowed {
 		return validationErr("restore_not_allowed", "session cannot be restored from state: "+sess.State)
@@ -918,6 +955,13 @@ func (m *Manager) Restore(ctx context.Context, id string) error {
 	repo, err := m.st.GetRepo(sess.RepoID)
 	if err != nil {
 		return err
+	}
+
+	if destroyTmux {
+		// Create would fail on the name still held by the stale tmux session.
+		if err := m.rt.Destroy(ctx, runtime.Handle{Name: sess.TmuxName}); err != nil {
+			return err
+		}
 	}
 
 	var path string

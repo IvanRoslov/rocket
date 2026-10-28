@@ -472,7 +472,20 @@ func handleRestoreSession(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
-	if err := d.Manager.Restore(r.Context(), id); err != nil {
+	force := false
+	if v := r.URL.Query().Get("force"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			force = b
+		}
+	}
+	// --force kills a live agent: only a human (no caller session) or the
+	// session's own parent may do it, not the session itself or a sibling.
+	if force && caller != nil && target.ParentID != caller.ID {
+		writeErr(w, http.StatusForbidden, "forbidden", "only a human or the parent session may force-restore")
+		return
+	}
+
+	if err := d.Manager.Restore(r.Context(), id, session.RestoreOpts{Force: force}); err != nil {
 		writeManagerErr(w, err)
 		return
 	}

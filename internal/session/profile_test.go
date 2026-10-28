@@ -93,7 +93,7 @@ func TestRestoreUsesSessionSnapshot(t *testing.T) {
 		t.Fatalf("Kill: %v", err)
 	}
 
-	if err := m.Restore(context.Background(), sess.ID); err != nil {
+	if err := m.Restore(context.Background(), sess.ID, RestoreOpts{}); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 	last := testFakeAgent.launchCalls[len(testFakeAgent.launchCalls)-1]

@@ -10,11 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -26,13 +22,6 @@ import (
 	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
-
-// shellNames are basenames (leading '-' stripped, as tmux/login shells often
-// prefix argv[0] with a hyphen) that count as "no agent process running" for
-// the pane-probe exited check.
-var shellNames = map[string]bool{
-	"sh": true, "bash": true, "zsh": true, "fish": true, "dash": true,
-}
 
 // pushEntry records the last state pushed for a session, via PushUpdate.
 type pushEntry struct {
@@ -52,45 +41,12 @@ type paneProber interface {
 	onlyShellRunning(ctx context.Context, tmuxName string) (bool, error)
 }
 
-// execProber is the real paneProber, shelling out to tmux and ps.
+// execProber is the real paneProber; the probe itself lives in
+// runtime.PaneOnlyShell so Manager.Restore shares it.
 type execProber struct{}
 
 func (execProber) onlyShellRunning(ctx context.Context, tmuxName string) (bool, error) {
-	out, err := exec.CommandContext(ctx, "tmux", "list-panes", "-t", "="+tmuxName, "-F", "#{pane_tty}").Output()
-	if err != nil {
-		return false, fmt.Errorf("list-panes: %w", err)
-	}
-
-	ttys := nonEmptyLines(string(out))
-	if len(ttys) == 0 {
-		return false, fmt.Errorf("no panes found for %q", tmuxName)
-	}
-
-	for _, tty := range ttys {
-		psOut, err := exec.CommandContext(ctx, "ps", "-t", tty, "-o", "comm=").Output()
-		if err != nil {
-			return false, fmt.Errorf("ps -t %s: %w", tty, err)
-		}
-		for _, comm := range nonEmptyLines(string(psOut)) {
-			base := filepath.Base(comm)
-			base = strings.TrimPrefix(base, "-")
-			if !shellNames[base] {
-				return false, nil
-			}
-		}
-	}
-	return true, nil
-}
-
-func nonEmptyLines(s string) []string {
-	var out []string
-	for _, line := range strings.Split(s, "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			out = append(out, line)
-		}
-	}
-	return out
+	return runtime.PaneOnlyShell(ctx, tmuxName)
 }
 
 // chatStat records the last-observed transcript (mtime, size) for a session,
