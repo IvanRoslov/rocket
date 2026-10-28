@@ -149,7 +149,7 @@ const STATUS_LABEL: Record<MessageStatus, string> = {
   delivered: 'delivered',
   queued: 'queued',
   delivering: 'delivering',
-  accepted: 'accepted · ждём подтверждения',
+  accepted: 'accepted · awaiting confirmation',
   failed: 'failed',
 }
 

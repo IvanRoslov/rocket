@@ -21,6 +21,8 @@ export interface MessagesTabProps {
 const STATUS_LABEL: Record<Message['status'], string> = {
   delivered: 'delivered',
   queued: 'queued',
+  delivering: 'delivering',
+  accepted: 'accepted · awaiting confirmation',
   failed: 'failed',
 }
 
