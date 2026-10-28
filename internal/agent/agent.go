@@ -110,6 +110,24 @@ func ShipsBrainstormSkill(a Agent) bool {
 	return ok && s.ShipsBrainstormSkill()
 }
 
+// FirstMessageByInput marks agents whose interactive CLI cannot accept a
+// positional first prompt. The session manager queues it for pane delivery.
+type FirstMessageByInput interface{ FirstMessageByInput() bool }
+
+func TakesFirstMessageByInput(a Agent) bool {
+	v, ok := a.(FirstMessageByInput)
+	return ok && v.FirstMessageByInput()
+}
+
+// BracketedPaster marks agents whose TUI needs bracketed paste for injected
+// text. The queue uses this capability when it delivers messages.
+type BracketedPaster interface{ BracketedPaste() bool }
+
+func WantsBracketedPaste(a Agent) bool {
+	v, ok := a.(BracketedPaster)
+	return ok && v.BracketedPaste()
+}
+
 // BusyInputAccepter is implemented by agents whose composer takes new input
 // while a turn is running and keeps it in the agent's own queue (Codex). For
 // them the message queue treats an active session as ready to receive.

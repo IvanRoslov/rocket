@@ -75,11 +75,12 @@ type LaunchProfile struct {
 
 // Manager owns session lifecycle: spawn, kill, restore.
 type Manager struct {
-	st  *store.Store
-	bus *bus.Bus
-	rt  runtime.Runtime
-	ws  workspace.Workspace
-	cfg *config.Config
+	st   *store.Store
+	bus  *bus.Bus
+	rt   runtime.Runtime
+	ws   workspace.Workspace
+	cfg  *config.Config
+	wake func(string) // wakes queued first-message delivery after launch
 
 	// mu serializes Spawn, Kill, Restore, and Reconcile end-to-end. Without
 	// it, a Kill racing a concurrent Spawn between the session's
@@ -132,6 +133,9 @@ type Manager struct {
 	// sequence into the same tmux pane.
 	quizInFlight map[string]bool
 }
+
+// SetWake installs the queue's wake function before sessions are launched.
+func (m *Manager) SetWake(wake func(string)) { m.wake = wake }
 
 // NewManager builds a Manager wired to the given dependencies.
 func NewManager(st *store.Store, b *bus.Bus, rt runtime.Runtime, ws workspace.Workspace, cfg *config.Config) *Manager {
@@ -464,10 +468,20 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 		m.markErrored(id, err)
 		return store.Session{}, err
 	}
+	argv, err := launchArgs(ag, spec)
+	if err != nil {
+		m.markErrored(id, err)
+		return store.Session{}, err
+	}
+	queuedFirst := agent.TakesFirstMessageByInput(ag) && spec.FirstMessage != ""
+	if err := m.queueFirstMessage(ag, &spec); err != nil {
+		m.markErrored(id, err)
+		return store.Session{}, err
+	}
 
 	env := mergeEnv(repo.Env, ag.Env(spec))
 	m.injectToken(env)
-	cmd := shellJoin(ag.LaunchCommand(spec))
+	cmd := shellJoin(argv)
 
 	if _, err := m.rt.Create(ctx, runtime.CreateSpec{
 		Name:    id,
@@ -484,6 +498,9 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 		return store.Session{}, err
 	}
 	m.bus.Publish("session.state_changed", id, map[string]any{"from": "spawning", "to": "running"})
+	if queuedFirst && m.wake != nil {
+		m.wake(id)
+	}
 
 	return sess, nil
 }
@@ -667,10 +684,20 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 		m.markErrored(id, err)
 		return store.Session{}, err
 	}
+	argv, err := launchArgs(ag, spec)
+	if err != nil {
+		m.markErrored(id, err)
+		return store.Session{}, err
+	}
+	queuedFirst := agent.TakesFirstMessageByInput(ag) && spec.FirstMessage != ""
+	if err := m.queueFirstMessage(ag, &spec); err != nil {
+		m.markErrored(id, err)
+		return store.Session{}, err
+	}
 
 	env := mergeEnv(repo.Env, ag.Env(spec))
 	m.injectToken(env)
-	cmd := shellJoin(ag.LaunchCommand(spec))
+	cmd := shellJoin(argv)
 
 	if _, err := m.rt.Create(ctx, runtime.CreateSpec{
 		Name:    id,
@@ -687,6 +714,9 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 		return store.Session{}, err
 	}
 	m.bus.Publish("session.state_changed", id, map[string]any{"from": "spawning", "to": "running"})
+	if queuedFirst && m.wake != nil {
+		m.wake(id)
+	}
 
 	return sess, nil
 }
@@ -956,6 +986,13 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 	if err != nil {
 		return err
 	}
+	ag, err := agent.Get(sess.Agent)
+	if err != nil {
+		return err
+	}
+	if err := ag.Available(); err != nil {
+		return validationErr("agent_unavailable", "agent unavailable: "+err.Error())
+	}
 
 	if destroyTmux {
 		// Create would fail on the name still held by the stale tmux session.
@@ -970,11 +1007,6 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 		path, restoreErr = m.ws.Restore(ctx, repo, id, sess.Branch)
 		return restoreErr
 	})
-	if err != nil {
-		return err
-	}
-
-	ag, err := agent.Get(sess.Agent)
 	if err != nil {
 		return err
 	}
@@ -1000,10 +1032,20 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 		m.markErrored(id, err)
 		return err
 	}
+	argv, err := launchArgs(ag, spec)
+	if err != nil {
+		m.markErrored(id, err)
+		return err
+	}
+	queuedFirst := agent.TakesFirstMessageByInput(ag) && spec.FirstMessage != ""
+	if err := m.queueFirstMessage(ag, &spec); err != nil {
+		m.markErrored(id, err)
+		return err
+	}
 
 	env := mergeEnv(repo.Env, ag.Env(spec))
 	m.injectToken(env)
-	cmd := shellJoin(ag.LaunchCommand(spec))
+	cmd := shellJoin(argv)
 
 	if _, err := m.rt.Create(ctx, runtime.CreateSpec{
 		Name:    id,
@@ -1020,7 +1062,47 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 		return err
 	}
 	m.bus.Publish("session.restored", id, nil)
+	if queuedFirst && m.wake != nil {
+		m.wake(id)
+	}
 
+	return nil
+}
+
+// launchArgs validates the interactive command before queueing a prompt.
+// Availability can change between its earlier check and this call; an empty
+// command would otherwise start a bare tmux shell while marking the session
+// running. Input-first agents receive an argv copy without the first message.
+func launchArgs(ag agent.Agent, spec agent.LaunchSpec) ([]string, error) {
+	if agent.TakesFirstMessageByInput(ag) {
+		spec.FirstMessage = ""
+	}
+	argv := ag.LaunchCommand(spec)
+	if len(argv) == 0 || argv[0] == "" {
+		return nil, fmt.Errorf("%s launch command is empty", ag.Name())
+	}
+	return argv, nil
+}
+
+// queueFirstMessage transfers the launch prompt to the persistent delivery
+// queue before the runtime starts. A spawning session is not eligible for
+// delivery yet, so the prompt is ready when the session becomes running.
+// Restore appends its notice after any pending messages, preserving their FIFO
+// order; SetupWorkspace has already rewritten the role prompt in AGENTS.md.
+// The queue's Kimi composer-readiness gate is implemented in Task 3; this
+// method only persists the message and the caller wakes delivery after launch.
+func (m *Manager) queueFirstMessage(ag agent.Agent, spec *agent.LaunchSpec) error {
+	if !agent.TakesFirstMessageByInput(ag) || spec.FirstMessage == "" {
+		return nil
+	}
+	// An empty FromSession is Rocket's system sender. The queue displays it
+	// as "rocket" without treating it as a session for failure notices.
+	if _, err := m.st.AddMessage(store.Message{
+		ToSession: spec.SessionID, Body: spec.FirstMessage,
+	}); err != nil {
+		return fmt.Errorf("queue first message: %w", err)
+	}
+	spec.FirstMessage = ""
 	return nil
 }
 
