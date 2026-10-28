@@ -30,6 +30,11 @@ type PermissionRef struct {
 	PromptID int64  `json:"prompt_id"`
 	Title    string `json:"title"`
 	Context  string `json:"context"`
+	// StartScreen marks a Codex start screen (runtime.ParseStartScreen)
+	// rather than a Claude Code permission dialog: the answer path re-reads
+	// the pane with the matching parser and may confirm the digit with
+	// Enter.
+	StartScreen bool `json:"start_screen,omitempty"`
 }
 
 // NewPermissionQuiz builds the pending quiz for dialog p journalled as row
@@ -57,6 +62,19 @@ func NewPermissionQuiz(p runtime.PermissionPrompt, promptID, askedAt int64) Quiz
 	}
 }
 
+// startScreenQuizHeader is the badge of a Codex start-screen quiz.
+const startScreenQuizHeader = "Экран Codex"
+
+// NewStartScreenQuiz builds the pending quiz for Codex start screen p
+// (runtime.ParseStartScreen) journalled as row promptID: a permission quiz
+// flagged StartScreen, so it is answered through answerPermission.
+func NewStartScreenQuiz(p runtime.PermissionPrompt, promptID, askedAt int64) Quiz {
+	q := NewPermissionQuiz(p, promptID, askedAt)
+	q.Questions[0].Header = startScreenQuizHeader
+	q.Permission.StartScreen = true
+	return q
+}
+
 // ParseQuiz decodes a session's stored pending quiz; ok is false when there
 // is none or it does not parse.
 func ParseQuiz(pendingQuiz string) (Quiz, bool) {
@@ -68,6 +86,11 @@ func ParseQuiz(pendingQuiz string) (Quiz, bool) {
 		return Quiz{}, false
 	}
 	return q, true
+}
+
+// IsStartScreen reports whether q was built from a Codex start screen.
+func (q Quiz) IsStartScreen() bool {
+	return q.IsPermission() && q.Permission.StartScreen
 }
 
 // IsPermission reports whether q was built from a permission dialog.

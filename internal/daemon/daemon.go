@@ -86,6 +86,9 @@ func Run(cfg *config.Config) error {
 
 	mon := monitor.New(st, b, rt, cfg, agent.Get)
 	q := queue.New(st, b, rt, cfg, mon.Activity)
+	// The monitor alerts a parent orchestrator when a session is stuck on
+	// an agent start screen; wake its delivery worker right away.
+	mon.SetWake(q.Wake)
 	// Claude Code recipients get their messages over the cross-session UDS
 	// inbox whenever one is reachable; every other agent keeps using tmux, and
 	// so does this path whenever the socket is missing, refuses the write, or
