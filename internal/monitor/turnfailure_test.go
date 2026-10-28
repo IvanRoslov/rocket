@@ -128,3 +128,15 @@ func TestTurnFailureNotReportedWithoutFailure(t *testing.T) {
 		t.Fatalf("alerts = %d, want 0", n)
 	}
 }
+
+// The in-memory record alone stops a repeat (e.g. when the journal event
+// could not be written).
+func TestTurnFailureMemoryBackstop(t *testing.T) {
+	m, st, ag := turnFailureMonitor(t, true)
+	ag.fail("session_a/0", "boom")
+	m.turnFailures = map[string]string{"sess1": "session_a/0"}
+	m.sweep(context.Background())
+	if n := len(messagesTo(t, st, "orch1")); n != 0 {
+		t.Fatalf("alerts = %d, want 0", n)
+	}
+}

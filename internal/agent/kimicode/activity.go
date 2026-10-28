@@ -22,6 +22,7 @@ type turnState struct {
 	failed          bool   // last turn ended with reason failed or blocked
 	errText         string // error.message of that failed turn
 	turnID          int64  // turnId of the last turn.ended
+	endedAt         int64  // its time (unix ms)
 	openInteraction bool   // an interaction.request after the last turn boundary is unresolved
 	found           bool   // any turn record or interaction was seen
 }
@@ -60,7 +61,7 @@ func readTurnState(path string) (turnState, error) {
 				} `json:"error"`
 			}
 			if json.Unmarshal(rec.Raw, &r) == nil && (r.Reason == "failed" || r.Reason == "blocked") {
-				st.failed, st.turnID = true, r.TurnID
+				st.failed, st.turnID, st.endedAt = true, r.TurnID, rec.Time.UnixMilli()
 				if r.Error != nil {
 					st.errText = r.Error.Message
 				}
@@ -77,7 +78,8 @@ var _ agent.TurnFailureReporter = (*KimiCode)(nil)
 
 // LastTurnFailure implements agent.TurnFailureReporter: the latest turn of
 // the session's main journal ended failed or blocked. The turn ID is
-// «<session dir>/<turnId>», since Kimi numbers turns per session.
+// «<session dir>/<turnId>@<ended at ms>»: Kimi numbers turns per session,
+// and the time keeps two failures apart even if a retry reused the number.
 func (k *KimiCode) LastTurnFailure(ctx context.Context, ref agent.ActivityRef) (string, string, bool, error) {
 	dir, err := findSession(kimiHome(), ref.WorktreePath, ref.Since)
 	if err != nil {
@@ -90,7 +92,8 @@ func (k *KimiCode) LastTurnFailure(ctx context.Context, ref agent.ActivityRef) (
 	if !st.failed {
 		return "", "", false, nil
 	}
-	return filepath.Base(dir) + "/" + strconv.FormatInt(st.turnID, 10), st.errText, true, nil
+	id := filepath.Base(dir) + "/" + strconv.FormatInt(st.turnID, 10) + "@" + strconv.FormatInt(st.endedAt, 10)
+	return id, st.errText, true, nil
 }
 
 // Activity implements agent.Agent over the main journal of the newest Kimi

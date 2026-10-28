@@ -122,7 +122,7 @@ func TestLastTurnFailureReporter(t *testing.T) {
 	r := New().(agent.TurnFailureReporter)
 	wt, _ := fakeKimi(t, fixture(t, "failed-turn-synthetic.wire.jsonl"), 1, oldMtime)
 	id, msg, ok, err := r.LastTurnFailure(context.Background(), agent.ActivityRef{WorktreePath: wt})
-	if err != nil || !ok || id != "session_x/0" || msg != "HTTP 429: quota exhausted (synthetic)" {
+	if err != nil || !ok || id != "session_x/0@1793195011001" || msg != "HTTP 429: quota exhausted (synthetic)" {
 		t.Fatalf("LastTurnFailure = %q %q %v %v", id, msg, ok, err)
 	}
 	wt, _ = fakeKimi(t, fixture(t, "completed-tool-turn.wire.jsonl"), 1, oldMtime)

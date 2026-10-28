@@ -82,6 +82,9 @@ type Monitor struct {
 	permNext map[string]permissionCandidate
 	// startScreens is checkStartScreen's per-session memory.
 	startScreens map[string]*startScreenState
+	// turnFailures is the last failed turn reportTurnFailure told someone
+	// about, per session: a backstop for its journal event.
+	turnFailures map[string]string
 	// wake wakes a recipient's delivery worker (the queue's Wake); see
 	// SetWake.
 	wake func(sessionID string)
@@ -250,6 +253,11 @@ func (m *Monitor) sweep(ctx context.Context) {
 	for id := range m.startScreens {
 		if !sessionIDs[id] {
 			delete(m.startScreens, id)
+		}
+	}
+	for id := range m.turnFailures {
+		if !sessionIDs[id] {
+			delete(m.turnFailures, id)
 		}
 	}
 	m.mu.Unlock()

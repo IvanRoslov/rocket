@@ -29,7 +29,8 @@ func agentTurnLabel(name string) string {
 // per failed turn, that the agent's latest turn failed and why — e.g. Kimi's
 // subscription quota ran out (HTTP 429), which Activity only shows as
 // blocked. It applies to adapters implementing agent.TurnFailureReporter.
-// The last reported turn is kept in the event log (turnFailedEvent).
+// The last reported turn is kept in the event log (turnFailedEvent), and in
+// memory too, so a failed event write cannot repeat the alert every sweep.
 func (m *Monitor) reportTurnFailure(ctx context.Context, sess store.Session, ag agent.Agent, ref agent.ActivityRef) {
 	r, ok := ag.(agent.TurnFailureReporter)
 	if !ok || sess.Kind == "agent" {
@@ -37,6 +38,12 @@ func (m *Monitor) reportTurnFailure(ctx context.Context, sess store.Session, ag 
 	}
 	turnID, msg, failed, err := r.LastTurnFailure(ctx, ref)
 	if err != nil || !failed {
+		return
+	}
+	m.mu.Lock()
+	reported := m.turnFailures[sess.ID] == turnID
+	m.mu.Unlock()
+	if reported {
 		return
 	}
 	last, seen, err := m.st.LastSessionEventData(sess.ID, turnFailedEvent)
@@ -51,6 +58,12 @@ func (m *Monitor) reportTurnFailure(ctx context.Context, sess store.Session, ag 
 	if !m.alertParentOrTask(sess, body, "turn failure", msg) {
 		return
 	}
+	m.mu.Lock()
+	if m.turnFailures == nil {
+		m.turnFailures = make(map[string]string)
+	}
+	m.turnFailures[sess.ID] = turnID
+	m.mu.Unlock()
 	if _, err := m.st.AppendEvent(store.Event{
 		TS: time.Now().Unix(), Type: turnFailedEvent, SessionID: sess.ID,
 		Data: map[string]any{"turn": turnID, "error": msg},
