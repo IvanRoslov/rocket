@@ -2,7 +2,7 @@
 
 Feature: `pi-and-deepseek2` (#5867), Task 1 (#5874)
 
-Status: `DONE_WITH_CONCERNS` — all requested DeepSeek session/pane shapes were captured except standalone cache-warming usage, which Pi did not emit.
+Status: `DONE` — all requested DeepSeek session/pane shapes were captured. The standalone usage fixture uses Pi's public SessionManager API; native automatic cache warming remains a separately documented negative finding.
 
 ## Environment and safety
 
@@ -77,8 +77,9 @@ The first turn is a real cache miss (`cacheRead=0`). Both subsequent turns are r
 Model attribution rules observed in Pi 1.4.0:
 
 - Assistant messages attribute usage directly through `message.provider` and `message.model`.
+- Standalone `type=usage` entries also carry direct top-level `provider` and `model`; their arbitrary `kind` identifies the operation and they do not participate in LLM context.
 - `compaction` and `branch_summary` keep usage at the record's top level but have **no** provider/model field. Attribute them to the session's governing `model_change` (`deepseek` / `deepseek-v4-pro` here), not to token counts or a hardcoded provider.
-- Assistant usage fields map naturally to Rocket as `input → Input`, `cacheRead → CacheRead`, `cacheWrite → CacheWrite`, and `output → Output`.
+- Assistant and standalone usage fields map naturally to Rocket as `input → Input`, `cacheRead → CacheRead`, `cacheWrite → CacheWrite`, and `output → Output`.
 
 ## Compaction
 
@@ -121,17 +122,43 @@ errorMessage=401: <redacted-authentication-error>
 
 The fixture preserves the error record shape and redacts the provider's request ID and dummy-key suffix.
 
-## Cache-warming limitation
+## Standalone usage entry and automatic-warming finding
 
-Normal startup, multiple turns, compaction, branch switching, and a clean resume produced no standalone `type=usage` record and no identifiable cache-warming operation. Therefore no cache-warming fixture is published. The brief's fallback could not be applied because it also requires a really observed `type=usage`; inventing that shape would violate the evidence requirement.
+### Native automatic cache warming
+
+Normal startup, multiple turns, compaction, branch switching, and a clean resume produced no automatic cache-warming operation. Source investigation found the precise reason:
+
+- Installed `dist/core/cache-warmer.js:26-33,123-128` requires `model.promptCache` for the active retention tier and otherwise stops with `cache lifetime unavailable`.
+- Installed `pi-ai/dist/providers/data/deepseek.json` defines both DeepSeek models without `promptCache`, so the unmodified DeepSeek sessions never scheduled a refresh.
+- `docs/settings.md:20-23` documents default `cacheWarming=streaming` and the `$0.05` expected-savings threshold. `dist/core/cache-warmer.js:238-250` persists `appendUsage("cache_warm", ...)` only after a successful replay.
+- The installed implementation was compared with upstream Pi `v1.4.0` `src/core/cache-warmer.ts`; the relevant logic matches.
+
+No native automatic cache-warming observation is claimed.
+
+### Standalone usage fallback fixture
+
+Fixture: `internal/agent/pi/testdata/pi-usage.jsonl`.
+
+Pi 1.4.0 publicly exports `SessionManager` from `dist/index.js`. Its public API defines `appendUsage(kind, provider, model, usage, note?)` in `dist/core/session-manager.d.ts:268-269`; the implementation at `dist/core/session-manager.js:863-877` creates the standalone entry and synchronously appends it to JSONL. `appendUsage` accepts arbitrary kinds, and direct `provider`/`model` attribution is mandatory.
+
+An isolated Node probe called the real API in this order:
+
+1. `SessionManager.create(<throwaway-cwd>, <isolated-session-dir>, { id: "pi-recon-usage" })`;
+2. `appendModelChange("deepseek", "deepseek-v4-pro")`;
+3. one synthetic `appendMessage`, required by `_hasConversation()` before Pi creates a new session file;
+4. `appendUsage("session_manager_probe", "deepseek", "deepseek-v4-pro", usage, "isolated public API probe")`.
+
+The controlled usage inputs were `input=7`, `output=3`, `cacheRead=5`, `cacheWrite=2`, `reasoning=0`, `totalTokens=17`, with zero cost fields. They are API-probe values, not billed provider usage or an automatic-warming measurement. Pi generated the real `id`, `parentId`, and `timestamp`; the returned entry exactly matched the last persisted JSONL record on readback.
+
+The fixture contains the actual four-record session. Only cwd and synthetic user text were redacted. It was not copied from the documentation example, and no credential, global setting, auth/package change, third-party extension, or record-type transformation was used.
 
 ## Artifact checks
 
 - Redaction preserved every JSON object key, array length, numeric value, usage count, and record ID; only strings and selected fixture record ranges changed.
 - Every published JSONL line parses as an object; record IDs are unique within each fixture.
 - Pane and JSONL scans found no real user paths, credential values, private prompts, or dummy-key residue. The scan ran in the credentialed shell and printed only `credential_value_matches=0` and `residue_matches=0`.
-- `python3 .superpowers/sdd/task-1-plan/scratch/validate_fixtures.py` → `FIXTURE VALIDATION GREEN (4 JSONL files)`.
+- `python3 .superpowers/sdd/task-1-plan/scratch/validate_fixtures.py` → `FIXTURE VALIDATION GREEN (5 JSONL files)`.
 - `git diff --check` → exit 0.
-- `make test` → exit 0; all Go packages passed and web tests passed 61 files / 718 tests. The web suite emitted only Node's non-fatal `localStorage` experimental warnings.
-- Final scope inspection found 12 changed files: this report, four JSONL fixtures, and seven pane fixtures; no production Go files or unrelated changes.
+- `make test` → exit 0; all Go packages passed and web tests passed 61 files / 718 tests. The web suite emitted pre-existing, non-fatal Node `localStorage` experimental warnings unrelated to these docs/fixtures.
+- Final scope inspection found 13 changed files: this report, five JSONL fixtures, and seven pane fixtures; no production Go files or unrelated changes.
 - Non-DeepSeek live calls were not performed.
