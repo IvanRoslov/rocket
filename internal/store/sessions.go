@@ -158,6 +158,20 @@ func (s *Store) ListSessions(f SessionFilter) ([]Session, error) {
 	return out, nil
 }
 
+// UpdateSessionAgent sets the adapter a session is tracked under. Targeted
+// (not UpdateSession) because the agent-watch reconcile touches only this
+// column and must not clobber concurrent row updates.
+func (s *Store) UpdateSessionAgent(id, agent string) error {
+	res, err := s.db.Exec(
+		`UPDATE sessions SET agent = ?, updated_at = ? WHERE id = ?`,
+		agent, time.Now().Unix(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("update session agent: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
 // UpdateSessionState updates a session's state and refreshes updated_at.
 // Returns ErrNotFound if the session doesn't exist.
 func (s *Store) UpdateSessionState(id, state string) error {

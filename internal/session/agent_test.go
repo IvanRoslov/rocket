@@ -205,6 +205,79 @@ func TestAdoptAgentSessionRevivesADeadRow(t *testing.T) {
 	}
 }
 
+func TestAdoptAgentSessionTracksAdapterDetectedFromCommand(t *testing.T) {
+	m, st, _, _, _ := testManager(t)
+	a := testAgentRow(t, "sre")
+	a.Command = "kimi --auto -m kimi-code/k3.1-pro"
+
+	sess, _, err := m.AdoptAgentSession(a)
+	if err != nil {
+		t.Fatalf("AdoptAgentSession: %v", err)
+	}
+	if sess.Agent != "kimi-code" {
+		t.Errorf("adopted Agent = %q, want kimi-code", sess.Agent)
+	}
+
+	stored, err := st.GetSession("sre")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if stored.Agent != "kimi-code" {
+		t.Errorf("stored Agent = %q, want kimi-code", stored.Agent)
+	}
+}
+
+func TestAdoptAgentSessionFallsBackToDefaultAgent(t *testing.T) {
+	m, st, _, _, _, cfg := testManagerWithConfig(t)
+	a := testAgentRow(t, "sre")
+	a.Command = "" // hand-made session: nothing to detect from
+
+	if _, _, err := m.AdoptAgentSession(a); err != nil {
+		t.Fatalf("AdoptAgentSession: %v", err)
+	}
+	stored, err := st.GetSession("sre")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if stored.Agent != cfg.DefaultAgent {
+		t.Errorf("stored Agent = %q, want the configured default %q", stored.Agent, cfg.DefaultAgent)
+	}
+}
+
+func TestAdoptAgentSessionReconcilesStaleAdapterOnLiveRow(t *testing.T) {
+	m, st, _, _, _ := testManager(t)
+	a := testAgentRow(t, "sre") // Command: claude
+
+	if _, _, err := m.AdoptAgentSession(a); err != nil {
+		t.Fatalf("AdoptAgentSession: %v", err)
+	}
+	if stored, _ := st.GetSession("sre"); stored.Agent != "claude-code" {
+		t.Fatalf("Agent after claude adopt = %q, want claude-code", stored.Agent)
+	}
+
+	// The human restarts the session on a different CLI: the registration's
+	// command changes, the row stays live. The next adopt must reconcile
+	// sessions.agent instead of leaving the old adapter on the row.
+	a.Command = "kimi --auto"
+	sess, fresh, err := m.AdoptAgentSession(a)
+	if err != nil {
+		t.Fatalf("re-adopt: %v", err)
+	}
+	if fresh {
+		t.Error("fresh = true on a live session, want false")
+	}
+	if sess.Agent != "kimi-code" {
+		t.Errorf("returned Agent = %q, want kimi-code", sess.Agent)
+	}
+	stored, err := st.GetSession("sre")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if stored.Agent != "kimi-code" {
+		t.Errorf("stored Agent = %q, want kimi-code", stored.Agent)
+	}
+}
+
 func TestRetireAgentSessionLeavesOtherKindsAlone(t *testing.T) {
 	m, st, _, _, _ := testManager(t)
 
