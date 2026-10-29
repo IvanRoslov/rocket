@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/runtime"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
@@ -109,6 +110,19 @@ func (m *Manager) AdoptAgentSession(a store.Agent) (sess store.Session, fresh bo
 		return store.Session{}, false, err
 	}
 	if err == nil && (existing.State == "spawning" || existing.State == "running") {
+		// The row is live and its lifecycle fields stay untouched, but the
+		// adapter may have drifted: a session restarted on a different CLI
+		// keeps the row while the pane runs something else. Delivery, the
+		// monitor and the dashboard all key off sessions.agent — a Kimi pane
+		// tracked as claude-code gets the wrong paste dialect, no journal
+		// confirmer, and redelivery loops (incident: cto on Kimi). Reconcile
+		// the column from the registered launcher command.
+		if want := m.agentAdapter(a); existing.Agent != want {
+			if err := m.st.UpdateSessionAgent(a.ID, want); err != nil {
+				return existing, false, fmt.Errorf("reconcile agent session adapter: %w", err)
+			}
+			existing.Agent = want
+		}
 		return existing, false, nil
 	}
 	adopted, err := m.upsertAgentSession(a)
@@ -141,6 +155,17 @@ func (m *Manager) RetireAgentSession(id string) error {
 	return nil
 }
 
+// agentAdapter resolves the adapter an agent's session row is tracked under:
+// detected from the registered launcher command when the leading binary is a
+// known CLI, else the configured default (see AdoptAgentSession for why the
+// row must name the adapter the pane actually runs).
+func (m *Manager) agentAdapter(a store.Agent) string {
+	if name := agent.DetectFromCommand(a.Command); name != "" {
+		return name
+	}
+	return m.cfg.DefaultAgent
+}
+
 // upsertAgentSession writes the session row describing an agent's live tmux
 // session, replacing any dead row left over from a previous run (the id is
 // fixed, so rows cannot accumulate per run the way worker sessions do).
@@ -153,7 +178,7 @@ func (m *Manager) upsertAgentSession(a store.Agent) (store.Session, error) {
 		Kind:         AgentSessionKind,
 		ProjectID:    a.ProjectID,
 		FeatureSlug:  a.ID,
-		Agent:        m.cfg.DefaultAgent,
+		Agent:        m.agentAdapter(a),
 		WorktreePath: a.Dir,
 		TmuxName:     a.ID,
 		State:        "running",
