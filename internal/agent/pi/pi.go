@@ -1,7 +1,6 @@
 package pi
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,8 +17,6 @@ type Pi struct{}
 func New() agent.Agent { return &Pi{} }
 
 func (p *Pi) Name() string { return "pi" }
-
-func (p *Pi) Catalog(context.Context) (agent.Catalog, error) { return agent.Catalog{}, nil }
 
 func (p *Pi) ShipsBrainstormSkill() bool { return true }
 
