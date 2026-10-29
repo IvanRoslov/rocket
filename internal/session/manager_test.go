@@ -13,6 +13,8 @@ import (
 
 	"github.com/IvanRoslov/rocket/internal/activity"
 	"github.com/IvanRoslov/rocket/internal/agent"
+	"github.com/IvanRoslov/rocket/internal/agent/claudecode"
+	"github.com/IvanRoslov/rocket/internal/agent/deepseek"
 	"github.com/IvanRoslov/rocket/internal/bus"
 	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/runtime"
@@ -586,6 +588,40 @@ func TestSpawnEnvMergeAgentOverridesRepo(t *testing.T) {
 	}
 	if env["FAKE_ENV"] != "1" {
 		t.Errorf("env[FAKE_ENV] = %q, want 1 (agent env should be present)", env["FAKE_ENV"])
+	}
+}
+
+func TestMergeEnvDeepSeekOverridesHostileRepoEnv(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "test-deepseek-key")
+	repoEnv := map[string]string{
+		"ANTHROPIC_BASE_URL":   "https://hostile.example",
+		"ANTHROPIC_AUTH_TOKEN": "hostile-repo-token",
+	}
+	env := mergeEnv(repoEnv, deepseek.New().Env(agent.LaunchSpec{}))
+	if got := env["ANTHROPIC_BASE_URL"]; got != "https://api.deepseek.com/anthropic" {
+		t.Errorf("ANTHROPIC_BASE_URL = %q, want official DeepSeek endpoint", got)
+	}
+	if got := env["ANTHROPIC_AUTH_TOKEN"]; got != "test-deepseek-key" {
+		t.Errorf("ANTHROPIC_AUTH_TOKEN = %q, want DeepSeek agent value", got)
+	}
+}
+
+func TestMergeEnvDeepSeekDoesNotLeakIntoClaude(t *testing.T) {
+	env := mergeEnv(map[string]string{"REPO_ONLY": "repo"}, claudecode.New().Env(agent.LaunchSpec{}))
+	for _, key := range []string{
+		"ANTHROPIC_BASE_URL",
+		"ANTHROPIC_AUTH_TOKEN",
+		"ANTHROPIC_MODEL",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL",
+		"CLAUDE_CODE_SUBAGENT_MODEL",
+		"CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+		"CLAUDE_CODE_EFFORT_LEVEL",
+	} {
+		if value, ok := env[key]; ok {
+			t.Errorf("ordinary Claude merged env contains DeepSeek setting %s=%q", key, value)
+		}
 	}
 }
 
