@@ -225,3 +225,50 @@ func TestQueue_KimiBlockedAfterFirstTurnFails(t *testing.T) {
 	h.q.Wake("kimi")
 	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "failed" }, "failed as recipient_unavailable")
 }
+
+func TestQueue_KimiCacheHintOwnsStashedMessageAfterUnconfirmedCompact(t *testing.T) {
+	h := newTestQueue(t)
+	h.startConfirmer()
+	addKimiSession(t, h, "kimi", activity.Ready)
+	h.rt.setCaptureEscaped(func(_ runtime.Handle, _ int) (string, error) { return kimiPane(t, "kimi-idle.pane"), nil })
+	h.rt.setCapture(func(_ runtime.Handle, _ int) (string, error) { return kimiPane(t, "kimi-cache-hint.pane"), nil })
+	h.rt.setInject(func(_ int, _ runtime.Handle, _ string) error { return runtime.ErrSubmitUnconfirmed })
+	id := addMsg(t, h, "kimi", "first line\nContinue as-is")
+	h.q.Wake("kimi")
+	time.Sleep(300 * time.Millisecond)
+	if got := messageStatus(t, h.st, id); got != "accepted" || h.rt.callCount() != 1 {
+		t.Fatalf("status=%q injects=%d, want accepted/1 while Kimi owns the stash", got, h.rt.callCount())
+	}
+	at := h.clock.now().Add(time.Second)
+	h.ag.confirmRecords(map[string][]time.Time{"first line\nContinue as-is": {at}})
+	h.q.kickConfirmer()
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" }, "stash confirmed without a second injection")
+	if n := h.rt.callCount(); n != 1 {
+		t.Fatalf("Inject called %d times, want 1", n)
+	}
+}
+
+func TestQueue_KimiAcceptedKeptWhileCacheHintOwnsStash(t *testing.T) {
+	h := newTestQueue(t)
+	h.startConfirmer()
+	addKimiSession(t, h, "kimi", activity.Ready)
+	h.rt.setCaptureEscaped(func(_ runtime.Handle, _ int) (string, error) { return kimiPane(t, "kimi-idle.pane"), nil })
+	h.rt.setCapture(func(_ runtime.Handle, _ int) (string, error) { return kimiPane(t, "kimi-cache-hint.pane"), nil })
+	id := addMsg(t, h, "kimi", "hello")
+	h.q.Wake("kimi")
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "accepted" }, "accepted")
+
+	h.clock.advance(2 * time.Minute)
+	h.q.kickConfirmer()
+	time.Sleep(150 * time.Millisecond)
+	if got := messageStatus(t, h.st, id); got != "accepted" || h.rt.callCount() != 1 {
+		t.Fatalf("status=%q injects=%d, want accepted/1 after the grace period", got, h.rt.callCount())
+	}
+	at := h.clock.now().Add(time.Second)
+	h.ag.confirmRecords(map[string][]time.Time{"hello": {at}})
+	h.q.kickConfirmer()
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" }, "stash confirmed after the grace period")
+	if n := h.rt.callCount(); n != 1 {
+		t.Fatalf("Inject called %d times, want 1", n)
+	}
+}

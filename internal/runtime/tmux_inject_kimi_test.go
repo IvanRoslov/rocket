@@ -164,3 +164,87 @@ func TestTmux_Inject_KimiCaptureErrorDefers(t *testing.T) {
 		t.Fatal("keys sent to an unreadable Kimi pane")
 	}
 }
+
+func injectCallCount(calls [][]string, command, last string) int {
+	n := 0
+	for _, c := range calls {
+		if len(c) > 0 && c[0] == command && (last == "" || c[len(c)-1] == last) {
+			n++
+		}
+	}
+	return n
+}
+
+func TestTmux_Inject_KimiCacheHintBeforePasteStartsCompact(t *testing.T) {
+	f := &fakeTmux{pane: readPane(t, "kimi-cache-hint.pane")}
+	err := newFakeRuntime(f).Inject(context.Background(), Handle{Name: "sess"}, "hello", InjectOpts{Dialect: PaneDialectKimi})
+	if !errors.Is(err, ErrComposerBusy) {
+		t.Fatalf("Inject = %v, want ErrComposerBusy", err)
+	}
+	if got := injectCallCount(f.calls, "send-keys", "Enter"); got != 1 {
+		t.Fatalf("Enter count = %d, want 1", got)
+	}
+	if f.sent("paste-buffer") {
+		t.Fatal("message pasted after the resume dialog was already open")
+	}
+}
+
+func TestTmux_Inject_KimiCacheHintAfterSubmitContinuesStashedMessage(t *testing.T) {
+	idle := readPane(t, "kimi-idle.pane")
+	draft := strings.Replace(idle, "│ >    ", "│ > [paste #1 +3 lines]", 1)
+	draft = strings.Replace(draft, "[paste #1 +3 lines]                  ", "[paste #1 +3 lines]", 1)
+	s := &scriptedKimi{draft: idle, idle: readPane(t, "kimi-cache-hint.pane")}
+	rt := newFakeRuntime(&s.fakeTmux)
+	rt.runFn = func(ctx context.Context, args ...string) (string, string, error) {
+		if args[0] == "paste-buffer" {
+			s.draft = draft
+		}
+		return s.run(ctx, args...)
+	}
+	if err := rt.Inject(context.Background(), Handle{Name: "sess"}, "a\nb\nc", InjectOpts{Bracketed: true, Dialect: PaneDialectKimi}); err != nil {
+		t.Fatalf("Inject: %v", err)
+	}
+	if got := injectCallCount(s.calls, "send-keys", "Enter"); got != 2 {
+		t.Fatalf("Enter count = %d, want submit + compact", got)
+	}
+	if got := injectCallCount(s.calls, "paste-buffer", ""); got != 1 {
+		t.Fatalf("paste count = %d, want 1", got)
+	}
+}
+
+func TestTmux_Inject_KimiCacheHintOtherSelectionIsUntouched(t *testing.T) {
+	pane := strings.Replace(strings.Replace(readPane(t, "kimi-cache-hint.pane"), "   ❯ Compact and continue", "     Compact and continue", 1), "     Continue as-is", "   ❯ Continue as-is", 1)
+	f := &fakeTmux{pane: pane}
+	err := newFakeRuntime(f).Inject(context.Background(), Handle{Name: "sess"}, "hello", InjectOpts{Dialect: PaneDialectKimi})
+	if !errors.Is(err, ErrComposerBusy) {
+		t.Fatalf("Inject = %v, want ErrComposerBusy", err)
+	}
+	if f.sent("send-keys") || f.sent("paste-buffer") {
+		t.Fatal("keys sent after the human moved the cursor off compact")
+	}
+}
+
+func TestTmux_Inject_KimiCacheHintCompactKeyFailureIsUnconfirmed(t *testing.T) {
+	idle := readPane(t, "kimi-idle.pane")
+	draft := strings.Replace(idle, "│ >    ", "│ > [paste #1 +3 lines]", 1)
+	draft = strings.Replace(draft, "[paste #1 +3 lines]                  ", "[paste #1 +3 lines]", 1)
+	s := &scriptedKimi{draft: idle, idle: readPane(t, "kimi-cache-hint.pane")}
+	rt := newFakeRuntime(&s.fakeTmux)
+	rt.runFn = func(ctx context.Context, args ...string) (string, string, error) {
+		if args[0] == "send-keys" && args[len(args)-1] == "Enter" && injectCallCount(s.calls, "send-keys", "Enter") == 1 {
+			s.calls = append(s.calls, args)
+			return "", "", errors.New("send-keys failed")
+		}
+		if args[0] == "paste-buffer" {
+			s.draft = draft
+		}
+		return s.run(ctx, args...)
+	}
+	err := rt.Inject(context.Background(), Handle{Name: "sess"}, "a\nb\nc", InjectOpts{Bracketed: true, Dialect: PaneDialectKimi})
+	if !errors.Is(err, ErrSubmitUnconfirmed) {
+		t.Fatalf("Inject = %v, want ErrSubmitUnconfirmed", err)
+	}
+	if got := injectCallCount(s.calls, "paste-buffer", ""); got != 1 {
+		t.Fatalf("paste count = %d, want 1", got)
+	}
+}

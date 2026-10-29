@@ -869,11 +869,12 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 			// would see the marker forever and could never conclude
 			// "delivered" — see tmux.Inject's confirmWindow doc.
 			out, capErr := q.rt.Capture(ctx, handle, 5)
-			if capErr == nil && markerPresent(out, text) {
+			cacheHintStash := capErr == nil && q.injectOpts(sess).Dialect == runtime.PaneDialectKimi && runtime.KimiCacheHintDialog(out)
+			if capErr == nil && !cacheHintStash && markerPresent(out, text) {
 				retryEligible = true
 			} else {
-				// Marker gone (or capture failed): treat as delivered —
-				// submission likely went through and confirmation was missed.
+				// Marker gone, a cache dialog holding Kimi's stashed submit,
+				// or capture failed: do not risk a duplicate paste.
 				// A confirmer recipient gets "accepted" instead: its journal
 				// settles the doubt, and an unconfirmed message is retried
 				// by the confirmer's rules rather than trusted.

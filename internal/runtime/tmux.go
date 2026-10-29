@@ -285,6 +285,12 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 			return fmt.Errorf("%w: session %q", ErrHeldDialog, h.Name)
 		}
 		if opts.Dialect == PaneDialectKimi {
+			if handled, err := t.acceptKimiCacheHint(ctx, h, out); handled {
+				if err != nil {
+					return fmt.Errorf("%w: session %q: cache hint Enter: %v", ErrComposerBusy, h.Name, err)
+				}
+				return fmt.Errorf("%w: session %q: cache compaction started", ErrComposerBusy, h.Name)
+			}
 			// Kimi: type only into its recognized composer — never into a
 			// question widget or dialog, where Enter picks an option, not
 			// even when forced (Force is for an abandoned draft).
@@ -441,6 +447,12 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 				if LooksLikeQuizWidget(tailLines(trimTrailingBlank(out), confirmWindow)) {
 					return nil
 				}
+				if handled, err := t.acceptKimiCacheHint(ctx, h, out); handled {
+					if err != nil {
+						return fmt.Errorf("%w: session %q: cache hint Enter: %v", ErrSubmitUnconfirmed, h.Name, err)
+					}
+					return nil
+				}
 				// Kimi: the composer no longer holds the text — the previous
 				// Enter submitted it (or queued it); another would be stray.
 				if kimiSubmitted(out, opts.Dialect) {
@@ -472,6 +484,12 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 			// «…», often before its last line.
 			if LooksLikeAgentQueued(full, text) {
 				return fmt.Errorf("%w: session %q", ErrQueuedByAgent, h.Name)
+			}
+			if handled, err := t.acceptKimiCacheHint(ctx, h, full); handled {
+				if err != nil {
+					return fmt.Errorf("%w: session %q: cache hint Enter: %v", ErrSubmitUnconfirmed, h.Name, err)
+				}
+				return nil
 			}
 			// Kimi shows a multi-line paste as «[paste #N +M lines]», so
 			// neither the marker nor a line-count change proves the submit;
@@ -981,4 +999,12 @@ func kimiSubmitted(pane, dialect string) bool {
 	}
 	c, ok := ParseKimiComposer(pane)
 	return !ok || c != KimiDraft
+}
+
+func (t *tmuxRuntime) acceptKimiCacheHint(ctx context.Context, h Handle, pane string) (bool, error) {
+	if !KimiCacheHintCompactSelected(pane) {
+		return false, nil
+	}
+	_, _, err := t.run(ctx, "send-keys", "-t", paneTarget(h.Name), "Enter")
+	return true, err
 }
