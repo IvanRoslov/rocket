@@ -1,0 +1,4 @@
+{"type":"session","version":3,"id":"pi-recon-usage","timestamp":"2026-10-29T19:16:56.872Z","cwd":"<worktree>/.superpowers/sdd/task-1-plan/scratch/warm-probe"}
+{"type":"model_change","id":"da4733e7","parentId":null,"timestamp":"2026-10-29T19:16:56.873Z","provider":"deepseek","modelId":"deepseek-v4-pro"}
+{"type":"message","id":"76fa130e","parentId":"da4733e7","timestamp":"2026-10-29T19:16:56.873Z","message":{"role":"user","content":[{"type":"text","text":"<redacted>"}],"timestamp":1793301416873}}
+{"type":"usage","id":"c55426fa","parentId":"76fa130e","timestamp":"2026-10-29T19:16:56.874Z","kind":"session_manager_probe","provider":"deepseek","model":"deepseek-v4-pro","usage":{"input":7,"output":3,"cacheRead":5,"cacheWrite":2,"reasoning":0,"totalTokens":17,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"note":"isolated public API probe"}
