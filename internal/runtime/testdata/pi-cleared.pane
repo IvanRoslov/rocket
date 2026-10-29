@@ -1,0 +1,45 @@
+bash-3.2$ pi --tui-mode regular --approve --session-id pi-recon --model deepseek/deepseek-v4-pro
+Warning: No project session found with id 'pi-recon'; creating a new session with that id.
+
+ ▀▀█  v1.4.0
+ █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more
+ Press ctrl+o to show full startup help and loaded resources.
+
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.
+
+
+[Context]
+  <worktree>/AGENTS.md
+
+[Skills]
+  agents-sdk, cloudflare, cloudflare-email-service, cloudflare-one, cloudflare-one-migrations, durable-objects, sandbox-sdk, turnstile-spin,
+web-perf, workers-best-practices, wrangler
+
+
+ Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf and restart tmux.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+<worktree>/.superpowers/sdd/task-1-plan/scratch/probe (main)
+0.0%/1.0M (auto)                                                                                                      deepseek-v4-pro • high
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
