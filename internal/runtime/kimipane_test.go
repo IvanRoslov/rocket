@@ -94,6 +94,26 @@ func TestParseKimiStartScreenTrust(t *testing.T) {
 	}
 }
 
+func TestKimiCacheHintCompactSelected(t *testing.T) {
+	pane := readPane(t, "kimi-cache-hint.pane")
+	if !KimiCacheHintDialog(pane) || !KimiCacheHintCompactSelected(pane) {
+		t.Fatal("cache hint with compact selected not recognized")
+	}
+	moved := strings.Replace(strings.Replace(pane, "   ❯ Compact and continue", "     Compact and continue", 1), "     Continue as-is", "   ❯ Continue as-is", 1)
+	if !KimiCacheHintDialog(moved) {
+		t.Fatal("cache hint not recognized after the cursor left compact")
+	}
+	if KimiCacheHintCompactSelected(moved) {
+		t.Fatal("compact recognized as selected after the cursor moved")
+	}
+	for _, name := range []string{"kimi-trust.pane", "kimi-question.pane", "kimi-idle.pane"} {
+		other := readPane(t, name)
+		if KimiCacheHintDialog(other) || KimiCacheHintCompactSelected(other) {
+			t.Errorf("%s recognized as a cache hint", name)
+		}
+	}
+}
+
 // Kimi's AskUserQuestion widget is a journal interaction (Activity reports
 // blocked), not a start screen; composer and other agents' panes are not
 // start screens either.
@@ -104,7 +124,7 @@ func TestParseKimiStartScreenNegatives(t *testing.T) {
 	}
 	for _, p := range all {
 		name := filepath.Base(p)
-		if name == "kimi-trust.pane" {
+		if name == "kimi-trust.pane" || name == "kimi-cache-hint.pane" {
 			continue
 		}
 		if got, ok := ParseKimiStartScreen(readPane(t, name)); ok {

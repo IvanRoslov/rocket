@@ -28,6 +28,33 @@ func ParseKimiStartScreen(pane string) (PermissionPrompt, bool) {
 	return p, ok
 }
 
+func parseKimiCacheHint(pane string) (PermissionPrompt, int, bool) {
+	p, cursor, ok := parseKimiStartScreen(pane)
+	if !ok || !strings.Contains(p.Context, "Cache expired") {
+		return PermissionPrompt{}, -1, false
+	}
+	expected := []string{"Compact and continue", "Start a new session", "Continue as-is", "Don't ask me again"}
+	if len(p.Options) != len(expected) {
+		return PermissionPrompt{}, -1, false
+	}
+	for i, prefix := range expected {
+		if !strings.HasPrefix(p.Options[i], prefix) {
+			return PermissionPrompt{}, -1, false
+		}
+	}
+	return p, cursor, true
+}
+
+func KimiCacheHintDialog(pane string) bool {
+	_, _, ok := parseKimiCacheHint(pane)
+	return ok
+}
+
+func KimiCacheHintCompactSelected(pane string) bool {
+	p, cursor, ok := parseKimiCacheHint(pane)
+	return ok && cursor >= 0 && cursor < len(p.Options) && strings.HasPrefix(p.Options[cursor], "Compact and continue")
+}
+
 // KimiStartScreenCursor returns the index into Options of the choice the ❯
 // cursor of the Kimi start screen on pane sits on, or -1 when pane shows no
 // such screen.
