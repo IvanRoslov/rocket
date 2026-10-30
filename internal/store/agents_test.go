@@ -109,7 +109,9 @@ func TestAddGetAgent(t *testing.T) {
 	s := openTestStore(t)
 	addAgentFixtures(t, s)
 
-	if err := s.AddAgent(testAgent("sre")); err != nil {
+	a := testAgent("sre")
+	a.LaunchProfile = "claude-opus"
+	if err := s.AddAgent(a); err != nil {
 		t.Fatalf("AddAgent: %v", err)
 	}
 
@@ -118,7 +120,8 @@ func TestAddGetAgent(t *testing.T) {
 		t.Fatalf("GetAgent: %v", err)
 	}
 	if got.ProjectID != "platform" || got.Description != "agent sre" ||
-		got.Dir != "/tmp/agents/sre" || got.Command != "claude --dangerously-skip-permissions" {
+		got.Dir != "/tmp/agents/sre" || got.Command != "claude --dangerously-skip-permissions" ||
+		got.LaunchProfile != "claude-opus" {
 		t.Errorf("agent = %+v", got)
 	}
 	if !got.Enabled {
@@ -198,6 +201,7 @@ func TestUpdateAgent(t *testing.T) {
 	a.Enabled = false
 	a.Description = "on call"
 	a.Command = ""
+	a.LaunchProfile = "kimi-k3-1-pro"
 	if err := s.UpdateAgent(a); err != nil {
 		t.Fatalf("UpdateAgent: %v", err)
 	}
@@ -214,6 +218,9 @@ func TestUpdateAgent(t *testing.T) {
 	}
 	if got.Description != "on call" {
 		t.Errorf("Description = %q, want \"on call\"", got.Description)
+	}
+	if got.LaunchProfile != "kimi-k3-1-pro" {
+		t.Errorf("LaunchProfile = %q, want kimi-k3-1-pro", got.LaunchProfile)
 	}
 	if got.UpdatedAt < a.CreatedAt {
 		t.Errorf("UpdatedAt = %d, want >= CreatedAt %d", got.UpdatedAt, a.CreatedAt)
