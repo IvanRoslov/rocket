@@ -33,7 +33,7 @@ func TestUsageIncludesAllRecordTypesAndBranches(t *testing.T) {
 		`{"type":"message","id":"abandoned","parentId":"assistant","timestamp":"2026-10-29T17:00:02Z","message":{"role":"assistant","provider":"deepseek","model":"deepseek-v4-pro","usage":{"input":7,"cacheRead":8,"cacheWrite":9,"output":10,"reasoning":11}}}`,
 		`{"type":"branch_summary","id":"summary","parentId":"assistant","fromId":"abandoned","timestamp":"2026-10-29T17:00:03Z","usage":{"input":40,"cacheRead":41,"cacheWrite":42,"output":43,"reasoning":44}}`,
 		`{"type":"compaction","id":"compact","parentId":"summary","timestamp":"2026-10-29T17:00:04Z","usage":{"input":30,"cacheRead":31,"cacheWrite":32,"output":33,"reasoning":34}}`,
-		`{"type":"usage","id":"standalone","parentId":"compact","timestamp":"2026-10-29T17:00:05Z","provider":"openai","model":"gpt-x","usage":{"input":50,"cacheRead":51,"cacheWrite":52,"output":53,"reasoning":54}}`,
+		`{"type":"usage","id":"standalone","parentId":"compact","timestamp":"2026-10-29T17:00:05Z","kind":"cache_warm","provider":"openai","model":"gpt-x","usage":{"input":50,"cacheRead":51,"cacheWrite":52,"output":53,"reasoning":54}}`,
 		`{"type":"message","id":"openai","parentId":"standalone","timestamp":"2026-10-29T17:00:06Z","message":{"role":"assistant","provider":"openai","model":"gpt-x","usage":{"input":60,"cacheRead":61,"cacheWrite":62,"output":63,"reasoning":64}}}`,
 	})
 	writeUsageSession(t, home, worktree, "2026-10-29_second.jsonl", []string{
@@ -159,6 +159,79 @@ func TestUsageHandlesLargeAndMalformedRecords(t *testing.T) {
 	got, err := New().(agent.UsageReader).Usage(context.Background(), worktree, time.Time{})
 	if err != nil || got.Models["deepseek/deepseek-v4-pro"].Input != 3 || got.Models["deepseek/deepseek-v4-pro"].Messages != 2 {
 		t.Fatalf("Usage with large/malformed records = %#v, %v; want two records totaling 3", got, err)
+	}
+}
+
+func TestUsageCompactionInheritsPrecedingAssistantModel(t *testing.T) {
+	home, worktree := t.TempDir(), t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", home)
+	writeUsageSession(t, home, worktree, "2026-10-29_assistant_model.jsonl", []string{
+		`{"type":"message","id":"assistant","timestamp":"2026-10-29T17:00:00Z","message":{"role":"assistant","provider":"openai","model":"gpt-x","usage":{"input":1}}}`,
+		`{"type":"compaction","id":"compact","timestamp":"2026-10-29T17:00:01Z","usage":{"input":9,"cacheRead":3,"cacheWrite":2,"output":4,"reasoning":2}}`,
+		`{"type":"branch_summary","id":"summary","timestamp":"2026-10-29T17:00:02Z","usage":{"input":5,"output":1}}`,
+	})
+
+	got, err := New().(agent.UsageReader).Usage(context.Background(), worktree, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := agent.Tokens{Input: 15, CacheRead: 3, CacheWrite: 2, Output: 5, Reasoning: 2, Messages: 3}
+	if !reflect.DeepEqual(got.Models, map[string]agent.Tokens{"openai/gpt-x": want}) {
+		t.Fatalf("Usage models = %#v; want assistant attribution %#v", got.Models, want)
+	}
+}
+
+func writeReconSession(t *testing.T, home, worktree, fixture string, names ...string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := fixture
+	if len(names) != 0 {
+		name = names[0]
+	}
+	path := writeSessionFile(t, home, worktree, name)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestUsageReadsReconFixtures(t *testing.T) {
+	for _, tc := range []struct {
+		fixture string
+		want    agent.Tokens
+	}{
+		{fixture: "pi-usage.jsonl", want: agent.Tokens{Input: 7, CacheRead: 5, CacheWrite: 2, Output: 3, Messages: 1}},
+		{fixture: "pi-compaction.jsonl", want: agent.Tokens{Input: 745, Output: 3612, Reasoning: 2973, Messages: 1}},
+		{fixture: "pi-branch-summary.jsonl", want: agent.Tokens{Input: 32389, CacheRead: 5120, Output: 224, Messages: 2}},
+		{fixture: "pi-session.jsonl", want: agent.Tokens{Input: 5221, CacheRead: 9984, Output: 116, Reasoning: 32, Messages: 3}},
+	} {
+		t.Run(tc.fixture, func(t *testing.T) {
+			home, worktree := t.TempDir(), t.TempDir()
+			t.Setenv("PI_CODING_AGENT_DIR", home)
+			writeReconSession(t, home, worktree, tc.fixture)
+			got, err := New().(agent.UsageReader).Usage(context.Background(), worktree, time.Time{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !got.Found || !reflect.DeepEqual(got.Models, map[string]agent.Tokens{"deepseek/deepseek-v4-pro": tc.want}) {
+				t.Fatalf("Usage = %#v; want %#v", got, tc.want)
+			}
+			if got.FirstAt.IsZero() || got.LastAt.IsZero() {
+				t.Fatalf("Usage timestamps = %v..%v; want real fixture times", got.FirstAt, got.LastAt)
+			}
+		})
+	}
+}
+
+func TestUsageReturnsJournalReadErrors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.jsonl")
+	result := agent.Usage{Models: make(map[string]agent.Tokens)}
+	err := scanPiUsage(context.Background(), path, time.Time{}, &result)
+	if err == nil || !strings.Contains(err.Error(), path) {
+		t.Fatalf("scanPiUsage error = %v; want read error naming %s", err, path)
 	}
 }
 

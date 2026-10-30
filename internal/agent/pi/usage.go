@@ -90,6 +90,11 @@ func scanPiUsage(ctx context.Context, path string, since time.Time, result *agen
 		if record.Type == "model_change" {
 			governingModel = piModelName(record.Provider, record.ModelID)
 		}
+		if record.Type == "message" && record.Message.Role == "assistant" {
+			if model := piModelName(record.Message.Provider, record.Message.Model); model != "" {
+				governingModel = model
+			}
+		}
 		if record.Timestamp.Before(since) {
 			continue
 		}

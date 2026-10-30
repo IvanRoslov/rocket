@@ -85,6 +85,36 @@ func TestTranscriptTailReadsActiveBranchEntries(t *testing.T) {
 	}
 }
 
+func TestTranscriptTailReadsReconFixture(t *testing.T) {
+	home, worktree := t.TempDir(), t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", home)
+	writeReconSession(t, home, worktree, "pi-session.jsonl", "2026-10-29_pi-recon.jsonl")
+
+	entries, cursor, err := New().TranscriptTail(context.Background(), agent.ActivityRef{WorktreePath: worktree, SessionID: "pi-recon"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRoles := []string{"user", "tool", "user", "assistant", "user", "assistant"}
+	if len(entries) != len(wantRoles) {
+		t.Fatalf("entries = %+v; want roles %v", entries, wantRoles)
+	}
+	for i, role := range wantRoles {
+		wantText := "<redacted>"
+		if role == "tool" {
+			wantText = `{"command":"<redacted>","timeout":30}`
+		}
+		if entries[i].Role != role || entries[i].Text != wantText {
+			t.Errorf("entry %d = %+v; want role %s and text %q", i, entries[i], role, wantText)
+		}
+	}
+	if entries[1].ToolName != "bash" || entries[0].TS != 1793294142 {
+		t.Fatalf("real tool/timestamp entries = %+v", entries)
+	}
+	if !strings.HasSuffix(cursor, ":0d140ff3") {
+		t.Fatalf("cursor = %q; want final real assistant ID", cursor)
+	}
+}
+
 func TestTranscriptTailShowsProviderError(t *testing.T) {
 	home, worktree := t.TempDir(), t.TempDir()
 	t.Setenv("PI_CODING_AGENT_DIR", home)
