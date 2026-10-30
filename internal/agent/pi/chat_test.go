@@ -180,6 +180,22 @@ func TestTranscriptStatReportsExactSession(t *testing.T) {
 	}
 }
 
+func TestTranscriptTailMissingTimestampUsesZero(t *testing.T) {
+	home, worktree := t.TempDir(), t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", home)
+	writeChatSession(t, home, worktree, []string{
+		`{"type":"message","id":"user","parentId":null,"message":{"role":"user","content":[{"type":"text","text":"hello"}]}}`,
+	})
+
+	entries, _, err := New().TranscriptTail(context.Background(), agent.ActivityRef{WorktreePath: worktree, SessionID: "s1"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].TS != 0 {
+		t.Fatalf("entries = %+v; want one entry with TS=0", entries)
+	}
+}
+
 func TestTranscriptNoJournalReturnsNoSignal(t *testing.T) {
 	home, worktree := t.TempDir(), t.TempDir()
 	t.Setenv("PI_CODING_AGENT_DIR", home)

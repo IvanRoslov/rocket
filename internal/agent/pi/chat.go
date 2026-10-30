@@ -47,7 +47,10 @@ func piChatEntries(record sessionRecord) []agent.ChatEntry {
 	if json.Unmarshal(record.Raw, &raw) != nil {
 		return nil
 	}
-	ts := record.Timestamp.Unix()
+	var ts int64
+	if !record.Timestamp.IsZero() {
+		ts = record.Timestamp.Unix()
+	}
 	var entries []agent.ChatEntry
 	switch raw.Message.Role {
 	case "user":
