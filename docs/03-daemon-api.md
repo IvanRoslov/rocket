@@ -245,7 +245,7 @@ tmux рендерит окно ровно в **одном** размере; пр
 | POST | `/v1/model-profiles/import-catalog` | Тело `{agent?, include_legacy?}`: выключенные профили для моделей каталога без профиля → `{created:[names], skipped:[{model, reason}]}`. Только человек (403 `human_only`) |
 | GET | `/v1/agents` | Список агентов; фильтр `?project=`; у элемента `session_alive` (жива ли tmux-сессия `<id>`), `unread` (непрочитанных в инбоксе), `open_questions` и `awaiting_user` (открытые треды и из них ждущие человека) |
 | POST | `/v1/agents` | `{id, description?, project?, dir?, command?}` → 201. `id` — `^[a-z0-9-]+$`, он же имя tmux-сессии; `project` проверяется, только если непустой |
-| GET | `/v1/agents/{id}` | Карточка агента; `milestones` — майлстоны, которые он держит (`{id, title, status}`, старые первыми), см. [12-tasks.md](12-tasks.md) |
+| GET | `/v1/agents/{id}` | Карточка агента; `launch_profile` — сохранённый профиль последующих запусков; `milestones` — майлстоны, которые он держит (`{id, title, status}`, старые первыми), см. [12-tasks.md](12-tasks.md) |
 | PATCH | `/v1/agents/{id}` | `{description?, project?, dir?, command?, enabled?}` |
 | DELETE | `/v1/agents/{id}` | Удаляет агента вместе с инбоксом и тредами; файлы на диске остаются |
 | POST | `/v1/agents/{id}/enable`&#124;`disable` | Включить/выключить агента |
@@ -253,7 +253,7 @@ tmux рендерит окно ровно в **одном** размере; пр
 | GET | `/v1/agents/{id}/inbox` | Сообщения инбокса, старые первыми; фильтр `?status=unread&#124;read` |
 | POST | `/v1/agents/{id}/inbox/next` | Отдаёт самое старое непрочитанное и помечает его прочитанным → `200 {id, from, body, status, created_at, read_at}`; пустой инбокс → `204` |
 | GET | `/v1/agents/{id}/inbox/{msg}` | Одно сообщение целиком, статус не меняется (peek); чужое сообщение — `404` |
-| POST | `/v1/agents/{id}/start` | Лончер: tmux-сессия `<id>` (cwd `dir`, `command`, env `ROCKET_*`) → `200 {id, status:"running", dir}`. Нет `dir` → `400 agent_no_dir`, сессия уже жива → `409 agent_live` |
+| POST | `/v1/agents/{id}/start` | Тело `{profile?}`: tmux-сессия `<id>` (cwd `dir`, env `ROCKET_*`). Явный профиль сохраняется в `launch_profile`; без него используется сохранённый, а при его отсутствии — legacy `command`. Запуск через профиль использует его адаптер и сохраняет snapshot → `200 {id, status:"running", dir, agent, profile, model, effort}`. Нет `dir` → `400 agent_no_dir`; неизвестный/выключенный профиль → `400 profile_not_found`/`profile_disabled`; сессия уже жива → `409 agent_live` |
 | POST | `/v1/agents/{id}/stop` | Убивает tmux-сессию; регистрация остаётся → `200 {id, status:"stopped"}` |
 | GET | `/v1/agents/{id}/questions` | Q&A-треды агента; фильтр `?status=open` |
 | POST | `/v1/agents/{id}/questions` | `{body, title?, brief?, context?, to?, type?, options?}` → 201. Направление — по вызывающему: человек (без заголовка сессии) спрашивает агента, агент эскалирует человеку. Участниками сеются человек, автор и сама роль, плюс `to`. `type`/`options` — как у тредов задач |

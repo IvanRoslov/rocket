@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,14 +16,15 @@ import (
 // stored columns is derived: whether its tmux session is alive, how much is
 // waiting in its inbox, and its open Q&A threads.
 type agentResponse struct {
-	ID           string `json:"id"`
-	Description  string `json:"description"`
-	Project      string `json:"project"`
-	Dir          string `json:"dir"`
-	Command      string `json:"command"`
-	Enabled      bool   `json:"enabled"`
-	SessionAlive bool   `json:"session_alive"`
-	Unread       int    `json:"unread"`
+	ID            string `json:"id"`
+	Description   string `json:"description"`
+	Project       string `json:"project"`
+	Dir           string `json:"dir"`
+	Command       string `json:"command"`
+	LaunchProfile string `json:"launch_profile"`
+	Enabled       bool   `json:"enabled"`
+	SessionAlive  bool   `json:"session_alive"`
+	Unread        int    `json:"unread"`
 	// OpenQuestions counts open Q&A threads; AwaitingUser counts the subset
 	// whose turn it is for the human to speak.
 	OpenQuestions int `json:"open_questions"`
@@ -116,6 +118,7 @@ func toAgentResponse(d Deps, a store.Agent, counts map[string]store.QuestionCoun
 		Project:       a.ProjectID,
 		Dir:           a.Dir,
 		Command:       a.Command,
+		LaunchProfile: a.LaunchProfile,
 		Enabled:       a.Enabled,
 		SessionAlive:  alive,
 		Unread:        unread,
@@ -488,9 +491,9 @@ func handleGetAgentInboxMessage(w http.ResponseWriter, r *http.Request, d Deps) 
 	writeJSON(w, http.StatusOK, toInboxMessageResponse(m))
 }
 
-// handleStartAgent runs the thin launcher: a tmux session named after the
-// agent, running its command in its directory. Rocket does not manage what
-// happens inside.
+// handleStartAgent runs the agent's selected model profile, or its legacy
+// command when no profile was selected. Rocket does not manage what happens
+// inside the tmux session.
 func handleStartAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 	a, ok := lookupAgent(w, r, d)
 	if !ok {
@@ -501,13 +504,21 @@ func handleStartAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
-	sess, err := d.Manager.StartAgent(r.Context(), a, "")
+	var req struct {
+		Profile string `json:"profile"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+	sess, err := d.Manager.StartAgent(r.Context(), a, req.Profile)
 	if err != nil {
 		writeManagerErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id": a.ID, "status": "running", "dir": sess.WorktreePath,
+		"agent": sess.Agent, "profile": sess.Profile, "model": sess.Model, "effort": sess.Effort,
 	})
 }
 

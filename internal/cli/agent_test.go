@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -71,5 +74,67 @@ func TestFormatHelpers(t *testing.T) {
 	}
 	if got := questionsCell(float64(0), float64(0)); got != "-" {
 		t.Errorf("questionsCell(0, 0) = %q", got)
+	}
+}
+
+func TestAgentStartSendsProfile(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		args        []string
+		wantProfile string
+	}{
+		{name: "explicit profile", args: []string{"cto", "--profile", "claude-opus"}, wantProfile: "claude-opus"},
+		{name: "saved profile", args: []string{"cto"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			seen, h := fakeDaemon(t, map[string]any{
+				"POST /v1/agents/cto/start": map[string]any{"id": "cto", "status": "running", "dir": "/tmp/cto"},
+			})
+			c := newUnixSocketTestServer(t, h)
+			cmd := newAgentStartCmdWith(func() (agentClient, error) { return c, nil })
+			cmd.SetArgs(tc.args)
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			if len(*seen) != 1 {
+				t.Fatalf("requests = %+v, want 1", *seen)
+			}
+			req := (*seen)[0]
+			if req.Method != "POST" || req.Path != "/v1/agents/cto/start" {
+				t.Errorf("request = %+v", req)
+			}
+			profile, ok := req.Body["profile"]
+			if tc.wantProfile == "" {
+				if ok {
+					t.Errorf("body = %+v, want no profile", req.Body)
+				}
+			} else if !ok || profile != tc.wantProfile {
+				t.Errorf("body = %+v, want profile %q", req.Body, tc.wantProfile)
+			}
+		})
+	}
+}
+
+func TestAgentShowPrintsLaunchProfile(t *testing.T) {
+	_, h := fakeDaemon(t, map[string]any{
+		"GET /v1/agents/cto": map[string]any{
+			"id": "cto", "description": "chief", "enabled": true,
+			"launch_profile": "claude-opus", "milestones": []any{},
+		},
+		"GET /v1/agents/cto/inbox": []any{},
+	})
+	c := newUnixSocketTestServer(t, h)
+	cmd := newAgentShowCmdWith(func() (agentClient, error) { return c, nil })
+	cmd.SetArgs([]string{"cto"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.String(), "profile:     claude-opus") {
+		t.Errorf("output missing launch profile:\n%s", out.String())
 	}
 }

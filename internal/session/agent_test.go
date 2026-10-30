@@ -186,6 +186,40 @@ func TestAdoptAgentSessionIgnoresSavedLaunchProfile(t *testing.T) {
 	}
 }
 
+func TestAdoptAgentSessionPreservesProfileSnapshot(t *testing.T) {
+	m, st, _, _, _ := testManager(t)
+	a := testAgentRow(t, "sre")
+	if err := st.AddAgent(a); err != nil {
+		t.Fatalf("AddAgent: %v", err)
+	}
+	if err := st.CreateModelProfile(store.ModelProfile{
+		Name: "deep", Agent: "fake", Model: "opus", Effort: "high", Enabled: true,
+	}); err != nil {
+		t.Fatalf("CreateModelProfile: %v", err)
+	}
+	if _, err := m.StartAgent(context.Background(), a, "deep"); err != nil {
+		t.Fatalf("StartAgent: %v", err)
+	}
+
+	sess, fresh, err := m.AdoptAgentSession(a)
+	if err != nil {
+		t.Fatalf("AdoptAgentSession: %v", err)
+	}
+	if fresh {
+		t.Error("fresh = true for an already-live profile session")
+	}
+	if sess.Agent != "fake" || sess.Profile != "deep" || sess.Model != "opus" || sess.Effort != "high" {
+		t.Errorf("adopted profile session = %+v, want launch snapshot preserved", sess)
+	}
+	stored, err := st.GetSession("sre")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if stored.Agent != "fake" || stored.Profile != "deep" || stored.Model != "opus" || stored.Effort != "high" {
+		t.Errorf("stored profile session = %+v, want launch snapshot preserved", stored)
+	}
+}
+
 func TestStartAgentWithoutCommandRunsAShell(t *testing.T) {
 	m, _, _, rt, _ := testManager(t)
 	a := testAgentRow(t, "sre")

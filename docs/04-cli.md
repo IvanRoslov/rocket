@@ -318,8 +318,11 @@ rocket agent show <id>            # регистрация, непрочитан
 rocket agent enable|disable <id>
 rocket agent rm <id>              # из реестра; файлы агента остаются на диске
 
-rocket agent start <id>           # tmux-сессия <id>: cwd=dir, команда command
-                                  # (нет command — shell; нет dir — ошибка)
+rocket agent start <id> [--profile <name>]
+                                  # tmux-сессия <id>, cwd=dir. Профиль задаёт
+                                  # harness/model/effort и запоминается для
+                                  # следующих запусков. Без сохранённого профиля —
+                                  # прежняя command (пустая — shell; нет dir — ошибка)
 rocket agent attach <id>          # подключиться к сессии агента
 rocket agent stop <id>            # убить сессию; регистрация остаётся
 

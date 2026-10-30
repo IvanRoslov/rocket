@@ -161,12 +161,15 @@ func (m *Manager) AdoptAgentSession(a store.Agent) (sess store.Session, fresh bo
 		// monitor and the dashboard all key off sessions.agent — a Kimi pane
 		// tracked as claude-code gets the wrong paste dialect, no journal
 		// confirmer, and redelivery loops (incident: cto on Kimi). Reconcile
-		// the column from the registered launcher command.
-		if want := m.agentAdapter(a); existing.Agent != want {
-			if err := m.st.UpdateSessionAgent(a.ID, want); err != nil {
-				return existing, false, fmt.Errorf("reconcile agent session adapter: %w", err)
+		// the column from the registered launcher command. A non-empty profile
+		// snapshot belongs to a rocket launch: its adapter is already exact.
+		if existing.Profile == "" {
+			if want := m.agentAdapter(a); existing.Agent != want {
+				if err := m.st.UpdateSessionAgent(a.ID, want); err != nil {
+					return existing, false, fmt.Errorf("reconcile agent session adapter: %w", err)
+				}
+				existing.Agent = want
 			}
-			existing.Agent = want
 		}
 		return existing, false, nil
 	}

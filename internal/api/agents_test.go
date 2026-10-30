@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"testing"
 
+	"github.com/IvanRoslov/rocket/internal/runtime"
 	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
@@ -481,5 +483,128 @@ func TestStartAgentWithoutDirIsRejected(t *testing.T) {
 	}
 	if errCode(body) != "agent_no_dir" {
 		t.Errorf("error = %+v, want agent_no_dir", body["error"])
+	}
+}
+
+type agentStartRuntime struct {
+	sessFakeRuntime
+	alive bool
+}
+
+func (r *agentStartRuntime) Alive(ctx context.Context, h runtime.Handle) bool { return r.alive }
+func (r *agentStartRuntime) Create(ctx context.Context, spec runtime.CreateSpec) (runtime.Handle, error) {
+	r.alive = true
+	return runtime.Handle{Name: spec.Name}, nil
+}
+func (r *agentStartRuntime) Destroy(ctx context.Context, h runtime.Handle) error {
+	r.alive = false
+	return nil
+}
+
+func useAgentStartRuntime(d *Deps) {
+	d.Manager = session.NewManager(d.Store, d.Bus, &agentStartRuntime{}, sessFakeWorkspace{}, d.Cfg)
+}
+
+func addStartableAgent(t *testing.T, d Deps, id string) {
+	t.Helper()
+	if err := d.Store.AddAgent(store.Agent{ID: id, Dir: t.TempDir(), Command: "claude", Enabled: true}); err != nil {
+		t.Fatalf("AddAgent: %v", err)
+	}
+}
+
+func TestStartAgentAcceptsProfileAndReturnsSnapshot(t *testing.T) {
+	d := agentsTestDeps(t)
+	useAgentStartRuntime(&d)
+	addStartableAgent(t, d, "sre")
+	if err := d.Store.CreateModelProfile(store.ModelProfile{
+		Name: "deep", Agent: "fake", Model: "opus", Effort: "high", Enabled: true,
+	}); err != nil {
+		t.Fatalf("CreateModelProfile: %v", err)
+	}
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	resp := postJSON(t, srv.URL+"/v1/agents/sre/start", map[string]any{"profile": "deep"})
+	body := decodeMap(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %+v)", resp.StatusCode, body)
+	}
+	if body["agent"] != "fake" || body["profile"] != "deep" || body["model"] != "opus" || body["effort"] != "high" {
+		t.Errorf("start response = %+v", body)
+	}
+	registered, err := d.Store.GetAgent("sre")
+	if err != nil {
+		t.Fatalf("GetAgent: %v", err)
+	}
+	if registered.LaunchProfile != "deep" {
+		t.Errorf("LaunchProfile = %q, want deep", registered.LaunchProfile)
+	}
+	sess, err := d.Store.GetSession("sre")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.Agent != "fake" || sess.Profile != "deep" || sess.Model != "opus" || sess.Effort != "high" {
+		t.Errorf("session = %+v", sess)
+	}
+}
+
+func TestStartAgentRejectsUnknownProfile(t *testing.T) {
+	d := agentsTestDeps(t)
+	useAgentStartRuntime(&d)
+	addStartableAgent(t, d, "sre")
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	resp := postJSON(t, srv.URL+"/v1/agents/sre/start", map[string]any{"profile": "missing"})
+	body := decodeMap(t, resp)
+	if resp.StatusCode != http.StatusBadRequest || errCode(body) != "profile_not_found" {
+		t.Fatalf("status = %d, body = %+v; want 400 profile_not_found", resp.StatusCode, body)
+	}
+	if _, err := d.Store.GetSession("sre"); err == nil {
+		t.Fatal("session created for unknown profile")
+	}
+}
+
+func TestStartAgentWithoutBodyUsesLegacyLauncher(t *testing.T) {
+	d := agentsTestDeps(t)
+	useAgentStartRuntime(&d)
+	addStartableAgent(t, d, "sre")
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/v1/agents/sre/start", "", nil)
+	if err != nil {
+		t.Fatalf("POST start: %v", err)
+	}
+	body := decodeMap(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %+v)", resp.StatusCode, body)
+	}
+	sess, err := d.Store.GetSession("sre")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.Agent != "claude-code" || sess.Profile != "" || sess.Model != "" || sess.Effort != "" {
+		t.Errorf("legacy session = %+v", sess)
+	}
+}
+
+func TestAgentResponseIncludesLaunchProfile(t *testing.T) {
+	d := agentsTestDeps(t)
+	addStartableAgent(t, d, "sre")
+	a, err := d.Store.GetAgent("sre")
+	if err != nil {
+		t.Fatalf("GetAgent: %v", err)
+	}
+	a.LaunchProfile = "deep"
+	if err := d.Store.UpdateAgent(a); err != nil {
+		t.Fatalf("UpdateAgent: %v", err)
+	}
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	body := decodeMap(t, getJSON(t, srv.URL+"/v1/agents/sre"))
+	if body["launch_profile"] != "deep" {
+		t.Errorf("agent response = %+v, want launch_profile deep", body)
 	}
 }
