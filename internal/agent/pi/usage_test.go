@@ -162,6 +162,25 @@ func TestUsageHandlesLargeAndMalformedRecords(t *testing.T) {
 	}
 }
 
+func TestUsageReadsValidUnterminatedRecord(t *testing.T) {
+	home, worktree := t.TempDir(), t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", home)
+	path := writeSessionFile(t, home, worktree, "2026-10-29_unterminated.jsonl")
+	line := `{"type":"usage","id":"complete","timestamp":"2026-10-29T17:00:00Z","kind":"cache_warm","provider":"deepseek","model":"deepseek-v4-pro","usage":{"input":7,"cacheRead":5,"cacheWrite":2,"output":3,"reasoning":1}}`
+	if err := os.WriteFile(path, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := New().(agent.UsageReader).Usage(context.Background(), worktree, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := agent.Tokens{Input: 7, CacheRead: 5, CacheWrite: 2, Output: 3, Reasoning: 1, Messages: 1}
+	if !reflect.DeepEqual(got.Models, map[string]agent.Tokens{"deepseek/deepseek-v4-pro": want}) {
+		t.Fatalf("Usage = %#v; want complete unterminated record %#v", got.Models, want)
+	}
+}
+
 func TestUsageCompactionInheritsPrecedingAssistantModel(t *testing.T) {
 	home, worktree := t.TempDir(), t.TempDir()
 	t.Setenv("PI_CODING_AGENT_DIR", home)

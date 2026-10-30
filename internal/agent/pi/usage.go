@@ -77,11 +77,11 @@ func scanPiUsage(ctx context.Context, path string, since time.Time, result *agen
 			return err
 		}
 		line, err := reader.ReadBytes('\n')
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
+		if err != nil && err != io.EOF {
 			return fmt.Errorf("read Pi journal %s: %w", path, err)
+		}
+		if len(line) == 0 && err == io.EOF {
+			break
 		}
 		var record piUsageRecord
 		if json.Unmarshal(line, &record) != nil || record.Timestamp.IsZero() {
@@ -134,6 +134,9 @@ func scanPiUsage(ctx context.Context, path string, since time.Time, result *agen
 		tokens.Reasoning += usage.Reasoning
 		tokens.Messages++
 		result.Models[model] = tokens
+		if err == io.EOF {
+			break
+		}
 	}
 	return nil
 }

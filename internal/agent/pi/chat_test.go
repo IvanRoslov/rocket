@@ -177,7 +177,6 @@ func TestTranscriptTailSkipsMalformedAndPartialRecords(t *testing.T) {
 		`{"type":"message","id":"user","parentId":null,"timestamp":"2026-10-29T17:00:00Z","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}`,
 		`{broken`,
 		`{"type":"message","id":"assistant","parentId":"user","timestamp":"2026-10-29T17:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"world"}]}}`,
-		`{"type":"message","id":"partial","parentId":"assistant"`,
 	})
 	ref := agent.ActivityRef{WorktreePath: worktree, SessionID: "s1"}
 	entries, cursor, err := New().TranscriptTail(context.Background(), ref, "")
@@ -185,10 +184,39 @@ func TestTranscriptTailSkipsMalformedAndPartialRecords(t *testing.T) {
 		t.Fatalf("partial tail = %+v, %q, %v; want two valid entries", entries, cursor, err)
 	}
 
-	appendChatRecords(t, path, `{"type":"message","id":"new","parentId":"assistant","timestamp":"2026-10-29T17:00:02Z","message":{"role":"user","content":[{"type":"text","text":"new"}]}}`)
-	entries, _, err = New().TranscriptTail(context.Background(), ref, cursor)
-	if err != nil || !reflect.DeepEqual(chatTexts(entries), []string{"new"}) {
-		t.Fatalf("resume after partial = %+v, %v; want only new", entries, err)
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	partial := `{"type":"message","id":"new","parentId":"assistant","timestamp":"2026-10-29T17:00:02Z","message":{"role":"user","content":[{"type":"text","text":"new"}]`
+	if _, err := file.WriteString(partial); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	entries, same, err := New().TranscriptTail(context.Background(), ref, cursor)
+	if err != nil || len(entries) != 0 || same != cursor {
+		t.Fatalf("unterminated tail = %+v, %q, %v; want no entry and unchanged cursor", entries, same, err)
+	}
+
+	file, err = os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("}}\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	entries, cursor, err = New().TranscriptTail(context.Background(), ref, cursor)
+	if err != nil || !reflect.DeepEqual(chatTexts(entries), []string{"new"}) || !strings.HasSuffix(cursor, ":new") {
+		t.Fatalf("completed tail = %+v, %q, %v; want only new", entries, cursor, err)
+	}
+	entries, same, err = New().TranscriptTail(context.Background(), ref, cursor)
+	if err != nil || len(entries) != 0 || same != cursor {
+		t.Fatalf("completed repeat = %+v, %q, %v; want no duplicate", entries, same, err)
 	}
 }
 
