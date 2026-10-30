@@ -17,16 +17,15 @@ import (
 // created by hand, and the row merely records that it exists (docs/10-agents.md).
 const AgentSessionKind = "agent"
 
-// StartAgent launches an agent's tmux session: a session named after the agent
-// running its own command in its own directory, with just enough environment
-// (ROCKET_SESSION_ID, ROCKET_SOCKET) for `rocket inbox|send|task` to work from
-// inside it. Rocket sets no system prompt and manages no lifecycle — the
-// agent's context is its own CLAUDE.md.
+// StartAgent launches an agent's tmux session in its own directory. A selected
+// or previously saved model profile uses its agent adapter; without one, the
+// legacy Command runs as before. Rocket sets no system prompt and manages no
+// lifecycle — the agent's context is its own CLAUDE.md.
 //
 // An empty Command means an interactive login shell. An empty Dir is an error:
 // there is nowhere to run, and guessing a directory would be worse than saying
 // so.
-func (m *Manager) StartAgent(ctx context.Context, a store.Agent) (store.Session, error) {
+func (m *Manager) StartAgent(ctx context.Context, a store.Agent, requestedProfile string) (store.Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -52,18 +51,64 @@ func (m *Manager) StartAgent(ctx context.Context, a store.Agent) (store.Session,
 		"ROCKET_SOCKET":     m.cfg.SocketPath(),
 		"ROCKET_HOME":       m.cfg.Home,
 	}
+	command := a.Command
+	agentName := m.agentAdapter(a)
+	var prof LaunchProfile
+
+	profileName := requestedProfile
+	if profileName == "" {
+		profileName = a.LaunchProfile
+	}
+	if profileName != "" {
+		p, err := m.st.GetModelProfile(profileName)
+		if errors.Is(err, store.ErrNotFound) {
+			return store.Session{}, validationErr("profile_not_found", "no profile "+profileName)
+		}
+		if err != nil {
+			return store.Session{}, err
+		}
+		if !p.Enabled {
+			return store.Session{}, validationErr("profile_disabled",
+				"profile is disabled: "+profileName+"; choose another with --profile")
+		}
+		ag, err := agent.Get(p.Agent)
+		if err != nil {
+			return store.Session{}, validationErr("agent_unknown", "unknown agent: "+p.Agent)
+		}
+		if err := ag.Available(); err != nil {
+			return store.Session{}, validationErr("agent_unavailable", "agent unavailable: "+err.Error())
+		}
+		spec := agent.LaunchSpec{
+			SessionID: a.ID, Kind: AgentSessionKind, ProjectID: a.ProjectID,
+			WorktreePath: a.Dir, SocketPath: m.cfg.SocketPath(), Model: p.Model, Effort: p.Effort,
+		}
+		argv, err := launchArgs(ag, spec)
+		if err != nil {
+			return store.Session{}, err
+		}
+		command = shellJoin(argv)
+		env = mergeEnv(env, ag.Env(spec))
+		agentName = p.Agent
+		prof = LaunchProfile{Name: p.Name, Model: p.Model, Effort: p.Effort}
+		if requestedProfile != "" {
+			a.LaunchProfile = requestedProfile
+			if err := m.st.UpdateAgent(a); err != nil {
+				return store.Session{}, err
+			}
+		}
+	}
 	m.injectToken(env)
 
 	if _, err := m.rt.Create(ctx, runtime.CreateSpec{
 		Name:    a.ID,
 		Dir:     a.Dir,
-		Command: a.Command,
+		Command: command,
 		Env:     env,
 	}); err != nil {
 		return store.Session{}, err
 	}
 
-	sess, err := m.upsertAgentSession(a)
+	sess, err := m.upsertAgentSession(a, agentName, prof)
 	if err != nil {
 		return store.Session{}, err
 	}
@@ -116,16 +161,19 @@ func (m *Manager) AdoptAgentSession(a store.Agent) (sess store.Session, fresh bo
 		// monitor and the dashboard all key off sessions.agent — a Kimi pane
 		// tracked as claude-code gets the wrong paste dialect, no journal
 		// confirmer, and redelivery loops (incident: cto on Kimi). Reconcile
-		// the column from the registered launcher command.
-		if want := m.agentAdapter(a); existing.Agent != want {
-			if err := m.st.UpdateSessionAgent(a.ID, want); err != nil {
-				return existing, false, fmt.Errorf("reconcile agent session adapter: %w", err)
+		// the column from the registered launcher command. A non-empty profile
+		// snapshot belongs to a rocket launch: its adapter is already exact.
+		if existing.Profile == "" {
+			if want := m.agentAdapter(a); existing.Agent != want {
+				if err := m.st.UpdateSessionAgent(a.ID, want); err != nil {
+					return existing, false, fmt.Errorf("reconcile agent session adapter: %w", err)
+				}
+				existing.Agent = want
 			}
-			existing.Agent = want
 		}
 		return existing, false, nil
 	}
-	adopted, err := m.upsertAgentSession(a)
+	adopted, err := m.upsertAgentSession(a, m.agentAdapter(a), LaunchProfile{})
 	return adopted, err == nil, err
 }
 
@@ -172,16 +220,19 @@ func (m *Manager) agentAdapter(a store.Agent) string {
 //
 // WorktreePath is the agent's own directory: it is not a rocket worktree, but
 // it is where the queue writes large-message files the agent then reads.
-func (m *Manager) upsertAgentSession(a store.Agent) (store.Session, error) {
+func (m *Manager) upsertAgentSession(a store.Agent, agentName string, prof LaunchProfile) (store.Session, error) {
 	sess := store.Session{
 		ID:           a.ID,
 		Kind:         AgentSessionKind,
 		ProjectID:    a.ProjectID,
 		FeatureSlug:  a.ID,
-		Agent:        m.agentAdapter(a),
+		Agent:        agentName,
 		WorktreePath: a.Dir,
 		TmuxName:     a.ID,
 		State:        "running",
+		Profile:      prof.Name,
+		Model:        prof.Model,
+		Effort:       prof.Effort,
 	}
 
 	err := m.st.AddSession(sess)

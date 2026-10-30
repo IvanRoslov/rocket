@@ -289,7 +289,8 @@ CREATE TABLE agents (                          -- постоянный аген�
   description TEXT NOT NULL DEFAULT '',
   project_id  TEXT NOT NULL DEFAULT '',      -- только группировка в UI; '' — вне проекта
   dir         TEXT NOT NULL DEFAULT '',      -- рабочая директория для agent start
-  command     TEXT NOT NULL DEFAULT '',      -- команда запуска; '' — интерактивный shell
+  command     TEXT NOT NULL DEFAULT '',      -- legacy команда запуска; '' — интерактивный shell
+  launch_profile TEXT NOT NULL DEFAULT '',   -- профиль последующих запусков; '' — legacy command
   enabled     INTEGER NOT NULL DEFAULT 1,
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL

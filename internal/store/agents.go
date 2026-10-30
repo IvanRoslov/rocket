@@ -19,14 +19,15 @@ type Agent struct {
 	ProjectID string
 	// Dir and Command are the launcher pair used by `rocket agent start`:
 	// the working directory and the command to run there. Both optional.
-	Dir       string
-	Command   string
-	Enabled   bool
-	CreatedAt int64
-	UpdatedAt int64
+	Dir           string
+	Command       string
+	LaunchProfile string
+	Enabled       bool
+	CreatedAt     int64
+	UpdatedAt     int64
 }
 
-const agentColumns = `id, description, project_id, dir, command, enabled, created_at, updated_at`
+const agentColumns = `id, description, project_id, dir, command, launch_profile, enabled, created_at, updated_at`
 
 // AddAgent inserts a new agent. Returns ErrExists if the id is already taken.
 func (s *Store) AddAgent(a Agent) error {
@@ -39,9 +40,9 @@ func (s *Store) AddAgent(a Agent) error {
 	}
 
 	_, err := s.db.Exec(
-		`INSERT INTO agents (`+agentColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		a.ID, a.Description, a.ProjectID, a.Dir, a.Command, boolToInt(a.Enabled),
-		a.CreatedAt, a.UpdatedAt,
+		`INSERT INTO agents (`+agentColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ID, a.Description, a.ProjectID, a.Dir, a.Command, a.LaunchProfile,
+		boolToInt(a.Enabled), a.CreatedAt, a.UpdatedAt,
 	)
 	if isUniqueViolation(err) {
 		return ErrExists
@@ -94,9 +95,9 @@ func (s *Store) ListAgents(projectID string) ([]Agent, error) {
 func (s *Store) UpdateAgent(a Agent) error {
 	res, err := s.db.Exec(
 		`UPDATE agents SET description = ?, project_id = ?, dir = ?, command = ?,
-		        enabled = ?, updated_at = ? WHERE id = ?`,
-		a.Description, a.ProjectID, a.Dir, a.Command, boolToInt(a.Enabled),
-		time.Now().Unix(), a.ID,
+		        launch_profile = ?, enabled = ?, updated_at = ? WHERE id = ?`,
+		a.Description, a.ProjectID, a.Dir, a.Command, a.LaunchProfile,
+		boolToInt(a.Enabled), time.Now().Unix(), a.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update agent: %w", err)
@@ -147,7 +148,7 @@ func scanAgent(row interface{ Scan(...any) error }) (Agent, error) {
 	var enabled int
 
 	err := row.Scan(&a.ID, &a.Description, &a.ProjectID, &a.Dir, &a.Command,
-		&enabled, &a.CreatedAt, &a.UpdatedAt)
+		&a.LaunchProfile, &enabled, &a.CreatedAt, &a.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Agent{}, ErrNotFound
 	}

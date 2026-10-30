@@ -10,6 +10,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type agentClient interface {
+	Get(path string, in, out any) error
+	Post(path string, in, out any) error
+}
+
+type agentDial func() (agentClient, error)
+
+func connectAgent() (agentClient, error) {
+	c, _, err := connect(true)
+	return c, err
+}
+
 func newAgentCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agent",
@@ -168,6 +180,10 @@ func newAgentLsCmd() *cobra.Command {
 }
 
 func newAgentShowCmd() *cobra.Command {
+	return newAgentShowCmdWith(connectAgent)
+}
+
+func newAgentShowCmdWith(dial agentDial) *cobra.Command {
 	return &cobra.Command{
 		Use:   "show <id>",
 		Short: "Показать агента: регистрацию и инбокс",
@@ -176,7 +192,7 @@ func newAgentShowCmd() *cobra.Command {
 				return &usageError{message: "usage: rocket agent show <id>"}
 			}
 
-			c, _, err := connect(true)
+			c, err := dial()
 			if err != nil {
 				return err
 			}
@@ -201,6 +217,7 @@ func newAgentShowCmd() *cobra.Command {
 			cmd.Printf("session:     %s\n", sessionCell(agent["session_alive"]))
 			cmd.Printf("dir:         %s\n", dashIfEmpty(toString(agent["dir"])))
 			cmd.Printf("command:     %s\n", dashIfEmpty(toString(agent["command"])))
+			cmd.Printf("profile:     %s\n", dashIfEmpty(toString(agent["launch_profile"])))
 
 			renderAgentMilestones(cmd.OutOrStdout(), agent["milestones"])
 
@@ -276,25 +293,33 @@ func newAgentToggleCmd(action, short string) *cobra.Command {
 	}
 }
 
-// newAgentStartCmd runs the launcher: a tmux session named after the agent,
-// running its own command in its own directory. Rocket manages nothing beyond
-// creating it.
+// newAgentStartCmd runs the launcher with a selected or saved model profile,
+// falling back to the agent's legacy command when no profile was ever chosen.
 func newAgentStartCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "start <id>",
-		Short: "Запустить tmux-сессию агента (dir + command из регистрации)",
+	return newAgentStartCmdWith(connectAgent)
+}
+
+func newAgentStartCmdWith(dial agentDial) *cobra.Command {
+	var profile string
+	cmd := &cobra.Command{
+		Use:   "start <id> [--profile <name>]",
+		Short: "Запустить tmux-сессию агента (профиль или dir + command)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return &usageError{message: "usage: rocket agent start <id>"}
+				return &usageError{message: "usage: rocket agent start <id> [--profile <name>]"}
 			}
 
-			c, _, err := connect(true)
+			c, err := dial()
 			if err != nil {
 				return err
 			}
 
+			var body map[string]any
+			if profile != "" {
+				body = map[string]any{"profile": profile}
+			}
 			var resp map[string]any
-			if err := c.Post(apiPath("v1", "agents", args[0], "start"), nil, &resp); err != nil {
+			if err := c.Post(apiPath("v1", "agents", args[0], "start"), body, &resp); err != nil {
 				return err
 			}
 			if flags.JSON {
@@ -304,6 +329,8 @@ func newAgentStartCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&profile, "profile", "", "профиль модели; запоминается для следующих запусков")
+	return cmd
 }
 
 func newAgentStopCmd() *cobra.Command {

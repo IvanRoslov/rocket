@@ -1,0 +1,1 @@
+ALTER TABLE agents ADD COLUMN launch_profile TEXT NOT NULL DEFAULT '';
