@@ -303,6 +303,8 @@ rocket devices revoke <id>              # отозвать устройство;
 
 `rocket doctor` дополнительно печатает строки удалённого доступа: `listen` (предупреждение, если `host` не loopback), `public_url` (предупреждение, если не задан) и `tailscale` (нет в PATH или `tailscale serve` не проксирует на порт демона — подсказка `tailscale serve --bg <port>`).
 
+Общие проверки `agent:pi` и `agent:deepseek` сообщают об отсутствии нужного бинаря, неподходящей версии Pi или пустом `DEEPSEEK_API_KEY`. Если Pi 1.0.0+ доступен, `pi:superpowers` с таймаутом читает `pi list` и ищет `git:github.com/obra/superpowers`; при отсутствии пакета или ошибке выводится предупреждение с подсказкой `pi install git:github.com/obra/superpowers`. Проверка ничего не устанавливает и не печатает credentials. Подробности агентов, каталога и импорта — [10-agents.md](10-agents.md).
+
 ### Постоянные агенты
 
 ```
