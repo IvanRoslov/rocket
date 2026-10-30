@@ -47,6 +47,7 @@ func TestFindSession(t *testing.T) {
 	worktree := t.TempDir()
 	otherWorktree := t.TempDir()
 	target, _ := seedSessionFiles(t, home, worktree, otherWorktree)
+	writeSessionFile(t, home, worktree, "0000_other_s1.jsonl")
 
 	got, err := findSession(home, worktree, "s1")
 	if err != nil || got != target {
@@ -123,6 +124,8 @@ func TestReadActiveBranch(t *testing.T) {
 		{name: "conversation leaf"},
 		{name: "trailing usage", trailing: `{"type":"usage","id":"usage","parentId":"current","timestamp":"2026-10-29T17:15:42.093Z"}`},
 		{name: "trailing custom", trailing: `{"type":"custom","id":"custom","parentId":"usage","timestamp":"2026-10-29T17:15:42.093Z"}`},
+		{name: "trailing label", trailing: `{"type":"label","id":"label","parentId":"current","timestamp":"2026-10-29T17:15:42.093Z"}`},
+		{name: "trailing session info", trailing: `{"type":"session_info","id":"info","parentId":"current","timestamp":"2026-10-29T17:15:42.093Z"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "session.jsonl")

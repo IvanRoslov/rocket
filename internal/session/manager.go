@@ -479,15 +479,16 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 		return store.Session{}, err
 	}
 
-	env := mergeEnv(repo.Env, ag.Env(spec))
+	env, unsetEnv := prepareLaunchEnv(ag, spec, repo.Env)
 	m.injectToken(env)
 	cmd := shellJoin(argv)
 
 	if _, err := m.rt.Create(ctx, runtime.CreateSpec{
-		Name:    id,
-		Dir:     wtRes.Path,
-		Command: cmd,
-		Env:     env,
+		Name:     id,
+		Dir:      wtRes.Path,
+		Command:  cmd,
+		Env:      env,
+		UnsetEnv: unsetEnv,
 	}); err != nil {
 		m.markErrored(id, err)
 		return store.Session{}, err
@@ -695,15 +696,16 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 		return store.Session{}, err
 	}
 
-	env := mergeEnv(repo.Env, ag.Env(spec))
+	env, unsetEnv := prepareLaunchEnv(ag, spec, repo.Env)
 	m.injectToken(env)
 	cmd := shellJoin(argv)
 
 	if _, err := m.rt.Create(ctx, runtime.CreateSpec{
-		Name:    id,
-		Dir:     wtRes.Path,
-		Command: cmd,
-		Env:     env,
+		Name:     id,
+		Dir:      wtRes.Path,
+		Command:  cmd,
+		Env:      env,
+		UnsetEnv: unsetEnv,
 	}); err != nil {
 		m.markErrored(id, err)
 		return store.Session{}, err
@@ -1043,15 +1045,16 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 		return err
 	}
 
-	env := mergeEnv(repo.Env, ag.Env(spec))
+	env, unsetEnv := prepareLaunchEnv(ag, spec, repo.Env)
 	m.injectToken(env)
 	cmd := shellJoin(argv)
 
 	if _, err := m.rt.Create(ctx, runtime.CreateSpec{
-		Name:    id,
-		Dir:     path,
-		Command: cmd,
-		Env:     env,
+		Name:     id,
+		Dir:      path,
+		Command:  cmd,
+		Env:      env,
+		UnsetEnv: unsetEnv,
 	}); err != nil {
 		return err
 	}

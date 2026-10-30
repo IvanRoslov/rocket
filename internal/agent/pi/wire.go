@@ -60,9 +60,9 @@ func findSession(home, worktree, sessionID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	suffix := "_" + sessionID + ".jsonl"
 	for _, path := range paths {
-		if strings.HasSuffix(filepath.Base(path), suffix) {
+		_, id, ok := strings.Cut(filepath.Base(path), "_")
+		if ok && strings.TrimSuffix(id, ".jsonl") == sessionID {
 			return path, nil
 		}
 	}
@@ -150,7 +150,7 @@ func readActiveBranch(path string) ([]sessionRecord, error) {
 		if record.ID != "" {
 			byID[record.ID] = record
 		}
-		if leaf == -1 && record.ID != "" && record.Type != "session" && record.Type != "usage" && record.Type != "custom" {
+		if leaf == -1 && record.ID != "" && record.Type != "session" && record.Type != "usage" && record.Type != "custom" && record.Type != "label" && record.Type != "session_info" {
 			leaf = i
 		}
 	}

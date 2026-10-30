@@ -138,6 +138,20 @@ func TestEnv(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("provider without model", func(t *testing.T) {
+		for _, key := range testProviderKeys {
+			t.Setenv(key, "ambient-"+key)
+		}
+		for _, model := range []string{"deepseek", "openai", "anthropic"} {
+			env := New().Env(agent.LaunchSpec{Model: model})
+			for _, key := range testProviderKeys {
+				if _, ok := env[key]; ok {
+					t.Errorf("provider-less model %q forwarded %s", model, key)
+				}
+			}
+		}
+	})
 }
 
 func TestAvailable(t *testing.T) {
@@ -160,6 +174,8 @@ func TestAvailable(t *testing.T) {
 		{version: "0.74.0", wantErr: true},
 		{version: "1.-1.0", wantErr: true},
 		{version: "1.0.-1", wantErr: true},
+		{version: "1.+0.0", wantErr: true},
+		{version: "1.-0.0", wantErr: true},
 		{version: "1.0.0"},
 		{version: "1.4.0"},
 		{version: "v2.0.0"},

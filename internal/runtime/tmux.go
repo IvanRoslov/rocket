@@ -63,6 +63,7 @@ var ErrHeldDialog = errors.New("inject: recipient is showing a held-message dial
 // targets as "=name", and tmux target syntax treats many characters
 // (":", ".", "%", etc.) specially.
 var nameRE = regexp.MustCompile(`^[a-z0-9-]+$`)
+var envNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // defaultPollInterval and defaultPollTimeout are Inject's production
 // confirmation-polling timings (see tmuxRuntime.pollInterval).
@@ -157,7 +158,16 @@ func (t *tmuxRuntime) Create(ctx context.Context, spec CreateSpec) (Handle, erro
 	}
 
 	launchPath := filepath.Join(spec.Dir, ".rocket-launch.sh")
-	script := "#!/bin/sh\n" + spec.Command + "\nexec $SHELL -i\n"
+	script := "#!/bin/sh\n"
+	unsetEnv := append([]string(nil), spec.UnsetEnv...)
+	sort.Strings(unsetEnv)
+	for _, key := range unsetEnv {
+		if !envNameRE.MatchString(key) {
+			return Handle{}, fmt.Errorf("invalid environment variable name %q", key)
+		}
+		script += "unset " + key + "\n"
+	}
+	script += spec.Command + "\nexec $SHELL -i\n"
 	if err := os.WriteFile(launchPath, []byte(script), 0o700); err != nil {
 		return Handle{}, fmt.Errorf("write launch script: %w", err)
 	}

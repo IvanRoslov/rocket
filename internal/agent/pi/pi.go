@@ -55,17 +55,22 @@ func (p *Pi) Available() error {
 	}
 	var numbers [3]int
 	for i, part := range parts {
+		if part == "" || part[0] < '0' || part[0] > '9' {
+			return fmt.Errorf("parse pi version %q", version)
+		}
 		if i == 2 {
 			if at := strings.IndexAny(part, "-+"); at >= 0 {
 				part = part[:at]
 			}
 		}
+		for _, digit := range part {
+			if digit < '0' || digit > '9' {
+				return fmt.Errorf("parse pi version %q", version)
+			}
+		}
 		numbers[i], err = strconv.Atoi(part)
 		if err != nil {
 			return fmt.Errorf("parse pi version %q: %w", version, err)
-		}
-		if numbers[i] < 0 {
-			return fmt.Errorf("parse pi version %q", version)
 		}
 	}
 	if numbers[0] < 1 {
@@ -127,6 +132,14 @@ var providerAPIKeys = map[string]string{
 	"xiaomi-token-plan-sgp":      "XIAOMI_TOKEN_PLAN_SGP_API_KEY",
 }
 
+func selectedProviderAPIKey(model string) string {
+	provider, _, ok := strings.Cut(model, "/")
+	if !ok {
+		return ""
+	}
+	return providerAPIKeys[provider]
+}
+
 func (p *Pi) Env(spec agent.LaunchSpec) map[string]string {
 	env := map[string]string{
 		"PI_TELEMETRY":      "0",
@@ -138,13 +151,26 @@ func (p *Pi) Env(spec agent.LaunchSpec) map[string]string {
 		"ROCKET_FEATURE":    spec.Feature,
 		"ROCKET_SOCKET":     spec.SocketPath,
 	}
-	provider, _, _ := strings.Cut(spec.Model, "/")
-	if key := providerAPIKeys[provider]; key != "" {
+	if key := selectedProviderAPIKey(spec.Model); key != "" {
 		if value := os.Getenv(key); value != "" {
 			env[key] = value
 		}
 	}
 	return env
+}
+
+func (p *Pi) ScrubLaunchEnv(spec agent.LaunchSpec) []string {
+	selected := selectedProviderAPIKey(spec.Model)
+	seen := map[string]bool{}
+	var keys []string
+	for _, key := range providerAPIKeys {
+		if key == "" || key == selected || seen[key] {
+			continue
+		}
+		seen[key] = true
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 func (p *Pi) SetupWorkspace(spec agent.LaunchSpec) error {
