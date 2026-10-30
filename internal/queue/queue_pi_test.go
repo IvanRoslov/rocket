@@ -98,6 +98,22 @@ func TestQueue_PiDraftHoldsDelivery(t *testing.T) {
 	waitUntil(t, func() bool { return h.rt.callCount() == 1 }, "delivered into Pi's steering queue")
 }
 
+func TestQueue_PiDraftNeverForcedAfterDeadline(t *testing.T) {
+	h := newTestQueue(t)
+	h.q.cfg.ComposerBusyDeadline = time.Nanosecond
+	addPiSession(t, h, "pi", activity.Ready)
+	h.rt.setCaptureEscaped(func(_ runtime.Handle, _ int) (string, error) { return piPane(t, "pi-draft.pane"), nil })
+	id := addMsg(t, h, "pi", "hello")
+	h.q.Wake("pi")
+	time.Sleep(250 * time.Millisecond)
+	if got := messageStatus(t, h.st, id); got != "queued" {
+		t.Fatalf("status = %q, want queued after the force deadline", got)
+	}
+	if n := h.rt.callCount(); n != 0 {
+		t.Fatalf("Inject called %d times after the force deadline, want 0", n)
+	}
+}
+
 func TestQueue_PiAcceptedKeptWhileInPisQueue(t *testing.T) {
 	h := newTestQueue(t)
 	h.startConfirmer()

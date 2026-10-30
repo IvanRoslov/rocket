@@ -311,13 +311,10 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 			clearKeys = kimiClearKeys(k.rows)
 		} else if opts.Dialect == PaneDialectPi {
 			k, ok := parsePiComposer(out)
-			if !ok || (!opts.Force && k.state == PiDraft) {
+			if !ok || k.state == PiDraft {
 				return fmt.Errorf("%w: session %q", ErrComposerBusy, h.Name)
 			}
 			clearKeys = nil
-			if k.state == PiDraft {
-				clearKeys = []string{"C-c"}
-			}
 		} else if !opts.Force && LooksLikeUserDraft(out) {
 			return fmt.Errorf("%w: session %q", ErrComposerBusy, h.Name)
 		}
@@ -619,9 +616,14 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 					cleanup = kimiClearKeys(k.rows)
 				}
 			} else if opts.Dialect == PaneDialectPi {
-				cleanup = []string{"C-c"}
+				cleanup = nil
+				if k, ok := parsePiComposer(full); ok && k.state == PiDraft {
+					cleanup = []string{"C-c"}
+				}
 			}
-			_, _, _ = t.run(ctx, append([]string{"send-keys", "-t", paneTarget(h.Name)}, cleanup...)...)
+			if len(cleanup) > 0 {
+				_, _, _ = t.run(ctx, append([]string{"send-keys", "-t", paneTarget(h.Name)}, cleanup...)...)
+			}
 			_, _, _ = t.run(ctx, "kill-buffer", "-b", bufName)
 			return fmt.Errorf("%w: after %d attempts", ErrNotDelivered, maxAttempts)
 		}

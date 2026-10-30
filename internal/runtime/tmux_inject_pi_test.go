@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -40,15 +41,14 @@ func TestTmux_Inject_PiCaptureErrorDefers(t *testing.T) {
 	}
 }
 
-func TestTmux_Inject_PiForcedClearUsesCtrlC(t *testing.T) {
+func TestTmux_Inject_PiForcedDraftGuard(t *testing.T) {
 	f := &fakeTmux{pane: readPane(t, "pi-draft.pane")}
-	_ = newFakeRuntime(f).Inject(context.Background(), Handle{Name: "sess"}, "hello", InjectOpts{Force: true, Dialect: PaneDialectPi})
-	want := []string{"send-keys", "-t", paneTarget("sess"), "C-c"}
-	if len(f.calls) < 2 || !slices.Equal(f.calls[1], want) {
-		t.Fatalf("clear = %q, want %q", f.calls[1], want)
+	err := newFakeRuntime(f).Inject(context.Background(), Handle{Name: "sess"}, "hello", InjectOpts{Force: true, Dialect: PaneDialectPi})
+	if !errors.Is(err, ErrComposerBusy) {
+		t.Fatalf("Inject = %v, want ErrComposerBusy even under Force", err)
 	}
-	if f.sent("C-u") {
-		t.Fatal("C-u sent to Pi; recon clear is C-c")
+	if f.sent("send-keys") || f.sent("paste-buffer") {
+		t.Fatal("clear/paste/Enter sent to a human draft under Force")
 	}
 }
 
@@ -80,5 +80,40 @@ func TestTmux_Inject_PiSteeringReturnsQueued(t *testing.T) {
 	}
 	if s.sent("kill-buffer") {
 		t.Fatal("kill-buffer issued for steering owned by Pi")
+	}
+}
+
+func TestTmux_Inject_PiFinalCleanupOnlyClearsDraft(t *testing.T) {
+	stuck := strings.Replace(readPane(t, "pi-plain-draft.pane"), "<redacted-plain-draft>", "hello", 1)
+	for _, tc := range []struct {
+		name      string
+		finalPane string
+		wantClear bool
+	}{
+		{name: "empty", finalPane: readPane(t, "pi-idle.pane"), wantClear: false},
+		{name: "busy", finalPane: readPane(t, "pi-busy.pane"), wantClear: false},
+		{name: "unknown", finalPane: readPane(t, "kimi-question.pane"), wantClear: false},
+		{name: "draft", finalPane: stuck, wantClear: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			captures := 0
+			s := &stagedTmux{paneFn: func(_ int, scrollback bool) string {
+				if scrollback {
+					return tc.finalPane
+				}
+				captures++
+				if captures == 1 {
+					return readPane(t, "pi-idle.pane")
+				}
+				return stuck
+			}}
+			err := newStagedRuntime(s).Inject(context.Background(), Handle{Name: "sess"}, "hello", InjectOpts{Dialect: PaneDialectPi})
+			if !errors.Is(err, ErrNotDelivered) {
+				t.Fatalf("Inject = %v, want ErrNotDelivered", err)
+			}
+			if got := countCalls(&s.fakeTmux, "send-keys", "-t", paneTarget("sess"), "C-c"); (got > 0) != tc.wantClear {
+				t.Fatalf("C-c calls = %d, wantClear=%v; calls: %v", got, tc.wantClear, s.calls)
+			}
+		})
 	}
 }

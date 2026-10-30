@@ -622,7 +622,7 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 				if busySince.IsZero() {
 					busySince = time.Now()
 				}
-				if time.Since(busySince) < q.composerBusyDeadline() {
+				if dialect == runtime.PaneDialectPi || time.Since(busySince) < q.composerBusyDeadline() {
 					slog.Info("queue: recipient composer holds a user draft, deferring delivery",
 						"id", msg.ID, "to", msg.ToSession, "busy_for", time.Since(busySince).Round(time.Second))
 					if !q.waitForReady(ctx, msg.ToSession) {
