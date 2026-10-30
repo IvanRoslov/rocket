@@ -10,7 +10,7 @@ Read actual Pi token/cache usage and the current conversation from native sessio
 
 - Sum assistant-message, standalone `usage`, `compaction`, and `branch_summary` usage once per journal record, per actual model, across every session for the physical worktree and across active and abandoned branches.
 - Map `input`, `cacheRead`, `cacheWrite`, `output`, and `reasoning` to the corresponding `agent.Tokens` fields and count each usage-bearing record once in `Messages`.
-- Attribute assistant and standalone records from their direct provider/model fields; attribute compaction and branch summaries to the governing `model_change`.
+- Attribute assistant and standalone records from their direct provider/model fields. Compaction and branch summaries use the governing preceding `model_change`; only when no `model_change` exists do they fall back to the preceding assistant's explicit provider/model.
 - Exclude records before `since`, preserve first/last record timestamps, report empty existing journals as found, skip malformed/partial lines, and return real I/O or cancellation errors.
 - Read user text, assistant text, assistant tool calls, and provider errors from the active branch only. Resume after a cursor without duplicate entries and report the exact session journal's size and mtime.
 

@@ -181,6 +181,29 @@ func TestUsageCompactionInheritsPrecedingAssistantModel(t *testing.T) {
 	}
 }
 
+func TestUsageModelChangeTakesPrecedenceOverAssistant(t *testing.T) {
+	home, worktree := t.TempDir(), t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", home)
+	writeUsageSession(t, home, worktree, "2026-10-29_precedence.jsonl", []string{
+		`{"type":"model_change","id":"model","timestamp":"2026-10-29T17:00:00Z","provider":"deepseek","modelId":"deepseek-v4-pro"}`,
+		`{"type":"message","id":"assistant","timestamp":"2026-10-29T17:00:01Z","message":{"role":"assistant","provider":"openai","model":"gpt-x","usage":{"input":1}}}`,
+		`{"type":"compaction","id":"compact","timestamp":"2026-10-29T17:00:02Z","usage":{"input":9,"output":4}}`,
+		`{"type":"branch_summary","id":"summary","timestamp":"2026-10-29T17:00:03Z","usage":{"input":5,"output":2}}`,
+	})
+
+	got, err := New().(agent.UsageReader).Usage(context.Background(), worktree, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]agent.Tokens{
+		"deepseek/deepseek-v4-pro": {Input: 14, Output: 6, Messages: 2},
+		"openai/gpt-x":             {Input: 1, Messages: 1},
+	}
+	if !reflect.DeepEqual(got.Models, want) {
+		t.Fatalf("Usage models = %#v; want model_change precedence %#v", got.Models, want)
+	}
+}
+
 func writeReconSession(t *testing.T, home, worktree, fixture string, names ...string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("testdata", fixture))

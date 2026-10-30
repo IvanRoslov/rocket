@@ -15,7 +15,7 @@
 - Keep changes inside `internal/agent/pi/usage.go`, `usage_test.go`, `chat.go`, `chat_test.go`, and the Task 4 design/plan documents.
 - Consume `findWorktreeSessions`, `findSession`, `readTail`, and `readActiveBranch` from merged Task 2; do not change their behavior.
 - Count assistant, standalone `usage`, `compaction`, and `branch_summary` usage once each across active and abandoned branches.
-- Model IDs are `provider/model`; compaction and branch summaries inherit the latest preceding `model_change` in their journal.
+- Model IDs are `provider/model`; compaction and branch summaries use the governing preceding `model_change`, falling back to the preceding assistant's explicit provider/model only when no `model_change` exists.
 - Skip malformed and trailing partial JSONL records; support records larger than 64 KiB and propagate real read/cancellation errors.
 - Chat reads only the active branch. Cursor resets to that branch when its saved record is no longer present.
 - No new dependencies, subagents, unrelated refactors, or global Pi settings changes.
@@ -57,7 +57,7 @@ Expected: FAIL because `Pi.Usage` is not implemented.
 
 - [ ] **Step 3: Implement usage accounting**
 
-Implement `Pi.Usage` using `findWorktreeSessions(piHome(), worktreePath)`. Mark `Found` for each existing regular journal. Forward-read complete lines with `bufio.Reader`; decode record type, timestamp, direct provider/model, nested assistant usage, and top-level usage. Track the latest `model_change` per journal. Add every usage-bearing supported record to its model and update `Messages`, `FirstAt`, and `LastAt`; never add a record twice. Check context during enumeration and reading and wrap non-cancellation I/O errors with the journal path.
+Implement `Pi.Usage` using `findWorktreeSessions(piHome(), worktreePath)`. Mark `Found` for each existing regular journal. Forward-read complete lines with `bufio.Reader`; decode record type, timestamp, direct provider/model, nested assistant usage, and top-level usage. Track the governing `model_change` per journal and use the preceding assistant's explicit model only while no model change exists. Add every usage-bearing supported record to its model and update `Messages`, `FirstAt`, and `LastAt`; never add a record twice or deduplicate distinct IDs by equal token counts. Check context during enumeration and reading and wrap non-cancellation I/O errors with the journal path.
 
 - [ ] **Step 4: Run focused and package tests, then commit**
 
