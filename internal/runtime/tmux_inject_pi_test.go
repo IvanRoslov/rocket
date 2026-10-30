@@ -59,6 +59,9 @@ func TestTmux_Inject_PiBracketedPaste(t *testing.T) {
 	if got := pasteCall(f); !slices.Equal(got, want) {
 		t.Fatalf("paste argv = %q, want %q", got, want)
 	}
+	if f.sent("C-c") {
+		t.Fatal("C-c sent to an empty Pi composer; only a draft needs clearing")
+	}
 }
 
 func TestTmux_Inject_PiSteeringReturnsQueued(t *testing.T) {

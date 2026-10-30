@@ -105,6 +105,14 @@ func TestActivity(t *testing.T) {
 	}
 }
 
+func TestActivityNoConversationIsNoSignal(t *testing.T) {
+	wt, _ := fakePiSession(t, firstPiLines(piFixture(t, "pi-session.jsonl"), 4), "s1", piOldMtime)
+	_, _, err := New().Activity(context.Background(), agent.ActivityRef{SessionID: "s1", WorktreePath: wt})
+	if !errors.Is(err, agent.ErrNoSignal) {
+		t.Fatalf("error = %v, want ErrNoSignal before the first user turn", err)
+	}
+}
+
 func TestActivityMetadataDoesNotChangeState(t *testing.T) {
 	wire := piFixture(t, "pi-session.jsonl") +
 		`{"type":"usage","id":"u1","parentId":"0d140ff3","timestamp":"2026-10-29T17:18:00Z"}` + "\n" +

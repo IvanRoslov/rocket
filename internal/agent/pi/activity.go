@@ -79,6 +79,9 @@ func (p *Pi) Activity(ctx context.Context, ref agent.ActivityRef) (activity.Stat
 	if err != nil {
 		return "", time.Time{}, err
 	}
+	if _, _, ok := latestConversation(records); !ok {
+		return "", time.Time{}, agent.ErrNoSignal
+	}
 	return conversationState(records, info.ModTime()), info.ModTime(), nil
 }
 

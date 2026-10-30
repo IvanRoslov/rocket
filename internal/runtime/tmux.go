@@ -314,7 +314,10 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 			if !ok || (!opts.Force && k.state == PiDraft) {
 				return fmt.Errorf("%w: session %q", ErrComposerBusy, h.Name)
 			}
-			clearKeys = []string{"C-c"}
+			clearKeys = nil
+			if k.state == PiDraft {
+				clearKeys = []string{"C-c"}
+			}
 		} else if !opts.Force && LooksLikeUserDraft(out) {
 			return fmt.Errorf("%w: session %q", ErrComposerBusy, h.Name)
 		}
@@ -324,8 +327,10 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 	// paste-buffer address a pane, not a session, so they need the
 	// colon-suffixed pane target even though has-session/kill-session
 	// accept the bare session target.
-	if _, _, err := t.run(ctx, append([]string{"send-keys", "-t", paneTarget(h.Name)}, clearKeys...)...); err != nil {
-		return fmt.Errorf("clear draft: %w", err)
+	if len(clearKeys) > 0 {
+		if _, _, err := t.run(ctx, append([]string{"send-keys", "-t", paneTarget(h.Name)}, clearKeys...)...); err != nil {
+			return fmt.Errorf("clear draft: %w", err)
+		}
 	}
 
 	// 2. Load the text into a tmux buffer via a temp file, then paste it.
