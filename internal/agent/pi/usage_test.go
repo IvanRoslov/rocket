@@ -200,6 +200,29 @@ func TestUsageCompactionInheritsPrecedingAssistantModel(t *testing.T) {
 	}
 }
 
+func TestUsageLatestAssistantFallbackWinsWithoutModelChange(t *testing.T) {
+	home, worktree := t.TempDir(), t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", home)
+	writeUsageSession(t, home, worktree, "2026-10-29_assistant_fallback.jsonl", []string{
+		`{"type":"message","id":"a","timestamp":"2026-10-29T17:00:00Z","message":{"role":"assistant","provider":"openai","model":"gpt-a","usage":{"input":1}}}`,
+		`{"type":"message","id":"b","timestamp":"2026-10-29T17:00:01Z","message":{"role":"assistant","provider":"openai","model":"gpt-b","usage":{"input":2}}}`,
+		`{"type":"compaction","id":"compact","timestamp":"2026-10-29T17:00:02Z","usage":{"input":4,"output":1}}`,
+		`{"type":"branch_summary","id":"summary","timestamp":"2026-10-29T17:00:03Z","usage":{"input":8,"output":2}}`,
+	})
+
+	got, err := New().(agent.UsageReader).Usage(context.Background(), worktree, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]agent.Tokens{
+		"openai/gpt-a": {Input: 1, Messages: 1},
+		"openai/gpt-b": {Input: 14, Output: 3, Messages: 3},
+	}
+	if !reflect.DeepEqual(got.Models, want) {
+		t.Fatalf("Usage models = %#v; want latest assistant fallback %#v", got.Models, want)
+	}
+}
+
 func TestUsageModelChangeTakesPrecedenceOverAssistant(t *testing.T) {
 	home, worktree := t.TempDir(), t.TempDir()
 	t.Setenv("PI_CODING_AGENT_DIR", home)

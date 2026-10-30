@@ -72,6 +72,7 @@ func scanPiUsage(ctx context.Context, path string, since time.Time, result *agen
 
 	reader := bufio.NewReaderSize(file, 64*1024)
 	governingModel := ""
+	assistantModel := ""
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -90,9 +91,9 @@ func scanPiUsage(ctx context.Context, path string, since time.Time, result *agen
 		if record.Type == "model_change" {
 			governingModel = piModelName(record.Provider, record.ModelID)
 		}
-		if governingModel == "" && record.Type == "message" && record.Message.Role == "assistant" {
+		if record.Type == "message" && record.Message.Role == "assistant" {
 			if model := piModelName(record.Message.Provider, record.Message.Model); model != "" {
-				governingModel = model
+				assistantModel = model
 			}
 		}
 		if record.Timestamp.Before(since) {
@@ -121,6 +122,9 @@ func scanPiUsage(ctx context.Context, path string, since time.Time, result *agen
 			usage = record.Usage
 		case "compaction", "branch_summary":
 			model = governingModel
+			if model == "" {
+				model = assistantModel
+			}
 			usage = record.Usage
 		}
 		if model == "" || usage == nil {
