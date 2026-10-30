@@ -20,8 +20,17 @@ func TestDetectFromCommand(t *testing.T) {
 		{"claude-code binary", "claude-code", "claude-code"},
 		{"bare codex", "codex", "codex"},
 		{"codex with flags", "codex --no-alt-screen", "codex"},
+		{"bare pi", "pi", "pi"},
+		{"pi absolute with flags", "/usr/local/bin/pi --approve", "pi"},
+		{"pi env prefix", "env FOO=1 pi", "pi"},
+		{"deepseek shell assignment", "ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic claude", "deepseek"},
+		{"deepseek env prefix", "env ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic claude", "deepseek"},
+		{"deepseek quoted shell assignment", `ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" claude`, "deepseek"},
+		{"deepseek quoted env assignment", `env ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" claude`, "deepseek"},
+		{"claude with unrelated base URL", "ANTHROPIC_BASE_URL=https://example.com claude", "claude-code"},
 		{"unrelated binary", "zsh", ""},
 		{"shell wrapper hides the binary", "bash -c 'kimi --auto'", ""},
+		{"pi shell wrapper stays unknown", "bash -c 'pi'", ""},
 		{"env running something else", "env FOO=1 zsh", ""},
 	}
 	for _, tc := range cases {

@@ -38,6 +38,8 @@ describe('SystemScreen', () => {
 
     await screen.findByText('billing-v2-orch')
     expect(screen.getByText('Agents running')).toBeInTheDocument()
+    const agentsTile = screen.getByText('Agents running').closest('[data-testid="stat-tile"]') as HTMLElement
+    expect(within(agentsTile).getByText('claude/codex/kimi/pi/deepseek')).toBeInTheDocument()
     expect(screen.getByText('Orphans')).toBeInTheDocument()
     expect(screen.getByText('Queue depth')).toBeInTheDocument()
 

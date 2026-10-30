@@ -34,17 +34,18 @@ func TestGetModelCatalogAllAgents(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("status = %d %v", status, body)
 	}
-	// The test binary also registers fake agents; keep the real two.
+	// The test binary also registers fake agents; keep the real adapters.
 	var agents []map[string]any
 	var names []string
 	for _, a := range catalogAgents(t, body) {
-		if n := a["agent"].(string); n == "claude-code" || n == "codex" {
+		n := a["agent"].(string)
+		if n == "claude-code" || n == "codex" || n == "deepseek" || n == "pi" {
 			agents = append(agents, a)
 			names = append(names, n)
 		}
 	}
-	if !reflect.DeepEqual(names, []string{"claude-code", "codex"}) {
-		t.Fatalf("agents = %v, want sorted claude-code, codex", names)
+	if !reflect.DeepEqual(names, []string{"claude-code", "codex", "deepseek", "pi"}) {
+		t.Fatalf("agents = %v, want sorted claude-code, codex, deepseek, pi", names)
 	}
 	cc := agents[0]
 	if cc["source"] != "cache" || cc["warning"] != "" {
@@ -67,6 +68,14 @@ func TestGetModelCatalogAllAgents(t *testing.T) {
 	codex := agents[1]
 	if codex["source"] != "builtin" || codex["warning"] != "codex debug models: not found" || codex["fetched_at"] != nil {
 		t.Errorf("codex = %v", codex)
+	}
+	deepseek := agents[2]
+	if deepseek["source"] != "builtin" || len(deepseek["models"].([]any)) != 2 {
+		t.Errorf("deepseek = %v", deepseek)
+	}
+	pi := agents[3]
+	if pi["source"] != "builtin" || len(pi["models"].([]any)) != 2 {
+		t.Errorf("pi = %v", pi)
 	}
 }
 
@@ -243,7 +252,12 @@ func TestImportCatalogCreatesDisabledProfiles(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("status = %d %v", status, body)
 	}
-	want := []string{"claude-opus-5-5", "claude-haiku-4-5-20251001", "codex-gpt-5-6-sol", "codex-gpt-5-5"}
+	want := []string{
+		"claude-opus-5-5", "claude-haiku-4-5-20251001",
+		"codex-gpt-5-6-sol", "codex-gpt-5-5",
+		"deepseek-flash-1m", "deepseek-v4-pro",
+		"pi-deepseek-flash", "pi-deepseek-v4-pro",
+	}
 	if got := importNames(t, body); !reflect.DeepEqual(got, want) {
 		t.Fatalf("created = %v, want %v (main models only)", got, want)
 	}
@@ -278,8 +292,8 @@ func TestImportCatalogTwiceCreatesNothing(t *testing.T) {
 	if got := importNames(t, body); len(got) != 0 {
 		t.Errorf("second import created %v", got)
 	}
-	if skipped := body["skipped"].([]any); len(skipped) != 4 {
-		t.Errorf("skipped = %v, want 4", skipped)
+	if skipped := body["skipped"].([]any); len(skipped) != 8 {
+		t.Errorf("skipped = %v, want 8", skipped)
 	}
 }
 
@@ -349,16 +363,36 @@ func TestImportCatalogErrors(t *testing.T) {
 	}
 }
 
+func TestImportCatalogPiNameCollision(t *testing.T) {
+	f := newMPFixture(t)
+	for _, n := range []string{"pi-deepseek-flash", "pi-deepseek-flash-2"} {
+		if err := f.d.Store.CreateModelProfile(store.ModelProfile{Name: n, Agent: "pi", Model: "other/" + n}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, body := mpDo(t, f.url, "POST", "/v1/model-profiles/import-catalog", "", map[string]any{"agent": "pi"})
+	want := []string{"pi-deepseek-flash-3", "pi-deepseek-v4-pro"}
+	if got := importNames(t, body); !reflect.DeepEqual(got, want) {
+		t.Errorf("created = %v, want %v", got, want)
+	}
+}
+
 func TestImportProfileName(t *testing.T) {
 	cases := map[[2]string]string{
 		{"claude-code", "claude-opus-5-5"}:                   "claude-opus-5-5",
 		{"codex", "gpt-5.6-sol"}:                             "codex-gpt-5-6-sol",
 		{"codex", "gpt_6.astra"}:                             "codex-gpt-6-astra",
 		{"codex", "GPT-X"}:                                   "codex-gpt-x",
+		{"claude-code", "claude-opus!"}:                      "claude-opus-",
+		{"codex", "gpt-5.5!"}:                                "codex-gpt-5-5-",
+		{"kimi-code", "kimi-code/k3!"}:                       "kimi-k3-",
 		{"kimi-code", "kimi-code/k3.1-pro"}:                  "kimi-k3-1-pro",
 		{"kimi-code", "kimi-code/kimi-for-coding"}:           "kimi-for-coding",
 		{"kimi-code", "kimi-code/k3"}:                        "kimi-k3",
 		{"kimi-code", "kimi-code/kimi-for-coding-highspeed"}: "kimi-for-coding-highspeed",
+		{"pi", "deepseek/deepseek-flash"}:                    "pi-deepseek-flash",
+		{"pi", "openai/gpt-6-sol"}:                           "pi-openai-gpt-6-sol",
+		{"deepseek", "deepseek-flash[1m]"}:                   "deepseek-flash-1m",
 	}
 	for in, want := range cases {
 		if got := importProfileName(in[0], in[1]); got != want {
@@ -446,8 +480,8 @@ func TestImportCatalogConcurrent(t *testing.T) {
 		}
 	}
 	ps, _ := f.d.Store.ListModelProfiles()
-	if len(ps) != 3+4 {
-		t.Errorf("profiles = %d, want 7 (3 seeded + 4 imported once)", len(ps))
+	if len(ps) != 3+8 {
+		t.Errorf("profiles = %d, want 11 (3 seeded + 8 imported once)", len(ps))
 	}
 }
 

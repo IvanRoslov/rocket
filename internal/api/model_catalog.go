@@ -290,9 +290,10 @@ func handleImportCatalog(w http.ResponseWriter, r *http.Request, d Deps) {
 }
 
 // importProfileName is the profile name an imported model gets: the model
-// id for claude-code, "codex-" + slug with "." and "_" as "-" for codex,
+// id for claude-code and deepseek, "codex-" + slug with "." and "_" as "-" for codex,
 // "kimi-" + slug of the id without its "kimi-code/" prefix for kimi-code
-// (no doubled "kimi-"); lowercased, any other character outside [a-z0-9-] becomes "-".
+// (no doubled "kimi-"), and "pi-" + slug of the full provider/model for pi
+// (without a duplicated provider). Any other character outside [a-z0-9-] becomes "-".
 func importProfileName(agentName, modelID string) string {
 	base := modelID
 	switch agentName {
@@ -303,6 +304,14 @@ func importProfileName(agentName, modelID string) string {
 		if !strings.HasPrefix(base, "kimi-") {
 			base = "kimi-" + base
 		}
+	case "pi":
+		provider, model, found := strings.Cut(modelID, "/")
+		if found {
+			model = strings.TrimPrefix(model, provider+"-")
+			base = "pi-" + provider + "/" + model
+		} else {
+			base = "pi-" + modelID
+		}
 	}
 	var b strings.Builder
 	for _, r := range strings.ToLower(base) {
@@ -311,6 +320,9 @@ func importProfileName(agentName, modelID string) string {
 		} else {
 			b.WriteRune('-')
 		}
+	}
+	if agentName == "pi" || agentName == "deepseek" {
+		return strings.Trim(b.String(), "-")
 	}
 	return b.String()
 }

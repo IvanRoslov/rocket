@@ -9,8 +9,8 @@
 ┌─────────────┐   localhost TCP (HTTP+SSE)  │  api ── session manager      │
 │  dashboard  │ ───────────────────────────▶│         │    │     │         │
 └─────────────┘                             │   runtime  workspace  agents │
-                                            │   (tmux)   (worktree) (CC,   │
-агент в tmux ──── `rocket send/...` ───────▶│                        codex)│
+                                            │   (tmux)   (worktree) (all 5)│
+агент в tmux ──── `rocket send/...` ───────▶│  CC/codex/kimi/Pi/DeepSeek   │
                                             │  monitor  queue  heartbeat   │
                                             │  github   events  store(SQLite)
                                             └──────────────────────────────┘
@@ -62,7 +62,7 @@ type Runtime interface {
 Зеркало подтягивается синхронно перед созданием worktree (под таймаутом в 60s; не успел — спавн идёт дальше на зеркале как есть) и фоновым тикером (`mirror_sync_interval`, по умолчанию 5m), который обходит зеркала в `repos_dir`: `git fetch --prune origin` плюс подтягивание рабочего дерева до `origin/<default_branch>` строго `merge --ff-only`. Fetch при спавне сессии двигал только remote-tracking ref'ы, оставляя файлы зеркала на давнем коммите — именно из этого агенты делали неверные выводы о чужих репозиториях. Зеркало, которое подтянуть нельзя (грязное дерево, HEAD не на default-ветке, невозможный FF), не перетирается: warn в лог, флаг `Blocked` и отдельная строка ПРОТУХЛО в `rocket status`. Детали — [05-state.md](05-state.md#свежесть-зеркал).
 
 ### agents
-Интерфейс `Agent` и адаптеры `claude-code`, `codex`, `kimi-code` — см. [10-agents.md](10-agents.md).
+Интерфейс `Agent` и компилируемые в daemon/CLI адаптеры `claude-code`, `codex`, `kimi-code`, `pi`, `deepseek` — см. [10-agents.md](10-agents.md). Профиль содержит только agent/model/effort; provider-specific настройки остаются внутри адаптера и не меняют схему состояния.
 
 ### monitor
 Цикл (каждые ~5s) опрашивает активность каждой живой сессии через её агент-адаптер, обновляет `activity` в store, публикует события при смене. См. [07-activity.md](07-activity.md).

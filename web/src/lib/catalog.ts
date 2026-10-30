@@ -22,7 +22,13 @@ export function effortsFor(
   return { efforts: m.efforts, disabled: m.efforts.length === 0 }
 }
 
-const AGENT_TITLE: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex', 'kimi-code': 'Kimi Code' }
+const AGENT_TITLE: Record<string, string> = {
+  'claude-code': 'Claude Code',
+  codex: 'Codex',
+  'kimi-code': 'Kimi Code',
+  pi: 'Pi',
+  deepseek: 'DeepSeek',
+}
 
 /** «from Codex CLI» / «from Claude Code cache» / «built-in». */
 export function catalogSourceText(c: AgentCatalog): string {

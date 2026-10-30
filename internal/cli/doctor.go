@@ -15,7 +15,9 @@ import (
 	"github.com/IvanRoslov/rocket/internal/agent"
 	_ "github.com/IvanRoslov/rocket/internal/agent/claudecode" // registers "claude-code" in agent.Registry()
 	_ "github.com/IvanRoslov/rocket/internal/agent/codex"      // registers "codex" in agent.Registry()
+	_ "github.com/IvanRoslov/rocket/internal/agent/deepseek"   // registers "deepseek" in agent.Registry()
 	_ "github.com/IvanRoslov/rocket/internal/agent/kimicode"   // registers "kimi-code" in agent.Registry()
+	_ "github.com/IvanRoslov/rocket/internal/agent/pi"         // registers "pi" in agent.Registry()
 	"github.com/IvanRoslov/rocket/internal/client"
 	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/spf13/cobra"
@@ -122,6 +124,7 @@ func runDoctorChecks() []checkResult {
 
 	results = append(results, checkAgents()...)
 	results = append(results, checkKimiAgent()...)
+	results = append(results, checkPiAgent()...)
 	results = append(results, checkSuperpowers())
 
 	return results

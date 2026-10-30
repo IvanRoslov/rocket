@@ -6,7 +6,7 @@
 
 ```go
 type Agent interface {
-    Name() string                          // "claude-code", "codex", "kimi-code"
+    Name() string                          // "claude-code", "codex", "kimi-code", "pi", "deepseek"
     Available() error                      // бинарник найден, версия ок (для doctor)
     LaunchCommand(spec LaunchSpec) []string
     Env(spec LaunchSpec) map[string]string
@@ -21,7 +21,7 @@ type LaunchSpec struct {
 }
 ```
 
-Адаптер ещё отдаёт `Efforts() []string` — допустимые уровни усилия (claude-code: `low, medium, high, xhigh, max`; codex: `minimal, low, medium, high, xhigh`; kimi-code: `low, high, max`). Пустые `Model`/`Effort` — флаг не передаётся, агент работает со своими умолчаниями. Модель адаптер не проверяет: неверное имя проявится при запуске CLI.
+Адаптер ещё отдаёт `Efforts() []string` — допустимые уровни усилия: claude-code `low, medium, high, xhigh, max`; codex `minimal, low, medium, high, xhigh, max, ultra`; kimi-code `low, high, max`; pi `off, minimal, low, medium, high, xhigh, max`; deepseek `low, medium, high, xhigh, max`. Пустые `Model`/`Effort` — флаг не передаётся, агент работает со своими умолчаниями. Модель адаптер не проверяет: неверное имя проявится при запуске CLI.
 
 Выбор агента, модели и усилия — через профиль модели (см. «Профили моделей» ниже); `--agent` при spawn/up/start остаётся для обратной совместимости, а запуск без профиля (пустой реестр) берёт `defaults.agent` конфига. Общая часть детекции (жив ли процесс на TTY pane) — в мониторе, не в адаптерах.
 
@@ -78,6 +78,47 @@ type LaunchSpec struct {
 - **`rocket doctor`.** Кроме общего `agent:kimi-code` (бинарь найден), если бинарь есть, выполняются две проверки-предупреждения (⚠️, не ❌): `kimi-code:login` — в `config.toml` есть провайдер `managed:kimi-code` и непустой `credentials/` (иначе «вход не выполнен — выполните `kimi login`»); `kimi-code:superpowers` — плагин `superpowers` есть в `plugins/installed.json` и `enabled`. Проверки только читают `$KIMI_CODE_HOME`.
 - **Не делаем:** серверный режим Kimi (`kimi web`/`kimi acp`), глобальные хуки, показ остатка квоты подписки в дашборде.
 
+## Адаптер pi
+
+Pi — мультипровайдерный агент для воркеров и оркестраторов. Профиль по-прежнему хранит только `agent/model/effort`: точный `provider/model` выбирается моделью профиля, отдельной provider-схемы нет.
+
+- **Доступность и запуск.** Требуется `pi` версии 1.0.0+. Команда:
+  ```
+  pi --tui-mode regular --approve --session-id <rocket-session-id> \
+     [--model <provider/model>] [--thinking <effort>] [-- <first message>]
+  ```
+  `regular` оставляет scrollback в tmux и браузере, `--approve` снимает остановку на доверии к worktree, первый бриф идёт позиционным аргументом. Пустые model/effort не передаются.
+- **Env и секреты.** Всегда выставляются `PI_TELEMETRY=0` и стандартные `ROCKET_*`. Из окружения демона в процесс явно передаётся только API key провайдера из `provider/model` (для DeepSeek — `DEEPSEEK_API_KEY`); пустые значения и ключи других провайдеров не передаются. Наследуемые ключи других провайдеров вычищаются. Ключи не попадают в профиль, SQLite, worktree, git или журналы rocket.
+- **System prompt и skills.** `SetupWorkspace` идемпотентно обновляет блок rocket в `AGENTS.md`, не вырезая секции skills. Оркестратору с custom skill записывается `.pi/skills/orchestrator-brainstorming/` и путь добавляется в `.git/info/exclude`; в остальных сессиях только эта rocket-копия удаляется. Superpowers ставит человек глобально: `pi install git:github.com/obra/superpowers`. Rocket не меняет глобальные Pi settings, auth или packages.
+- **Сессия и restore.** Журнал — `~/.pi/agent/sessions/--<path>--/*_<session-id>.jsonl` (с учётом `PI_CODING_AGENT_DIR`), поэтому restore передаёт тот же `--session-id` и снимок профиля, продолжает прежний JSONL и добавляет restore-бриф новым сообщением. `ActivityRef.Since` отсекает ход прежнего запуска; серверный кэш после паузы может уже истечь, и это не failed restore.
+- **Activity, chat, ошибки.** По активной ветке JSONL: незавершённый user/assistant/tool ход → `active` независимо от mtime, закрытый ответ → `ready`, provider/model error → `blocked`; отсутствие журнала → `ErrNoSignal`. Чат идёт по активной ветке с курсором; user/assistant — сообщения, tool records — короткие digest, битая строка не ломает остальной журнал. `TurnFailureReporter` отдаёт стабильный id и текст последней ошибки без повторов.
+- **Доставка и pane.** `AcceptsInputWhileBusy() = true`: Enter во время хода ставит steering в собственную очередь Pi. Статус `accepted` сохраняется, пока `DeliveryConfirmer` не найдёт соответствующий user record после `since` именно в этой сессии. Отдельный pane parser различает empty/draft/busy composer и steering-очередь; на неизвестный экран ввод вслепую не идёт, чужой draft не стирается. Режим вставки определяется живой разведкой и покрыт тестами.
+- **Каталог.** `pi --list-models` с таймаутом 10 с отдаёт точные `provider/model` и уровни `off,minimal,low,medium,high,xhigh,max`; при ошибке — встроенные `deepseek/deepseek-flash` и `deepseek/deepseek-v4-pro` с `warning`. Ручной ввод любого другого `provider/model` остаётся доступен. Пустой реестр автоматически не сидируется.
+- **`rocket doctor`.** После успешной общей `agent:pi` дополнительная `pi:superpowers` с таймаутом читает `pi list` и ищет `git:github.com/obra/superpowers`. Отсутствие пакета, ошибка или таймаут — ⚠️ с подсказкой `pi install git:github.com/obra/superpowers`; credentials и raw output не печатаются.
+- **Кэш и non-goals.** Используются нативные cache warming/compaction и фактические usage. Rocket не задаёт `PI_CACHE_RETENTION`, не обещает TTL/hit-rate и не повторяет запрос из-за обычного cache miss. DSH, прокси, provider-поля в профиле, автоматический fallback и отдельный mobile UI не добавляются.
+
+## Адаптер deepseek
+
+DeepSeek — отдельный адаптер поверх полной реализации Claude Code, использующий официальную Anthropic-совместимую интеграцию. Launch, system prompt, Superpowers/orchestrator skill, activity, chat, delivery, restore и startup behavior наследуются; обычный `claude-code` остаётся на Anthropic и не получает DeepSeek-настройки.
+
+- **Доступность.** Требуются бинарь `claude` и непустой `DEEPSEEK_API_KEY` в окружении демона. Общая проверка `agent:deepseek` сообщает об отсутствии любого из них; ключ не хранится в профиле/SQLite/git/task docs/log.
+- **Env.** К базовому Claude Code env адаптер добавляет только свои значения, которые выигрывают у repo-level env:
+  ```
+  ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
+  ANTHROPIC_AUTH_TOKEN=<значение DEEPSEEK_API_KEY>
+  ANTHROPIC_MODEL=<model профиля, иначе deepseek-flash[1m]>
+  ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-flash[1m]
+  ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-flash[1m]
+  ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-flash
+  CLAUDE_CODE_SUBAGENT_MODEL=deepseek-flash
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW=786432
+  CLAUDE_CODE_EFFORT_LEVEL=<effort профиля, иначе max>
+  ```
+  Явные `--model` и `--effort` базового запуска сохраняются. Обычный `claude-code` не наследует endpoint/token DeepSeek.
+- **Сессия и каталог.** Restore использует нативный Claude Code журнал и снимок профиля. Встроенный каталог содержит `deepseek-flash[1m]` и `deepseek-v4-pro`, рекомендуемое усилие — `max`; сетевого каталога и автосидинга нет.
+- **Кэш и usage.** Disk cache DeepSeek включён самим provider и работает best effort: совпадающий префикс может дать hit без специального параметра. В usage фактический hit → `CacheRead`, miss → `Input`, output → `Output`; `CacheWrite` заполняется только при реальном значении из журнала, не по предположению о записи. Anthropic `cache_control` и TTL не управляют этим кэшем, 100% hit не гарантируется, обычный miss не является ошибкой и не вызывает повторный запрос.
+- **Non-goals.** DeepSeek Harness (`dsh`), прокси, сторонние cache-расширения, собственная compaction, принудительный TTL, хранение API key и автоматический переход на другой профиль не используются.
+
 ## Расход токенов (UsageReader)
 
 Все адаптеры дополнительно реализуют необязательный интерфейс `agent.UsageReader`; основной `agent.Agent` от него не зависит:
@@ -99,6 +140,8 @@ type UsageReader interface {
 - **Claude Code:** все `*.jsonl` в `~/.claude/projects/<slug-worktree>/` и `*/subagents/*.jsonl` при наличии подходящего родительского файла. У родителя сверяется `cwd` с worktree; сабагент привязывается через родителя. Из строк `type=assistant` учитываются `message.model` и `message.usage`, кроме модели `<synthetic>`. Повторы `message.id` дают один ответ: `Messages` — число уникальных ответов. `input_tokens` → `Input`, `cache_creation_input_tokens` → `CacheWrite`, `cache_read_input_tokens` → `CacheRead`, `output_tokens` → `Output`.
 - **Codex:** все `rollout-*.jsonl` в каталогах `$CODEX_HOME/sessions/YYYY/MM/DD` от даты `since` до сегодня, если `session_meta.payload.cwd` совпадает с worktree. `event_msg` с `payload.type=token_count` содержит накопительный `info.total_token_usage`; разница между соседними событиями относится к последнему `turn_context.model`. `Input = input_tokens − cached_input_tokens`, `CacheRead = cached_input_tokens`, `CacheWrite = cache_write_input_tokens`, `Output = output_tokens`; `Reasoning = reasoning_output_tokens` уже входит в `Output`. `Messages` — число событий `token_count`, у которых накопительный `total_tokens` вырос относительно предыдущего события; повтор без прироста не считается.
 - **Kimi Code:** записи `usage.record` из `agents/*/wire.jsonl` всех сессий ворктри (папки сессий, найденные тем же локатором, что и Activity), по фактической `model`: `usage.inputOther` → `Input`, `inputCacheRead` → `CacheRead`, `inputCacheCreation` → `CacheWrite`, `output` → `Output`; `Messages` — число записей. Журналы помощников (`agents/agent-N/wire.jsonl`) включаются, а `subagent.completed.usage` в журнале основного агента **не** прибавляется — он повторяет итог журнала помощника (иначе двойной счёт). Записи до `since` не считаются; несколько сессий в одном ворктри суммируются; нет журнала — `Found=false`.
+- **Pi:** по журналу сессии суммируются фактические `usage.input/cacheRead/cacheWrite/output` assistant records, а также отдельные usage cache warming, compaction и branch summary по их фактической модели. Все выполненные ветки включаются, даже заброшенные, но один record учитывается один раз; `since` исключает прежнее использование worktree, повторный поллинг не удваивает сумму. Ошибка чтения не превращается в нулевой расход.
+- **DeepSeek:** используется Claude Code UsageReader по фактической модели: DeepSeek cache hit → `CacheRead`, miss → `Input`, output → `Output`; `CacheWrite` берётся только из реального поля журнала. Стоимость по тарифам настраивается человеком через `rocket stats prices`.
 
 ## Профили моделей
 
@@ -136,18 +179,21 @@ rocket task models <id> [--allow p1,p2 | --clear]   # посмотреть/су�
 - **codex:** `codex debug models` (таймаут 10 с) → `$CODEX_HOME/models_cache.json` (по умолчанию `~/.codex`) → встроенный список. Модели с `visibility=hide` не показываются; все показанные — основные (`main`).
 - **kimi-code:** таблицы `[models."kimi-code/*"]` из `$KIMI_CODE_HOME/config.toml` (по умолчанию `~/.kimi-code`): id = алиас (`kimi-code/k3.1-pro`), имя = `display_name`, усилия = `support_efforts`, по умолчанию = `default_effort`; все модели основные (`main`). Нет файла или TOML битый → встроенный снимок 6 моделей на 2026-10-28 + предупреждение. Источник — `cache`; CLI и дашборд подписывают его «из конфига Kimi Code» (`from Kimi Code config`).
 - **claude-code:** самый свежий по mtime `~/.claude/cache/model-catalog/*-cc.json` (формат `version: 2`, модели в `catalog.config.models`) → встроенный список. `section=main` — основные, `overflow` — предыдущие. Усилие по умолчанию — вариант с бейджем `Default`, иначе `Recommended`.
+- **pi:** `pi --list-models` с таймаутом 10 с → встроенные `deepseek/deepseek-flash` и `deepseek/deepseek-v4-pro` с `warning`. Источник CLI подписывается «из Pi CLI» (`from Pi CLI`). Модели получают полный набор `off,minimal,low,medium,high,xhigh,max`: Pi сам ограничивает его возможностями конкретной модели.
+- **deepseek:** встроенные `deepseek-flash[1m]` и `deepseek-v4-pro` с уровнями Claude Code и рекомендуемым `max`. Источник подписывается `built-in` / `встроенный список`.
 
-Битый или отсутствующий источник — не ошибка: адаптер откатывается дальше, пишет предупреждение в лог демона и возвращает его в `warning`. Встроенные списки — снимок на 2026-10-02 (kimi-code — на 2026-10-28). Стартовые профили пустого реестра Kimi не добавляют: профили Kimi заводит человек (`rocket models import --agent kimi-code` или Настройки → «Модели»). Демон держит каталог в памяти 10 минут (`refresh=1` сбрасывает).
+Битый или отсутствующий источник — не ошибка: адаптер откатывается дальше, пишет предупреждение в лог демона и возвращает его в `warning`. Пустой реестр новых агентов автоматически не сидируется: профили заводит человек (`rocket models import` или Настройки → «Модели»). Демон держит каталог в памяти 10 минут (`refresh=1` сбрасывает).
 
 ```
 rocket models catalog [--agent A] [--all] [--refresh]   # агент, id, имя, усилия (* — по умолчанию), описание;
                                                         # --all — с предыдущими; внизу источник и предупреждение
-rocket models import [--agent A] [--legacy]             # выключенные профили для моделей без профиля (только человек); A: claude-code | codex | kimi-code
+rocket models import [--agent A] [--legacy]             # выключенные профили для моделей без профиля (только человек);
+                                                        # A: claude-code | codex | kimi-code | pi | deepseek
 ```
 
-**Проверка усилия профиля.** Если модель профиля есть в каталоге его агента (точное совпадение id), усилие должно входить в уровни этой модели; у модели без настройки усилия (Haiku) оно должно быть пустым. Иначе (алиас вроде `opus`, своя модель, модель не задана) — проверка по `Efforts()` агента: claude-code `low, medium, high, xhigh, max`, codex `minimal, low, medium, high, xhigh, max, ultra`, kimi-code `low, high, max`. Ошибка — 400 `bad_effort` со списком допустимых уровней.
+**Проверка усилия профиля.** Если модель профиля есть в каталоге его агента (точное совпадение id), усилие должно входить в уровни этой модели; у модели без настройки усилия (Haiku) оно должно быть пустым. Иначе (алиас вроде `opus`, своя модель, модель не задана) — проверка по `Efforts()` агента: claude-code `low, medium, high, xhigh, max`, codex `minimal, low, medium, high, xhigh, max, ultra`, kimi-code `low, high, max`, pi `off, minimal, low, medium, high, xhigh, max`, deepseek `low, medium, high, xhigh, max`. Ошибка — 400 `bad_effort` со списком допустимых уровней.
 
-**Импорт.** `import` создаёт профиль для каждой модели каталога (по умолчанию только основные), у которой ещё нет профиля с тем же агентом и моделью (усилие не важно). Профиль выключен, усилие пустое, описание из каталога (или имя модели), позиция — после существующих. Имя: claude-code — id модели; codex — `codex-` + slug с `.`/`_` → `-` (`codex-gpt-5-6-sol`); kimi-code — `kimi-` + slug id без префикса `kimi-code/`, без двойного `kimi-` (`kimi-code/k3.1-pro` → `kimi-k3-1-pro`, `kimi-code/kimi-for-coding` → `kimi-for-coding`); занятое имя получает `-2`, `-3`…
+**Импорт.** `import` создаёт профиль для каждой модели каталога (по умолчанию только основные), у которой ещё нет профиля с тем же агентом и моделью (усилие не важно). Профиль выключен, усилие пустое, описание из каталога (или имя модели), позиция — после существующих. Имя: claude-code и deepseek — slug id модели (`deepseek-flash[1m]` → `deepseek-flash-1m`); codex — `codex-` + slug с `.`/`_` → `-` (`codex-gpt-5-6-sol`); kimi-code — `kimi-` + slug id без префикса `kimi-code/`, без двойного `kimi-` (`kimi-code/k3.1-pro` → `kimi-k3-1-pro`, `kimi-code/kimi-for-coding` → `kimi-for-coding`); pi — `pi-` + slug полного `provider/model`, при этом повторный префикс провайдера убирается (`deepseek/deepseek-flash` → `pi-deepseek-flash`, `openai/gpt-6-sol` → `pi-openai-gpt-6-sol`). Занятое имя получает `-2`, `-3`…
 
 ## Добавление нового агента
 
@@ -236,9 +282,12 @@ tmux-сессиями:
 - **Без сохранённого профиля работает legacy launcher.** Запускается `command`;
   нет `command` — интерактивный shell; нет `dir` — ошибка `agent_no_dir` с
   подсказкой создать сессию вручную (`tmux new -s <id>`). Для таких и поднятых
-  вручную сессий адаптер определяется из ведущего бинарника `command` (`kimi` →
-  `kimi-code`, `claude`/`claude-code` → `claude-code`, `codex` → `codex`;
-  понимаются `env`, присваивания, пути и кавычки, но не обёртки `bash -c`),
+  вручную сессий адаптер определяется из ведущего бинарника `command`: `kimi` →
+  `kimi-code`, `claude`/`claude-code` → `claude-code`, `codex` → `codex`, `pi` →
+  `pi`; явный `ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic` перед
+  `claude` → `deepseek`, а bare `claude` остаётся `claude-code`. Понимаются
+  `env`, присваивания, пути и кавычки, но не обёртки `bash -c` — неизвестная
+  обёртка возвращает пустое определение,
   с fallback на `defaults.agent`. Доставка, монитор и дашборд ключуются по
   `sessions.agent`: неверный адаптер ломает диалект вставки и подтверждение
   доставки. Adoption живой legacy-сессии пересверяет адаптер с `command`;

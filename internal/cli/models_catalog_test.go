@@ -119,3 +119,12 @@ func TestCatalogSourceLabel_KimiCode(t *testing.T) {
 		t.Errorf("kimi-code builtin label = %q", got)
 	}
 }
+
+func TestCatalogSourceLabel_PiAndDeepSeek(t *testing.T) {
+	if got := catalogSourceLabel("pi", "cli"); got != "из Pi CLI" {
+		t.Errorf("pi cli label = %q", got)
+	}
+	if got := catalogSourceLabel("deepseek", "builtin"); got != "встроенный список" {
+		t.Errorf("deepseek builtin label = %q", got)
+	}
+}

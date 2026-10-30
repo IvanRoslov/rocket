@@ -8,6 +8,8 @@ import (
 
 	_ "github.com/IvanRoslov/rocket/internal/agent/claudecode" // registers "claude-code"
 	_ "github.com/IvanRoslov/rocket/internal/agent/codex"      // registers "codex"
+	_ "github.com/IvanRoslov/rocket/internal/agent/deepseek"   // registers "deepseek"
+	_ "github.com/IvanRoslov/rocket/internal/agent/pi"         // registers "pi"
 )
 
 // The agent-kinds endpoint feeds the "which agent runs this orchestrator"
@@ -40,7 +42,7 @@ func TestGetAgentKinds(t *testing.T) {
 	for _, k := range body.Kinds {
 		byName[k.Name] = k
 	}
-	for _, want := range []string{"claude-code", "codex"} {
+	for _, want := range []string{"claude-code", "codex", "deepseek", "pi"} {
 		k, ok := byName[want]
 		if !ok {
 			t.Fatalf("kinds missing %q, got %+v", want, body.Kinds)
@@ -71,6 +73,12 @@ func TestGetAgentKindsEfforts(t *testing.T) {
 	}
 	if got, want := efforts["codex"], []any{"minimal", "low", "medium", "high", "xhigh", "max", "ultra"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("codex efforts = %v, want %v", got, want)
+	}
+	if got, want := efforts["deepseek"], []any{"low", "medium", "high", "xhigh", "max"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("deepseek efforts = %v, want %v", got, want)
+	}
+	if got, want := efforts["pi"], []any{"off", "minimal", "low", "medium", "high", "xhigh", "max"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("pi efforts = %v, want %v", got, want)
 	}
 	for name, e := range efforts {
 		if e == nil {

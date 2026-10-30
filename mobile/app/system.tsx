@@ -41,7 +41,7 @@ export default function SystemScreen() {
 
   const stats = [
     { label: 'Live sessions', value: String(live.length), unit: 'tmux', fg: colors.greenFg },
-    { label: 'Agents running', value: String(live.length), unit: 'claude/codex', fg: colors.text },
+    { label: 'Agents running', value: String(live.length), unit: 'claude/codex/kimi/pi/deepseek', fg: colors.text },
     { label: 'Orphans', value: String(orphans), unit: 'reconcile', fg: orphans > 0 ? colors.amberFg : colors.text },
     {
       label: 'Queue depth',
