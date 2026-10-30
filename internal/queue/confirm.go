@@ -179,7 +179,8 @@ func (q *Queue) confirmRecipient(ctx context.Context, st *confirmState, to strin
 			if confirmer != nil {
 				pane, capErr := q.rt.Capture(ctx, runtime.Handle{Name: sess.TmuxName}, acceptedPaneLines)
 				if capErr == nil && (runtime.LooksLikeAgentQueued(pane, text) ||
-					q.injectOpts(sess).Dialect == runtime.PaneDialectKimi && (runtime.LooksLikeKimiQueued(pane, text) || runtime.KimiCacheHintDialog(pane))) {
+					q.injectOpts(sess).Dialect == runtime.PaneDialectKimi && (runtime.LooksLikeKimiQueued(pane, text) || runtime.KimiCacheHintDialog(pane)) ||
+					q.injectOpts(sess).Dialect == runtime.PaneDialectPi && runtime.LooksLikePiQueued(pane, text)) {
 					// The text is visibly parked in the agent's own queue or
 					// stashed behind its cache dialog: pasting again would duplicate.
 					pending++

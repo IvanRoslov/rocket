@@ -42,6 +42,8 @@ const composerWindow = 10
 // bar, and runtime.ParseKimiComposer needs the whole box.
 const kimiComposerWindow = 20
 
+const piComposerWindow = 20
+
 // defaultBackoff returns the real backoff schedule: 1s, 2s, 4s, 8s, 16s for
 // attempt 1..5 (attempt is 1-based, the number of the attempt that just
 // failed).
@@ -555,6 +557,8 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 			window := composerWindow
 			if dialect == runtime.PaneDialectKimi {
 				window = kimiComposerWindow
+			} else if dialect == runtime.PaneDialectPi {
+				window = piComposerWindow
 			}
 			out, capErr := q.rt.CaptureEscaped(ctx, runtime.Handle{Name: sess.TmuxName}, window)
 			draft, composerUp := false, true
@@ -563,6 +567,10 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 					var c runtime.KimiComposer
 					c, composerUp = runtime.ParseKimiComposer(out)
 					draft = composerUp && c == runtime.KimiDraft
+				} else if dialect == runtime.PaneDialectPi {
+					var c runtime.PiComposer
+					c, composerUp = runtime.ParsePiComposer(out)
+					draft = composerUp && c == runtime.PiDraft
 				} else {
 					draft = runtime.LooksLikeUserDraft(out)
 				}
@@ -614,7 +622,7 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 				if busySince.IsZero() {
 					busySince = time.Now()
 				}
-				if time.Since(busySince) < q.composerBusyDeadline() {
+				if dialect == runtime.PaneDialectPi || time.Since(busySince) < q.composerBusyDeadline() {
 					slog.Info("queue: recipient composer holds a user draft, deferring delivery",
 						"id", msg.ID, "to", msg.ToSession, "busy_for", time.Since(busySince).Round(time.Second))
 					if !q.waitForReady(ctx, msg.ToSession) {

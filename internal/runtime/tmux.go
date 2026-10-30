@@ -279,8 +279,8 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 	// autosuggestion, which renders identically without it.
 	clearKeys := []string{"C-u"}
 	out, _, capErr := t.run(ctx, "capture-pane", "-p", "-e", "-t", paneTarget(h.Name))
-	if capErr != nil && opts.Dialect == PaneDialectKimi {
-		// Kimi: no blind typing into a pane we could not read.
+	if capErr != nil && (opts.Dialect == PaneDialectKimi || opts.Dialect == PaneDialectPi) {
+		// Kimi and Pi: no blind typing into a pane we could not read.
 		return fmt.Errorf("%w: session %q: capture: %v", ErrComposerBusy, h.Name, capErr)
 	}
 	if capErr == nil {
@@ -309,6 +309,12 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 				return fmt.Errorf("%w: session %q", ErrComposerBusy, h.Name)
 			}
 			clearKeys = kimiClearKeys(k.rows)
+		} else if opts.Dialect == PaneDialectPi {
+			k, ok := parsePiComposer(out)
+			if !ok || k.state == PiDraft {
+				return fmt.Errorf("%w: session %q", ErrComposerBusy, h.Name)
+			}
+			clearKeys = nil
 		} else if !opts.Force && LooksLikeUserDraft(out) {
 			return fmt.Errorf("%w: session %q", ErrComposerBusy, h.Name)
 		}
@@ -318,8 +324,10 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 	// paste-buffer address a pane, not a session, so they need the
 	// colon-suffixed pane target even though has-session/kill-session
 	// accept the bare session target.
-	if _, _, err := t.run(ctx, append([]string{"send-keys", "-t", paneTarget(h.Name)}, clearKeys...)...); err != nil {
-		return fmt.Errorf("clear draft: %w", err)
+	if len(clearKeys) > 0 {
+		if _, _, err := t.run(ctx, append([]string{"send-keys", "-t", paneTarget(h.Name)}, clearKeys...)...); err != nil {
+			return fmt.Errorf("clear draft: %w", err)
+		}
 	}
 
 	// 2. Load the text into a tmux buffer via a temp file, then paste it.
@@ -463,6 +471,12 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 					}
 					return nil
 				}
+				if LooksLikePiQueued(out, text) {
+					return fmt.Errorf("%w: session %q", ErrQueuedByAgent, h.Name)
+				}
+				if piSubmitted(out, opts.Dialect) {
+					return nil
+				}
 				// Kimi: the composer no longer holds the text — the previous
 				// Enter submitted it (or queued it); another would be stray.
 				if kimiSubmitted(out, opts.Dialect) {
@@ -492,8 +506,11 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 			// confirmWindow, hence the whole visible screen. Matching the
 			// whole text, not marker: Codex cuts a long item short with
 			// «…», often before its last line.
-			if LooksLikeAgentQueued(full, text) {
+			if LooksLikeAgentQueued(full, text) || LooksLikePiQueued(full, text) {
 				return fmt.Errorf("%w: session %q", ErrQueuedByAgent, h.Name)
+			}
+			if piSubmitted(full, opts.Dialect) {
+				return nil
 			}
 			if handled, err := t.acceptKimiCacheHint(ctx, h, full); handled {
 				if err != nil {
@@ -575,7 +592,7 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 			// in the agent's own queue. Neither delivered nor stuck —
 			// clearing would wipe nothing useful, and a retry would
 			// queue a duplicate.
-			if LooksLikeAgentQueued(full, text) {
+			if LooksLikeAgentQueued(full, text) || LooksLikePiQueued(full, text) {
 				return fmt.Errorf("%w: session %q", ErrQueuedByAgent, h.Name)
 			}
 			// StripHeldPeerBanner first: a session that ever held one of our
@@ -598,8 +615,15 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 				if k, ok := parseKimiComposer(full); ok {
 					cleanup = kimiClearKeys(k.rows)
 				}
+			} else if opts.Dialect == PaneDialectPi {
+				cleanup = nil
+				if k, ok := parsePiComposer(full); ok && k.state == PiDraft {
+					cleanup = []string{"C-c"}
+				}
 			}
-			_, _, _ = t.run(ctx, append([]string{"send-keys", "-t", paneTarget(h.Name)}, cleanup...)...)
+			if len(cleanup) > 0 {
+				_, _, _ = t.run(ctx, append([]string{"send-keys", "-t", paneTarget(h.Name)}, cleanup...)...)
+			}
 			_, _, _ = t.run(ctx, "kill-buffer", "-b", bufName)
 			return fmt.Errorf("%w: after %d attempts", ErrNotDelivered, maxAttempts)
 		}
@@ -996,6 +1020,14 @@ func LooksLikeQuizWidget(tail string) bool {
 	return strings.Contains(tail, "Enter to select · ") ||
 		strings.Contains(tail, "✔ Submit") ||
 		strings.Contains(tail, "Ready to submit your answers?")
+}
+
+func piSubmitted(pane, dialect string) bool {
+	if dialect != PaneDialectPi {
+		return false
+	}
+	c, ok := ParsePiComposer(pane)
+	return !ok || c != PiDraft
 }
 
 // kimiSubmitted reports, for the Kimi dialect only, that the text left
