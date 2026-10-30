@@ -45,6 +45,8 @@ describe('catalogSourceText', () => {
     expect(catalogSourceText({ ...claude, agent: 'codex', source: 'cli' })).toBe('from Codex CLI')
     expect(catalogSourceText({ ...claude, agent: 'codex', source: 'cache' })).toBe('from Codex cache')
     expect(catalogSourceText({ ...claude, agent: 'kimi-code', source: 'cache' })).toBe('from Kimi Code config')
+    expect(catalogSourceText({ ...claude, agent: 'pi', source: 'cli' })).toBe('from Pi CLI')
+    expect(catalogSourceText({ ...claude, agent: 'deepseek', source: 'builtin' })).toBe('built-in')
     expect(catalogSourceText({ ...claude, source: 'builtin' })).toBe('built-in')
   })
 })

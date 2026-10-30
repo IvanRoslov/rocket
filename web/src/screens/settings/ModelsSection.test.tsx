@@ -408,6 +408,8 @@ describe('ModelsSection', () => {
     renderSection()
     expect(await screen.findByText('Model list for claude-code: from Claude Code cache')).toBeInTheDocument()
     expect(screen.getByText('Model list for codex: built-in')).toBeInTheDocument()
+    expect(screen.getByText('Model list for pi: from Pi CLI')).toBeInTheDocument()
+    expect(screen.getByText('Model list for deepseek: built-in')).toBeInTheDocument()
     expect(screen.getByText(/executable file not found/)).toBeInTheDocument()
   })
 
@@ -479,10 +481,14 @@ describe('ModelsSection', () => {
 
     await waitFor(() => expect(bodies).toEqual([{ include_legacy: false }]))
     expect(await screen.findByRole('status')).toHaveTextContent(
-      'Created: 5 (claude-opus-5-5, claude-sonnet-5-5, claude-haiku-4-5-20251001, codex-gpt-6-sol, codex-gpt-5-6-luna)',
+      'Created: 9 (claude-opus-5-5, claude-sonnet-5-5, claude-haiku-4-5-20251001, codex-gpt-6-sol, codex-gpt-5-6-luna, deepseek-flash-1m, deepseek-v4-pro, pi-deepseek-flash, pi-deepseek-v4-pro)',
     )
     const added = await screen.findByRole('row', { name: /^claude-opus-5-5\b/ })
     expect(within(added).getByRole('checkbox', { name: 'Enabled' })).not.toBeChecked()
+    for (const name of ['pi-deepseek-flash', 'deepseek-flash-1m']) {
+      const newRow = await screen.findByRole('row', { name: new RegExp(`^${name}\\b`) })
+      expect(within(newRow).getByRole('checkbox', { name: 'Enabled' })).not.toBeChecked()
+    }
     expect(screen.queryByRole('row', { name: /^claude-opus-4-6\b/ })).not.toBeInTheDocument()
   })
 

@@ -1259,6 +1259,7 @@ export const modelProfiles: ModelProfile[] = [
 // Code's comes from its cache file; codex has no binary on the fixture
 // machine, so it fell back to the builtin list with a warning.
 const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+const PI_EFFORTS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 export const modelCatalog: AgentCatalog[] = [
   {
     agent: 'claude-code',
@@ -1280,6 +1281,26 @@ export const modelCatalog: AgentCatalog[] = [
     models: [
       { id: 'gpt-6-sol', name: 'GPT-6 Sol', description: 'Frontier agentic coding', main: true, efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], default_effort: 'medium' },
       { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', description: 'Fast and cheap', main: true, efforts: ['low', 'medium', 'high'], default_effort: 'low' },
+    ],
+  },
+  {
+    agent: 'deepseek',
+    source: 'builtin',
+    fetched_at: null,
+    warning: '',
+    models: [
+      { id: 'deepseek-flash[1m]', name: 'DeepSeek Flash 1M', description: '', main: true, efforts: CLAUDE_EFFORTS, default_effort: 'max' },
+      { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', description: '', main: true, efforts: CLAUDE_EFFORTS, default_effort: 'max' },
+    ],
+  },
+  {
+    agent: 'pi',
+    source: 'cli',
+    fetched_at: '2026-10-30T08:00:00Z',
+    warning: '',
+    models: [
+      { id: 'deepseek/deepseek-flash', name: 'DeepSeek Flash', description: '', main: true, efforts: PI_EFFORTS, default_effort: '' },
+      { id: 'deepseek/deepseek-v4-pro', name: 'DeepSeek V4 Pro', description: '', main: true, efforts: PI_EFFORTS, default_effort: '' },
     ],
   },
 ]

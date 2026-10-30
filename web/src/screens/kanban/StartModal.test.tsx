@@ -158,6 +158,8 @@ test('an empty registry falls back to picking the agent', async () => {
   await waitFor(() => expect(within(select).getByRole('option', { name: 'claude-code' })).toBeInTheDocument())
   expect(within(select).getByRole('option', { name: 'Default (claude-code)' })).toBeInTheDocument()
   expect(within(select).getByRole('option', { name: 'codex — unavailable' })).toBeDisabled()
+  expect(within(select).getByRole('option', { name: 'pi' })).toBeInTheDocument()
+  expect(within(select).getByRole('option', { name: 'deepseek — unavailable' })).toBeDisabled()
   expect(screen.queryByLabelText('Profile')).not.toBeInTheDocument()
   expect(screen.queryByRole('group', { name: 'Models allowed for workers' })).not.toBeInTheDocument()
 

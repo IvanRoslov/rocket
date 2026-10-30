@@ -88,11 +88,13 @@ export function resetModelProfiles(): void {
   profilesState = modelProfiles.map((p) => ({ ...p }))
 }
 
-// Mirrors Agent.Efforts() (internal/agent/claudecode, internal/agent/codex, internal/agent/kimicode).
+// Mirrors Agent.Efforts() across the registered adapters.
 const AGENT_EFFORTS: Record<string, string[]> = {
   'claude-code': ['low', 'medium', 'high', 'xhigh', 'max'],
   codex: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
   'kimi-code': ['low', 'high', 'max'],
+  pi: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+  deepseek: ['low', 'medium', 'high', 'xhigh', 'max'],
 }
 
 function profileError(status: number, code: string, message: string) {
@@ -1620,14 +1622,16 @@ export const handlers = [
     }),
   ),
 
-  // Agent kinds — the orchestrator picker in StartModal. codex is registered
-  // but has no binary on the fixture machine, so it shows up disabled.
+  // Agent kinds — the orchestrator picker in StartModal. Unavailable agents
+  // stay visible but disabled, with the adapter's actual availability error.
   http.get('/v1/agent-kinds', () =>
     HttpResponse.json({
       default: 'claude-code',
       kinds: [
         { name: 'claude-code', available: true, efforts: AGENT_EFFORTS['claude-code'] },
         { name: 'codex', available: false, error: 'codex not found in PATH', efforts: AGENT_EFFORTS.codex },
+        { name: 'deepseek', available: false, error: 'DEEPSEEK_API_KEY is required', efforts: AGENT_EFFORTS.deepseek },
+        { name: 'pi', available: true, efforts: AGENT_EFFORTS.pi },
       ],
     }),
   ),
@@ -1691,13 +1695,19 @@ export const handlers = [
         }
         // Mirrors importProfileName (internal/api/model_catalog.go).
         const kimiBase = m.id.replace(/^kimi-code\//, '')
+        const [provider, ...modelParts] = m.id.split('/')
+        const providerModel = modelParts.join('/')
+        const deduplicatedModel = providerModel.startsWith(`${provider}-`) ? providerModel.slice(provider.length + 1) : providerModel
+        const piBase = providerModel ? `pi-${provider}/${deduplicatedModel}` : `pi-${m.id}`
         const named =
           cat.agent === 'codex'
             ? `codex-${m.id}`
             : cat.agent === 'kimi-code'
               ? kimiBase.startsWith('kimi-') ? kimiBase : `kimi-${kimiBase}`
-              : m.id
-        const base = named.replace(/[^a-z0-9-]/g, '-')
+              : cat.agent === 'pi'
+                ? piBase
+                : m.id
+        const base = named.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '')
         let name = base
         for (let i = 2; profilesState.some((p) => p.name === name); i++) name = `${base}-${i}`
         profilesState = [
