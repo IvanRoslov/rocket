@@ -16,7 +16,9 @@ import (
 	"github.com/IvanRoslov/rocket/internal/agent"
 	_ "github.com/IvanRoslov/rocket/internal/agent/claudecode" // register the claude-code agent
 	_ "github.com/IvanRoslov/rocket/internal/agent/codex"      // register the codex agent
+	_ "github.com/IvanRoslov/rocket/internal/agent/deepseek"   // register the deepseek agent
 	_ "github.com/IvanRoslov/rocket/internal/agent/kimicode"   // register the kimi-code agent
+	_ "github.com/IvanRoslov/rocket/internal/agent/pi"         // register the pi agent
 	"github.com/IvanRoslov/rocket/internal/agentwatch"
 	"github.com/IvanRoslov/rocket/internal/api"
 	"github.com/IvanRoslov/rocket/internal/bus"

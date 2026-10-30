@@ -26,6 +26,18 @@ var fakeCatalogs = map[string]agent.Catalog{
 		{ID: "gpt-5.5", Name: "GPT-5.5", Description: "Legacy coding model.", Main: true,
 			Efforts: []string{"low", "medium", "high", "xhigh"}, DefaultEffort: "medium"},
 	}},
+	"deepseek": {Source: agent.CatalogSourceBuiltin, Models: []agent.CatalogModel{
+		{ID: "deepseek-flash[1m]", Name: "DeepSeek Flash 1M", Main: true,
+			Efforts: []string{"low", "medium", "high", "xhigh", "max"}, DefaultEffort: "max"},
+		{ID: "deepseek-v4-pro", Name: "DeepSeek V4 Pro", Main: true,
+			Efforts: []string{"low", "medium", "high", "xhigh", "max"}, DefaultEffort: "max"},
+	}},
+	"pi": {Source: agent.CatalogSourceBuiltin, Models: []agent.CatalogModel{
+		{ID: "deepseek/deepseek-flash", Name: "DeepSeek Flash", Main: true,
+			Efforts: []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}},
+		{ID: "deepseek/deepseek-v4-pro", Name: "DeepSeek V4 Pro", Main: true,
+			Efforts: []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}},
+	}},
 }
 
 func TestMain(m *testing.M) {
