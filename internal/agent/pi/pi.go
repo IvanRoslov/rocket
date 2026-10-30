@@ -64,6 +64,9 @@ func (p *Pi) Available() error {
 		if err != nil {
 			return fmt.Errorf("parse pi version %q: %w", version, err)
 		}
+		if numbers[i] < 0 {
+			return fmt.Errorf("parse pi version %q", version)
+		}
 	}
 	if numbers[0] < 1 {
 		return fmt.Errorf("pi 1.0.0 or newer is required (got %s)", version)

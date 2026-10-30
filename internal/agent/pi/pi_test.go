@@ -158,6 +158,8 @@ func TestAvailable(t *testing.T) {
 		{version: "not-a-version", wantErr: true},
 		{version: "0.9.9", wantErr: true},
 		{version: "0.74.0", wantErr: true},
+		{version: "1.-1.0", wantErr: true},
+		{version: "1.0.-1", wantErr: true},
 		{version: "1.0.0"},
 		{version: "1.4.0"},
 		{version: "v2.0.0"},
