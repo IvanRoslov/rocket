@@ -1,0 +1,4 @@
+provider  model            context  max-out  thinking  images
+deepseek  deepseek-flash   1M       128K     yes       no
+deepseek  deepseek-v4-pro  1M       128K     yes       no
+openai    gpt-6-sol        400K     128K     yes       no

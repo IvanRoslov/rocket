@@ -250,6 +250,21 @@ type Agent interface {
 	TranscriptStat(ctx context.Context, ref ActivityRef) (mtime int64, size int64, err error)
 }
 
+// LaunchEnvScrubber is an optional adapter capability for credentials that
+// must be absent from the actual launched process, including inherited ones.
+type LaunchEnvScrubber interface {
+	ScrubLaunchEnv(spec LaunchSpec) []string
+}
+
+// LaunchEnvUnsets returns the variable names a wants removed after env merging.
+func LaunchEnvUnsets(a Agent, spec LaunchSpec) []string {
+	s, ok := a.(LaunchEnvScrubber)
+	if !ok {
+		return nil
+	}
+	return s.ScrubLaunchEnv(spec)
+}
+
 // builders holds agent constructor functions, populated by agent implementations via Register.
 var builders = map[string]func() Agent{}
 

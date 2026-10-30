@@ -15,6 +15,9 @@ type CreateSpec struct {
 	Dir     string
 	Command string
 	Env     map[string]string
+	// UnsetEnv lists variable names to unset in the launch shell, including
+	// values inherited from the daemon or tmux global environment.
+	UnsetEnv []string
 }
 
 // InjectOpts tunes a single Inject call.
