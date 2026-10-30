@@ -501,7 +501,7 @@ func handleStartAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
-	sess, err := d.Manager.StartAgent(r.Context(), a)
+	sess, err := d.Manager.StartAgent(r.Context(), a, "")
 	if err != nil {
 		writeManagerErr(w, err)
 		return
