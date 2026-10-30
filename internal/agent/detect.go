@@ -36,7 +36,7 @@ func DetectFromCommand(command string) string {
 			return "" // env mid-line: not a launcher prefix we understand
 		case strings.Contains(t, "=") && !strings.HasPrefix(t, "/"):
 			if key, value, ok := strings.Cut(t, "="); ok && key == "ANTHROPIC_BASE_URL" {
-				deepseek = value == "https://api.deepseek.com/anthropic"
+				deepseek = strings.Trim(value, `"'`) == "https://api.deepseek.com/anthropic"
 			}
 			continue // KEY=VAL assignment (after env or standalone)
 		}

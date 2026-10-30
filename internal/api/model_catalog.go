@@ -321,7 +321,10 @@ func importProfileName(agentName, modelID string) string {
 			b.WriteRune('-')
 		}
 	}
-	return strings.Trim(b.String(), "-")
+	if agentName == "pi" || agentName == "deepseek" {
+		return strings.Trim(b.String(), "-")
+	}
+	return b.String()
 }
 
 // maxProfileNameLen matches profileNameRe.

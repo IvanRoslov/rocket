@@ -52,7 +52,12 @@ func TestCheckPiSuperpowersTimeout(t *testing.T) {
 	oldTimeout := piListTimeout
 	piListTimeout = time.Millisecond
 	t.Cleanup(func() { piListTimeout = oldTimeout })
-	stubPiList(t, "", context.DeadlineExceeded)
+	oldRun := runPiList
+	t.Cleanup(func() { runPiList = oldRun })
+	runPiList = func(ctx context.Context) ([]byte, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	r := checkPiSuperpowers()
 	if r.Status != statusWarn || !strings.Contains(r.Detail, "pi install git:github.com/obra/superpowers") {
 		t.Fatalf("timeout result = %+v", r)

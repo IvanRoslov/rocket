@@ -25,6 +25,8 @@ func TestDetectFromCommand(t *testing.T) {
 		{"pi env prefix", "env FOO=1 pi", "pi"},
 		{"deepseek shell assignment", "ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic claude", "deepseek"},
 		{"deepseek env prefix", "env ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic claude", "deepseek"},
+		{"deepseek quoted shell assignment", `ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" claude`, "deepseek"},
+		{"deepseek quoted env assignment", `env ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" claude`, "deepseek"},
 		{"claude with unrelated base URL", "ANTHROPIC_BASE_URL=https://example.com claude", "claude-code"},
 		{"unrelated binary", "zsh", ""},
 		{"shell wrapper hides the binary", "bash -c 'kimi --auto'", ""},
