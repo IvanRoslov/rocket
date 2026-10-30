@@ -124,6 +124,7 @@ func runDoctorChecks() []checkResult {
 
 	results = append(results, checkAgents()...)
 	results = append(results, checkKimiAgent()...)
+	results = append(results, checkPiAgent()...)
 	results = append(results, checkSuperpowers())
 
 	return results
