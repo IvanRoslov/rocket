@@ -28,6 +28,7 @@ import (
 	"github.com/IvanRoslov/rocket/internal/heartbeat"
 	"github.com/IvanRoslov/rocket/internal/mirror"
 	"github.com/IvanRoslov/rocket/internal/monitor"
+	"github.com/IvanRoslov/rocket/internal/nativeinput"
 	"github.com/IvanRoslov/rocket/internal/queue"
 	"github.com/IvanRoslov/rocket/internal/runtime"
 	"github.com/IvanRoslov/rocket/internal/session"
@@ -89,6 +90,7 @@ func Run(cfg *config.Config) error {
 
 	mon := monitor.New(st, b, rt, cfg, agent.Get)
 	q := queue.New(st, b, rt, cfg, mon.Activity)
+	q.SetNativeSender(nativeinput.SenderFunc(nativeinput.Send))
 	mgr.SetWake(q.Wake)
 	// The monitor alerts a parent orchestrator when a session is stuck on
 	// an agent start screen; wake its delivery worker right away.

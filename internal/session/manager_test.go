@@ -39,6 +39,7 @@ type fakeRuntime struct {
 	listNames []string
 	sentKeys  []sentKey
 	sendErr   error
+	onCreate  func()
 
 	// captureOut, when set, is what Capture returns (default "fake
 	// output"); captureErr fails it; captureLines records each requested
@@ -54,6 +55,9 @@ type fakeRuntime struct {
 func (f *fakeRuntime) Create(ctx context.Context, spec runtime.CreateSpec) (runtime.Handle, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.onCreate != nil {
+		f.onCreate()
+	}
 	f.created = append(f.created, spec)
 	if f.aliveMap == nil {
 		f.aliveMap = map[string]bool{}
@@ -210,6 +214,10 @@ type fakeAgent struct {
 	setupErr     error
 	setupCalls   []agent.LaunchSpec
 	launchCalls  []agent.LaunchSpec
+	envCalls     []agent.LaunchSpec
+	nativeLaunch agent.NativeLaunch
+	nativeErr    error
+	nativeCalls  int
 	envOverrides map[string]string // optional env overrides to merge with defaults
 	shipsSkill   bool              // reports ShipsBrainstormSkill, like claude-code
 	firstByInput bool
@@ -226,6 +234,11 @@ func (a *fakeAgent) Efforts() []string { return nil }
 
 func (a *fakeAgent) Available() error { return a.availableErr }
 
+func (a *fakeAgent) PrepareNativeLaunch(spec agent.LaunchSpec) (agent.NativeLaunch, error) {
+	a.nativeCalls++
+	return a.nativeLaunch, a.nativeErr
+}
+
 func (a *fakeAgent) SetupWorkspace(spec agent.LaunchSpec) error {
 	a.setupCalls = append(a.setupCalls, spec)
 	return a.setupErr
@@ -240,6 +253,7 @@ func (a *fakeAgent) LaunchCommand(spec agent.LaunchSpec) []string {
 }
 
 func (a *fakeAgent) Env(spec agent.LaunchSpec) map[string]string {
+	a.envCalls = append(a.envCalls, spec)
 	env := map[string]string{"FAKE_ENV": "1", "ROCKET_SESSION_ID": spec.SessionID}
 	if a.envOverrides != nil {
 		for k, v := range a.envOverrides {
