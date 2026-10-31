@@ -71,8 +71,20 @@ type ChatEntry struct {
 	Quiz json.RawMessage
 }
 
+type NativeLaunch struct {
+	Transport  string
+	InstanceID string
+	Endpoint   string
+}
+
+type NativeLaunchProvider interface {
+	PrepareNativeLaunch(spec LaunchSpec) (NativeLaunch, error)
+}
+
 // LaunchSpec contains all configuration needed to launch an agent.
 type LaunchSpec struct {
+	NativeDelivery NativeLaunch
+
 	SessionID    string
 	Kind         string
 	ParentID     string
