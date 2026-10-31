@@ -22,7 +22,8 @@ type Message struct {
 	// pasted into a recipient whose agent confirms delivery from its journal
 	// (status "accepted"); 0 otherwise. It bounds the journal search and the
 	// "turn ended without confirmation" rule.
-	InjectAt int64
+	InjectAt          int64
+	DeliveryTransport string
 }
 
 // AddMessage inserts a new message with status "queued" (unless already set)
@@ -36,9 +37,9 @@ func (s *Store) AddMessage(m Message) (int64, error) {
 	}
 
 	res, err := s.db.Exec(
-		`INSERT INTO messages (from_session, to_session, body, status, attempts, created_at, delivered_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		nullIfEmpty(m.FromSession), m.ToSession, m.Body, m.Status, m.Attempts, m.CreatedAt, nullIfZero(m.DeliveredAt),
+		`INSERT INTO messages (from_session, to_session, body, status, attempts, created_at, delivered_at, delivery_transport)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		nullIfEmpty(m.FromSession), m.ToSession, m.Body, m.Status, m.Attempts, m.CreatedAt, nullIfZero(m.DeliveredAt), m.DeliveryTransport,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert message: %w", err)
@@ -49,7 +50,7 @@ func (s *Store) AddMessage(m Message) (int64, error) {
 // GetMessage returns the message with the given id, or ErrNotFound.
 func (s *Store) GetMessage(id int64) (Message, error) {
 	row := s.db.QueryRow(
-		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at
+		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport
 		 FROM messages WHERE id = ?`, id,
 	)
 	return scanMessage(row)
@@ -59,7 +60,7 @@ func (s *Store) GetMessage(id int64) (Message, error) {
 // or from_session = sessionID, in ascending id order. A limit <= 0 means no
 // limit.
 func (s *Store) ListMessages(sessionID string, limit int) ([]Message, error) {
-	query := `SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at
+	query := `SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport
 	          FROM messages WHERE to_session = ? OR from_session = ? ORDER BY id DESC`
 	args := []any{sessionID, sessionID}
 	if limit > 0 {
@@ -97,7 +98,7 @@ func (s *Store) ListMessages(sessionID string, limit int) ([]Message, error) {
 // message for to.
 func (s *Store) NextQueuedMessage(to string) (Message, bool, error) {
 	row := s.db.QueryRow(
-		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at
+		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport
 		 FROM messages WHERE to_session = ? AND status = 'queued' ORDER BY id LIMIT 1`, to,
 	)
 	m, err := scanMessage(row)
@@ -135,6 +136,32 @@ func (s *Store) ClaimMessage(id int64) (bool, error) {
 	return n == 1, nil
 }
 
+func (s *Store) ClaimNativeMessage(id int64, transport string, injectAt int64) (bool, error) {
+	res, err := s.db.Exec(
+		`UPDATE messages SET status = 'delivering', delivery_transport = ?, inject_at = ? WHERE id = ? AND status = 'queued'`,
+		transport, injectAt, id,
+	)
+	if err != nil {
+		return false, fmt.Errorf("claim native message: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("claim native message rows affected: %w", err)
+	}
+	return n == 1, nil
+}
+
+func (s *Store) SetMessageNativeDelivery(id int64, transport string, injectAt int64) error {
+	res, err := s.db.Exec(
+		`UPDATE messages SET delivery_transport = ?, inject_at = ? WHERE id = ? AND status = 'delivering'`,
+		transport, injectAt, id,
+	)
+	if err != nil {
+		return fmt.Errorf("set native delivery: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
 // UpdateMessageStatus updates a message's status, attempts, delivered_at
 // (0 stored as NULL), and reason (empty string stored as NULL). Returns
 // ErrNotFound if the message doesn't exist.
@@ -163,7 +190,7 @@ func (s *Store) SetMessageInjectAt(id int64, injectAt int64) error {
 // messages oldest-first in a single pass.
 func (s *Store) ListAcceptedMessages() ([]Message, error) {
 	rows, err := s.db.Query(
-		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at
+		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport
 		 FROM messages WHERE status = 'accepted' ORDER BY to_session, id`,
 	)
 	if err != nil {
@@ -241,7 +268,7 @@ func (s *Store) ExpireQueuedBefore(ts int64) ([]Message, error) {
 	rows, err := tx.Query(
 		`UPDATE messages SET status = 'failed', reason = 'timeout'
 		 WHERE status = 'queued' AND created_at < ?
-		 RETURNING id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at`, ts,
+		 RETURNING id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport`, ts,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("expire messages: %w", err)
@@ -269,19 +296,11 @@ func (s *Store) ExpireQueuedBefore(ts int64) ([]Message, error) {
 	return out, nil
 }
 
-// ResetDelivering resets every message stuck in status "delivering" back to
-// "queued". It exists to recover messages orphaned by a daemon crash: since
-// no query anywhere reads status = 'delivering' back into the live queue,
-// such messages would otherwise be silently lost forever, breaking FIFO for
-// anything queued behind them. It is intended to be called once, at
-// Queue.Run startup, before any delivery workers are spawned.
-//
-// Tradeoff: if the crash happened after the recipient actually received the
-// injected text but before the status update was persisted, this causes a
-// duplicate re-delivery of that one message. That is accepted as the lesser
-// evil versus silently losing the message forever.
+// ResetDelivering recovers messages orphaned in status "delivering" by a
+// daemon crash. Legacy rows become queued for another attempt; native rows
+// become accepted so their journal, not a blind re-send, settles delivery.
 func (s *Store) ResetDelivering() (int, error) {
-	res, err := s.db.Exec(`UPDATE messages SET status = 'queued' WHERE status = 'delivering'`)
+	res, err := s.db.Exec(`UPDATE messages SET status = CASE WHEN delivery_transport = 'pi-uds-v1' THEN 'accepted' ELSE 'queued' END WHERE status = 'delivering'`)
 	if err != nil {
 		return 0, fmt.Errorf("reset delivering messages: %w", err)
 	}
@@ -358,7 +377,7 @@ func scanMessage(row interface{ Scan(...any) error }) (Message, error) {
 	var reason sql.NullString
 
 	err := row.Scan(
-		&m.ID, &fromSession, &m.ToSession, &m.Body, &m.Status, &m.Attempts, &m.CreatedAt, &deliveredAt, &reason, &m.InjectAt,
+		&m.ID, &fromSession, &m.ToSession, &m.Body, &m.Status, &m.Attempts, &m.CreatedAt, &deliveredAt, &reason, &m.InjectAt, &m.DeliveryTransport,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Message{}, ErrNotFound
