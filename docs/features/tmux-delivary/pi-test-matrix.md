@@ -6,17 +6,17 @@
 
 ## Воспроизводимый pre-flight harness
 
-Файлы harness в git-ignored scratch worktree:
+Файлы harness сохранены в репозитории:
 
-- `.superpowers/sdd/2026-10-31-tmux-delivary/probe/pty_preservation_probe.py`
+- `scripts/probes/tmux-delivary/pty_preservation_probe.py`
   - SHA-256: `ab70099d4eb17328e855fa3d01ec2660ddf8ff5f99a1fdaf902dff6d3aa4b7a2`.
-- `.superpowers/sdd/2026-10-31-tmux-delivary/probe/preservation-extension.ts`
+- `scripts/probes/tmux-delivary/preservation-extension.ts`
   - SHA-256: `c2581c2cabf085f77b7fc614b13a0ea370558f6899f54f67ec7ed867edab8866`.
 
 Запуск из корня worktree:
 
 ```bash
-python3 .superpowers/sdd/2026-10-31-tmux-delivary/probe/pty_preservation_probe.py
+python3 scripts/probes/tmux-delivary/pty_preservation_probe.py
 ```
 
 Провайдер — **только детерминированный локальный тестовый backend** `probe/deterministic` внутри изолированного расширения. Он возвращает `Deterministic local response` после 100 ms в idle и 2500 ms в busy. Внешняя сеть и учётные данные не используются. Это не DeepSeek и не проверка production provider.
@@ -25,7 +25,7 @@ python3 .superpowers/sdd/2026-10-31-tmux-delivary/probe/pty_preservation_probe.p
 
 ## Уже подтверждено
 
-Итоговый прогон: 4/4 PASS за 13.636 секунды; `go test ./...` — все пакеты PASS.
+Итоговый прогон по committed-path: 4/4 PASS за 13.751 секунды; `go test ./...` — все пакеты PASS.
 
 | Проверка | idle single | idle multiline | busy single | busy multiline |
 | --- | --- | --- | --- | --- |
@@ -36,7 +36,7 @@ python3 .superpowers/sdd/2026-10-31-tmux-delivary/probe/pty_preservation_probe.p
 | Вызовы provider | 1 | 1 | 2 | 2 |
 | Порядок user → assistant → user → assistant | н/д | н/д | PASS | PASS |
 
-Исходные доказательства: `.superpowers/sdd/2026-10-31-tmux-delivary/probe/results/<scenario>/{result.json,events.jsonl,pty.raw}`.
+Маленькие sanitized-доказательства: `scripts/probes/tmux-delivary/results/<scenario>/result.json`. Полные `pty.raw`, `events.jsonl`, транскрипты и временные каталоги остаются git-ignored.
 
 ## Матрица после merged-contract release
 

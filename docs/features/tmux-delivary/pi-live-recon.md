@@ -25,10 +25,10 @@
 ## Команда
 
 ```bash
-python3 .superpowers/sdd/2026-10-31-tmux-delivary/probe/pty_preservation_probe.py
+python3 scripts/probes/tmux-delivary/pty_preservation_probe.py
 ```
 
-Перед реализацией probe тот же harness был запущен без расширения и ожидаемо не прошёл: сокет не был создан. После добавления изолированного расширения итоговая команда прошла все четыре сценария за 13.636 секунды. Проверка также подтверждает точное состояние idle/busy, версию Pi по фактическому `pi --version`, структуру записей транскрипта и порядок user → assistant → user → assistant в busy.
+Перед реализацией probe тот же harness был запущен без расширения и ожидаемо не прошёл: сокет не был создан. После добавления изолированного расширения итоговая команда прошла все четыре сценария за 13.751 секунды. Проверка также подтверждает точное состояние idle/busy, версию Pi по фактическому `pi --version`, структуру записей транскрипта и порядок user → assistant → user → assistant в busy.
 
 ## Результаты
 
@@ -41,7 +41,7 @@ python3 .superpowers/sdd/2026-10-31-tmux-delivary/probe/pty_preservation_probe.p
 
 Во всех случаях `text`, `lines`, `cursorLine` и `cursorCol` совпали точно до вызова, сразу после вызова и после возвращения в idle. В busy второй вызов provider подтверждает обработку followUp после текущего хода. Ровно одна запись `type: "message"` с `message.role: "user"` содержит внедрённый текст; количество подсчитано структурным разбором JSONL, а не поиском подстроки. Все тексты — синтетические.
 
-Доказательства по сценариям находятся в git-ignored scratch: `.superpowers/sdd/2026-10-31-tmux-delivary/probe/results/<scenario>/{result.json,events.jsonl,pty.raw}`. Финальный `go test ./...` после исследования прошёл все пакеты; продуктовых изменений не было.
+Маленькие sanitized-доказательства сохранены в репозитории: `scripts/probes/tmux-delivary/results/<scenario>/result.json`. Полные `pty.raw`, `events.jsonl`, транскрипты и временные каталоги остаются git-ignored. Финальный `go test ./...` после исследования прошёл все пакеты; продуктовых изменений не было.
 
 ## Вывод и ограничения
 
