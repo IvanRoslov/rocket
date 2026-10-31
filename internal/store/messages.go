@@ -18,12 +18,12 @@ type Message struct {
 	CreatedAt   int64
 	DeliveredAt int64  // 0 = not delivered
 	Reason      string // empty = none; set on status "failed" (e.g. "timeout", "delivery_failed", "recipient_gone", "not_confirmed")
-	// InjectAt is the unix-millisecond moment right before the text was
-	// pasted into a recipient whose agent confirms delivery from its journal
-	// (status "accepted"); 0 otherwise. It bounds the journal search and the
-	// "turn ended without confirmation" rule.
+	// InjectAt is the unix-millisecond moment right before a send whose agent
+	// confirms delivery from its journal (status "accepted"); 0 otherwise.
 	InjectAt          int64
 	DeliveryTransport string
+	DeliveryProofAt   int64
+	DeliveryProofText string
 }
 
 // AddMessage inserts a new message with status "queued" (unless already set)
@@ -50,7 +50,7 @@ func (s *Store) AddMessage(m Message) (int64, error) {
 // GetMessage returns the message with the given id, or ErrNotFound.
 func (s *Store) GetMessage(id int64) (Message, error) {
 	row := s.db.QueryRow(
-		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport
+		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport, delivery_proof_at, delivery_proof_text
 		 FROM messages WHERE id = ?`, id,
 	)
 	return scanMessage(row)
@@ -60,7 +60,7 @@ func (s *Store) GetMessage(id int64) (Message, error) {
 // or from_session = sessionID, in ascending id order. A limit <= 0 means no
 // limit.
 func (s *Store) ListMessages(sessionID string, limit int) ([]Message, error) {
-	query := `SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport
+	query := `SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport, delivery_proof_at, delivery_proof_text
 	          FROM messages WHERE to_session = ? OR from_session = ? ORDER BY id DESC`
 	args := []any{sessionID, sessionID}
 	if limit > 0 {
@@ -98,7 +98,7 @@ func (s *Store) ListMessages(sessionID string, limit int) ([]Message, error) {
 // message for to.
 func (s *Store) NextQueuedMessage(to string) (Message, bool, error) {
 	row := s.db.QueryRow(
-		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport
+		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport, delivery_proof_at, delivery_proof_text
 		 FROM messages WHERE to_session = ? AND status = 'queued' ORDER BY id LIMIT 1`, to,
 	)
 	m, err := scanMessage(row)
@@ -190,7 +190,7 @@ func (s *Store) SetMessageInjectAt(id int64, injectAt int64) error {
 // messages oldest-first in a single pass.
 func (s *Store) ListAcceptedMessages() ([]Message, error) {
 	rows, err := s.db.Query(
-		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport
+		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport, delivery_proof_at, delivery_proof_text
 		 FROM messages WHERE status = 'accepted' ORDER BY to_session, id`,
 	)
 	if err != nil {
@@ -213,10 +213,10 @@ func (s *Store) ListAcceptedMessages() ([]Message, error) {
 // "delivered" with delivered_at = deliveredAt. It reports false when the
 // message was no longer accepted (already requeued, failed or confirmed by a
 // concurrent pass), so a stale decision never overwrites a newer status.
-func (s *Store) ConfirmAccepted(id int64, deliveredAt int64) (bool, error) {
+func (s *Store) ConfirmAccepted(id, deliveredAt, proofAt int64, proofText string) (bool, error) {
 	return s.casAccepted(id,
-		`UPDATE messages SET status = 'delivered', delivered_at = ? WHERE id = ? AND status = 'accepted'`,
-		deliveredAt, id)
+		`UPDATE messages SET status = 'delivered', delivered_at = ?, delivery_proof_at = ?, delivery_proof_text = ? WHERE id = ? AND status = 'accepted'`,
+		deliveredAt, proofAt, proofText, id)
 }
 
 // RequeueAccepted atomically moves message id from "accepted" back to
@@ -268,7 +268,7 @@ func (s *Store) ExpireQueuedBefore(ts int64) ([]Message, error) {
 	rows, err := tx.Query(
 		`UPDATE messages SET status = 'failed', reason = 'timeout'
 		 WHERE status = 'queued' AND created_at < ?
-		 RETURNING id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport`, ts,
+		 RETURNING id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport, delivery_proof_at, delivery_proof_text`, ts,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("expire messages: %w", err)
@@ -378,6 +378,7 @@ func scanMessage(row interface{ Scan(...any) error }) (Message, error) {
 
 	err := row.Scan(
 		&m.ID, &fromSession, &m.ToSession, &m.Body, &m.Status, &m.Attempts, &m.CreatedAt, &deliveredAt, &reason, &m.InjectAt, &m.DeliveryTransport,
+		&m.DeliveryProofAt, &m.DeliveryProofText,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Message{}, ErrNotFound

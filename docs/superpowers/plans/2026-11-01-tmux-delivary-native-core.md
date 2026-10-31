@@ -13,9 +13,10 @@
 ## Global Constraints
 
 - Implement Task 1 only: no Pi extension and no production Codex/Kimi/Pi launch changes.
-- Protocol version 1; JSON fields `v`, `session_id`, `instance_id`, `message_id`, `text`; frames at most 1 MiB.
+- Protocol version 1; JSON fields `v`, `session_id`, `instance_id`, `message_id`, `text`; frames at most 1 MiB; each send has a five-second overall deadline and a post-write timeout is `Unknown`.
 - Native `pi-uds-v1` never uses tmux Inject, SendKeys, Capture, or CaptureEscaped to decide delivery and never falls back to legacy when its endpoint is unavailable.
 - Persist transport and `inject_at` before every send. Only `NotSent` may use bounded retry; `Accepted` and `Unknown` become `accepted` and require journal confirmation.
+- Persist each consumed journal proof (`delivery_proof_at`, normalized `delivery_proof_text`) and rebuild consumed proofs after recovery so equal text with distinct IDs cannot reuse an earlier record; timestamp collisions fail conservatively rather than confirm the wrong message.
 - Native `delivering` recovery becomes `accepted`; native terminal failure first checks the journal, including after recipient exit/restore. Disabled `QueueTimeout` waits while the recipient remains live.
 - Empty transport means legacy. Legacy socket/held behavior, retry limits, expiry, visual checks, and interactive answers stay unchanged.
 

@@ -311,6 +311,71 @@ func TestNativeExitWithoutConfirmationFails(t *testing.T) {
 	}
 }
 
+func TestNativeRecoveryDoesNotReuseEqualTextProof(t *testing.T) {
+	for _, collision := range []bool{false, true} {
+		name := "delayed proof"
+		if collision {
+			name = "timestamp collision"
+		}
+		t.Run(name, func(t *testing.T) {
+			h := newTestQueue(t)
+			h.addNativeSession(t, "native")
+			base := h.clock.now()
+			proofAt := base.Add(time.Second)
+			if collision {
+				proofAt = base
+			}
+			h.ag.confirmRecords(map[string][]time.Time{"same": {proofAt}})
+			first := addMsg(t, h, "native", "same")
+			firstMsg, _ := h.st.GetMessage(first)
+			firstMsg.Status = "accepted"
+			firstMsg.Attempts = 1
+			firstMsg.InjectAt = base.Add(-2 * time.Second).UnixMilli()
+			if err := h.st.UpdateMessageStatus(first, "accepted", 1, 0, ""); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.st.SetMessageInjectAt(first, firstMsg.InjectAt); err != nil {
+				t.Fatal(err)
+			}
+			st1 := &confirmState{used: make(map[string]map[recordKey]struct{}), restored: make(map[string]bool)}
+			_, confirmer := h.q.recipientCaps(store.Session{Agent: "codex"})
+			if !h.q.confirmOne(h.ctx, st1, confirmer, agent.ActivityRef{SessionID: "native"}, "native", firstMsg, "same") {
+				t.Fatal("first equal-text message was not confirmed")
+			}
+
+			second := addMsg(t, h, "native", "same")
+			if ok, err := h.st.ClaimNativeMessage(second, "pi-uds-v1", base.Add(-time.Second).UnixMilli()); err != nil || !ok {
+				t.Fatalf("second claim = %v, %v", ok, err)
+			}
+			h.q.Recover(h.ctx)
+			h.activityTo("native", activity.Exited)
+			st2 := &confirmState{used: make(map[string]map[recordKey]struct{}), restored: make(map[string]bool)}
+			h.q.confirmPass(h.ctx, st2)
+
+			msg, _ := h.st.GetMessage(second)
+			if msg.Status != "failed" || msg.Reason != "native_delivery_unconfirmed" {
+				t.Fatalf("unsent equal-text message = %+v, want conservative failure, not false delivery", msg)
+			}
+		})
+	}
+}
+
+func TestAcceptedLegacyMessageDoesNotBecomeNativeAfterRestore(t *testing.T) {
+	h := newTestQueue(t)
+	h.addNativeSession(t, "native")
+	id := addMsg(t, h, "native", "legacy paste")
+	if err := h.st.UpdateMessageStatus(id, "accepted", maxAttempts, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	st := &confirmState{used: make(map[string]map[recordKey]struct{}), restored: make(map[string]bool)}
+	h.q.confirmPass(h.ctx, st)
+
+	msg, _ := h.st.GetMessage(id)
+	if msg.Status != "failed" || msg.Reason != "not_confirmed" {
+		t.Fatalf("accepted legacy message = %+v, want legacy not_confirmed", msg)
+	}
+}
+
 func (h *testHarness) addNativeSession(t *testing.T, id string) {
 	t.Helper()
 	if err := h.st.AddSession(store.Session{
