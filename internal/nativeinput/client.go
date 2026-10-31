@@ -31,6 +31,8 @@ func Send(ctx context.Context, target Target, messageID int64, text string) (Out
 	if len(frame) > MaxFrameSize {
 		return NotSent, fmt.Errorf("native request exceeds 1 MiB frame limit")
 	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "unix", target.SocketPath)

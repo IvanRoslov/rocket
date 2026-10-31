@@ -123,6 +123,25 @@ func TestSendRejectsWrongResponseIdentity(t *testing.T) {
 	}
 }
 
+func TestSendUnresponsivePeerTimesOutUnknown(t *testing.T) {
+	target := testTarget(t)
+	release := make(chan struct{})
+	target.SocketPath = serveOnce(t, func(conn net.Conn) {
+		_, _ = bufio.NewReader(conn).ReadBytes('\n')
+		<-release
+	})
+	t.Cleanup(func() { close(release) })
+
+	start := time.Now()
+	outcome, err := nativeinput.Send(context.Background(), target, 42, "text")
+	if err == nil || outcome != nativeinput.Unknown {
+		t.Fatalf("Send = %v, %v; want unknown and response timeout", outcome, err)
+	}
+	if elapsed := time.Since(start); elapsed > 7*time.Second {
+		t.Fatalf("Send blocked for %v, want a bounded per-attempt timeout", elapsed)
+	}
+}
+
 func testTarget(t *testing.T) nativeinput.Target {
 	t.Helper()
 	return nativeinput.Target{

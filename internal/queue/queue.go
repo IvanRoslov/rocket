@@ -233,17 +233,16 @@ func (q *Queue) runCtx() context.Context {
 	return context.Background()
 }
 
-// Recover performs the queue's startup recovery pass: it resets messages
-// orphaned in status "delivering" by a previous crash back to "queued" (see
-// store.ResetDelivering for why this is necessary — no query anywhere reads
-// "delivering" back into the live queue, so without this they would be
-// silently lost, breaking FIFO for anything queued behind them), then wakes
-// a delivery worker for every recipient with a queued message.
+// Recover performs the queue's startup recovery pass: legacy messages
+// orphaned in "delivering" become queued, while native ones become accepted
+// for journal confirmation rather than a blind re-send (see
+// store.ResetDelivering). It then wakes a delivery worker for every recipient
+// with a queued message.
 //
-// Messages in status "accepted" are deliberately left alone: the paste did
-// happen, so requeueing them blindly would duplicate; the confirmer loop
-// (started by Run) picks them up and confirms, requeues or fails them by
-// its own rules. Recover only kicks it so the first pass is prompt.
+// Messages in status "accepted" are deliberately left alone: requeueing them
+// blindly would duplicate; the confirmer loop (started by Run) picks them up
+// and confirms, requeues or fails them by its own rules. Recover only kicks
+// it so the first pass is prompt.
 //
 // Callers MUST call Recover synchronously (not in a goroutine) and have it
 // complete BEFORE the API starts serving requests. Otherwise an early
@@ -921,10 +920,9 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 	}
 }
 
-// accept marks a message accepted — pasted into a recipient whose agent
-// will confirm the delivery from its journal — publishes message.accepted
-// and nudges the confirmer loop. Attempts are kept: a later requeue counts
-// this paste as one of them.
+// accept marks a message accepted by the legacy or native transport, publishes
+// message.accepted and nudges journal confirmation. Attempts are kept: a later
+// legacy requeue counts this send as one of them.
 func (q *Queue) accept(msg store.Message) {
 	if err := q.st.UpdateMessageStatus(msg.ID, "accepted", msg.Attempts, 0, ""); err != nil {
 		slog.Error("queue: update message accepted", "id", msg.ID, "error", err)

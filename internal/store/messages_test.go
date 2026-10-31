@@ -433,7 +433,7 @@ func TestMessageInjectAtRoundTrip(t *testing.T) {
 func TestAcceptedTransitionsAreCAS(t *testing.T) {
 	s := openTestStore(t)
 	id, _ := s.AddMessage(Message{ToSession: "r", Body: "x"})
-	if ok, err := s.ConfirmAccepted(id, 5); ok || err != nil {
+	if ok, err := s.ConfirmAccepted(id, 5, 6, "x"); ok || err != nil {
 		t.Fatalf("queued must not confirm: ok=%v err=%v", ok, err)
 	}
 	if err := s.UpdateMessageStatus(id, "accepted", 1, 0, ""); err != nil {
@@ -459,15 +459,15 @@ func TestAcceptedTransitionsAreCAS(t *testing.T) {
 	if m.Status != "failed" || m.Reason != "not_confirmed" || m.Attempts != 2 {
 		t.Fatalf("after fail: %+v", m)
 	}
-	if ok, _ := s.ConfirmAccepted(id, 5); ok {
+	if ok, _ := s.ConfirmAccepted(id, 5, 6, "x"); ok {
 		t.Fatal("failed must not confirm")
 	}
 	_ = s.UpdateMessageStatus(id, "accepted", 2, 0, "")
-	if ok, _ := s.ConfirmAccepted(id, 5); !ok {
+	if ok, _ := s.ConfirmAccepted(id, 5, 6, "x"); !ok {
 		t.Fatal("ConfirmAccepted")
 	}
 	m, _ = s.GetMessage(id)
-	if m.Status != "delivered" || m.DeliveredAt != 5 {
+	if m.Status != "delivered" || m.DeliveredAt != 5 || m.DeliveryProofAt != 6 || m.DeliveryProofText != "x" {
 		t.Fatalf("after confirm: %+v", m)
 	}
 }

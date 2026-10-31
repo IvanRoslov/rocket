@@ -24,7 +24,7 @@ func nativeDelivery(msg store.Message, sess store.Session) bool {
 	if msg.DeliveryTransport != "" {
 		return msg.DeliveryTransport == NativeTransportPiUDS
 	}
-	return sess.DeliveryTransport == NativeTransportPiUDS
+	return msg.Status == "queued" && sess.DeliveryTransport == NativeTransportPiUDS
 }
 
 func (q *Queue) attemptNativeDelivery(ctx context.Context, msg store.Message, sess store.Session, confirmer agent.DeliveryConfirmer) {

@@ -260,6 +260,24 @@ func (q *Queue) confirmNativeRecipient(ctx context.Context, st *confirmState, to
 func (q *Queue) confirmOne(ctx context.Context, st *confirmState, confirmer agent.DeliveryConfirmer, ref agent.ActivityRef, to string, msg store.Message, text string) bool {
 	since := time.UnixMilli(msg.InjectAt)
 	norm := strings.Join(strings.Fields(text), " ")
+	used := st.used[to]
+	if used == nil {
+		used = make(map[recordKey]struct{})
+		st.used[to] = used
+	}
+	previous, err := q.st.ListMessages(to, 0)
+	if err != nil {
+		slog.Error("queue: rebuild consumed journal proofs", "id", msg.ID, "to", to, "error", err)
+		return false
+	}
+	for _, prior := range previous {
+		if prior.ID >= msg.ID {
+			break
+		}
+		if prior.ToSession == to && prior.DeliveryProofAt > 0 && prior.DeliveryProofText == norm {
+			used[recordKey{at: prior.DeliveryProofAt, text: norm}] = struct{}{}
+		}
+	}
 	for {
 		found, at, err := confirmer.ConfirmDelivered(ctx, ref, text, since)
 		if err != nil {
@@ -272,18 +290,13 @@ func (q *Queue) confirmOne(ctx context.Context, st *confirmState, confirmer agen
 			return false
 		}
 		key := recordKey{at: at.UnixNano(), text: norm}
-		used := st.used[to]
-		if used == nil {
-			used = make(map[recordKey]struct{})
-			st.used[to] = used
-		}
 		if _, dup := used[key]; dup {
 			// This record already proved an earlier identical message;
 			// the next one needs a record of its own.
 			since = at
 			continue
 		}
-		ok, err := q.st.ConfirmAccepted(msg.ID, q.now().Unix())
+		ok, err := q.st.ConfirmAccepted(msg.ID, q.now().Unix(), at.UnixNano(), norm)
 		if err != nil {
 			slog.Error("queue: confirm accepted message", "id", msg.ID, "error", err)
 			return false
