@@ -137,6 +137,22 @@ func (q *Queue) confirmPass(ctx context.Context, st *confirmState) (pending int)
 // confirmRecipient handles the accepted messages of one recipient (oldest
 // first) and returns how many stay accepted.
 func (q *Queue) confirmRecipient(ctx context.Context, st *confirmState, to string, msgs []store.Message) (pending int) {
+	sess, _ := q.getSession(to)
+	native := make([]store.Message, 0, len(msgs))
+	legacy := msgs[:0]
+	for _, msg := range msgs {
+		if nativeDelivery(msg, sess) {
+			native = append(native, msg)
+		} else {
+			legacy = append(legacy, msg)
+		}
+	}
+	pending += q.confirmNativeRecipient(ctx, st, to, native)
+	msgs = legacy
+	if len(msgs) == 0 {
+		return pending
+	}
+
 	restored := st.restored[to]
 	delete(st.restored, to)
 
@@ -189,6 +205,51 @@ func (q *Queue) confirmRecipient(ctx context.Context, st *confirmState, to strin
 			}
 		}
 		q.giveUpAccepted(msg, exited, now)
+	}
+	return pending
+}
+
+func (q *Queue) confirmNativeRecipient(ctx context.Context, st *confirmState, to string, msgs []store.Message) (pending int) {
+	if len(msgs) == 0 {
+		return 0
+	}
+	restored := st.restored[to]
+	delete(st.restored, to)
+
+	sess, err := q.getSession(to)
+	gone := errors.Is(err, store.ErrNotFound)
+	if err != nil && !gone {
+		slog.Error("queue: get session for native accepted messages (transient)", "to", to, "error", err)
+		return len(msgs)
+	}
+	state, known := q.getActivity(to)
+	exited := gone || sess.State != "running" || (known && state == activity.Exited) || restored
+	_, confirmer := q.recipientCaps(sess)
+	ref := agent.ActivityRef{SessionID: to, WorktreePath: sess.WorktreePath}
+	now := q.now()
+
+	for _, msg := range msgs {
+		if ctx.Err() != nil {
+			return pending + 1
+		}
+		if confirmer != nil && q.confirmOne(ctx, st, confirmer, ref, to, msg, q.injectedText(msg, sess)) {
+			continue
+		}
+		timedOut := q.cfg != nil && q.cfg.QueueTimeout > 0 && now.Sub(time.Unix(msg.CreatedAt, 0)) >= q.cfg.QueueTimeout
+		if !exited && !timedOut {
+			pending++
+			continue
+		}
+		ok, err := q.st.FailAccepted(msg.ID, nativeDeliveryUnconfirmed)
+		if err != nil {
+			slog.Error("queue: fail native accepted message", "id", msg.ID, "error", err)
+			pending++
+			continue
+		}
+		if ok {
+			slog.Warn("queue: native delivery never confirmed", "id", msg.ID, "to", to, "recipient_exited", exited, "timed_out", timedOut)
+			q.announceFailure(msg, nativeDeliveryUnconfirmed)
+		}
 	}
 	return pending
 }

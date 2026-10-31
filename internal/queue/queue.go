@@ -68,6 +68,7 @@ type Queue struct {
 	// delivery: it hands the message to the recipient's Claude Code inbox
 	// without touching their composer. nil means "tmux only".
 	socket SocketSender
+	native NativeSender
 
 	// getSession looks up a recipient's session. Defaults to st.GetSession;
 	// overridable by tests to simulate transient (non-ErrNotFound) lookup
@@ -470,17 +471,14 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 			return
 		}
 
-		// Resolve the transport once per pass: it decides both gates below
-		// and the delivery itself, and each resolution costs a connect() to
-		// the recipient's socket.
-		viaSocket := q.socketReady(sess)
-
 		// Optional agent capabilities (Codex): busyOK makes an active
 		// recipient ready; confirmer turns a successful paste into
 		// "accepted" instead of "delivered" (see attemptDelivery).
 		busyOK, confirmer := q.recipientCaps(sess)
+		native := nativeDelivery(msg, sess)
+		viaSocket := !native && q.socketReady(sess)
 
-		if sess.PendingQuiz != "" && !viaSocket {
+		if sess.PendingQuiz != "" && !viaSocket && !native {
 			// Recipient has a pending AskUserQuestion quiz on screen: text
 			// injected now would corrupt the TUI widget, and no socket is
 			// available to route around it. Hold the message (stays queued,
@@ -499,7 +497,7 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 		}
 
 		state, known := q.getActivity(msg.ToSession)
-		if known && state == activity.Blocked && q.beforeFirstTurn(ctx, sess) {
+		if !native && known && state == activity.Blocked && q.beforeFirstTurn(ctx, sess) {
 			// Kimi takes its first message (the brief) from the queue, and
 			// before its first turn "blocked" can only come from a start
 			// screen — possibly one the human has just answered, with the
@@ -525,6 +523,11 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 				return // ctx cancelled
 			}
 			continue
+		}
+
+		if native {
+			q.attemptNativeDelivery(ctx, msg, sess, confirmer)
+			return
 		}
 
 		// Draft guard. Someone may be typing into the recipient's composer
