@@ -61,7 +61,10 @@ Start now:
    "[rocket gate] Нужны правки …" revise the spec, store it, request again.
 
 5. EXECUTE. Create subtasks, spawn workers, coordinate to merged PRs.
-   Gates: a worker's PR needs green CI before you consider its task done.
+   Gates: if the repo has CI, a worker's PR needs it green before you
+   consider its task done. If the repo has no CI, the worker's own tests
+   and checks plus your acceptance are enough — do not substitute a
+   reviewer for the missing CI and do not ask the human about it.
 
 6. DELIVER. Final report, task to review, tell the human.
 
