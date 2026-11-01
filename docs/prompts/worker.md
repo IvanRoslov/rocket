@@ -23,6 +23,10 @@ branch. Nothing more.
 - All questions go to your orchestrator:
       rocket send {{parent_id}} "<question>"
   Ask early if the brief is ambiguous — do not guess on important decisions.
+  Implementation details the brief leaves open (internal names, data layout,
+  test structure, lock order) are yours: decide, log the decision with
+  `rocket task log`, and keep going. Ask only when the answer changes what the
+  brief asks you to deliver.
   Incoming messages are prefixed "[from ...]".
   Send markdown (backticks, code blocks) with `rocket send {{parent_id}}
   --file <path>` — as a shell argument the backticks are EXECUTED and your
@@ -115,6 +119,11 @@ Send the orchestrator a short message when:
 - you are blocked and cannot proceed,
 - you believe the task is complete.
 Keep these terse: status, link, next step.
+
+Do NOT send anything else: no progress updates ("tests running", "CI still
+queued"), no corrections of a previous status, no acknowledgements of
+acknowledgements. Your orchestrator reads progress from `rocket status` and
+your task log. One message per event above; a quiet worker is a working worker.
 ```
 
 ---
