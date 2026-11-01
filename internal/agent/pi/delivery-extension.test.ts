@@ -587,6 +587,43 @@ test("danglingAcceptedSymlinkFailsClosed", async (t) => {
 	assert.equal(api.calls.length, 0);
 });
 
+test("deferredHandlerErrorAdmitsNoRecord", async (t) => {
+	// Q5 fixture: the supported Pi API accepts sendUserMessage and returns
+	// void. A later handler error can drop the turn, so an accepted call may
+	// leave no user record; a later call with the same text can leave the
+	// only one. The bridge cannot report NotSent after either call.
+	const api = new FakeApi();
+	const journal: string[] = [];
+	let deferNext = false;
+	const recordSend = (text: string, options: any): void => {
+		api.calls.push({ text, options });
+		if (deferNext) {
+			deferNext = false;
+			setTimeout(() => {
+				// Deferred handler error: the turn is dropped, no record.
+			}, 0);
+			return;
+		}
+		journal.push(text);
+	};
+	api.sendUserMessage = recordSend;
+	const { endpoint, sessionID, instanceID } = await makeBridge(t, api);
+
+	deferNext = true;
+	const first = await connectRequest(endpoint, {
+		v: 1, session_id: sessionID, instance_id: instanceID, message_id: 401, text: "одинаковый",
+	});
+	const second = await connectRequest(endpoint, {
+		v: 1, session_id: sessionID, instance_id: instanceID, message_id: 402, text: "одинаковый",
+	});
+	await new Promise((resolve) => setTimeout(resolve, 10));
+
+	assert.equal(first.outcome, "accepted", "a possible submission is never reported as not_sent");
+	assert.equal(second.outcome, "accepted");
+	assert.equal(api.calls.length, 2);
+	assert.deepEqual(journal, ["одинаковый"], "only the second call left a record");
+});
+
 test("sessionStartOpensPrivateEndpoint", async (t) => {
 	const api = new FakeApi();
 	const endpoint = endpointFor();
