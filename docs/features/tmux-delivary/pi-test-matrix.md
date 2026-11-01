@@ -103,10 +103,12 @@ node --experimental-strip-types --test internal/agent/pi/delivery-extension.test
 | Привязка к реальной истории после switch+reload | `ctx.sessionManager.getSessionId()` проверяется при открытии endpoint и перед каждым submit; чужой/недоступный context закрывает канал с нулём API-вызовов | `refusesStartInAForeignHistory`, `reloadAfterSwitchNeverRoutesIntoNewHistory`, `submissionRequiresBoundHistory`, `historyGetterFailureFailsClosed` |
 | Уникальность endpoint | Ключ сессии расширен до 128 бит; endpoint содержит launch instance (`s-<instance>`); поздняя очистка старого запуска не трогает новый endpoint | Go `TestPiNativeCollisionIDsProduceDistinctTargets` (`rocket-native-collision-37639`/`133628`), `TestPiNativeLateCleanupKeepsNewEndpoint`, `TestPiNativeRestoreChangesInstance` |
 | Долговечная дедупликация | Запись accepted ID синхронно до API; ошибка записи даёт `not_sent` с 0 вызовов; нечитаемое/повреждённое состояние не становится пустым набором | `reservesAcceptedIDBeforeAPI`, `unreadableAcceptedStateFailsClosed`, `corruptAcceptedStateFailsClosed`, `persistenceFailureReturnsNotSentWithoutAPI` |
-| Ограничение старта и прав | Ошибка chmod сокета закрывает и удаляет endpoint; rejection `start()` не выходит за handler-границу | `socketPermissionFailureFailsClosed`, `startFailureIsContained` |
+| Ограничение старта и прав | Ошибка chmod сокета закрывает и удаляет endpoint; rejection `start()` не выходит за handler-границу | `socketPermissionFailureFailsClosed` (RED), `endpointDirectoryBindFailureIsContained` и `danglingAcceptedSymlinkFailsClosed` (regression-покрытие существующего поведения) |
 | Один обмен на соединение | Обрабатывается только первый JSONL-кадр; кадры в том же или следующем chunk не вызывают API | `oneExchangePerConnection`, `trailingChunkCannotSubmit` |
+| Возврат A→B→A после switch | Нерелоад-завершение пишет durable `retired-<instance>.marker`; возврат в ту же историю не переоткрывает launch; accepted state сохраняется; новый Rocket launch очищает marker | `retiredLaunchDoesNotReopenAfterSwitchAndReturn`, `shutdownReloadAndSwitchCloseOldEndpoint`, Go `TestPiNativeNewLaunchClearsRetirement` |
+| Частичная/неканоническая запись accepted | Файл обязан заканчиваться newline, каждая запись строго `/^[1-9][0-9]*$/`; иначе старт отклоняется с 0 вызовов | `truncatedAcceptedTailFailsClosed`, `nonCanonicalAcceptedRecordsFailClosed` |
 
-Результат: `node --experimental-strip-types --test internal/agent/pi/delivery-extension.test.ts` — 23/23 PASS; `go test ./internal/agent/pi -count=1` — PASS; `go test -race ./internal/agent/pi` — PASS; `go vet ./...` — чисто.
+Результат: `node --experimental-strip-types --test internal/agent/pi/delivery-extension.test.ts` — 28/28 PASS; `go test ./internal/agent/pi -count=1` — PASS; `go test -race ./internal/agent/pi` — PASS; `go vet ./...` — чисто.
 
 Полный `go test ./...`: все пакеты PASS, кроме одного intermittent падения `internal/api` `TestParticipantFanOut_SkipsAuthorAndHuman` (`TempDir RemoveAll cleanup: directory not empty`). Целевой повтор теста и повторный прогон пакета — PASS. Это известный TempDir-cleanup flake, не связанный с изменёнными Pi-файлами; зелёным полный прогон не объявляется.
 
@@ -121,7 +123,7 @@ python3 scripts/probes/tmux-delivary/native_bridge_probe.py \
 
 Fixture теперь запускает Pi с `--session-id` равным ROCKET target и проверяет `sessionManager.getSessionId()` наблюдаемого процесса. Результаты: `reload`, `target-frames`, `foreign-history` — PASS. В `foreign-history` фактическая история `live-foreign-history-b` при target `live-foreign-history`: endpoint не создан, подключение отсутствует (`ENOENT`), 0 injected и 0 вызовов provider.
 
-Остальные 10 сценариев сохранённой матрицы (17:12–17:14) относятся к коду до этих исправлений; полная матрица против текущего моста не перезапускалась. Это остаётся явным gap, а не PASS.
+Остальные 10 сценариев сохранённой матрицы относятся к коду до этих исправлений; полная матрица против текущего моста не перезапускалась. Это остаётся явным gap, а не PASS. Сводка `/tmp/pi-live-all.out` (17:12) устарела и расходится с per-scenario JSON: три файла (`delayed-modal`, `modal-guard`, `reload`) были перезаписаны позднее отдельными прогонами. У `delayed-modal` в сохранённом файле `ui_prompt_starts = 0`, поэтому фактическое срабатывание задержанного slow listener этим артефактом не доказано; `modal-guard` и `delayed-modal` на текущем коде не перезапускались.
 
 ## Ограничение текущего результата
 

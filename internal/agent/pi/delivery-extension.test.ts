@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -11,6 +11,7 @@ import {
 	MAX_FRAME_BYTES,
 	acceptedIDsPath,
 	createDeliveryExtension,
+	retiredLaunchPath,
 } from "./delivery-extension.ts";
 
 class FakeApi {
@@ -278,13 +279,15 @@ test("shutdownReloadAndSwitchCloseOldEndpoint", async (t) => {
 	})).outcome, "accepted");
 	assert.equal(reloaded.calls.length, 0, "dedupe must survive module reload");
 	second.bridge.stop("quit");
-	assert.equal(existsSync(ids), false);
+	assert.ok(existsSync(ids), "a shutdown must not destroy the launch dedupe state");
+	assert.ok(existsSync(retiredLaunchPath(endpoint, instanceID)), "a non-reload shutdown retires the launch");
 
 	const third = await makeBridge(t, new FakeApi());
 	third.api.emit("session_before_switch");
-	third.api.emit("session_start");
+	third.api.emit("session_shutdown", { reason: "new" });
+	third.api.emit("session_start", { reason: "new" });
 	await new Promise((resolve) => setTimeout(resolve, 20));
-	assert.equal(third.bridge.listening, false, "switch must not reopen the old identity");
+	assert.equal(third.bridge.listening, false, "a committed switch must not reopen the old identity");
 });
 
 test("refusesStartInAForeignHistory", async (t) => {
@@ -477,6 +480,110 @@ test("socketPermissionFailureFailsClosed", async (t) => {
 	await assert.rejects(bridge.start(), /chmod denied/);
 	assert.equal(bridge.listening, false, "an endpoint without the 0600 contract must not accept");
 	assert.equal(existsSync(endpoint), false, "the refused endpoint must be unlinked");
+	assert.equal(api.calls.length, 0);
+});
+
+test("retiredLaunchDoesNotReopenAfterSwitchAndReturn", async (t) => {
+	const api = new FakeApi();
+	const { endpoint, sessionID, instanceID } = await makeBridge(t, api);
+	assert.equal((await connectRequest(endpoint, {
+		v: 1, session_id: sessionID, instance_id: instanceID, message_id: 301, text: "до переключения",
+	})).outcome, "accepted");
+	assert.equal(api.calls.length, 1);
+
+	// The switch commits: the old runtime shuts down and another history starts.
+	api.emit("session_before_switch", { reason: "new" });
+	api.emit("session_shutdown", { reason: "new" });
+	assert.ok(
+		existsSync(acceptedIDsPath(endpoint, instanceID)),
+		"switch must not destroy the launch dedupe state",
+	);
+
+	const foreignApi = new FakeApi();
+	foreignApi.sessionID = "history-b";
+	const foreign = createDeliveryExtension(foreignApi);
+	assert.ok(foreign);
+	t.after(() => foreign.stop("quit"));
+	foreignApi.emit("session_start", { reason: "new" });
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	assert.equal(foreign.listening, false);
+	assert.equal(foreignApi.calls.length, 0);
+
+	// Returning to the same history must not resurrect the retired launch.
+	const backApi = new FakeApi();
+	backApi.sessionID = sessionID;
+	const back = createDeliveryExtension(backApi);
+	assert.ok(back);
+	t.after(() => back.stop("quit"));
+	backApi.emit("session_start", { reason: "resume" });
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	assert.equal(back.listening, false, "a retired launch must not reopen");
+	await assert.rejects(connectRequest(endpoint, {
+		v: 1, session_id: sessionID, instance_id: instanceID, message_id: 302, text: "после возврата",
+	}));
+	assert.equal(backApi.calls.length, 0);
+});
+
+test("truncatedAcceptedTailFailsClosed", async (t) => {
+	const api = new FakeApi();
+	const endpoint = endpointFor();
+	setNativeEnv(endpoint, "sess-1", "instance-1");
+	api.sessionID = "sess-1";
+	// A crash mid-append leaves a partial record; it must never fold into ID 4.
+	writeFileSync(acceptedIDsPath(endpoint, "instance-1"), "4", { mode: 0o600 });
+	const bridge = createDeliveryExtension(api);
+	assert.ok(bridge);
+	t.after(() => bridge.stop("quit"));
+	api.emit("session_start", { reason: "reload" });
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	assert.equal(bridge.listening, false, "an unterminated tail must not load as an ID");
+	assert.equal(api.calls.length, 0);
+});
+
+test("nonCanonicalAcceptedRecordsFailClosed", async (t) => {
+	for (const record of ["0x10\n", "007\n", "+4\n", "4.0\n", " 4\n"]) {
+		const api = new FakeApi();
+		const endpoint = endpointFor();
+		setNativeEnv(endpoint, "sess-1", "instance-1");
+		api.sessionID = "sess-1";
+		writeFileSync(acceptedIDsPath(endpoint, "instance-1"), record, { mode: 0o600 });
+		const bridge = createDeliveryExtension(api);
+		assert.ok(bridge);
+		t.after(() => bridge.stop("quit"));
+		api.emit("session_start", { reason: "reload" });
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		assert.equal(bridge.listening, false, `record ${JSON.stringify(record)} must fail closed`);
+		assert.equal(api.calls.length, 0);
+	}
+});
+
+test("endpointDirectoryBindFailureIsContained", async (t) => {
+	const api = new FakeApi();
+	const endpoint = endpointFor();
+	mkdirSync(endpoint, { recursive: true, mode: 0o700 });
+	setNativeEnv(endpoint);
+	api.sessionID = "sess-1";
+	const bridge = createDeliveryExtension(api);
+	assert.ok(bridge);
+	t.after(() => bridge.stop("quit"));
+	assert.doesNotThrow(() => api.emit("session_start"));
+	await new Promise((resolve) => setTimeout(resolve, 30));
+	assert.equal(bridge.listening, false, "a bind failure must not accept");
+	assert.equal(api.calls.length, 0);
+});
+
+test("danglingAcceptedSymlinkFailsClosed", async (t) => {
+	const api = new FakeApi();
+	const endpoint = endpointFor();
+	setNativeEnv(endpoint, "sess-1", "instance-1");
+	api.sessionID = "sess-1";
+	symlinkSync(join(shortDir(), "missing", "state"), acceptedIDsPath(endpoint, "instance-1"));
+	const bridge = createDeliveryExtension(api);
+	assert.ok(bridge);
+	t.after(() => bridge.stop("quit"));
+	api.emit("session_start", { reason: "reload" });
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	assert.equal(bridge.listening, false, "an unreadable accepted path must not become empty");
 	assert.equal(api.calls.length, 0);
 });
 

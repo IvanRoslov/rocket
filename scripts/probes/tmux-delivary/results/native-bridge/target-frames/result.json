@@ -3,7 +3,7 @@
   "pi": "1.4.0",
   "session_id": "live-target-frames",
   "pi_session_id": "live-target-frames",
-  "instance_id": "796c8c93616ae953",
+  "instance_id": "0cb40e47672638be",
   "endpoint_kind": "short /tmp UDS",
   "extensions": [
     "native-bridge-probe-extension.ts",
@@ -13,7 +13,7 @@
     {
       "v": 1,
       "session_id": "other",
-      "instance_id": "796c8c93616ae953",
+      "instance_id": "0cb40e47672638be",
       "message_id": 601,
       "outcome": "not_sent"
     },
@@ -27,14 +27,14 @@
     {
       "v": 1,
       "session_id": "live-target-frames",
-      "instance_id": "796c8c93616ae953",
+      "instance_id": "0cb40e47672638be",
       "message_id": 603,
       "outcome": "not_sent"
     },
     {
       "v": 1,
       "session_id": "live-target-frames",
-      "instance_id": "796c8c93616ae953",
+      "instance_id": "0cb40e47672638be",
       "message_id": 0,
       "outcome": "not_sent"
     }
@@ -43,7 +43,7 @@
   "oversized": {
     "v": 1,
     "session_id": "live-target-frames",
-    "instance_id": "796c8c93616ae953",
+    "instance_id": "0cb40e47672638be",
     "message_id": 0,
     "outcome": "not_sent"
   },
@@ -51,7 +51,7 @@
   "split_utf8": {
     "v": 1,
     "session_id": "live-target-frames",
-    "instance_id": "796c8c93616ae953",
+    "instance_id": "0cb40e47672638be",
     "message_id": 605,
     "outcome": "accepted"
   },
@@ -59,28 +59,28 @@
   "equal_1": {
     "v": 1,
     "session_id": "live-target-frames",
-    "instance_id": "796c8c93616ae953",
+    "instance_id": "0cb40e47672638be",
     "message_id": 606,
     "outcome": "accepted"
   },
   "equal_2": {
     "v": 1,
     "session_id": "live-target-frames",
-    "instance_id": "796c8c93616ae953",
+    "instance_id": "0cb40e47672638be",
     "message_id": 607,
     "outcome": "accepted"
   },
   "duplicate": {
     "v": 1,
     "session_id": "live-target-frames",
-    "instance_id": "796c8c93616ae953",
+    "instance_id": "0cb40e47672638be",
     "message_id": 608,
     "outcome": "accepted"
   },
   "duplicate_repeat": {
     "v": 1,
     "session_id": "live-target-frames",
-    "instance_id": "796c8c93616ae953",
+    "instance_id": "0cb40e47672638be",
     "message_id": 608,
     "outcome": "accepted"
   },

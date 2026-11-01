@@ -197,10 +197,11 @@ func removeLaunchState(dir string) error {
 		return fmt.Errorf("native launch: read runtime dir: %w", err)
 	}
 	for _, entry := range entries {
-		if !strings.HasPrefix(entry.Name(), "accepted-") {
+		name := entry.Name()
+		if !strings.HasPrefix(name, "accepted-") && !strings.HasPrefix(name, "retired-") {
 			continue
 		}
-		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !os.IsNotExist(err) {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("native launch: clear old launch state: %w", err)
 		}
 	}

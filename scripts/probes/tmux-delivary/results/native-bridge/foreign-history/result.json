@@ -3,7 +3,7 @@
   "pi": "1.4.0",
   "session_id": "live-foreign-history",
   "pi_session_id": "live-foreign-history-b",
-  "instance_id": "cc9a03e9742c0056",
+  "instance_id": "217220468dec3507",
   "endpoint_kind": "short /tmp UDS",
   "extensions": [
     "native-bridge-probe-extension.ts",

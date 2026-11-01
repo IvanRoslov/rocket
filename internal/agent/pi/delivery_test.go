@@ -304,6 +304,32 @@ func TestPiNativeLateCleanupKeepsNewEndpoint(t *testing.T) {
 }
 
 
+func TestPiNativeNewLaunchClearsRetirement(t *testing.T) {
+	installFakePi(t, "1.4.0", fakeExtensionHelp)
+	useNativeRoot(t, shortTempDir(t))
+	p := New().(*Pi)
+	spec := agent.LaunchSpec{SessionID: "sess-retired"}
+	first, err := p.PrepareNativeLaunch(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tombstone := filepath.Join(filepath.Dir(first.Endpoint), "retired-"+first.InstanceID+".marker")
+	if err := os.WriteFile(tombstone, []byte("switch\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := p.PrepareNativeLaunch(spec)
+	if err != nil {
+		t.Fatalf("PrepareNativeLaunch after retirement: %v", err)
+	}
+	if second.InstanceID == first.InstanceID {
+		t.Fatalf("new launch reused the retired instance %q", first.InstanceID)
+	}
+	if _, err := os.Stat(tombstone); !os.IsNotExist(err) {
+		t.Fatalf("new launch must clear the old retirement tombstone: %v", err)
+	}
+}
+
 func contains(args []string, want string) bool {
 	for _, arg := range args {
 		if arg == want {

@@ -48,7 +48,7 @@ python3 scripts/probes/tmux-delivary/pty_preservation_probe.py
 Дата: 1 ноября 2026. Ветка `feature/tmux-delivary/pi-bridge-cc`, коммиты `cc9bfe3`, `5220040`, `fa03bd5`, `4538d2f`, `62c5838` и обновлённый fixture.
 
 - `scripts/probes/tmux-delivary/native_bridge_probe.py` теперь запускает Pi с `--session-id`, равным ROCKET target, и после старта сверяет `ctx.sessionManager.getSessionId()` наблюдаемого процесса с этим target. Привязка проверяется по фактической истории, а не по env-строке.
-- Ограниченный прогон: `reload`, `target-frames`, `foreign-history` — PASS.
+- Ограниченный прогон: `reload`, `target-frames`, `foreign-history` — PASS. После финальных review-исправлений (retirement tombstone и строгая валидация accepted) те же три сценария перезапущены повторно — снова PASS; `/reload` не получает ложный tombstone.
 - `reload`: после `/reload` повторный запрос с тем же ID не вызвал второй API submit (`injected_count` = 1, число вызовов provider не выросло).
 - `foreign-history`: ROCKET target `live-foreign-history`, фактическая история `live-foreign-history-b`. Endpoint не создан, подключение завершилось `ENOENT`, 0 injected и 0 вызовов provider. Это прямая проверка repro из review.
 

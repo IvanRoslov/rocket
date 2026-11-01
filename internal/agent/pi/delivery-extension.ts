@@ -1,4 +1,4 @@
-import { appendFileSync, chmodSync, lstatSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
+import { appendFileSync, chmodSync, lstatSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -70,6 +70,10 @@ export function acceptedIDsPath(endpoint: string, instanceID: string): string {
 	return join(dirname(endpoint), `accepted-${instanceID}.ids`);
 }
 
+export function retiredLaunchPath(endpoint: string, instanceID: string): string {
+	return join(dirname(endpoint), `retired-${instanceID}.marker`);
+}
+
 function statePathExists(path: string): boolean {
 	try {
 		lstatSync(path);
@@ -96,6 +100,7 @@ export class DeliveryBridge {
 	private readonly log: (event: string, data?: Record<string, unknown>) => void;
 	private readonly chmod: (path: string, mode: number) => void;
 	private readonly acceptedFile: string;
+	private readonly retiredFile: string;
 	private server: net.Server | undefined;
 	private connections = new Set<net.Socket>();
 	private accepted = new Set<number>();
@@ -115,6 +120,7 @@ export class DeliveryBridge {
 		this.log = options.log ?? (() => {});
 		this.chmod = options.chmod ?? chmodSync;
 		this.acceptedFile = acceptedIDsPath(options.endpoint, options.instanceID);
+		this.retiredFile = retiredLaunchPath(options.endpoint, options.instanceID);
 	}
 
 	get listening(): boolean {
@@ -162,6 +168,12 @@ export class DeliveryBridge {
 
 	async start(): Promise<void> {
 		if (this.suppressStart || this.server?.listening) return;
+		if (statePathExists(this.retiredFile)) {
+			// The launch left its history. Returning to the same history must
+			// not resurrect it; only a new Rocket launch clears the marker.
+			this.suppressStart = true;
+			throw new Error(`native launch ${this.config.instanceID} is retired`);
+		}
 		mkdirSync(dirname(this.config.endpoint), { recursive: true, mode: 0o700 });
 		this.chmod(dirname(this.config.endpoint), 0o700);
 		try {
@@ -207,28 +219,51 @@ export class DeliveryBridge {
 	}
 
 	stop(reason = ""): void {
-		// A reload keeps this live launch and its dedupe state. Any other
-		// lifecycle end (quit/new/resume/fork/switch) must never reopen the
-		// same identity against a changed context.
-		if (reason !== "reload") this.suppressStart = true;
+		if (reason === "reload") {
+			// A reload continues the same live launch: keep the dedupe state
+			// and leave the stale path for the new module's start().
+			this.closeListener();
+			return;
+		}
+		this.retire(reason);
+	}
+
+	/**
+	 * Close acceptance while a switch is only pending. A cancelled switch
+	 * must not retire the launch or destroy its dedupe state.
+	 */
+	suspend(): void {
+		this.closeListener();
+		this.unlinkEndpoint();
+	}
+
+	private retire(reason: string): void {
+		this.suppressStart = true;
+		try {
+			writeFileSync(this.retiredFile, `${reason}\n`, { mode: 0o600 });
+			this.chmod(this.retiredFile, 0o600);
+		} catch (error) {
+			// The accepted set is still preserved, so a module that manages to
+			// reopen this launch cannot resend an admitted ID.
+			this.log("retire_error", { reason, error: String(error) });
+		}
+		this.closeListener();
+		this.unlinkEndpoint();
+	}
+
+	private closeListener(): void {
 		const server = this.server;
 		this.server = undefined;
 		if (server) server.close();
 		for (const socket of this.connections) socket.destroy();
 		this.connections.clear();
-		if (reason !== "reload") {
-			// On reload a new extension instance may already have bound the
-			// same path; leave the stale file to be replaced by its start().
-			try {
-				unlinkSync(this.config.endpoint);
-			} catch {
-				// Already gone.
-			}
-			try {
-				unlinkSync(this.acceptedFile);
-			} catch {
-				// No accepted IDs yet.
-			}
+	}
+
+	private unlinkEndpoint(): void {
+		try {
+			unlinkSync(this.config.endpoint);
+		} catch {
+			// Already gone.
 		}
 	}
 
@@ -245,10 +280,18 @@ export class DeliveryBridge {
 			}
 			return;
 		}
-		for (const line of data.split("\n")) {
-			if (line === "") continue;
-			const id = Number(line);
-			if (!Number.isSafeInteger(id) || id <= 0) {
+		if (data !== "" && !data.endsWith("\n")) {
+			throw new Error(`accepted state ${this.acceptedFile} has an unterminated record`);
+		}
+		for (const record of data.split("\n")) {
+			if (record === "") continue;
+			// Canonical decimal only: a partial append such as "4" must never
+			// fold into ID 4, and "0x10"/"007"/"+4"/"4.0" must not become IDs.
+			if (!/^[1-9][0-9]*$/.test(record)) {
+				throw new Error(`accepted state ${this.acceptedFile} is corrupt`);
+			}
+			const id = Number(record);
+			if (!Number.isSafeInteger(id)) {
 				throw new Error(`accepted state ${this.acceptedFile} is corrupt`);
 			}
 			this.accepted.add(id);
@@ -383,7 +426,7 @@ export function createDeliveryExtension(
 	api.on("session_shutdown", (event: any) => {
 		bridge.stop(String(event?.reason ?? ""));
 	});
-	api.on("session_before_switch", () => bridge.stop("switch"));
+	api.on("session_before_switch", () => bridge.suspend());
 	api.on("ui_prompt_start", () => bridge.setModal(true));
 	api.on("ui_prompt_end", () => bridge.setModal(false));
 	api.on("session_before_compact", () => bridge.setCompaction(true));
