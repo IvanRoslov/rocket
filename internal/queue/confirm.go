@@ -102,8 +102,8 @@ func (q *Queue) confirmLoop(ctx context.Context) {
 	}
 }
 
-// confirmPass walks every accepted message, grouped by recipient in id
-// order, and returns how many are still accepted afterwards.
+// confirmPass walks accepted messages and durably claimed Claude delivering
+// rows, grouped by recipient in id order, returning how many remain pending.
 func (q *Queue) confirmPass(ctx context.Context, st *confirmState) (pending int) {
 	msgs, err := q.st.ListAcceptedMessages()
 	if err != nil {

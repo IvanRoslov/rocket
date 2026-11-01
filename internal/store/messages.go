@@ -191,13 +191,15 @@ func (s *Store) SetMessageInjectAt(id int64, injectAt int64) error {
 	return nil
 }
 
-// ListAcceptedMessages returns every message in status "accepted", ordered
-// by recipient and then by id, so a confirmer can walk one recipient's
-// messages oldest-first in a single pass.
+// ListAcceptedMessages returns accepted messages and durably claimed Claude
+// delivering rows, ordered by recipient then id. Outcome persistence may fail
+// after a claim or cross its age deadline; the running confirmer must still
+// settle that ownership without ResetDelivering or another sender invocation.
+// Native and legacy delivering rows retain their existing sender-owned path.
 func (s *Store) ListAcceptedMessages() ([]Message, error) {
 	rows, err := s.db.Query(
 		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, ` + effectiveClaudeTransport + `, delivery_proof_at, delivery_proof_text
-		 FROM messages WHERE status = 'accepted' ORDER BY to_session, id`,
+		 FROM messages WHERE status = 'accepted' OR (status = 'delivering' AND (delivery_transport='claude-socket-v1' OR EXISTS(SELECT 1 FROM claude_deliveries WHERE message_id=messages.id))) ORDER BY to_session, id`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query accepted messages: %w", err)

@@ -55,3 +55,32 @@ func TestClaudeClaimAtomicMarkerAndNonzeroAttempts(t *testing.T) {
 		t.Fatalf("crash recovery requeued side effect %+v", m)
 	}
 }
+
+func TestListAcceptedIncludesClaimedClaudeOwnershipOnly(t *testing.T) {
+	for _, marker := range []string{"claude-socket-v1", "", "conflicting-transport"} {
+		t.Run(marker, func(t *testing.T) {
+			st := openTestStore(t)
+			v, id := claudeStoreFixture(t, st)
+			if ok, e := st.ClaimClaudeMessage(v); !ok || e != nil {
+				t.Fatalf("claim %v %v", ok, e)
+			}
+			if _, e := st.db.Exec(`UPDATE messages SET delivery_transport=? WHERE id=?`, marker, id); e != nil {
+				t.Fatal(e)
+			}
+			// Neither native nor legacy in-flight sends enter their accepted-only path.
+			for _, transport := range []string{"pi-uds-v1", "", "future"} {
+				if _, e := st.AddMessage(Message{ToSession: "s", Body: "unrelated", Status: "delivering", DeliveryTransport: transport}); e != nil {
+					t.Fatal(e)
+				}
+			}
+			got, e := st.ListAcceptedMessages()
+			want := "claude-socket-v1"
+			if marker == "conflicting-transport" {
+				want = "claude-snapshot-conflict"
+			}
+			if e != nil || len(got) != 1 || got[0].ID != id || got[0].Status != "delivering" || got[0].DeliveryTransport != want {
+				t.Fatalf("pending ownership: %+v %v", got, e)
+			}
+		})
+	}
+}
