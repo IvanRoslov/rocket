@@ -626,7 +626,8 @@ func TestPiDelayedTimedOutRecordDoesNotConfirmNewMessage(t *testing.T) {
 		t.Fatal("delayed timed-out A record confirmed B")
 	}
 
-	h.journal.appendRecord(ownB, bID, h.clock.now().Add(time.Second))
+	h.clock.advance(time.Second)
+	h.journal.appendRecord(ownB, bID, h.clock.now())
 	h.confirmPass()
 	b, _ := h.st.GetMessage(bID)
 	if b.Status != "delivered" {
@@ -673,5 +674,119 @@ func TestPiOldUnsignedNativeRecordStaysUnconfirmed(t *testing.T) {
 	}
 	if got := h.sender.callCount(); got != 1 {
 		t.Fatalf("sender calls after terminal failure = %d, want 1 (no resend)", got)
+	}
+}
+
+// TestPiDelayedTimedOutRecordAfterRecoverDoesNotConfirmNewMessage repeats the
+// delayed terminal-A case across Recover: after the recovery pass, A's delayed
+// signed record must still not confirm B, and only B's own record settles it.
+func TestPiDelayedTimedOutRecordAfterRecoverDoesNotConfirmNewMessage(t *testing.T) {
+	h := newCorrHarness(t)
+	h.addNativeSession(t, "native")
+	const body = "поздняя запись после Recover"
+	aID := h.addMessage(t, "sender", "native", body)
+	h.q.SetNativeSender(h.sender)
+	h.q.Wake("native")
+	corrWait(t, 5*time.Second, func() bool { return h.status(t, aID) == "accepted" }, "A accepted")
+	delayedA := h.sender.callTexts()[0]
+
+	h.clock.advance(31 * time.Minute)
+	h.confirmPass()
+	a, _ := h.st.GetMessage(aID)
+	if a.Status != "failed" || a.Reason != nativeDeliveryUnconfirmed {
+		t.Fatalf("A = %+v, want failed/%s before B is sent", a, nativeDeliveryUnconfirmed)
+	}
+
+	h.q.cfg.QueueTimeout = 0
+	bID := h.addMessage(t, "sender", "native", body)
+	h.q.Wake("native")
+	corrWait(t, 5*time.Second, func() bool { return h.status(t, bID) == "accepted" }, "B accepted")
+	ownB := h.sender.callTexts()[1]
+
+	h.q.Recover(h.ctx)
+	h.journal.appendRecord(delayedA, aID, h.clock.now())
+	h.confirmPass()
+	if got := h.status(t, bID); got == "delivered" {
+		t.Fatal("delayed timed-out A record confirmed B after Recover")
+	}
+
+	h.clock.advance(time.Second)
+	h.journal.appendRecord(ownB, bID, h.clock.now())
+	h.confirmPass()
+	b, _ := h.st.GetMessage(bID)
+	if b.Status != "delivered" {
+		t.Fatalf("B status = %q, want delivered by its own record", b.Status)
+	}
+	if reopened, _ := h.st.GetMessage(aID); reopened.Status != "failed" {
+		t.Fatalf("terminal A was reopened after Recover: %+v", reopened)
+	}
+	if got := h.sender.callCount(); got != 2 {
+		t.Fatalf("sender calls = %d, want 2 (no resend)", got)
+	}
+}
+
+// TestPiOldUnsignedPersistedNativeRowStaysUnconfirmed claims a persisted
+// native row exactly like the old sender would have left it, writes the old
+// bare record after the boundary, and recovers it under the new confirmer.
+// The bare record must never prove the signed message; the positive control
+// with the exact signed record must still be delivered, so a disabled scan
+// cannot make the negative case pass.
+func TestPiOldUnsignedPersistedNativeRowStaysUnconfirmed(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		signed bool
+	}{
+		{name: "old unsigned record is rejected"},
+		{name: "positive signed record control", signed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newCorrHarness(t)
+			h.addNativeSession(t, "native")
+			const body = "старая сохранённая подача"
+			id := h.addMessage(t, "sender", "native", body)
+			msg, _ := h.st.GetMessage(id)
+			injectAt := h.clock.now()
+			if ok, err := h.st.ClaimNativeMessage(id, NativeTransportPiUDS, injectAt.UnixMilli()); err != nil || !ok {
+				t.Fatalf("ClaimNativeMessage = %v, %v", ok, err)
+			}
+
+			h.clock.advance(time.Second)
+			recordText := formatBody(msg)
+			if tc.signed {
+				recordText = nativePiEnvelope(id, formatBody(msg))
+			}
+			recordAt := h.clock.now()
+			h.journal.appendRecord(recordText, id, recordAt)
+
+			h.q.Recover(h.ctx)
+			if got := h.status(t, id); got != "accepted" {
+				t.Fatalf("status after Recover = %q, want accepted under confirmation", got)
+			}
+			h.confirmPass()
+
+			if tc.signed {
+				got, _ := h.st.GetMessage(id)
+				if got.Status != "delivered" || got.DeliveryProofAt != recordAt.UnixNano() {
+					t.Fatalf("signed control = %+v, want delivered by its own record", got)
+				}
+				return
+			}
+
+			if got := h.status(t, id); got == "delivered" {
+				t.Fatal("old unsigned record confirmed the persisted native row")
+			}
+			h.clock.advance(31 * time.Minute)
+			h.confirmPass()
+			got, _ := h.st.GetMessage(id)
+			if got.Status != "failed" || got.Reason != nativeDeliveryUnconfirmed {
+				t.Fatalf("message = %+v, want failed/%s", got, nativeDeliveryUnconfirmed)
+			}
+			if got.DeliveryProofAt != 0 || got.DeliveryProofText != "" {
+				t.Fatalf("old bare record stored as proof: %+v", got)
+			}
+			if h.sender.callCount() != 0 {
+				t.Fatalf("sender calls = %d, want 0 (no resend)", h.sender.callCount())
+			}
+		})
 	}
 }
