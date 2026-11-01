@@ -1,0 +1,13 @@
+{
+  "source": "one bounded automated cursor probe, selected fields only",
+  "codexVersion": "codex-cli 0.160.0",
+  "threadId": "01a1945f-c635-7510-9ad4-acc92c035972",
+  "turnId": "01a1945f-ce5d-7c20-b6b2-311646ffee78",
+  "waitTimeoutSeconds": 120,
+  "observerError": "turn 01a1945f-ce5d-7c20-b6b2-311646ffee78 did not complete",
+  "renderedTui": {
+    "agentText": "PROBE_READY",
+    "workedSeconds": 2
+  },
+  "conclusion": "The turn completed, but the automated observer did not receive turn/completed. This is not evidence of a pending model turn. The probe stopped before the cursor baseline, so mid-line cursor preservation remains unverified."
+}

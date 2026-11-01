@@ -1,0 +1,15 @@
+{
+  "source": "rendered tui-busy3.log, selected lines only",
+  "cursor": {
+    "x": 18,
+    "y": 37
+  },
+  "draft": "busy3-черновик-ε",
+  "visibleMarkers": [
+    "TUI_THREAD_H",
+    "BUSY_DONE_F",
+    "BUSY_G_OK",
+    "RESTART_I_OK"
+  ],
+  "interpretation": "The 16-character draft plus the two-cell prompt offset ends at x=18, so the final frame shows the cursor at end-of-input. No BEFORE mid-line frame exists."
+}

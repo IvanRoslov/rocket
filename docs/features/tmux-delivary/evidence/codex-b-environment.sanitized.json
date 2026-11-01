@@ -1,0 +1,11 @@
+{
+  "source": "isolated Codex server B, selected fields only",
+  "threadId": "01a19405-7c6a-7562-b596-d460a3e6cfe1",
+  "turnId": "01a19405-7d12-7cb0-b1db-8180b63ddae0",
+  "cliVersion": "0.160.0",
+  "status": "completed",
+  "startedAt": 1793484750,
+  "completedAt": 1793484763,
+  "agentText": "SESSION_B_OK",
+  "shellOutput": "ROCKET_SESSION_ID=rocket-5907-b\nROCKET_SOCKET=/tmp/rocket-5907-b.sock\n"
+}
