@@ -77,7 +77,8 @@ type Monitor struct {
 	quizMiss map[string]int
 	// inputWaitMiss counts consecutive sweeps that saw no prompt on the
 	// pane of a session claiming waiting_input — see correctStaleInputWait.
-	inputWaitMiss map[string]int
+	inputWaitMiss  map[string]int
+	claudeWaitMiss map[string]claudeWaitCounter
 	// permMiss counts consecutive sweeps that saw no permission dialog on
 	// the pane of a session holding a permission quiz — see pollPermission.
 	permMiss map[string]int
@@ -247,6 +248,11 @@ func (m *Monitor) sweep(ctx context.Context) {
 	for id := range m.quizMiss {
 		if !sessionIDs[id] {
 			delete(m.quizMiss, id)
+		}
+	}
+	for id := range m.claudeWaitMiss {
+		if !sessionIDs[id] {
+			delete(m.claudeWaitMiss, id)
 		}
 	}
 	for id := range m.inputWaitMiss {

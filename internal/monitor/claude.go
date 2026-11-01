@@ -5,7 +5,7 @@ import (
 	"github.com/IvanRoslov/rocket/internal/activity"
 	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/claudeinstance"
-	"github.com/IvanRoslov/rocket/internal/socketmsg"
+	"github.com/IvanRoslov/rocket/internal/runtime"
 	"github.com/IvanRoslov/rocket/internal/store"
 	"path/filepath"
 	"time"
@@ -23,7 +23,7 @@ func (m *Monitor) resolveClaude(ctx context.Context, sess store.Session) claudei
 	if e != nil {
 		return claudeinstance.Resolution{State: claudeinstance.Unknown, Reason: "unproven_launch"}
 	}
-	all, e := socketmsg.ListSessions(m.claudeSessionsDir)
+	all, e := claudeinstance.ReadRegistry(ctx, m.claudeSessionsDir)
 	if e != nil {
 		return claudeinstance.Resolution{State: claudeinstance.Unknown, Reason: "registry_lookup"}
 	}
@@ -53,6 +53,15 @@ func (m *Monitor) PushClaudeUpdate(ctx context.Context, sessionID string, state 
 	next := string(state)
 	if state == activity.Exited {
 		next = ""
+	} else {
+		// A root Stop also follows an API-error turn. Qualified hook metadata
+		// cannot bypass the exact journal's genuine block. Uncertain/older
+		// evidence likewise cannot clear an already established block.
+		journal, at, journalErr := claudeJournalActivity(ctx, r.Identity)
+		if (journalErr == nil && journal == activity.Blocked) ||
+			(sess.Activity == "blocked" && (journalErr != nil || !at.After(time.Unix(sess.ActivityTS, 0)))) {
+			next = "blocked"
+		}
 	} // SessionEnd != OS death.
 	ok, e := m.st.AcceptClaudeHook(sessionID, event.LaunchGeneration, event.At, next, event.At/int64(time.Second))
 	if e != nil || !ok {
@@ -95,7 +104,7 @@ func (m *Monitor) pollClaudeSession(ctx context.Context, sess store.Session, a a
 	}
 	state, ts, e := claudeJournalActivity(ctx, r.Identity)
 	if e != nil {
-		if sess.Activity != "blocked" {
+		if sess.Activity != "blocked" && sess.Activity != "waiting_input" {
 			m.applyClaude(sess, l.Generation, "", time.Now(), "claude-journal-uncertain")
 		}
 		return
@@ -115,5 +124,58 @@ func (m *Monitor) pollClaudeSession(ctx context.Context, sess store.Session, a a
 	if r.State != claudeinstance.Verified && state != activity.Blocked {
 		return
 	}
+	if sess.Activity == string(activity.WaitingInput) && state != activity.Blocked {
+		// A qualified Notification is a suspicion until the pane has been
+		// prompt-free for two sweeps. Quiz/capture uncertainty retains it.
+		if !m.clearClaudeWait(ctx, sess, l.Generation) {
+			return
+		}
+		if now := time.Now(); now.After(ts) {
+			ts = now
+		}
+	} else {
+		m.mu.Lock()
+		delete(m.claudeWaitMiss, sess.ID)
+		m.mu.Unlock()
+	}
 	m.applyClaude(sess, l.Generation, state, ts, "claude-journal-poll")
+}
+
+// A generation travels with the miss count, so a delayed G1 capture can never
+// contribute to G2's correction, even when replacement races with Capture.
+type claudeWaitCounter struct {
+	generation string
+	misses     int
+}
+
+func (m *Monitor) clearClaudeWait(ctx context.Context, sess store.Session, generation string) bool {
+	reset := func() { m.mu.Lock(); delete(m.claudeWaitMiss, sess.ID); m.mu.Unlock() }
+	if sess.PendingQuiz != "" {
+		reset()
+		return false
+	}
+	out, e := m.rt.Capture(ctx, runtime.Handle{Name: sess.TmuxName}, inputWaitCaptureLines)
+	if e != nil {
+		return false
+	}
+	if runtime.LooksLikeInputWait(out) {
+		reset()
+		return false
+	}
+	current, _, e := m.st.GetClaudeLaunch(sess.ID)
+	if e != nil || current.Generation != generation {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.claudeWaitMiss == nil {
+		m.claudeWaitMiss = make(map[string]claudeWaitCounter)
+	}
+	count := m.claudeWaitMiss[sess.ID]
+	if count.generation != generation {
+		count = claudeWaitCounter{generation: generation}
+	}
+	count.misses++
+	m.claudeWaitMiss[sess.ID] = count
+	return count.misses >= inputWaitMissThreshold
 }

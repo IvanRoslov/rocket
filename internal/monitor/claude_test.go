@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/IvanRoslov/rocket/internal/activity"
 	"github.com/IvanRoslov/rocket/internal/agent"
+	"github.com/IvanRoslov/rocket/internal/agent/claudecode"
+	"github.com/IvanRoslov/rocket/internal/agent/deepseek"
 	"github.com/IvanRoslov/rocket/internal/claudeinstance"
+	"github.com/IvanRoslov/rocket/internal/runtime"
 	"github.com/IvanRoslov/rocket/internal/socketmsg"
 	"github.com/IvanRoslov/rocket/internal/store"
 	"os"
@@ -168,5 +172,135 @@ func TestForeignBlockedCannotOverrideExactLiveActivity(t *testing.T) {
 				t.Fatalf("foreign blocked overrode root: %+v", got)
 			}
 		})
+	}
+}
+
+func TestClaudeRealAdaptersHaveNoGenericFailureOrStartupConsumer(t *testing.T) {
+	for _, a := range []agent.Agent{claudecode.New(), deepseek.New()} {
+		if _, ok := a.(agent.TurnFailureReporter); ok {
+			t.Fatalf("%s now needs exact-journal failure integration", a.Name())
+		}
+		if _, ok := a.(agent.StartupProber); ok {
+			t.Fatalf("%s now needs exact-journal startup integration", a.Name())
+		}
+	}
+}
+
+func TestClaudeQualifiedWaitRetainsPromptQuizAndUncertainty(t *testing.T) {
+	for _, which := range []string{"prompt", "quiz", "capture error", "two misses"} {
+		t.Run(which, func(t *testing.T) {
+			m, st, _, event := claudeMonitorFixture(t)
+			rt := &quizFakeRuntime{fakeRuntime: fakeRuntime{names: []string{"s"}}, captureOut: plainComposerTail}
+			m.rt = rt
+			if which == "prompt" {
+				rt.captureOut = permissionPromptTail
+			}
+			if which == "capture error" {
+				rt.captureErr = errors.New("unavailable")
+			}
+			event.HookEventName = "Notification"
+			m.PushClaudeUpdate(context.Background(), "s", activity.WaitingInput, event)
+			if which == "quiz" {
+				st.SetPendingQuiz("s", "pending")
+			}
+			for pass := 0; pass < 2; pass++ {
+				sess, _ := st.GetSession("s")
+				m.pollSession(context.Background(), sess, map[string]bool{"s": true}, true)
+				got, _ := st.GetSession("s")
+				want := "waiting_input"
+				if which == "two misses" && pass == 1 {
+					want = "active"
+				}
+				if got.Activity != want {
+					t.Fatalf("pass %d activity=%s want=%s", pass, got.Activity, want)
+				}
+			}
+		})
+	}
+}
+
+type claudeCaptureCallback struct {
+	*quizFakeRuntime
+	capture func()
+}
+
+func (r *claudeCaptureCallback) Capture(ctx context.Context, h runtime.Handle, lines int) (string, error) {
+	if r.capture != nil {
+		r.capture()
+	}
+	return r.quizFakeRuntime.Capture(ctx, h, lines)
+}
+func TestClaudeWaitMissesCannotCrossGenerationOrApplyStaleCapture(t *testing.T) {
+	for _, race := range []bool{false, true} {
+		t.Run(fmt.Sprint(race), func(t *testing.T) {
+			m, st, _, event := claudeMonitorFixture(t)
+			rt := &claudeCaptureCallback{quizFakeRuntime: &quizFakeRuntime{captureOut: plainComposerTail}}
+			m.rt = rt
+			event.HookEventName = "Notification"
+			m.PushClaudeUpdate(context.Background(), "s", activity.WaitingInput, event)
+			poll := func() {
+				sess, _ := st.GetSession("s")
+				m.pollSession(context.Background(), sess, map[string]bool{"s": true}, true)
+			}
+			poll() // one G1 miss
+			l, id, _ := st.GetClaudeLaunch("s")
+			replace := func() {
+				l.Generation = "g2"
+				if e := st.PutClaudeLaunch(l); e != nil {
+					t.Fatal(e)
+				}
+				id.LaunchGeneration = "g2"
+				if ok, e := st.BindClaudeIdentity(*id); !ok || e != nil {
+					t.Fatalf("bind %v %v", ok, e)
+				}
+				if ok, e := st.AcceptClaudeHook("s", "g2", time.Now().UnixNano(), "waiting_input", time.Now().Unix()); !ok || e != nil {
+					t.Fatalf("wait %v %v", ok, e)
+				}
+			}
+			if race {
+				rt.capture = func() { rt.capture = nil; replace() }
+				poll()
+			} else {
+				replace()
+			}
+			poll() // first G2 miss must not combine with G1
+			got, _ := st.GetSession("s")
+			if got.Activity != "waiting_input" {
+				t.Fatalf("G1 capture/miss cleared G2: %+v", got)
+			}
+			poll() // second G2 miss permits stale wait correction
+			got, _ = st.GetSession("s")
+			if got.Activity != "active" {
+				t.Fatalf("G2 misses failed to clear stale wait: %+v", got)
+			}
+		})
+	}
+}
+
+func TestClaudeOlderExactReadyCanReplaceLegacyExitHint(t *testing.T) {
+	m, st, _, _ := claudeMonitorFixture(t)
+	_, id, _ := st.GetClaudeLaunch("s")
+	raw := `{"sessionId":"` + id.ClaudeSessionID + `","type":"assistant","timestamp":"` + time.Now().Add(-time.Minute).Format(time.RFC3339Nano) + `"}` + "\n"
+	os.WriteFile(id.JournalPath, []byte(raw), 0600)
+	st.UpdateSessionActivity("s", "exited", time.Now().Unix())
+	m.cache["s"] = activity.Exited
+	sess, _ := st.GetSession("s")
+	m.pollSession(context.Background(), sess, map[string]bool{"s": true}, true)
+	got, _ := st.GetSession("s")
+	if got.Activity != "ready" && got.Activity != "idle" {
+		t.Fatalf("unqualified newer exit blocked exact ready: %+v", got)
+	}
+}
+func TestClaudeQualifiedStopCannotClearExactAPIErrorBlock(t *testing.T) {
+	m, st, _, event := claudeMonitorFixture(t)
+	_, id, _ := st.GetClaudeLaunch("s")
+	raw := `{"sessionId":"` + id.ClaudeSessionID + `","type":"assistant","isApiErrorMessage":true,"timestamp":"` + time.Now().Add(-time.Minute).Format(time.RFC3339Nano) + `"}` + "\n"
+	os.WriteFile(id.JournalPath, []byte(raw), 0600)
+	st.UpdateSessionActivity("s", "blocked", time.Now().Add(-time.Minute).Unix())
+	event.HookEventName = "Stop"
+	m.PushClaudeUpdate(context.Background(), "s", activity.Ready, event)
+	got, _ := st.GetSession("s")
+	if got.Activity != "blocked" {
+		t.Fatalf("API-error Stop bypassed genuine blocked: %+v", got)
 	}
 }

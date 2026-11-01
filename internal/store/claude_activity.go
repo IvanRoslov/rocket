@@ -36,7 +36,7 @@ func (s *Store) ApplyClaudeActivity(sessionID, generation, state string, activit
 	}
 	res, e := s.db.Exec(`UPDATE sessions SET activity=?,activity_ts=? WHERE id=?
  AND ((?<>'' AND EXISTS(SELECT 1 FROM claude_launches WHERE session_id=? AND generation=?)) OR (?='' AND NOT EXISTS(SELECT 1 FROM claude_launches WHERE session_id=?)))
- AND (activity_ts IS NULL OR activity_ts<=? OR ?='exited' OR (?='' AND activity='exited'))`, nullIfEmpty(state), nullIfZero(activityTS), sessionID, generation, sessionID, generation, generation, sessionID, activityTS, state, state)
+ AND (activity_ts IS NULL OR activity_ts<=? OR ?='exited' OR activity IS NULL OR activity='' OR activity='exited')`, nullIfEmpty(state), nullIfZero(activityTS), sessionID, generation, sessionID, generation, generation, sessionID, activityTS, state, state)
 	if e != nil {
 		return false, e
 	}

@@ -75,7 +75,7 @@ func (s *ClaudeSocketSender) Resolve(ctx context.Context, sess store.Session) cl
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	registry, e := socketmsg.ListSessions(s.sessionsDir)
+	registry, e := claudeinstance.ReadRegistry(ctx, s.sessionsDir)
 	if e != nil {
 		return claudeinstance.Resolution{State: claudeinstance.Unknown, Reason: "registry_lookup"}
 	}
