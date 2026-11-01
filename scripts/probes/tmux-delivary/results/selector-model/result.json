@@ -1,0 +1,135 @@
+{
+  "scenario": "selector-model",
+  "pi": "1.4.0",
+  "selector": "stock built-in model selector (showModelSelector via showSelector, Ctrl+L)",
+  "selector_marker": "Only showing models from configured providers",
+  "draft": "Первая строка черновика\nВторая строка с курсором",
+  "before": {
+    "ok": true,
+    "text": "Первая строка черновика\nВторая строка с курсором",
+    "lines": [
+      "Первая строка черновика",
+      "Вторая строка с курсором"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 21,
+    "idle": true,
+    "model": "probe/deterministic",
+    "editorInputCount": 52,
+    "editorLastInput": "\u001b[D",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0
+  },
+  "selector_open": {
+    "ok": true,
+    "text": "Первая строка черновика\nВторая строка с курсором",
+    "lines": [
+      "Первая строка черновика",
+      "Вторая строка с курсором"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 21,
+    "idle": true,
+    "model": "probe/deterministic",
+    "editorInputCount": 53,
+    "editorLastInput": "\f",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0
+  },
+  "after_send": {
+    "ok": true,
+    "text": "Первая строка черновика\nВторая строка с курсором",
+    "lines": [
+      "Первая строка черновика",
+      "Вторая строка с курсором"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 21,
+    "idle": false,
+    "model": "probe/deterministic",
+    "editorInputCount": 53,
+    "editorLastInput": "\f",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0
+  },
+  "after_settled": {
+    "ok": true,
+    "text": "Первая строка черновика\nВторая строка с курсором",
+    "lines": [
+      "Первая строка черновика",
+      "Вторая строка с курсором"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 21,
+    "idle": true,
+    "model": "probe/deterministic",
+    "editorInputCount": 53,
+    "editorLastInput": "\f",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0
+  },
+  "after_search_typing": {
+    "ok": true,
+    "text": "Первая строка черновика\nВторая строка с курсором",
+    "lines": [
+      "Первая строка черновика",
+      "Вторая строка с курсором"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 21,
+    "idle": true,
+    "model": "probe/deterministic",
+    "editorInputCount": 53,
+    "editorLastInput": "\f",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0
+  },
+  "after_escape": {
+    "ok": true,
+    "text": "Первая строка черновика\nВторая строка с курсором",
+    "lines": [
+      "Первая строка черновика",
+      "Вторая строка с курсором"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 21,
+    "idle": true,
+    "model": "probe/deterministic",
+    "editorInputCount": 53,
+    "editorLastInput": "\f",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0
+  },
+  "after_editor_typing": {
+    "ok": true,
+    "text": "Первая строка черновика\nВторая строка с курсо!ром",
+    "lines": [
+      "Первая строка черновика",
+      "Вторая строка с курсо!ром"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 22,
+    "idle": true,
+    "model": "probe/deterministic",
+    "editorInputCount": 54,
+    "editorLastInput": "!",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0
+  },
+  "expected_lines_after_typing": [
+    "Первая строка черновика",
+    "Вторая строка с курсо!ром"
+  ],
+  "provider_calls": 1,
+  "ui_prompt_events": 0,
+  "model_select_events": 0,
+  "injected_message_id": "e6b70fb8",
+  "injected_transcript_count": 1,
+  "screen_evidence": [
+    "Only showing models from configured providers. Use /login to add providers. > → ✓ deterministic [probe]",
+    "Model catalogs refreshed. ✓ deterministic [probe] → secondary [probe] Model Name: Secondary deterministic probe Внешнее сообщение при открытом селекторе",
+    "> zz No matching models",
+    "Вторая строка с курсо!ром"
+  ],
+  "status": "PASS"
+}
