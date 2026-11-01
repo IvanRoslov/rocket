@@ -16,7 +16,7 @@
   "b": {
     "rocket_id": 2,
     "status": "delivered",
-    "proof_at": 1793562563860000000,
+    "proof_at": 1793563194593000000,
     "api_calls": 1,
     "sender_invocations": 1,
     "user_records": 1
@@ -31,6 +31,9 @@
   },
   "tmux_calls": 0,
   "body_unchanged": true,
-  "note": "First run showed B delivered while A stayed accepted with no proof; after the test-only +31m clock offset and a normal confirmer wake, A became failed/native_delivery_unconfirmed with no resend. Private temp paths and raw PTY/logs are not committed. Final rerun used a synchronized test clock; -race passed with the same counters.",
-  "race": "PASS (ROCKET_PI_STOCK_E2E=1 go test -race ...)"
+  "note": "First run showed B delivered while A stayed accepted with no proof; after the test-only +31m clock offset and a normal confirmer wake, A became failed/native_delivery_unconfirmed with no resend. Private temp paths and raw PTY/logs are not committed. Final rerun used a synchronized test clock; -race passed with the same counters. Final runs: normal and opt-in -race PASS after the common-group cleanup change; Queue.Run joined in test cleanup (public API does not expose the confirm-loop join).",
+  "race": "PASS (ROCKET_PI_STOCK_E2E=1 go test -race ...)",
+  "cleanup": "PASS: TestPiStockFixtureEarlyFailureCleansOwnedGroup (pre-ready synthetic failure; temp dir removed, owned group gone, Python reaped)",
+  "process_group": "fixture and Pi share the fixture-owned process group; Go cleanup is EOF -> TERM group -> KILL group with a single Wait; no bare-PID kill",
+  "uds_count": "derived: one dial/write per measured NativeSender invocation (nativeinput.Send invariant), not independently observed"
 }

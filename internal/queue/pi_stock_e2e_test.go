@@ -9,6 +9,8 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,7 +44,37 @@ type piStockFixture struct {
 	PiPID      int    `json:"pi_pid"`
 }
 
-func startPiStockFixture(t *testing.T) piStockFixture {
+// piStockBuffer is a concurrency-safe stderr sink: the fixture can write while
+// an early failure path reads the collected output.
+type piStockBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (w *piStockBuffer) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.b.Write(p)
+}
+
+func (w *piStockBuffer) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.b.String()
+}
+
+func piStockWaitExit(ch <-chan error, timeout time.Duration) bool {
+	select {
+	case <-ch:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+// piStockFixtureCommand prepares the owned fixture command. Go creates its own
+// process group; the fixture keeps Pi in that same group.
+func piStockFixtureCommand(t *testing.T, extraEnv ...string) (*exec.Cmd, io.WriteCloser, *piStockBuffer) {
 	t.Helper()
 	python, err := exec.LookPath("python3")
 	if err != nil {
@@ -57,19 +89,47 @@ func startPiStockFixture(t *testing.T) piStockFixture {
 	}
 	cmd := exec.Command(python, fixture)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
+	stderr := &piStockBuffer{}
+	cmd.Stderr = stderr
+	return cmd, stdin, stderr
+}
+
+func startPiStockFixture(t *testing.T) piStockFixture {
+	t.Helper()
+	cmd, stdin, stderr := piStockFixtureCommand(t)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start stock E2E fixture: %v", err)
 	}
+
+	// Owned-group cleanup and reaping are registered immediately: every early
+	// error path (timeout, malformed announcement) runs this before the test
+	// ends. Graceful EOF/TERM first, owned-group SIGKILL only as fallback.
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
+	t.Cleanup(func() {
+		_ = stdin.Close()
+		if !piStockWaitExit(waitCh, 5*time.Second) {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+			if !piStockWaitExit(waitCh, 5*time.Second) {
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				<-waitCh
+			}
+		}
+		if t.Failed() {
+			t.Logf("fixture stderr: %s", stderr.String())
+		}
+	})
 
 	type lineResult struct {
 		line string
@@ -84,43 +144,20 @@ func startPiStockFixture(t *testing.T) piStockFixture {
 	select {
 	case result := <-lineCh:
 		if result.err != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 			t.Fatalf("fixture did not announce readiness: %v; stderr: %s", result.err, stderr.String())
 		}
 		line = result.line
 	case <-time.After(30 * time.Second):
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		t.Fatalf("fixture readiness timed out; stderr: %s", stderr.String())
 	}
 	var info piStockFixture
 	if err := json.Unmarshal([]byte(line), &info); err != nil {
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		t.Fatalf("decode fixture announcement: %v (%q)", err, line)
 	}
 	if info.PiVersion != "1.4.0" || info.AgentHome == "" || info.Cwd == "" || info.SessionID == "" ||
 		info.InstanceID == "" || info.Endpoint == "" || info.InputLog == "" || info.PiPID <= 0 {
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		t.Fatalf("incomplete fixture identity: %+v", info)
 	}
-
-	t.Cleanup(func() {
-		_ = stdin.Close()
-		done := make(chan struct{})
-		go func() {
-			_ = cmd.Wait()
-			close(done)
-		}()
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			_ = syscall.Kill(info.PiPID, syscall.SIGKILL)
-			<-done
-		}
-		if t.Failed() {
-			t.Logf("fixture stderr: %s", stderr.String())
-		}
-	})
 	return info
 }
 
@@ -396,6 +433,7 @@ func TestPiNativeQueueStockE2E(t *testing.T) {
 	q.SetNativeSender(sender)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan struct{})
 	t.Cleanup(func() {
 		cancel()
 		piStockWait(t, 5*time.Second, func() bool {
@@ -403,6 +441,14 @@ func TestPiNativeQueueStockE2E(t *testing.T) {
 			defer q.mu.Unlock()
 			return len(q.workers) == 0
 		}, "delivery workers to exit")
+		// Join the public Run loop. The confirm-loop goroutine it spawns exits
+		// on the same cancellation; the public API does not expose its join, so
+		// this test does not claim one.
+		select {
+		case <-runDone:
+		case <-time.After(5 * time.Second):
+			t.Logf("Queue.Run did not return within the cleanup window")
+		}
 	})
 
 	if err := st.AddSession(store.Session{
@@ -416,7 +462,10 @@ func TestPiNativeQueueStockE2E(t *testing.T) {
 	testClock := &piStockClock{}
 	q.now = testClock.now
 	q.Recover(ctx)
-	go q.Run(ctx)
+	go func() {
+		q.Run(ctx)
+		close(runDone)
+	}()
 
 	const body = "E2E одинаковый исходный Body"
 	aID, err := st.AddMessage(store.Message{FromSession: "e2e-sender", ToSession: info.SessionID, Body: body})
@@ -520,4 +569,58 @@ func TestPiNativeQueueStockE2E(t *testing.T) {
 		info.PiVersion, aID, terminalA.Status, bID, piStockStatus(t, st, bID), bMsg.DeliveryProofAt,
 		sender.counts(), apiA, apiB, handled, continued,
 		piStockCount(records, piStockNormalize(envelopeA)), piStockCount(records, piStockNormalize(envelopeB)), rt.tmuxCalls())
+}
+
+// TestPiStockFixtureEarlyFailureCleansOwnedGroup exercises the fixture's
+// pre-ready failure path: Pi is spawned, the fixture fails before readiness,
+// and its finally must remove the temp dir, stop the owned child and be
+// reaped by Wait. Opt-in only because it needs the installed stock Pi.
+func TestPiStockFixtureEarlyFailureCleansOwnedGroup(t *testing.T) {
+	if os.Getenv(piStockE2EEnv) != "1" {
+		t.Skip("set " + piStockE2EEnv + "=1 to run the fixture cleanup regression")
+	}
+	cmd, stdin, stderr := piStockFixtureCommand(t, "PI_QUEUE_E2E_FAIL_AFTER_SPAWN=1")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start fixture: %v", err)
+	}
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
+	select {
+	case err := <-waitCh:
+		if err == nil {
+			t.Fatalf("fixture exited 0, want the synthetic pre-ready failure")
+		}
+	case <-time.After(30 * time.Second):
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		<-waitCh
+		t.Fatalf("fixture did not fail within the bounded window; stderr: %s", stderr.String())
+	}
+	_ = stdin.Close()
+
+	var marker struct {
+		FixtureDir string `json:"fixture_dir"`
+		PiPID      int    `json:"pi_pid"`
+	}
+	found := false
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if json.Unmarshal([]byte(line), &marker) == nil && marker.FixtureDir != "" && marker.PiPID > 0 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing early-failure marker; stderr: %s", stderr.String())
+	}
+	if _, err := os.Stat(marker.FixtureDir); !os.IsNotExist(err) {
+		t.Fatalf("fixture temp dir not cleaned: %v", err)
+	}
+	if err := syscall.Kill(marker.PiPID, 0); err == nil {
+		t.Fatalf("Pi child %d is still alive", marker.PiPID)
+	} else if !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("Pi liveness check: %v", err)
+	}
+	if err := syscall.Kill(-cmd.Process.Pid, 0); err == nil {
+		t.Fatalf("owned fixture process group is still alive")
+	} else if !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("fixture group liveness check: %v", err)
+	}
 }

@@ -16,8 +16,8 @@ SHA-256 проверенных blobs:
 | `internal/queue/pi_envelope.go` | `374849eabc2cb2d4a01e9f2df81484553a34aae14d5fb801a1ea3d026e9edc52` |
 | `internal/queue/pi_equal_text_correlation_test.go` | `461345fcad4f6d9b5568caec648f39245e3ac944a36fdd5c641a9012c6dfd25f` |
 | `internal/queue/pi_envelope_test.go` | `5c3b7b228b17908b05e53a18c0abfffa431f38ecf78b7c47cf6c2c125fbfa34e` |
-| `internal/queue/pi_stock_e2e_test.go` | `c31bc75b974a6d9969524710ec66edeaf4ea30d4f6b82f2f5cef03eb22ec8363` |
-| `scripts/probes/tmux-delivary/pi_queue_e2e_fixture.py` | `4a039f6c78e6f6fd5c12c065c4f267140739f915d4c77dfaa85f81acb6ecb55a` |
+| `internal/queue/pi_stock_e2e_test.go` | `2a60d701a67cc5ed0bee1019a8adbbe3d29ba0639e76278c6c24b58e320e6b53` |
+| `scripts/probes/tmux-delivary/pi_queue_e2e_fixture.py` | `4e14a783023befc8be3ec95f6d6642f1ce113a2b296b7699d6090be2cbd8f160` |
 | `scripts/probes/tmux-delivary/native_bridge_probe.py` | `99de8bb1f4efcd7486b5567d3465a1fa83c81d46d5d62e73318ebf7ea0d99150` |
 | `scripts/probes/tmux-delivary/input-handled-extension.ts` | `29227bf1ce0e1d3e8d0a2040d6d4ec4c3186174fbe0a5e6201211acbc4802ee4` |
 | `scripts/probes/tmux-delivary/native-bridge-probe-extension.ts` | `7a497a2aa7fc6fb45f4fc957e60283082eafdca5af1b16666b463fe99df4a2b3` |
@@ -26,7 +26,7 @@ SHA-256 проверенных blobs:
 ## Точные команды harness
 
 ```bash
-node --experimental-strip-types --test internal/agent/pi/delivery-extension.test.ts   # 29/29 PASS
+node --experimental-strip-types --test internal/agent/pi/delivery-extension.test.ts   # 31/31 PASS (compaction table included)
 go test ./internal/agent/pi -count=1                                                  # PASS
 go test ./internal/agent/pi ./internal/session ./internal/queue ./internal/nativeinput -count=1
 go test -race ./internal/agent/pi ./internal/queue ./internal/nativeinput
@@ -37,6 +37,7 @@ python3 scripts/probes/tmux-delivary/native_bridge_probe.py --all
 
 # Сквозной queue -> stock Pi (opt-in; без флага обычный suite только SKIP этого теста)
 ROCKET_PI_STOCK_E2E=1 go test -count=1 -timeout=90s ./internal/queue -run ^TestPiNativeQueueStockE2E$
+ROCKET_PI_STOCK_E2E=1 go test -count=1 -timeout=90s ./internal/queue -run ^TestPiStockFixtureEarlyFailureCleansOwnedGroup$
 ```
 
 ## Матрица: current evidence
@@ -57,7 +58,9 @@ ROCKET_PI_STOCK_E2E=1 go test -count=1 -timeout=90s ./internal/queue -run ^TestP
 | `foreign-history` | endpoint отсутствует, 0 injected/0 provider, observed session B |
 | `handled-input` (отдельно) | 1 handled + 1 continued, 1 user record, provider 1 |
 
-Сквозной queue→Pi: PASS, A `failed/native_delivery_unconfirmed` после test-only +31m offset, B `delivered` своей записью; sender 1/ID, API 1/ID, records A0/B1, tmux 0. Evidence: `results/native-bridge/pi-stock-e2e/result.json`.
+Сквозной queue→Pi: PASS (normal и opt-in `-race`), A `failed/native_delivery_unconfirmed` после test-only +31m offset, B `delivered` своей записью; sender 1/ID, API 1/ID, records A0/B1, tmux 0. UDS count — derived: один dial/write на измеренный Sender invocation, не независимо наблюдаемый. Fixture и Pi в одной fixture-owned process group; pre-ready cleanup regression PASS (temp dir удалён, group gone, Python reaped); Queue.Run joined в cleanup (join confirm-loop публичный API не обещает). Evidence: `results/native-bridge/pi-stock-e2e/result.json`.
+
+Compaction: deterministic FakeApi-таблица (before/after success/failure/cancellation/deferred+duplicate), exact outcomes/API counts, 31/31 Node. Stock live compaction на локальном provider не запускался — unknown/limit.
 
 ## Остаточные ограничения
 
@@ -74,7 +77,7 @@ ROCKET_PI_STOCK_E2E=1 go test -count=1 -timeout=90s ./internal/queue -run ^TestP
 - `{action:"handled"}` — доказанный no-record witness; брошенная ошибка input-handler'а Pi ловится и продолжается, отсутствие записи не доказывает.
 
 **Compaction**
-- Guard на `session_before_compact`/`session_compact`/`session_compact_failed`; отдельного fake-vs-live разбора интервалов в текущей матрице нет.
+- Guard на `session_before_compact`/`session_compact`/`session_compact_failed`; deterministic FakeApi-таблица покрывает before/after success/failure/cancellation и deferred/duplicate (API не растёт). Stock live compaction не проверялся — unknown/limit.
 
 **Операционные**
 - GitHub Actions отсутствуют; пустой CI не считается зелёным.

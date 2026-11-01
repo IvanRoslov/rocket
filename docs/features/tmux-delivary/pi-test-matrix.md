@@ -167,4 +167,18 @@ Fixture теперь запускает Pi с `--session-id` равным ROCKET
 
 Сквозной queue→Pi (отдельно, opt-in): `ROCKET_PI_STOCK_E2E=1 go test -count=1 -timeout=90s ./internal/queue -run ^TestPiNativeQueueStockE2E$` — PASS (3.82 s): A `failed/native_delivery_unconfirmed` после timeout, B `delivered` своей записью; sender 1 вызов/ID, bridge API 1/ID, records A0/B1, tmux 0, Body не изменён. Evidence: `scripts/probes/tmux-delivary/results/native-bridge/pi-stock-e2e/result.json`.
 
-Остаточные ограничения: login/OAuth и часть `showSelector`-веток — source-only; отложенный async `ui_prompt_start` — принятое исключение Spec2; отменённый switch оставляет канал закрытым до `/reload`; повреждённое accepted-состояние fail-closed до нового Rocket launch; возврат в старую историю после non-reload завершения требует restore; `queue_timeout`-политика для nil-confirmer не расширялась. GitHub workflows отсутствуют — пустой CI не считается зелёным.
+## Compaction: deterministic public-event table (Node FakeApi)
+
+Дата: 1 ноября 2026. Deterministic unit evidence на установленной публичной поверхности событий; это **не** stock/live-доказательство.
+
+| Случай | События | Outcome | API calls |
+| --- | --- | --- | --- |
+| before | `session_before_compact` | `not_sent` | 0 |
+| after success | `session_before_compact` → `session_compact` | `accepted` | 1 |
+| after failure | `session_before_compact` → `session_compact_failed {aborted:false, errorMessage}` | `accepted` | 1 |
+| after cancellation | `session_before_compact` → `session_compact_failed {aborted:true}` | `accepted` | 1 |
+| deferred / possible write | принятый ID → `session_before_compact` → тот же ID `not_sent`, API не растёт; после `session_compact` тот же ID `accepted` без второго API; новый ID `accepted` | — | 1 → 2 |
+
+Источник: installed Pi 1.4.0 `agent-session.js` — и abort, и `cancelledByExtension` проходят через catch, который эмитит `session_compact_failed` с `aborted: true`; отдельного публичного cancel-события нет. Stock live compaction на локальном provider в этом прогоне не запускался — exact limit/unknown. Delayed async `ui_prompt_start` остаётся принятым исключением Spec2.
+
+Остаточные ограничения: login/OAuth и часть `showSelector`-веток — source-only; отложенный async `ui_prompt_start` — принятое исключение Spec2; stock live compaction не проверялся (только deterministic FakeApi-таблица выше); отменённый switch оставляет канал закрытым до `/reload`; повреждённое accepted-состояние fail-closed до нового Rocket launch; возврат в старую историю после non-reload завершения требует restore; `queue_timeout`-политика для nil-confirmer не расширялась. GitHub workflows отсутствуют — пустой CI не считается зелёным.

@@ -139,14 +139,22 @@ class Fixture:
         master, slave = pty.openpty()
         import fcntl
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
+        # Pi stays in the fixture's own process group (Go creates it with
+        # Setpgid) so the owner can always reap the whole group. No separate
+        # session and no bare-PID fallback are used.
         self.process = subprocess.Popen(
             command, cwd=self.cwd, env=env, stdin=slave, stdout=slave, stderr=slave,
-            start_new_session=True, close_fds=True,
+            close_fds=True,
         )
         os.close(slave)
         self.master = master
         self.reader = threading.Thread(target=self._drain, daemon=True)
         self.reader.start()
+        if os.environ.get("PI_QUEUE_E2E_FAIL_AFTER_SPAWN") == "1":
+            # Deterministic pre-ready failure for the cleanup regression:
+            # announce the private resources, then fail before readiness.
+            print(json.dumps({"fixture_dir": str(self.dir), "pi_pid": self.process.pid}), file=sys.stderr, flush=True)
+            raise RuntimeError("synthetic pre-ready failure")
         wait_until(
             lambda: self.endpoint.exists() and self.probe_socket.exists(),
             25, "native and probe sockets", self.process, self.tail,
@@ -212,12 +220,19 @@ class Fixture:
         shutil.rmtree(self.dir, ignore_errors=True)
 
 
+def _exit_on_signal(signum, frame):
+    raise SystemExit(0)
+
+
 def main():
+    # Installed before Pi is spawned so an early TERM/INT still runs the
+    # finally cleanup instead of leaving an orphan Pi or temp directory.
+    signal.signal(signal.SIGTERM, _exit_on_signal)
+    signal.signal(signal.SIGINT, _exit_on_signal)
     fixture = Fixture()
     try:
         fixture.start()
         print(json.dumps(fixture.info(), ensure_ascii=False), flush=True)
-        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
         # The Go test closes stdin when it is done with the run.
         try:
             sys.stdin.buffer.read()

@@ -247,6 +247,63 @@ test("knownPromptAndCompactionRefuseBeforeAPI", async (t) => {
 	assert.equal(bridge.compactionActive, false);
 });
 
+test("compactionOutcomeTable", async (t) => {
+	// Deterministic public-event surface for every supported compaction
+	// outcome. The installed 1.4.0 agent-session routes both abort and
+	// cancelledByExtension through the catch that emits session_compact_failed
+	// with aborted=true; there is no separate public cancel event.
+	const cases = [
+		{ name: "before compaction refuses", events: ["session_before_compact"], outcome: "not_sent", calls: 0 },
+		{ name: "after success accepts", events: ["session_before_compact", "session_compact"], outcome: "accepted", calls: 1 },
+		{ name: "after failure accepts", events: ["session_before_compact", "session_compact_failed"], payload: { aborted: false, errorMessage: "boom" }, outcome: "accepted", calls: 1 },
+		{ name: "after cancellation accepts", events: ["session_before_compact", "session_compact_failed"], payload: { aborted: true }, outcome: "accepted", calls: 1 },
+	];
+	let id = 700;
+	for (const testCase of cases) {
+		id += 1;
+		const api = new FakeApi();
+		const endpoint = endpointFor();
+		setNativeEnv(endpoint);
+		const bridge = createDeliveryExtension(api);
+		assert.ok(bridge);
+		t.after(() => bridge.stop("quit"));
+		api.emit("session_start", { reason: "startup" });
+		await waitForListening(bridge);
+		for (const event of testCase.events) {
+			api.emit(event, event === "session_compact_failed" ? (testCase.payload ?? {}) : { reason: "manual" });
+		}
+		const response = await connectRequest(endpoint, {
+			v: 1, session_id: "sess-1", instance_id: "instance-1", message_id: id, text: `compaction ${testCase.name}`,
+		});
+		assert.equal(response.outcome, testCase.outcome, testCase.name);
+		assert.equal(api.calls.length, testCase.calls, `${testCase.name}: API calls`);
+	}
+});
+
+test("compactionDeferredAfterPossibleAPICallDoesNotRetry", async (t) => {
+	const api = new FakeApi();
+	const { endpoint, sessionID, instanceID } = await makeBridge(t, api);
+	const body = { v: 1, session_id: sessionID, instance_id: instanceID, message_id: 711, text: "уже принято" };
+	assert.equal((await connectRequest(endpoint, body)).outcome, "accepted");
+	assert.equal(api.calls.length, 1);
+
+	api.emit("session_before_compact", { reason: "manual" });
+	// The known state is checked before dedupe, so a duplicate is refused —
+	// but the API is never called a second time for the same ID.
+	assert.equal((await connectRequest(endpoint, body)).outcome, "not_sent");
+	assert.equal(api.calls.length, 1);
+	const fresh = { ...body, message_id: 712, text: "новое" };
+	assert.equal((await connectRequest(endpoint, fresh)).outcome, "not_sent");
+	assert.equal(api.calls.length, 1);
+
+	api.emit("session_compact", { reason: "manual" });
+	// The earlier ID is deduped without a second API call; the fresh one sends.
+	assert.equal((await connectRequest(endpoint, body)).outcome, "accepted");
+	assert.equal(api.calls.length, 1);
+	assert.equal((await connectRequest(endpoint, fresh)).outcome, "accepted");
+	assert.equal(api.calls.length, 2);
+});
+
 test("possibleAPICallNeverReturnsNotSent", async (t) => {
 	const api = new FakeApi();
 	api.throwOnSend = true;
