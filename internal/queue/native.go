@@ -39,12 +39,16 @@ const (
 	routeLegacy deliveryRoute = iota
 	routeNative
 	routeUnsupported
+	routeClaude
 )
 
 // routeOf classifies msg for sess. A message snapshot always wins over the
 // session's current transport: a legacy message accepted before its recipient
 // became native keeps legacy confirmation semantics.
 func routeOf(msg store.Message, sess store.Session) deliveryRoute {
+	if msg.DeliveryTransport == ClaudeSocketTransport {
+		return routeClaude
+	}
 	if msg.DeliveryTransport != "" {
 		if msg.DeliveryTransport == NativeTransportPiUDS {
 			return routeNative

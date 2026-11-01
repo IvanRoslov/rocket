@@ -334,7 +334,7 @@ func (s *Store) ExpireQueuedBefore(ts int64) ([]Message, error) {
 // daemon crash. Legacy rows become queued for another attempt; native rows
 // become accepted so their journal, not a blind re-send, settles delivery.
 func (s *Store) ResetDelivering() (int, error) {
-	res, err := s.db.Exec(`UPDATE messages SET status = CASE WHEN delivery_transport = 'pi-uds-v1' THEN 'accepted' ELSE 'queued' END WHERE status = 'delivering'`)
+	res, err := s.db.Exec(`UPDATE messages SET status = CASE WHEN delivery_transport IN ('pi-uds-v1','claude-socket-v1') THEN 'accepted' ELSE 'queued' END WHERE status = 'delivering'`)
 	if err != nil {
 		return 0, fmt.Errorf("reset delivering messages: %w", err)
 	}

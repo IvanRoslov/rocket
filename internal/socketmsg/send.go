@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"runtime"
 	"time"
 )
 
@@ -92,8 +91,17 @@ var ErrEmptyText = errors.New("socketmsg: пустой текст сообщен
 // «сообщение показано пользователю»: приём может быть отложен (held) или
 // отклонён (refused) политикой crossSessionInbound получателя.
 func Send(socketPath, text string, opt Options) (string, error) {
+	id, _, err := SendWithOutcome(socketPath, text, opt)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// SendWithOutcome distinguishes prewrite rejection from every possible write.
+func SendWithOutcome(socketPath, text string, opt Options) (string, WriteOutcome, error) {
 	if text == "" {
-		return "", ErrEmptyText
+		return "", NotSent, ErrEmptyText
 	}
 	if opt.Priority == "" {
 		opt.Priority = PriorityNext
@@ -110,7 +118,7 @@ func Send(socketPath, text string, opt Options) (string, error) {
 	if id == "" {
 		var err error
 		if id, err = newUUID(); err != nil {
-			return "", err
+			return "", NotSent, err
 		}
 	}
 	msg := Message{
@@ -122,10 +130,8 @@ func Send(socketPath, text string, opt Options) (string, error) {
 		From:      from,
 		SessionID: opt.SessionID,
 	}
-	if err := writeLine(socketPath, msg, opt.Timeout); err != nil {
-		return "", err
-	}
-	return id, nil
+	outcome, err := writeLineOutcome(socketPath, msg, opt.Timeout)
+	return id, outcome, err
 }
 
 // SendControl отправляет control-сообщение (например, переименование сессии).
@@ -160,34 +166,27 @@ func Probe(socketPath string, timeout time.Duration) bool {
 }
 
 func writeLine(socketPath string, msg Message, timeout time.Duration) error {
+	_, err := writeLineOutcome(socketPath, msg, timeout)
+	return err
+}
+func writeLineOutcome(socketPath string, msg Message, timeout time.Duration) (WriteOutcome, error) {
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
 	payload, err := json.Marshal(msg)
 	if err != nil {
-		return err
+		return NotSent, err
 	}
 	payload = append(payload, '\n')
-
+	if len(payload) > maxFrame {
+		return NotSent, fmt.Errorf("socket frame exceeds protocol limit")
+	}
 	conn, err := net.DialTimeout("unix", socketPath, timeout)
 	if err != nil {
-		return fmt.Errorf("socketmsg: соединение с %s: %w", socketPath, err)
+		return NotSent, fmt.Errorf("socket connect: %w", err)
 	}
 	defer conn.Close()
-
-	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
-		return err
-	}
-	if _, err := conn.Write(payload); err != nil {
-		return fmt.Errorf("socketmsg: запись в %s: %w", socketPath, err)
-	}
-	if runtime.GOOS == "darwin" {
-		time.Sleep(macOSLingerDelay)
-	}
-	if uc, ok := conn.(*net.UnixConn); ok {
-		return uc.CloseWrite()
-	}
-	return nil
+	return writePayload(conn, payload, timeout)
 }
 
 // NewMsgID возвращает msg_id в формате, который принимает CLI (UUIDv4).

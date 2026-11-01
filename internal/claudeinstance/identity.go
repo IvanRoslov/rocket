@@ -99,6 +99,11 @@ func Resolve(ctx context.Context, launch Launch, pinned *Identity, registry []so
 		return result(Rejected, "ambiguous_or_missing_registry")
 	}
 	r := candidates[0]
+	for _, other := range registry {
+		if other.SessionID == r.SessionID && (other.PID != r.PID || other.Tmux != r.Tmux) {
+			return result(Rejected, "ambiguous_uuid_writer")
+		}
+	}
 	if r.Tmux != pane.Identity || r.Kind != "interactive" || r.PeerProtocol != 1 || r.MessagingSocketPath == "" || !uuidPattern.MatchString(r.SessionID) || !filepath.IsAbs(r.CWD) || !filepath.IsAbs(r.MessagingSocketPath) {
 		return result(Rejected, "registry_identity")
 	}

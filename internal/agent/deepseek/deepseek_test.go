@@ -85,6 +85,7 @@ func TestEnv(t *testing.T) {
 	want := map[string]string{
 		"CLAUDECODE":                      "",
 		"ROCKET_SESSION_ID":               "session-1",
+		"ROCKET_CLAUDE_LAUNCH":            "",
 		"ROCKET_KIND":                     "worker",
 		"ROCKET_PARENT_ID":                "parent-1",
 		"ROCKET_PROJECT_ID":               "project-1",
@@ -154,5 +155,25 @@ func TestInheritedClaudeLaunchAndEfforts(t *testing.T) {
 	}
 	if !agent.ShipsBrainstormSkill(New()) {
 		t.Error("DeepSeek must preserve Claude Code's brainstorm skill shipping")
+	}
+}
+
+// Optional compatibility must be inherited from ClaudeCode, not inferred from
+// adapter names, model profiles or generic wrapper behavior.
+func TestDeepSeekClaudeSocketCapability(t *testing.T) {
+	a := New()
+	capability, ok := any(a).(interface{ ClaudeSocketCompatible() bool })
+	if !ok || !capability.ClaudeSocketCompatible() {
+		t.Fatal("DeepSeek does not inherit Claude socket compatibility")
+	}
+}
+
+func TestClaudeSocketCapabilityIsExplicit(t *testing.T) {
+	if !agent.SupportsClaudeSocket(New()) || !agent.SupportsClaudeSocket(claudecode.New()) {
+		t.Fatal("Claude and DeepSeek must support socket")
+	}
+	wrapper := struct{ agent.Agent }{New()}
+	if agent.SupportsClaudeSocket(wrapper) {
+		t.Fatal("generic wrapper inherited an unexposed capability")
 	}
 }

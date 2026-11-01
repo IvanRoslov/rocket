@@ -14,6 +14,8 @@ import (
 
 type ClaudeCode struct{}
 
+func (*ClaudeCode) ClaudeSocketCompatible() bool { return true }
+
 // New creates a new claudecode agent.
 func New() agent.Agent {
 	return &ClaudeCode{}
@@ -718,14 +720,15 @@ func (c *ClaudeCode) Efforts() []string {
 // Env returns environment variables for the agent.
 func (c *ClaudeCode) Env(spec agent.LaunchSpec) map[string]string {
 	return map[string]string{
-		"CLAUDECODE":        "",
-		"ROCKET_SESSION_ID": spec.SessionID,
-		"ROCKET_KIND":       spec.Kind,
-		"ROCKET_PARENT_ID":  spec.ParentID,
-		"ROCKET_PROJECT_ID": spec.ProjectID,
-		"ROCKET_REPO_ID":    spec.RepoID,
-		"ROCKET_FEATURE":    spec.Feature,
-		"ROCKET_SOCKET":     spec.SocketPath,
+		"CLAUDECODE":           "",
+		"ROCKET_SESSION_ID":    spec.SessionID,
+		"ROCKET_CLAUDE_LAUNCH": spec.ClaudeLaunchGeneration,
+		"ROCKET_KIND":          spec.Kind,
+		"ROCKET_PARENT_ID":     spec.ParentID,
+		"ROCKET_PROJECT_ID":    spec.ProjectID,
+		"ROCKET_REPO_ID":       spec.RepoID,
+		"ROCKET_FEATURE":       spec.Feature,
+		"ROCKET_SOCKET":        spec.SocketPath,
 	}
 }
 

@@ -9,15 +9,19 @@ import (
 )
 
 type fakeProbe struct {
-	pane      Pane
-	processes map[int]Process
-	err       error
+	pane          Pane
+	processes     map[int]Process
+	err           error
+	processErrors map[int]error
 }
 
 func (p fakeProbe) Pane(context.Context, string) (Pane, bool, error) {
 	return p.pane, p.pane.PID != 0, p.err
 }
 func (p fakeProbe) Process(_ context.Context, pid int) (Process, bool, error) {
+	if err := p.processErrors[pid]; err != nil {
+		return Process{}, false, err
+	}
 	v, ok := p.processes[pid]
 	return v, ok, p.err
 }
@@ -82,5 +86,29 @@ func TestJournalSlugPreservesOtherPathCharacters(t *testing.T) {
 	got := Resolve(context.Background(), l, nil, r, p, "/tmp/projects")
 	if got.State != Verified || got.Identity.JournalPath != "/tmp/projects/-work-project_name-v2/329baa3b-27eb-40ed-82e1-1d9f3dde01e5.jsonl" {
 		t.Fatalf("wrong exact journal path: %+v", got)
+	}
+}
+
+func TestResolveRejectsCrossTmuxDuplicateUUIDWriter(t *testing.T) {
+	for _, variant := range []string{"live", "dead", "probe uncertainty"} {
+		t.Run(variant, func(t *testing.T) {
+			l, r, p := fixture()
+			other := r[0]
+			other.PID = 22
+			other.Tmux = "other:@9.%9"
+			r = append(r, other)
+			if variant == "live" {
+				p.processes[22] = Process{PID: 22, PPID: 20, Start: l.PaneStart, Name: "claude"}
+			}
+			if variant == "probe uncertainty" {
+				p.processErrors = map[int]error{22: errors.New("other process lookup failed")}
+			}
+			// Even stale registry metadata is not a writer-closed journal horizon;
+			// duplicate UUID ownership must not become Verified through a failed probe.
+			got := Resolve(context.Background(), l, nil, r, p, "/tmp/projects")
+			if got.State == Verified {
+				t.Fatalf("duplicate writer was considered unique: %+v", got)
+			}
+		})
 	}
 }

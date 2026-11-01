@@ -210,19 +210,20 @@ func (f *fakeWorkspace) List() ([]workspace.Entry, error) {
 }
 
 type fakeAgent struct {
-	availableErr error
-	setupErr     error
-	setupCalls   []agent.LaunchSpec
-	launchCalls  []agent.LaunchSpec
-	envCalls     []agent.LaunchSpec
-	nativeLaunch agent.NativeLaunch
-	nativeErr    error
-	nativeCalls  int
-	envOverrides map[string]string // optional env overrides to merge with defaults
-	shipsSkill   bool              // reports ShipsBrainstormSkill, like claude-code
-	firstByInput bool
-	bracketed    bool
-	launchEmpty  bool
+	claudeCompatible bool
+	availableErr     error
+	setupErr         error
+	setupCalls       []agent.LaunchSpec
+	launchCalls      []agent.LaunchSpec
+	envCalls         []agent.LaunchSpec
+	nativeLaunch     agent.NativeLaunch
+	nativeErr        error
+	nativeCalls      int
+	envOverrides     map[string]string // optional env overrides to merge with defaults
+	shipsSkill       bool              // reports ShipsBrainstormSkill, like claude-code
+	firstByInput     bool
+	bracketed        bool
+	launchEmpty      bool
 }
 
 func (a *fakeAgent) ShipsBrainstormSkill() bool { return a.shipsSkill }
@@ -1643,3 +1644,5 @@ func (f *fakeRuntime) CaptureEscaped(ctx context.Context, h runtime.Handle, line
 
 func (*fakeRuntime) ScrollHistory(context.Context, runtime.Handle, int) error { return nil }
 func (*fakeRuntime) ExitHistory(context.Context, runtime.Handle) error        { return nil }
+
+func (f *fakeAgent) ClaudeSocketCompatible() bool { return f.claudeCompatible }

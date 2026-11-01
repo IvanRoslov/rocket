@@ -1,188 +1,169 @@
 package queue
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"log/slog"
-	"path/filepath"
-	"strings"
-	"sync"
-	"time"
-
+	"github.com/IvanRoslov/rocket/internal/agent"
+	"github.com/IvanRoslov/rocket/internal/claudeinstance"
 	"github.com/IvanRoslov/rocket/internal/socketmsg"
 	"github.com/IvanRoslov/rocket/internal/store"
+	"path/filepath"
+	"time"
 )
 
-// claudeCodeAgent is the store.Session.Agent value whose sessions expose a
-// cross-session UDS inbox. No other agent has one.
-const claudeCodeAgent = "claude-code"
+const ClaudeSocketTransport = "claude-socket-v1"
 
-// supportedPeerProtocol is the only peer-protocol version internal/socketmsg
-// was reverse-engineered against (docs/design/cc-socket-protocol.md §9). A
-// higher number means the CLI changed the protocol under us, so we treat the
-// session as unreachable and let tmux injection carry the message rather than
-// guessing at a format we have not verified.
-const supportedPeerProtocol = 1
+type SocketOutcome string
 
-// SocketSender delivers a message body straight into a recipient's Claude Code
-// inbox over its unix socket, bypassing the TUI composer entirely.
-//
-// It is an interface so the queue's delivery tests can drive both the success
-// and the failure path without a real socket.
+const (
+	SocketNotSent  SocketOutcome = "not_sent"
+	SocketAccepted SocketOutcome = "accepted"
+	SocketHeld     SocketOutcome = "held"
+	SocketUnknown  SocketOutcome = "unknown"
+	SocketDenied   SocketOutcome = "denied"
+	SocketExpired  SocketOutcome = "expired"
+)
+
 type SocketSender interface {
-	// Available reports whether sess is reachable over a live socket right
-	// now. It is a point-in-time answer: a socket can die between Available
-	// and Send, which is why Send returns its own error.
-	//
-	// Contract the queue depends on: once Send has answered ErrHeld for a
-	// session, Available must report false for it from then on. A hold is a
-	// property of the recipient process's inbound policy, which cannot change
-	// while it lives, so retrying the socket would only re-hold the message —
-	// and the queue defers the tmux fallback until the hold's dialog clears,
-	// so a sender that kept saying "available" would loop forever instead of
-	// ever delivering. ClaudeSocketSender implements this via heldSessions.
-	Available(sess store.Session) bool
-
-	// Send delivers text to sess. fromName is the display name the recipient
-	// sees. A nil error means the bytes were accepted by the recipient's
-	// socket — not that the recipient has read them: the protocol has no ack
-	// (docs/design/cc-socket-protocol.md §3).
-	Send(sess store.Session, fromName, text string) error
+	Resolve(context.Context, store.Session) claudeinstance.Resolution
+	Prepare(context.Context, store.Session, string, string) (claudeinstance.Snapshot, error)
+	Send(context.Context, claudeinstance.Snapshot) (SocketOutcome, error)
 }
 
-// ClaudeSocketSender is the production SocketSender: it resolves a rocket
-// session to a Claude Code registry entry and writes to that entry's socket.
-type ClaudeSocketSender struct {
-	// sessionsDir is the Claude Code session registry directory
-	// (~/.claude/sessions by default).
-	sessionsDir string
+var ErrNoSocket = errors.New("queue: exact Claude socket unavailable")
+var ErrHeld = errors.New("queue: recipient held message")
 
-	// receipts is rocket's own listening socket, advertised as the reply
-	// address so the recipient can tell us a message was held. nil disables
-	// the wait entirely: we write and hope, which is the pre-receipt behavior.
-	receipts *socketmsg.Receipts
-
-	// heldWait overrides defaultHeldWait; tests shorten or lengthen it.
-	heldWait time.Duration
-
-	// heldSessions remembers Claude sessionIds that held a message. Its
-	// lifetime is deliberately the daemon's: a sessionId is a fresh UUID per
-	// claude process, so the memory expires by construction when the worker
-	// restarts, and a daemon restart costs at most one more wait per session.
-	heldMu       sync.Mutex
-	heldSessions map[string]bool
-}
-
-// NewClaudeSocketSender builds a sender reading the registry at sessionsDir.
-// Pass socketmsg.SessionsDir() for the real one.
-func NewClaudeSocketSender(sessionsDir string) *ClaudeSocketSender {
-	return &ClaudeSocketSender{
-		sessionsDir:  sessionsDir,
-		heldWait:     defaultHeldWait,
-		heldSessions: make(map[string]bool),
-	}
-}
-
-// SetReceipts installs the reply channel. It is called once during daemon
-// wiring, before delivery starts.
-func (s *ClaudeSocketSender) SetReceipts(r *socketmsg.Receipts) { s.receipts = r }
-
-// ErrNoSocket reports that a session has no reachable Claude Code socket. The
-// queue turns it into a tmux injection, never into a delivery failure.
-var ErrNoSocket = errors.New("queue: no live claude code socket for recipient")
-
-// ErrHeld reports that the recipient accepted the bytes but did NOT queue the
-// message: it sits in their hold buffer awaiting the user's approval, and if
-// nobody approves it, it expires silently after a few minutes (protocol doc
-// §6). That is a non-delivery, so the queue must treat it exactly like a
-// socket failure and fall back to tmux injection.
-var ErrHeld = errors.New("queue: recipient held the message for user approval")
-
-// defaultHeldWait is how long Send waits for a peer_message_status receipt
-// after the write. The recipient emits `held` immediately from its inbound
-// handler, so this only has to cover a local UDS round trip plus a busy Node
-// event loop. Silence means accept — an accepted message never produces a
-// receipt at all — so this window is pure added latency on the happy path and
-// must stay small. It is paid at most once per recipient process, thanks to
-// heldSessions.
 const defaultHeldWait = 2 * time.Second
 
-// Available implements SocketSender.
-func (s *ClaudeSocketSender) Available(sess store.Session) bool {
-	_, ok := s.lookup(sess)
-	return ok
+type ClaudeSocketSender struct {
+	sessionsDir  string
+	receipts     *socketmsg.Receipts
+	st           *store.Store
+	resolveAgent func(string) (agent.Agent, error)
+	probe        claudeinstance.Probe
+	heldWait     time.Duration
 }
 
-// Send implements SocketSender.
-func (s *ClaudeSocketSender) Send(sess store.Session, fromName, text string) error {
-	cc, ok := s.lookup(sess)
-	if !ok {
-		return ErrNoSocket
+func NewClaudeSocketSender(dir string) *ClaudeSocketSender {
+	return &ClaudeSocketSender{sessionsDir: dir, resolveAgent: agent.Get, probe: claudeinstance.SystemProbe{}, heldWait: defaultHeldWait}
+}
+func (s *ClaudeSocketSender) SetStore(st *store.Store) { s.st = st }
+func (s *ClaudeSocketSender) SetAgentResolver(resolve func(string) (agent.Agent, error)) {
+	s.resolveAgent = resolve
+}
+func (s *ClaudeSocketSender) SetReceipts(r *socketmsg.Receipts) {
+	s.receipts = r
+	if r != nil {
+		r.SetHandler(s.handleReceipt)
 	}
-	// The reply address, the msg id and the waiter must all exist BEFORE the
-	// write: the `held` receipt is emitted from the recipient's inbound
-	// handler and can land before Send returns.
-	//
-	// The address has to sit in the recipient's own socket directory and end
-	// in .sock or the receipt is silently never sent (protocol doc §7) —
-	// hence deriving the directory from the recipient's path.
-	var (
-		from   string
-		msgID  string
-		wait   <-chan socketmsg.Message
-		cancel = func() {}
-	)
-	if s.receipts != nil {
-		addr, addrErr := s.receipts.Addr(filepath.Dir(cc.MessagingSocketPath))
-		id, idErr := socketmsg.NewMsgID()
-		switch {
-		case addrErr != nil:
-			// No reply channel: deliver blind rather than not at all.
-			slog.Warn("queue: no receipt listener, socket delivery cannot detect a hold",
-				"error", addrErr)
-		case idErr != nil:
-			slog.Warn("queue: cannot mint a msg id for receipt correlation", "error", idErr)
-		default:
-			from, msgID = addr, id
-			wait, cancel = s.receipts.Watch(id)
+}
+func (s *ClaudeSocketSender) Resolve(ctx context.Context, sess store.Session) claudeinstance.Resolution {
+	rejected := func(reason string) claudeinstance.Resolution {
+		return claudeinstance.Resolution{State: claudeinstance.Rejected, Reason: reason}
+	}
+	if s.st == nil || s.resolveAgent == nil {
+		return rejected("missing_wiring")
+	}
+	a, e := s.resolveAgent(sess.Agent)
+	if e != nil || !agent.SupportsClaudeSocket(a) {
+		return rejected("incompatible_adapter")
+	}
+	l, pinned, e := s.st.GetClaudeLaunch(sess.ID)
+	if e != nil {
+		return rejected("unproven_launch")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	registry, e := socketmsg.ListSessions(s.sessionsDir)
+	if e != nil {
+		return claudeinstance.Resolution{State: claudeinstance.Unknown, Reason: "registry_lookup"}
+	}
+	resolution := claudeinstance.Resolve(ctx, l, pinned, registry, s.probe, filepath.Join(filepath.Dir(s.sessionsDir), "projects"))
+	if resolution.State == claudeinstance.Verified {
+		ok, e := s.st.BindClaudeIdentity(resolution.Identity)
+		if e != nil || !ok {
+			return rejected("binding_persistence")
 		}
 	}
-	defer cancel()
-
-	if _, err := socketmsg.Send(cc.MessagingSocketPath, text, socketmsg.Options{
-		From:     from,
-		MsgID:    msgID,
-		FromName: fromName,
-		Priority: socketmsg.PriorityNext,
-		// Pin the recipient's identity: if the pid was recycled between the
-		// registry read and this write, the new owner of the socket drops the
-		// message instead of showing a stranger's text (protocol doc §8).
-		SessionID: cc.SessionID,
-		// from-mode is deliberately never asserted — claiming "bypass" would
-		// let our messages through a bypass-mode recipient's guard with
-		// privileges we have no business claiming (protocol doc §5.2). We
-		// take the hold and route around it instead.
-	}); err != nil {
-		return err
-	}
-
-	if wait == nil {
-		return nil
-	}
-	err := s.awaitReceipt(wait)
-	if errors.Is(err, ErrHeld) {
-		s.rememberHeld(cc.SessionID)
-	}
-	return err
+	return resolution
 }
-
-// awaitReceipt turns the recipient's verdict into an error, or nil.
-//
-// Silence is success: `accept` never produces a receipt (protocol doc §7), so
-// the only thing this window can realistically catch is a hold, which is
-// emitted at once. `denied`/`expired` only ever follow a `held` we already
-// reacted to, but they are handled here too in case one races into the window.
-func (s *ClaudeSocketSender) awaitReceipt(wait <-chan socketmsg.Message) error {
+func (s *ClaudeSocketSender) Prepare(ctx context.Context, sess store.Session, fromName, text string) (claudeinstance.Snapshot, error) {
+	result := s.Resolve(ctx, sess)
+	if result.State != claudeinstance.Verified {
+		return claudeinstance.Snapshot{}, ErrNoSocket
+	}
+	boundary, e := claudeinstance.PinJournal(result.Identity)
+	if e != nil {
+		return claudeinstance.Snapshot{}, e
+	}
+	wire, e := socketmsg.NewMsgID()
+	if e != nil {
+		return claudeinstance.Snapshot{}, e
+	}
+	reply := ""
+	if s.receipts != nil {
+		reply = s.receipts.Path(filepath.Dir(result.Identity.SocketPath))
+	}
+	from := ""
+	if reply != "" {
+		from = socketmsg.EncodeAddr(reply)
+	}
+	return claudeinstance.Snapshot{Transport: ClaudeSocketTransport, Target: result.Identity, WireID: wire, Envelope: socketmsg.Envelope(from, fromName, text), ReplyPath: reply, Boundary: boundary}, nil
+}
+func (s *ClaudeSocketSender) Send(ctx context.Context, v claudeinstance.Snapshot) (SocketOutcome, error) {
+	if s.st == nil {
+		return SocketNotSent, ErrNoSocket
+	}
+	saved, e := s.st.GetClaudeDelivery(v.MessageID)
+	if e != nil || saved.WireID != v.WireID || !claudeinstance.SameIdentity(saved.Target, v.Target) || saved.Envelope != v.Envelope || saved.Boundary != v.Boundary || saved.ReplyPath != v.ReplyPath {
+		return SocketNotSent, fmt.Errorf("missing immutable Claude claim")
+	}
+	if !time.Now().Before(saved.Deadline) {
+		return SocketNotSent, fmt.Errorf("Claude deadline expired")
+	}
+	var wait <-chan socketmsg.Message
+	cancel := func() {}
+	if v.ReplyPath != "" {
+		if s.receipts == nil {
+			return SocketNotSent, fmt.Errorf("missing receipt channel")
+		}
+		actual, e := s.receipts.Addr(filepath.Dir(v.Target.SocketPath))
+		if e != nil || actual != v.ReplyPath {
+			return SocketNotSent, fmt.Errorf("receipt address differs from durable snapshot")
+		}
+		wait, cancel = s.receipts.Watch(v.WireID)
+	}
+	defer cancel()
+	sess, e := s.st.GetSession(v.Target.RocketSessionID)
+	if e != nil {
+		return SocketNotSent, e
+	}
+	result := s.Resolve(ctx, sess)
+	if result.State != claudeinstance.Verified || !claudeinstance.SameIdentity(result.Identity, v.Target) {
+		return SocketNotSent, ErrNoSocket
+	}
+	m, e := s.st.GetMessage(v.MessageID)
+	if e != nil || (m.Status != "delivering" && m.Status != "accepted") || !time.Now().Before(saved.Deadline) {
+		return SocketNotSent, fmt.Errorf("Claude claim no longer active")
+	}
+	timeout := time.Until(saved.Deadline)
+	if timeout > socketmsg.DefaultTimeout {
+		timeout = socketmsg.DefaultTimeout
+	}
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < timeout {
+		timeout = time.Until(deadline)
+	}
+	if timeout <= 0 || ctx.Err() != nil {
+		return SocketNotSent, context.Canceled
+	}
+	_, outcome, e := socketmsg.SendWithOutcome(v.Target.SocketPath, v.Envelope, socketmsg.Options{From: v.ReplyPath, MsgID: v.WireID, Raw: true, SessionID: v.Target.ClaudeSessionID, Priority: socketmsg.PriorityNext, Timeout: timeout})
+	if outcome == socketmsg.NotSent {
+		return SocketNotSent, e
+	}
+	if e != nil || wait == nil {
+		return SocketUnknown, e
+	}
 	window := s.heldWait
 	if window <= 0 {
 		window = defaultHeldWait
@@ -190,93 +171,52 @@ func (s *ClaudeSocketSender) awaitReceipt(wait <-chan socketmsg.Message) error {
 	timer := time.NewTimer(window)
 	defer timer.Stop()
 	select {
-	case m := <-wait:
-		switch m.Status {
-		case "held", "denied", "expired":
-			return fmt.Errorf("%w (status %s)", ErrHeld, m.Status)
-		default:
-			// "delivered" (the user approved it before our window closed) and
-			// anything unknown: the message is in the recipient's queue.
-			return nil
-		}
+	case receipt := <-wait:
+		return s.receiptOutcome(ctx, v, receipt), nil
 	case <-timer.C:
-		return nil
+		return SocketUnknown, nil
+	case <-ctx.Done():
+		return SocketUnknown, ctx.Err()
 	}
 }
-
-// rememberHeld records that sessionID holds peer messages, so later deliveries
-// skip the socket instead of paying the wait again.
-func (s *ClaudeSocketSender) rememberHeld(sessionID string) {
-	if sessionID == "" {
+func (s *ClaudeSocketSender) receiptOutcome(ctx context.Context, v claudeinstance.Snapshot, m socketmsg.Message) SocketOutcome {
+	if m.MsgV != 1 || m.Type != "control" || m.Action != "peer_message_status" || m.OrigMsgID != v.WireID || m.SessionID == "" || m.SessionID != v.Target.ClaudeSessionID || m.From != socketmsg.EncodeAddr(v.Target.SocketPath) {
+		return SocketUnknown
+	}
+	sess, e := s.st.GetSession(v.Target.RocketSessionID)
+	if e != nil {
+		return SocketUnknown
+	}
+	r := s.Resolve(ctx, sess)
+	if r.State != claudeinstance.Verified || !claudeinstance.SameIdentity(r.Identity, v.Target) {
+		return SocketUnknown
+	}
+	switch m.Status {
+	case "held":
+		return SocketHeld
+	case "delivered":
+		return SocketAccepted
+	case "denied":
+		return SocketDenied
+	case "expired":
+		return SocketExpired
+	default:
+		return SocketUnknown
+	}
+}
+func (s *ClaudeSocketSender) handleReceipt(m socketmsg.Message) {
+	if s.st == nil {
 		return
 	}
-	s.heldMu.Lock()
-	defer s.heldMu.Unlock()
-	if s.heldSessions == nil {
-		s.heldSessions = make(map[string]bool)
+	v, e := s.st.GetClaudeDeliveryByWireID(m.OrigMsgID)
+	if e != nil {
+		return
 	}
-	if !s.heldSessions[sessionID] {
-		slog.Warn("queue: recipient holds peer messages, preferring tmux for it from now on",
-			"claude_session_id", sessionID)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	phase := s.receiptOutcome(ctx, v, m)
+	if phase == SocketUnknown {
+		return
 	}
-	s.heldSessions[sessionID] = true
-}
-
-func (s *ClaudeSocketSender) heldRecently(sessionID string) bool {
-	s.heldMu.Lock()
-	defer s.heldMu.Unlock()
-	return s.heldSessions[sessionID]
-}
-
-// lookup resolves sess to a live Claude Code registry entry.
-//
-// The match key is the tmux session name: the registry's `tmux` field holds
-// "<tmux-session>:@window.%pane", and rocket sets store.Session.TmuxName to
-// that same tmux session name (internal/session/agent.go). That beats matching
-// on the working directory, which several Claude processes can share — a
-// worktree with a second claude open in it would be ambiguous, while the tmux
-// session name is unique per rocket session by construction.
-//
-// A match must additionally be addressable (non-empty socket path), speak the
-// protocol version we implement, and actually answer a connect: stale entries
-// outlive their process, so the file on disk proves nothing on its own.
-//
-// Ambiguity is treated as no match. If two live entries claim one tmux name we
-// cannot tell which pane the recipient is, and delivering to the wrong session
-// is worse than falling back to tmux.
-func (s *ClaudeSocketSender) lookup(sess store.Session) (socketmsg.Session, bool) {
-	if sess.Agent != claudeCodeAgent || sess.TmuxName == "" {
-		return socketmsg.Session{}, false
-	}
-	all, err := socketmsg.ListSessions(s.sessionsDir)
-	if err != nil {
-		return socketmsg.Session{}, false
-	}
-
-	var match socketmsg.Session
-	found := 0
-	for _, cc := range all {
-		name, _, _ := strings.Cut(cc.Tmux, ":")
-		if name != sess.TmuxName {
-			continue
-		}
-		if !cc.Addressable() || cc.PeerProtocol != supportedPeerProtocol {
-			continue
-		}
-		if !socketmsg.Probe(cc.MessagingSocketPath, 0) {
-			continue
-		}
-		match = cc
-		found++
-	}
-	if found != 1 {
-		return socketmsg.Session{}, false
-	}
-	if s.heldRecently(match.SessionID) {
-		// This process already held one of our messages. Its inbound policy
-		// cannot change while it lives, so the socket is a dead end for it:
-		// report no match and let tmux carry everything from here.
-		return socketmsg.Session{}, false
-	}
-	return match, true
+	_, _ = s.st.SetClaudePhase(v.MessageID, v.WireID, v.Target, string(phase), time.Now())
 }
