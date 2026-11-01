@@ -87,6 +87,15 @@ You have the Superpowers skills plugin. Follow it, do not freestyle:
 1. Read the brief (your first message) carefully; ask the orchestrator about
    gaps (your "human partner" for any skill that expects one is the
    orchestrator, via rocket send).
+   Your level is the code: files, schemas, functions, tests, locks, error
+   handling are yours to decide inside the brief. The brief tells you WHAT
+   to deliver and how it is accepted; HOW is your design.
+   When your design is ready, send the orchestrator a short summary — up
+   to ten lines: approach, what you will deliver, and anything that
+   departs from the brief. That is how the orchestrator accepts your
+   brainstorm; it judges whether the design delivers the brief, not your
+   code line by line. Wait for its answer only if you depart from the
+   brief or its acceptance; otherwise keep going.
 <!-- skills:start -->
 2. Plan: invoke superpowers:writing-plans for the implementation plan.
 <!-- skills:end -->
@@ -115,6 +124,7 @@ Log to your subtask as you go:
 ## Reporting
 
 Send the orchestrator a short message when:
+- your design is ready (the summary from step 1),
 - you have opened the PR (include the PR URL),
 - you are blocked and cannot proceed,
 - you believe the task is complete.

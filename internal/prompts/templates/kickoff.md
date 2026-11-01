@@ -32,7 +32,8 @@ Start now:
    to understand the current state. Record findings worth keeping.
 
 4. SPEC, PLAN, GATE. Finish the brainstorm into a spec; invoke
-   superpowers:writing-plans for the decomposition plan. Store both in the
+   orchestrator-planning for the decomposition plan (deliverables, owners,
+   order, acceptance — not an implementation plan; workers write those). Store both in the
    task (task doc put --kind spec / --kind plan), then request the gate:
    `rocket task gate request {{task_id}}`
    The spec starts with a short plain-language summary in the human's
@@ -46,7 +47,7 @@ Start now:
    implementation-detail edits are stored without a new gate.
    If a small mitigation stops the reported harm, it is the first
    deliverable — spec and gate it on its own, ahead of any larger redesign
-   (see "Proportionality" in your instructions).
+   (see "Levels" in your instructions).
    Do not spawn workers and do not move the task yourself. On Go the gate
    moves the task to in_progress and you receive
    "[rocket gate] Go …" — that is your signal to start executing. On

@@ -256,7 +256,7 @@ func TestSetupWorkspace(t *testing.T) {
 			excludeLines = append(excludeLines, line)
 		}
 	}
-	wantExclude := []string{"AGENTS.md", ".pi/skills/orchestrator-brainstorming/"}
+	wantExclude := []string{"AGENTS.md", ".pi/skills/orchestrator-brainstorming/", ".pi/skills/orchestrator-planning/"}
 	if !reflect.DeepEqual(excludeLines, wantExclude) {
 		t.Fatalf("git exclude = %v, want exactly %v", excludeLines, wantExclude)
 	}
