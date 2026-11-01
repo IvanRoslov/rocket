@@ -1,8 +1,12 @@
 package queue
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +14,7 @@ import (
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/agent"
+	"github.com/IvanRoslov/rocket/internal/nativeinput"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -126,8 +131,53 @@ func (f *legacyOnlyFake) ConfirmDelivered(ctx context.Context, ref agent.Activit
 	return true, time.Time{}, nil
 }
 
-func TestNativePiProofAdapter(t *testing.T) {
-	if got := nativePiProofConfirmer(nil); got != nil {
+// TestNativeFinalCancellationWithoutStrictCapabilityLeavesDelivering: a
+// cancelled caller must leave the delivering row for Recover even when the
+// recipient confirmer has no strict native capability. The legacy matcher
+// must never be called, and Recover must return the row to native
+// confirmation without a resend.
+func TestNativeFinalCancellationWithoutStrictCapabilityLeavesDelivering(t *testing.T) {
+	h := newTestQueue(t)
+	rt := installNativeRuntime(h)
+	h.addNativeSession(t, "native")
+	id := addMsg(t, h, "native", "shutdown with legacy confirmer")
+	claimNativeForTest(t, h, id, h.clock.now())
+
+	msg, _ := h.st.GetMessage(id)
+	sess, _ := h.st.GetSession("native")
+	legacy := &legacyOnlyFake{}
+	ctx, cancel := context.WithCancel(h.ctx)
+	cancel()
+	h.q.failNativeAttempt(ctx, msg, sess, legacy)
+
+	if legacy.calls != 0 {
+		t.Fatalf("legacy matcher was called %d times on the native path", legacy.calls)
+	}
+	if got := messageStatus(t, h.st, id); got != "delivering" {
+		t.Fatalf("status = %q, want delivering left for Recover on shutdown", got)
+	}
+	assertNoTmux(t, rt)
+
+	h.q.Recover(h.ctx)
+	if got := messageStatus(t, h.st, id); got != "accepted" {
+		t.Fatalf("status after Recover = %q, want accepted under native confirmation", got)
+	}
+	sender := &fakeNativeSender{}
+	h.q.SetNativeSender(sender)
+	h.q.confirmPass(h.ctx, &confirmState{
+		used:     make(map[string]map[recordKey]struct{}),
+		restored: make(map[string]bool),
+	})
+	if got := messageStatus(t, h.st, id); got != "accepted" {
+		t.Fatalf("status after confirmation pass = %q, want accepted/unconfirmed", got)
+	}
+	if sender.count() != 0 {
+		t.Fatalf("native sends after Recover = %d, want 0 (no resend)", sender.count())
+	}
+	assertNoTmux(t, rt)
+}
+
+func TestNativePiProofAdapter(t *testing.T) {	if got := nativePiProofConfirmer(nil); got != nil {
 		t.Fatalf("nil base produced %#v, want nil", got)
 	}
 	legacy := &legacyOnlyFake{}
@@ -150,5 +200,98 @@ func TestNativePiProofAdapter(t *testing.T) {
 	}
 	if legacy.calls != 0 {
 		t.Fatalf("legacy confirmer was called %d times", legacy.calls)
+	}
+}
+
+func nativePiFrameLen(t *testing.T, target nativeinput.Target, messageID int64, text string) int {
+	t.Helper()
+	b, err := json.Marshal(nativeinput.Request{
+		Version:    nativeinput.Version,
+		SessionID:  target.SessionID,
+		InstanceID: target.InstanceID,
+		MessageID:  messageID,
+		Text:       text,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(b) + 1 // serialized JSONL including the trailing newline
+}
+
+// TestNativePiEnvelopeFrameBoundary pins the actual serialized JSONL limit
+// with the numbered prepared text: exactly 1 MiB including JSON escaping and
+// the newline is accepted; one byte over is refused before the peer sees a
+// connection or a frame.
+func TestNativePiEnvelopeFrameBoundary(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "rpi-frame-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	socket := filepath.Join(dir, "s")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	target := nativeinput.Target{SessionID: "s1", InstanceID: "launch-1", SocketPath: socket}
+	const id int64 = 123
+	prefix := nativePiEnvelope(id, "")
+	base := nativePiFrameLen(t, target, id, "")
+	total := nativeinput.MaxFrameSize - base
+	if total <= len(prefix) {
+		t.Fatalf("frame base %d leaves no room for the envelope", base)
+	}
+	text := prefix + strings.Repeat("a", total-len(prefix))
+	if text != nativePiEnvelope(id, strings.Repeat("a", total-len(prefix))) {
+		t.Fatal("the exact-bound text is not the numbered prepared text")
+	}
+	if got := nativePiFrameLen(t, target, id, text); got != nativeinput.MaxFrameSize {
+		t.Fatalf("exact-bound frame = %d bytes, want %d", got, nativeinput.MaxFrameSize)
+	}
+
+	peerBytes := make(chan int, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		line, _ := bufio.NewReader(conn).ReadBytes('\n')
+		peerBytes <- len(line)
+		resp := fmt.Sprintf(`{"v":1,"session_id":%q,"instance_id":%q,"message_id":%d,"outcome":"accepted"}`+"\n",
+			target.SessionID, target.InstanceID, id)
+		_, _ = conn.Write([]byte(resp))
+	}()
+	outcome, err := nativeinput.Send(context.Background(), target, id, text)
+	if err != nil || outcome != nativeinput.Accepted {
+		t.Fatalf("exact-bound send = %v %v, want accepted", outcome, err)
+	}
+	if got := <-peerBytes; got != nativeinput.MaxFrameSize {
+		t.Fatalf("peer read %d bytes, want %d", got, nativeinput.MaxFrameSize)
+	}
+
+	over := text + "a"
+	if got := nativePiFrameLen(t, target, id, over); got != nativeinput.MaxFrameSize+1 {
+		t.Fatalf("over-bound frame = %d bytes, want %d", got, nativeinput.MaxFrameSize+1)
+	}
+	peerSaw := make(chan struct{}, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		peerSaw <- struct{}{}
+		_ = conn.Close()
+	}()
+	outcome, err = nativeinput.Send(context.Background(), target, id, over)
+	if err == nil || outcome != nativeinput.NotSent {
+		t.Fatalf("over-bound send = %v %v, want NotSent with an error", outcome, err)
+	}
+	select {
+	case <-peerSaw:
+		t.Fatal("over-bound frame reached the peer before rejection")
+	case <-time.After(100 * time.Millisecond):
 	}
 }

@@ -148,8 +148,8 @@ func (q *Queue) attemptNativeDelivery(ctx context.Context, msg store.Message, se
 func (q *Queue) failNativeAttempt(ctx context.Context, msg store.Message, sess store.Session, confirmer agent.DeliveryConfirmer) {
 	if confirmer != nil {
 		// The native path never falls back to the legacy substring matcher:
-		// a missing strict capability leaves the row to the honest failure
-		// below instead of matching bare text.
+		// an unsupported strict capability is not replaced by bare-text
+		// matching; the row then follows the shutdown/failure rules below.
 		if strict := nativePiProofConfirmer(confirmer); strict != nil {
 			deadline := q.confirmTimeout
 			if deadline <= 0 {
@@ -164,14 +164,15 @@ func (q *Queue) failNativeAttempt(ctx context.Context, msg store.Message, sess s
 			if confirmed {
 				return
 			}
-			if ctx.Err() != nil {
-				// The caller is shutting down, not the recipient. Leaving the row
-				// in "delivering" lets startup Recover turn it into "accepted" for
-				// journal confirmation; failing it here would turn a graceful
-				// shutdown into a permanent false failure.
-				slog.Warn("queue: native final confirmation interrupted by shutdown, leaving delivering for Recover", "id", msg.ID, "to", msg.ToSession)
-				return
-			}
+		}
+		if ctx.Err() != nil {
+			// The caller is shutting down, not the recipient. Leaving the row
+			// in "delivering" lets startup Recover turn it into "accepted" for
+			// journal confirmation; failing it here would turn a graceful
+			// shutdown into a permanent false failure. This applies whether or
+			// not the recipient exposes the strict native capability.
+			slog.Warn("queue: native final confirmation interrupted by shutdown, leaving delivering for Recover", "id", msg.ID, "to", msg.ToSession)
+			return
 		}
 	}
 	ok, err := q.st.FailDelivering(msg.ID, nativeDeliveryUnconfirmed)
