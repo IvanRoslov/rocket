@@ -2,6 +2,7 @@ package store
 
 import (
 	"github.com/IvanRoslov/rocket/internal/claudeinstance"
+	"github.com/IvanRoslov/rocket/internal/socketmsg"
 	"os"
 	"path/filepath"
 	"testing"
@@ -30,7 +31,8 @@ func claudeStoreFixture(t *testing.T, st *Store) (claudeinstance.Snapshot, int64
 	if e != nil {
 		t.Fatal(e)
 	}
-	return claudeinstance.Snapshot{MessageID: id, Transport: "claude-socket-v1", Target: target, WireID: "08edca10-0082-4bd4-b91a-a687a2690ba3", Envelope: "envelope", Boundary: boundary, PreparedAt: now, Deadline: now.Add(time.Minute)}, id
+	env, _ := socketmsg.EnvelopeWithID("08edca10-0082-4bd4-b91a-a687a2690ba3", "", "", "feedback")
+	return claudeinstance.Snapshot{EnvelopeVersion: 1, MessageID: id, Transport: "claude-socket-v1", Target: target, WireID: "08edca10-0082-4bd4-b91a-a687a2690ba3", Envelope: env, Boundary: boundary, PreparedAt: now, Deadline: now.Add(time.Minute)}, id
 }
 func TestClaudeClaimAtomicMarkerAndNonzeroAttempts(t *testing.T) {
 	st := openTestStore(t)

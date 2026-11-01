@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/IvanRoslov/rocket/internal/claudeinstance"
+	"github.com/IvanRoslov/rocket/internal/socketmsg"
+	"strings"
 	"time"
 )
 
@@ -36,11 +38,24 @@ func claudeDeadlineNS(deadline time.Time) (int64, bool) {
 func claudeAgeExpired(deadline, now time.Time) bool {
 	return !deadline.IsZero() && !now.Before(deadline)
 }
+func validClaudeEnvelope(v claudeinstance.Snapshot) bool {
+	if v.EnvelopeVersion == 0 {
+		return true
+	}
+	if v.EnvelopeVersion != 1 {
+		return false
+	}
+	if _, err := socketmsg.EnvelopeWithID(v.WireID, "", "", ""); err != nil {
+		return false
+	}
+	open, _, ok := strings.Cut(v.Envelope, ">\n")
+	return ok && strings.HasPrefix(open, `<cross-session-message msg-id="`+v.WireID+`"`) && strings.Count(open, "msg-id=") == 1 && strings.HasSuffix(v.Envelope, "\n</cross-session-message>")
+}
 func validClaudeSnapshot(v claudeinstance.Snapshot) bool {
 	t := v.Target
 	b := v.Boundary
 	_, validDeadline := claudeDeadlineNS(v.Deadline)
-	return v.MessageID > 0 && v.Transport == claudeTransport && v.WireID != "" && v.Envelope != "" && t.RocketSessionID != "" && t.LaunchGeneration != "" && t.ClaudeSessionID != "" && t.PID > 0 && !t.ProcessStart.IsZero() && t.PaneIdentity != "" && t.PeerProtocol == 1 && t.Kind == "interactive" && t.SocketPath != "" && t.JournalPath != "" && b.Path == t.JournalPath && b.Inode > 0 && b.Offset >= 0 && !v.PreparedAt.IsZero() && validDeadline && (v.Deadline.IsZero() || v.Deadline.After(v.PreparedAt))
+	return validClaudeEnvelope(v) && v.MessageID > 0 && v.Transport == claudeTransport && v.WireID != "" && v.Envelope != "" && t.RocketSessionID != "" && t.LaunchGeneration != "" && t.ClaudeSessionID != "" && t.PID > 0 && !t.ProcessStart.IsZero() && t.PaneIdentity != "" && t.PeerProtocol == 1 && t.Kind == "interactive" && t.SocketPath != "" && t.JournalPath != "" && b.Path == t.JournalPath && b.Inode > 0 && b.Offset >= 0 && !v.PreparedAt.IsZero() && validDeadline && (v.Deadline.IsZero() || v.Deadline.After(v.PreparedAt))
 }
 func scanClaude(row interface{ Scan(...any) error }) (claudeRow, error) {
 	var v claudeRow
@@ -141,7 +156,7 @@ func (s *Store) ClaimClaudeMessage(v claudeinstance.Snapshot) (bool, error) {
 	v.Target.ProcessStart = v.Target.ProcessStart.UTC()
 	v.PreparedAt = v.PreparedAt.UTC()
 	v.Deadline = v.Deadline.UTC()
-	if !validClaudeSnapshot(v) || claudeAgeExpired(v.Deadline, time.Now()) {
+	if v.EnvelopeVersion != 1 || !validClaudeSnapshot(v) || claudeAgeExpired(v.Deadline, time.Now()) {
 		return false, fmt.Errorf("invalid Claude prewrite snapshot")
 	}
 	tx, e := s.db.Begin()

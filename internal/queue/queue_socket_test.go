@@ -50,7 +50,8 @@ func (f *fakeSocket) Prepare(_ context.Context, _ store.Session, name, text stri
 	if e != nil {
 		return claudeinstance.Snapshot{}, e
 	}
-	v := claudeinstance.Snapshot{Transport: ClaudeSocketTransport, Target: f.target, WireID: wire, Envelope: socketmsg.Envelope("", name, text), Boundary: b}
+	env, _ := socketmsg.EnvelopeWithID(wire, "", name, text)
+	v := claudeinstance.Snapshot{EnvelopeVersion: 1, Transport: ClaudeSocketTransport, Target: f.target, WireID: wire, Envelope: env, Boundary: b}
 	if f.beforeClaim != nil {
 		f.beforeClaim()
 	}
@@ -194,7 +195,7 @@ func TestSocketFromNameForSystemMessages(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	expected := socketmsg.Envelope("", "rocket", body)
+	expected := `<cross-session-message msg-id="` + v.WireID + `" from-name="rocket">` + "\n" + body + "\n</cross-session-message>"
 	if v.Envelope != expected {
 		t.Fatalf("queue system envelope=%q want=%q", v.Envelope, expected)
 	}

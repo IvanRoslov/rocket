@@ -1,6 +1,7 @@
 package socketmsg
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -97,4 +98,12 @@ func Unwrap(s string) (string, bool) {
 		body = "[from " + m[1] + "] " + body
 	}
 	return body, true
+}
+
+// EnvelopeWithID adds service correlation without changing the generic envelope.
+func EnvelopeWithID(id, from, fromName, body string) (string, error) {
+	if !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(id) {
+		return "", fmt.Errorf("invalid Claude wire UUID")
+	}
+	return strings.Replace(Envelope(from, fromName, body), "<"+EnvelopeTag, "<"+EnvelopeTag+` msg-id="`+id+`"`, 1), nil
 }

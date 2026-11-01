@@ -18,6 +18,7 @@ type JournalBoundary struct {
 	Offset        int64
 }
 type Snapshot struct {
+	EnvelopeVersion                    uint8
 	MessageID                          int64
 	Transport                          string
 	Target                             Identity

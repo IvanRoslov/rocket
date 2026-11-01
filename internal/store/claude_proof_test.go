@@ -52,7 +52,9 @@ func nextClaudeSnapshot(t *testing.T, st *Store, old claudeinstance.Snapshot, ge
 	if e != nil {
 		t.Fatal(e)
 	}
+	oldWire := v.WireID
 	v.WireID, _ = socketmsg.NewMsgID()
+	v.Envelope = strings.Replace(v.Envelope, oldWire, v.WireID, 1)
 	v.Boundary, e = claudeinstance.PinJournal(v.Target)
 	if e != nil {
 		t.Fatal(e)
@@ -91,9 +93,11 @@ func TestClaudeExactProofConsumesPhysicalRecord(t *testing.T) {
 func TestLateEqualEnvelopeAcrossGenerationsRemainsAmbiguousAfterPurge(t *testing.T) {
 	st := openTestStore(t)
 	a, id := claudeStoreFixture(t, st)
-	st.ClaimClaudeMessage(a)
+	a.EnvelopeVersion = 0
+	a.Envelope = "legacy equal envelope"
+	claimLegacyClaudeFixture(t, st, a)
 	b := nextClaudeSnapshot(t, st, a, "g2")
-	if ok, e := st.ClaimClaudeMessage(b); !ok || e != nil {
+	if ok, e := claimLegacyClaudeFixture(t, st, b); !ok || e != nil {
 		t.Fatalf("B claim %v %v", ok, e)
 	}
 	st.ExpireClaudeMessage(id, a.Deadline.Add(time.Second))
@@ -124,7 +128,7 @@ func TestClaudeReplacementJournalAndDamagedOldHistoryPreventNewClaim(t *testing.
 			}
 			b := nextClaudeSnapshot(t, st, a, "g2")
 			if which == "replacement inode different envelope" {
-				b.Envelope = "different envelope"
+				b.Envelope, _ = socketmsg.EnvelopeWithID(b.WireID, "", "", "different envelope")
 			}
 			if which == "missing old side row" {
 				st.db.Exec(`DELETE FROM claude_deliveries WHERE message_id=?`, id)
@@ -189,7 +193,7 @@ func TestClaudeProofRejectsDamagedOldHistoryAfterClaim(t *testing.T) {
 			a, id := claudeStoreFixture(t, st)
 			st.ClaimClaudeMessage(a)
 			b := nextClaudeSnapshot(t, st, a, "g2")
-			b.Envelope = "different envelope"
+			b.Envelope, _ = socketmsg.EnvelopeWithID(b.WireID, "", "", "different envelope")
 			st.ClaimClaudeMessage(b)
 			switch which {
 			case "missing":
@@ -216,7 +220,7 @@ func TestClaudePhysicalConsumptionAtomicAcrossGenerationsAndReopen(t *testing.T)
 	a, _ := claudeStoreFixture(t, st)
 	st.ClaimClaudeMessage(a)
 	b := nextClaudeSnapshot(t, st, a, "g2")
-	b.Envelope = "different envelope"
+	b.Envelope, _ = socketmsg.EnvelopeWithID(b.WireID, "", "", "different envelope")
 	if ok, e := st.ClaimClaudeMessage(b); !ok || e != nil {
 		t.Fatal(e)
 	}
@@ -287,7 +291,9 @@ func TestClaudePurgePreservesOnlyNeededResolvedProofAndForeignTransport(t *testi
 		t.Run(fmt.Sprint(overlap), func(t *testing.T) {
 			st := openTestStore(t)
 			a, id := claudeStoreFixture(t, st)
-			st.ClaimClaudeMessage(a)
+			a.EnvelopeVersion = 0
+			a.Envelope = "legacy equal envelope"
+			claimLegacyClaudeFixture(t, st, a)
 			p := appendClaudeIncoming(t, a, "record-a")
 			if ok, e := st.ConfirmClaudeMessage(id, p, time.Now()); !ok || e != nil {
 				t.Fatal(e)
@@ -296,7 +302,7 @@ func TestClaudePurgePreservesOnlyNeededResolvedProofAndForeignTransport(t *testi
 			if overlap {
 				b.Boundary = a.Boundary
 			}
-			if ok, e := st.ClaimClaudeMessage(b); !ok || e != nil {
+			if ok, e := claimLegacyClaudeFixture(t, st, b); !ok || e != nil {
 				t.Fatal(e)
 			}
 			legacy, _ := st.AddMessage(Message{ToSession: "s", Body: "legacy", Status: "delivered"})
@@ -497,6 +503,7 @@ func TestClaudeContextCancelsLargeHistoricalValidation(t *testing.T) {
 		}
 		history := v
 		history.MessageID, _ = res.LastInsertId()
+		history.EnvelopeVersion = 0
 		history.WireID = fmt.Sprintf("history-%d", i)
 		history.Envelope = fmt.Sprintf("history envelope %d", i)
 		raw, _ := json.Marshal(history)
@@ -660,7 +667,7 @@ func TestClaudeAtomicProofLargeRecordsAndLaterDuplicate(t *testing.T) {
 		t.Run(fmt.Sprint(duplicate), func(t *testing.T) {
 			st := openTestStore(t)
 			v, id := claudeStoreFixture(t, st)
-			v.Envelope = strings.Repeat("<>&\n", 20000) // JSON escaping enlarges a legal envelope.
+			v.Envelope, _ = socketmsg.EnvelopeWithID(v.WireID, "", "", strings.Repeat("<>&\n", 20000)) // JSON escaping enlarges a legal envelope.
 			if ok, e := st.ClaimClaudeMessage(v); !ok || e != nil {
 				t.Fatalf("claim %v %v", ok, e)
 			}
@@ -703,4 +710,28 @@ func TestClaudeAtomicProofLargeRecordsAndLaterDuplicate(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Seed pre-version1 persisted history directly; new production claims never accept v0.
+func claimLegacyClaudeFixture(t *testing.T, st *Store, v claudeinstance.Snapshot) (bool, error) {
+	t.Helper()
+	v.EnvelopeVersion = 0
+	raw, e := json.Marshal(v)
+	if e != nil {
+		t.Fatal(e)
+	}
+	tx, e := st.db.Begin()
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer tx.Rollback()
+	if _, e = tx.Exec(`UPDATE messages SET status='delivering',attempts=attempts+1,delivery_transport='claude-socket-v1' WHERE id=?`, v.MessageID); e != nil {
+		t.Fatal(e)
+	}
+	ns, _ := claudeDeadlineNS(v.Deadline)
+	_, e = tx.Exec(`INSERT INTO claude_deliveries(message_id,transport,wire_id,snapshot_json,claude_uuid,journal_device,journal_inode,journal_path,boundary_offset,envelope_hash,phase,deadline_ns) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, v.MessageID, v.Transport, v.WireID, string(raw), v.Target.ClaudeSessionID, v.Boundary.Device, v.Boundary.Inode, v.Boundary.Path, v.Boundary.Offset, envelopeHash(v.Envelope), "possible_write", ns)
+	if e != nil {
+		t.Fatal(e)
+	}
+	return true, tx.Commit()
 }

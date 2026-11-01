@@ -109,14 +109,18 @@ func (s *ClaudeSocketSender) Prepare(ctx context.Context, sess store.Session, fr
 	if reply != "" {
 		from = socketmsg.EncodeAddr(reply)
 	}
-	return claudeinstance.Snapshot{Transport: ClaudeSocketTransport, Target: result.Identity, WireID: wire, Envelope: socketmsg.Envelope(from, fromName, text), ReplyPath: reply, Boundary: boundary}, nil
+	envelope, e := socketmsg.EnvelopeWithID(wire, from, fromName, text)
+	if e != nil {
+		return claudeinstance.Snapshot{}, e
+	}
+	return claudeinstance.Snapshot{EnvelopeVersion: 1, Transport: ClaudeSocketTransport, Target: result.Identity, WireID: wire, Envelope: envelope, ReplyPath: reply, Boundary: boundary}, nil
 }
 func (s *ClaudeSocketSender) Send(ctx context.Context, v claudeinstance.Snapshot) (SocketOutcome, error) {
 	if s.st == nil {
 		return SocketNotSent, ErrNoSocket
 	}
 	saved, e := s.st.GetClaudeDelivery(v.MessageID)
-	if e != nil || saved.WireID != v.WireID || !claudeinstance.SameIdentity(saved.Target, v.Target) || saved.Envelope != v.Envelope || saved.Boundary != v.Boundary || saved.ReplyPath != v.ReplyPath {
+	if e != nil || saved.EnvelopeVersion != v.EnvelopeVersion || saved.WireID != v.WireID || !claudeinstance.SameIdentity(saved.Target, v.Target) || saved.Envelope != v.Envelope || saved.Boundary != v.Boundary || saved.ReplyPath != v.ReplyPath {
 		return SocketNotSent, fmt.Errorf("missing immutable Claude claim")
 	}
 	if claudeAgeExpired(saved.Deadline, time.Now()) {
