@@ -102,6 +102,8 @@ codex queue --thread '<thread-uuid>' \
 
 Санированная выдержка: [codex-automation-failure.sanitized.json](evidence/codex-automation-failure.sanitized.json).
 
+После ревью скрипт сокращён до воспроизведения именно этого сбоя: неисполненный success-path с cursor/busy/restart удалён, чтобы непроверенная логика не могла дать ложный PASS. Полный cursor-сценарий остаётся задачей следующего gate.
+
 Повторить ограниченный сценарий можно так, только в новом пустом каталоге:
 
 ```bash
@@ -114,7 +116,7 @@ PROBE_PYTHON=/path/to/isolated-python-with-pyte-and-websockets
   --rocket-socket /tmp/rocket-cursor-recon.sock
 ```
 
-Ожидаемый результат на сохранённой конфигурации — `status=failed` через 120 секунд, а не PASS. Скрипт оставлен как воспроизводимый диагностический probe, не как рабочая интеграция. `render_tui.py` и `ws_request.py` — более узкие полезные примитивы для ручного рецепта. При cleanup `codex_native_probe.py` завершает только собственные child process groups (`start_new_session=True` и `killpg`); общий app-server daemon и чужие каталоги не затрагиваются.
+Ожидаемый результат на сохранённой конфигурации — `status=failed` через 120 секунд, а не PASS. Скрипт оставлен как минимальный воспроизводимый probe именно этого сбоя, не как рабочая интеграция и не как cursor-тест. `render_tui.py` и `ws_request.py` — более узкие полезные примитивы для ручного рецепта. При cleanup `codex_native_probe.py` завершает только собственные child process groups (`start_new_session=True` и `killpg`); общий app-server daemon и чужие каталоги не затрагиваются.
 
 ## Предложение для следующей спецификации
 

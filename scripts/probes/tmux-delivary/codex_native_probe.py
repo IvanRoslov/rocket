@@ -1,4 +1,21 @@
 #!/usr/bin/env python3
+"""Minimal isolated Codex observer-completion probe.
+
+This probe starts a private Codex app-server, connects the stock TUI to it
+over a private Unix socket, starts one model turn, and waits for the
+`turn/completed` notification. It exists to reproduce the documented
+observer limitation: the rendered TUI can show a finished turn while the
+observer connection never receives `turn/completed`.
+
+It deliberately does NOT try to prove cursor preservation, draft
+preservation, busy follow-up, or restart delivery. Those scenarios need a
+separate, properly executed gate; keeping an unexecuted success path here
+would risk reporting a false PASS.
+
+Cleanup stops only this probe's own child process groups. It never touches
+a shared app-server daemon, global config/auth, or other sessions.
+"""
+
 import argparse
 import asyncio
 import fcntl
@@ -98,9 +115,7 @@ class AppServer:
             if remaining <= 0:
                 break
             try:
-                message = json.loads(
-                    await asyncio.wait_for(self.ws.recv(), remaining)
-                )
+                message = json.loads(await asyncio.wait_for(self.ws.recv(), remaining))
             except asyncio.TimeoutError:
                 continue
             self.notifications.append(message)
@@ -117,7 +132,10 @@ class AppServer:
 
     async def close(self):
         if self.ws is not None:
-            await self.ws.close()
+            try:
+                await self.ws.close()
+            except Exception:
+                pass
         self.stop()
 
 
@@ -176,9 +194,6 @@ class Tui:
         self.pump()
         return self.raw.decode("utf-8", errors="replace")
 
-    def send(self, data):
-        os.write(self.master, data.encode("utf-8"))
-
     def snapshot(self):
         screen = pyte.Screen(120, 40)
         stream = pyte.Stream(screen)
@@ -208,50 +223,9 @@ async def wait_for_text(tui, marker, timeout=90):
     raise TimeoutError(f"marker not seen in TUI: {marker}")
 
 
-async def queue(thread_id, text, socket_path, check=True):
-    result = await asyncio.to_thread(
-        subprocess.run,
-        [
-            "codex",
-            "queue",
-            "--thread",
-            thread_id,
-            "--message",
-            text,
-            "--remote",
-            f"unix://{socket_path}",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    output = (result.stdout + result.stderr).strip()
-    if check and result.returncode != 0:
-        raise RuntimeError(output)
-    return {"exitCode": result.returncode, "output": output}
-
-
-def turn_with_text(turns, marker):
-    for turn in turns:
-        for item in turn.get("items", []):
-            if marker in json.dumps(item, ensure_ascii=False):
-                return turn
-    return None
-
-
-def cursor_status(before, after_busy, after_restart):
-    baseline = before["cursor"]["x"]
-    if baseline >= 19:
-        return "unverified_baseline_not_midline"
-    positions = [baseline, after_busy["cursor"]["x"], after_restart["cursor"]["x"]]
-    if len(set(positions)) == 1:
-        return "preserved"
-    return "moved"
-
-
 async def main():
     parser = argparse.ArgumentParser(
-        description="Bounded isolated Codex app-server and stock-TUI delivery probe"
+        description="Minimal isolated Codex observer-completion probe"
     )
     parser.add_argument("--root", required=True)
     parser.add_argument("--session-id", required=True)
@@ -262,7 +236,6 @@ async def main():
         raise SystemExit(f"refusing non-empty probe root: {root}")
     (root / "work").mkdir(parents=True, exist_ok=True)
     server = AppServer(root, args.session_id, args.rocket_socket)
-    restarted = None
     tui = None
     evidence = {
         "codexVersion": subprocess.run(
@@ -290,107 +263,16 @@ async def main():
             },
         )
         await server.wait_turn_completed(tui, initial["turn"]["id"])
-        tui.send("cursor-черновик-ε")
-        tui.send("\x1b[D\x1b[D")
-        await asyncio.sleep(1)
-        evidence["cursorBefore"] = tui.snapshot()
-        (root / "cursor-before.json").write_text(
-            json.dumps(evidence["cursorBefore"], ensure_ascii=False, indent=2) + "\n"
-        )
-        long_prompt = (
-            "Run this exact shell command: printf 'ROCKET_SESSION_ID=%s\\nROCKET_SOCKET=%s\\n' "
-            '"$ROCKET_SESSION_ID" "$ROCKET_SOCKET"; sleep 3. Then reply with exactly BUSY_DONE'
-        )
-        evidence["longQueue"] = await queue(thread_id, long_prompt, server.socket_path)
-        await asyncio.sleep(1)
-        evidence["busyQueue"] = await queue(
-            thread_id, "ROCKET_BUSY: reply with exactly BUSY_OK", server.socket_path
-        )
-        long_turn = None
-        busy_turn = None
-        deadline = time.monotonic() + 120
-        while time.monotonic() < deadline:
-            tui.pump()
-            turns = (
-                await server.request(
-                    "thread/turns/list", {"threadId": thread_id, "itemsView": "full"}
-                )
-            )["data"]
-            long_turn = turn_with_text(turns, "BUSY_DONE")
-            busy_turn = turn_with_text(turns, "BUSY_OK")
-            if (
-                long_turn
-                and busy_turn
-                and long_turn["status"] == busy_turn["status"] == "completed"
-            ):
-                break
-            await asyncio.sleep(0.5)
-        else:
-            raise TimeoutError("busy turns did not complete")
-        evidence["longTurn"] = {
-            "startedAt": long_turn["startedAt"],
-            "completedAt": long_turn["completedAt"],
-        }
-        evidence["busyTurn"] = {
-            "startedAt": busy_turn["startedAt"],
-            "completedAt": busy_turn["completedAt"],
-        }
-        if long_turn["completedAt"] > busy_turn["startedAt"]:
-            raise AssertionError("follow-up started before the active turn completed")
-        executions = [
-            item for item in long_turn["items"] if item.get("type") == "commandExecution"
-        ]
-        env_output = "\n".join(
-            item.get("aggregatedOutput", "") for item in executions
-        )
-        expected_output = (
-            f"ROCKET_SESSION_ID={args.session_id}\nROCKET_SOCKET={args.rocket_socket}\n"
-        )
-        if expected_output not in env_output:
-            raise AssertionError(f"unexpected shell environment: {env_output}")
-        evidence["shellOutput"] = env_output
-        await wait_for_text(tui, "BUSY_OK")
-        evidence["cursorAfterBusy"] = tui.snapshot()
-        (root / "cursor-after-busy.json").write_text(
-            json.dumps(evidence["cursorAfterBusy"], ensure_ascii=False, indent=2)
-            + "\n"
-        )
-        server.stop()
-        evidence["offlineQueue"] = await queue(
-            thread_id, "ROCKET_OFFLINE: no blind retry", server.socket_path, check=False
-        )
-        if evidence["offlineQueue"]["exitCode"] == 0:
-            raise AssertionError("offline queue unexpectedly succeeded")
-        restarted = AppServer(root, args.session_id, args.rocket_socket)
-        restarted.start()
-        await restarted.connect()
-        evidence["restartQueue"] = await queue(
-            thread_id, "ROCKET_RESTART: reply with exactly RESTART_OK", restarted.socket_path
-        )
-        await wait_for_text(tui, "RESTART_OK")
-        evidence["cursorAfterRestart"] = tui.snapshot()
-        (root / "cursor-after-restart.json").write_text(
-            json.dumps(evidence["cursorAfterRestart"], ensure_ascii=False, indent=2)
-            + "\n"
-        )
-        evidence["draftPreserved"] = "cursor-черновик-ε" in tui.text()
-        if not evidence["draftPreserved"]:
-            raise AssertionError("draft disappeared from TUI")
-        evidence["cursorStatus"] = cursor_status(
-            evidence["cursorBefore"],
-            evidence["cursorAfterBusy"],
-            evidence["cursorAfterRestart"],
-        )
         evidence["status"] = "completed"
     except Exception as error:
         evidence["status"] = "failed"
         evidence["error"] = str(error)
+        if tui is not None:
+            evidence["renderedTui"] = tui.snapshot()
         raise
     finally:
         if tui is not None:
             tui.stop()
-        if restarted is not None:
-            await restarted.close()
         await server.close()
         (root / "evidence.json").write_text(
             json.dumps(evidence, ensure_ascii=False, indent=2) + "\n"
