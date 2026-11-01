@@ -11,6 +11,7 @@ import (
 	"github.com/IvanRoslov/rocket/internal/socketmsg"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -651,5 +652,55 @@ func TestClaudeDamagedConflictingSideRetainsOwnershipDuringPurge(t *testing.T) {
 	}
 	if _, e := st.GetMessage(id); e != nil {
 		t.Fatalf("corrupt side with conflicting marker lost ownership: %v", e)
+	}
+}
+
+func TestClaudeAtomicProofLargeRecordsAndLaterDuplicate(t *testing.T) {
+	for _, duplicate := range []bool{false, true} {
+		t.Run(fmt.Sprint(duplicate), func(t *testing.T) {
+			st := openTestStore(t)
+			v, id := claudeStoreFixture(t, st)
+			v.Envelope = strings.Repeat("<>&\n", 20000) // JSON escaping enlarges a legal envelope.
+			if ok, e := st.ClaimClaudeMessage(v); !ok || e != nil {
+				t.Fatalf("claim %v %v", ok, e)
+			}
+			raw, e := json.Marshal(map[string]any{"type": "assistant", "sessionId": v.Target.ClaudeSessionID, "message": map[string]string{"role": "assistant", "content": strings.Repeat("x", 80*1024)}})
+			if e != nil {
+				t.Fatal(e)
+			}
+			f, e := os.OpenFile(v.Boundary.Path, os.O_APPEND|os.O_WRONLY, 0600)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if _, e = f.Write(append(raw, '\n')); e != nil {
+				f.Close()
+				t.Fatal(e)
+			}
+			if e = f.Close(); e != nil {
+				t.Fatal(e)
+			}
+			proof := appendClaudeIncoming(t, v, "large-exact")
+			if duplicate {
+				appendClaudeIncoming(t, v, "large-later-duplicate")
+			}
+			ok, e := st.ConfirmClaudeMessageContext(context.Background(), id, proof, time.Now())
+			if e != nil || ok == duplicate {
+				t.Fatalf("atomic large proof confirmed=%v duplicate=%v error=%v", ok, duplicate, e)
+			}
+			var consumed int
+			if e = st.db.QueryRow(`SELECT count(*) FROM claude_consumed_records WHERE message_id=?`, id).Scan(&consumed); e != nil {
+				t.Fatal(e)
+			}
+			m, e := st.GetMessage(id)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if duplicate && (consumed != 0 || m.Status != "delivering") {
+				t.Fatalf("duplicate consumed=%d status=%s", consumed, m.Status)
+			}
+			if !duplicate && (consumed != 1 || m.Status != "delivered") {
+				t.Fatalf("unique consumed=%d status=%s", consumed, m.Status)
+			}
+		})
 	}
 }

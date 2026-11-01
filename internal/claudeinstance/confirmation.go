@@ -96,8 +96,10 @@ func FindProof(ctx context.Context, s Snapshot) (Proof, bool, error) {
 	if _, err = f.Seek(s.Boundary.Offset, io.SeekStart); err != nil {
 		return Proof{}, false, err
 	}
-	// A fixed-size snapshot and bounded records keep a growing journal from
-	// stranding confirmation. An oversized scan is uncertainty, never success.
+	// Bound the whole fixed-size tail, including metadata and JSON escaping.
+	// A complete record may be larger than the socket frame; a per-record
+	// cutoff would hide both legal exact envelopes and later duplicates.
+	// An oversized total scan remains uncertainty, never success.
 	remaining := st.Size() - s.Boundary.Offset
 	if remaining > 32<<20 {
 		return Proof{}, false, fmt.Errorf("journal scan exceeds limit")
@@ -112,7 +114,18 @@ func FindProof(ctx context.Context, s Snapshot) (Proof, bool, error) {
 		}
 		line, err := reader.ReadSlice('\n')
 		if err == bufio.ErrBufferFull {
-			return Proof{}, false, fmt.Errorf("journal record exceeds limit")
+			// Reassemble complete records within the already bounded tail,
+			// checking the caller's shared budget between read fragments.
+			complete := append([]byte(nil), line...)
+			for err == bufio.ErrBufferFull {
+				if e := ctx.Err(); e != nil {
+					return Proof{}, false, e
+				}
+				var part []byte
+				part, err = reader.ReadSlice('\n')
+				complete = append(complete, part...)
+			}
+			line = complete
 		}
 		if err == io.EOF {
 			break
