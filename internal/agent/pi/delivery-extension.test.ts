@@ -16,6 +16,19 @@ class FakeApi {
 	handlers = new Map<string, ((event: any, ctx?: any) => unknown)[]>();
 	calls: { text: string; options: any }[] = [];
 	throwOnSend = false;
+	sessionID = "sess-1";
+	historyThrows = false;
+	ctxOverride: any;
+
+	readonly ctx = {
+		isIdle: () => true,
+		sessionManager: {
+			getSessionId: (): string => {
+				if (this.historyThrows) throw new Error("history unavailable");
+				return this.sessionID;
+			},
+		},
+	};
 
 	on(event: string, handler: (event: any, ctx?: any) => unknown): () => void {
 		const list = this.handlers.get(event) ?? [];
@@ -31,7 +44,7 @@ class FakeApi {
 
 	emit(event: string, payload: Record<string, unknown> = {}): void {
 		for (const handler of this.handlers.get(event) ?? []) {
-			handler(payload, { isIdle: () => true });
+			handler(payload, this.ctxOverride ?? this.ctx);
 		}
 	}
 }
@@ -63,15 +76,28 @@ async function makeBridge(
 	const endpoint = overrides.endpoint ?? endpointFor();
 	const sessionID = overrides.sessionID ?? "sess-1";
 	const instanceID = overrides.instanceID ?? "instance-1";
+	setNativeEnv(endpoint, sessionID, instanceID);
+	api.sessionID = sessionID;
+	const bridge = createDeliveryExtension(api);
+	assert.ok(bridge, "delivery extension must start from the native env");
+	t.after(() => bridge.stop("quit"));
+	api.emit("session_start", { reason: "startup" });
+	await waitForListening(bridge);
+	return { bridge, api, endpoint, sessionID, instanceID };
+}
+
+function setNativeEnv(endpoint: string, sessionID = "sess-1", instanceID = "instance-1"): void {
 	process.env.ROCKET_PI_NATIVE_SESSION_ID = sessionID;
 	process.env.ROCKET_PI_NATIVE_INSTANCE_ID = instanceID;
 	process.env.ROCKET_PI_NATIVE_ENDPOINT = endpoint;
 	process.env.ROCKET_PI_NATIVE_PROTOCOL = "1";
-	const bridge = createDeliveryExtension(api);
-	assert.ok(bridge, "delivery extension must start from the native env");
-	t.after(() => bridge.stop("quit"));
-	await bridge.start();
-	return { bridge, api, endpoint, sessionID, instanceID };
+}
+
+async function waitForListening(bridge: { listening: boolean }): Promise<void> {
+	for (let i = 0; i < 100 && !bridge.listening; i++) {
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+	assert.equal(bridge.listening, true, "a bound session_start must open the endpoint");
 }
 
 function connectRequest(endpoint: string, body: unknown, chunks?: Buffer[]): Promise<any> {
@@ -229,21 +255,94 @@ test("shutdownReloadAndSwitchCloseOldEndpoint", async (t) => {
 	assert.equal(third.bridge.listening, false, "switch must not reopen the old identity");
 });
 
+test("refusesStartInAForeignHistory", async (t) => {
+	const api = new FakeApi();
+	const endpoint = endpointFor();
+	setNativeEnv(endpoint, "sess-1", "instance-1");
+	api.sessionID = "history-b";
+	const bridge = createDeliveryExtension(api);
+	assert.ok(bridge);
+	t.after(() => bridge.stop("quit"));
+	api.emit("session_start", { reason: "reload" });
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	assert.equal(bridge.listening, false, "a foreign history must not open the endpoint");
+	assert.equal(existsSync(endpoint), false, "a foreign history must not leave a reachable endpoint");
+	await assert.rejects(connectRequest(endpoint, {
+		v: 1, session_id: "sess-1", instance_id: "instance-1", message_id: 71, text: "чужой контекст",
+	}));
+	assert.equal(api.calls.length, 0);
+});
+
+test("refusesStartWithoutHistoryContext", async (t) => {
+	const api = new FakeApi();
+	const endpoint = endpointFor();
+	setNativeEnv(endpoint);
+	api.ctxOverride = { isIdle: () => true };
+	const bridge = createDeliveryExtension(api);
+	assert.ok(bridge);
+	t.after(() => bridge.stop("quit"));
+	api.emit("session_start", { reason: "startup" });
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	assert.equal(bridge.listening, false, "without a supported history getter the bridge fails closed");
+	assert.equal(api.calls.length, 0);
+});
+
+test("reloadAfterSwitchNeverRoutesIntoNewHistory", async (t) => {
+	const api = new FakeApi();
+	const { endpoint, sessionID, instanceID } = await makeBridge(t, api);
+	assert.equal((await connectRequest(endpoint, {
+		v: 1, session_id: sessionID, instance_id: instanceID, message_id: 81, text: "история A",
+	})).outcome, "accepted");
+	api.emit("session_before_switch", { reason: "new" });
+	assert.equal(api.calls.length, 1);
+
+	// Pi reloads the extension module in history B while the old ROCKET env
+	// still names history A. The new instance must not open A's endpoint.
+	const foreignApi = new FakeApi();
+	foreignApi.sessionID = "history-b";
+	const foreign = createDeliveryExtension(foreignApi);
+	assert.ok(foreign);
+	t.after(() => foreign.stop("quit"));
+	foreignApi.emit("session_start", { reason: "reload" });
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	assert.equal(foreign.listening, false);
+	await assert.rejects(connectRequest(endpoint, {
+		v: 1, session_id: sessionID, instance_id: instanceID, message_id: 82, text: "история B",
+	}));
+	assert.equal(foreignApi.calls.length, 0, "the old target must make zero API calls after the switch");
+});
+
+test("submissionRequiresBoundHistory", async (t) => {
+	const api = new FakeApi();
+	const { endpoint, sessionID, instanceID } = await makeBridge(t, api);
+	api.sessionID = "history-b";
+	const response = await connectRequest(endpoint, {
+		v: 1, session_id: sessionID, instance_id: instanceID, message_id: 91, text: "уже не та история",
+	});
+	assert.equal(response.outcome, "not_sent");
+	assert.equal(api.calls.length, 0);
+});
+
+test("historyGetterFailureFailsClosed", async (t) => {
+	const api = new FakeApi();
+	const { endpoint, sessionID, instanceID } = await makeBridge(t, api);
+	api.historyThrows = true;
+	const response = await connectRequest(endpoint, {
+		v: 1, session_id: sessionID, instance_id: instanceID, message_id: 92, text: "нет истории",
+	});
+	assert.equal(response.outcome, "not_sent");
+	assert.equal(api.calls.length, 0);
+});
+
 test("sessionStartOpensPrivateEndpoint", async (t) => {
 	const api = new FakeApi();
 	const endpoint = endpointFor();
-	process.env.ROCKET_PI_NATIVE_SESSION_ID = "sess-1";
-	process.env.ROCKET_PI_NATIVE_INSTANCE_ID = "instance-1";
-	process.env.ROCKET_PI_NATIVE_ENDPOINT = endpoint;
-	process.env.ROCKET_PI_NATIVE_PROTOCOL = "1";
+	setNativeEnv(endpoint);
 	const bridge = createDeliveryExtension(api);
 	assert.ok(bridge);
 	t.after(() => bridge.stop("quit"));
 	api.emit("session_start");
-	for (let i = 0; i < 100 && !bridge.listening; i++) {
-		await new Promise((resolve) => setTimeout(resolve, 5));
-	}
-	assert.equal(bridge.listening, true);
+	await waitForListening(bridge);
 	assert.equal(statSync(dirname(endpoint)).mode & 0o777, 0o700);
 	assert.equal(statSync(endpoint).mode & 0o777, 0o600);
 	const response = await connectRequest(endpoint, {
@@ -258,10 +357,7 @@ test("startFailureIsContained", async (t) => {
 	const parentFile = join(shortDir(), "file");
 	writeFileSync(parentFile, "not a directory");
 	const endpoint = join(parentFile, "s");
-	process.env.ROCKET_PI_NATIVE_SESSION_ID = "sess-1";
-	process.env.ROCKET_PI_NATIVE_INSTANCE_ID = "instance-1";
-	process.env.ROCKET_PI_NATIVE_ENDPOINT = endpoint;
-	process.env.ROCKET_PI_NATIVE_PROTOCOL = "1";
+	setNativeEnv(endpoint);
 	const bridge = createDeliveryExtension(api);
 	assert.ok(bridge);
 	t.after(() => bridge.stop("quit"));

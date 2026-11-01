@@ -90,6 +90,7 @@ export class DeliveryBridge {
 	private modalOpen = false;
 	private compaction = false;
 	private suppressStart = false;
+	private context: any;
 
 	constructor(options: BridgeOptions) {
 		this.config = {
@@ -117,6 +118,33 @@ export class DeliveryBridge {
 
 	setCompaction(active: boolean): void {
 		this.compaction = active;
+	}
+
+	/**
+	 * Bind the bridge to the Pi history reported by the supported extension
+	 * context. The ROCKET_* environment alone can outlive a switch: after
+	 * /reload a fresh module instance still sees the old launch env.
+	 */
+	bindContext(ctx: any): boolean {
+		let sessionID: unknown;
+		try {
+			sessionID = ctx?.sessionManager?.getSessionId?.();
+		} catch {
+			sessionID = undefined;
+		}
+		if (typeof sessionID !== "string" || sessionID !== this.config.sessionID) return false;
+		this.context = ctx;
+		return true;
+	}
+
+	/** The history Pi would submit into must still be the bound one. */
+	historyMatches(): boolean {
+		if (!this.context) return false;
+		try {
+			return this.context.sessionManager.getSessionId() === this.config.sessionID;
+		} catch {
+			return false;
+		}
 	}
 
 	async start(): Promise<void> {
@@ -231,6 +259,9 @@ export class DeliveryBridge {
 			return this.responseLine(undefined, "not_sent");
 		}
 		if (!this.validRequest(request)) return this.responseLine(request, "not_sent");
+		// The request must address the history Pi is in right now, not just
+		// the one named by the launch environment.
+		if (!this.historyMatches()) return this.responseLine(request, "not_sent");
 		if (this.accepted.has(request.message_id)) return this.responseLine(request, "accepted");
 		// Only known states refuse before the API. isIdle alone cannot
 		// distinguish ordinary busy from compaction, so it is not a guard.
@@ -286,7 +317,13 @@ export function createDeliveryExtension(
 		sendUserMessage: (text) =>
 			api.sendUserMessage(text, { deliverAs: "followUp", expandPromptTemplates: false }),
 	});
-	api.on("session_start", () => {
+	api.on("session_start", (_event: any, ctx: any) => {
+		if (!bridge.bindContext(ctx)) {
+			// A reloaded module with a stale env must never open the old
+			// target inside a different history. Neutralize the old path.
+			bridge.stop("foreign-history");
+			return;
+		}
 		bridge.startSafely();
 	});
 	api.on("session_shutdown", (event: any) => {
