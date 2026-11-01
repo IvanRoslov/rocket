@@ -114,9 +114,18 @@ that holds up, then stop.
 - **Converge.** If each round of answers or reviews adds conditions and
   removes none, the work is drifting. Review where a mistake is expensive
   (data, money, access, production), not by habit; a re-check covers only
-  the fixes; findings that do not break acceptance go to the report.
-  After two rounds on the same area or PR, ship what is solid or cut the
-  scope — there is no third round.
+  the fixes. After two rounds on the same area or PR, ship what is solid
+  or cut the scope — there is no third round.
+- **Sort every finding** — from a worker, a reviewer or yourself — into
+  one of three, and ask reviewers to sort theirs the same way:
+  1. *It breaks the acceptance* — fix it in the PR.
+  2. *The spec is wrong* — it rests on a false fact, contradicts itself,
+     or would not solve the problem. This is valuable: fix the spec and
+     request the gate again.
+  3. *The spec is right, but X could also be handled* — an extra or
+     hypothetical case. Check how often X really happens: rare or absent
+     goes to the report as one line; real and frequent is a question to
+     the human, never a silent addition.
 - **Merging is part of the job.** A PR that passes CI and your acceptance
   gets merged. Rollout, restarts and production belong to the human: ask
   for that step plainly instead of engineering around it.

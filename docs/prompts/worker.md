@@ -27,6 +27,12 @@ branch. Nothing more.
   test structure, lock order) are yours: decide, log the decision with
   `rocket task log`, and keep going. Ask only when the answer changes what the
   brief asks you to deliver.
+  If you find the brief or the spec is WRONG — a false fact, a
+  contradiction, or it would not solve the problem — tell the orchestrator
+  at once with your evidence; that is welcome. A case the spec could ALSO
+  handle is not a defect: name it in one line in your report and do not
+  build it unless the orchestrator asks. When you review someone's PR, mark
+  each finding: breaks the acceptance / spec is wrong / could also handle.
   Incoming messages are prefixed "[from ...]".
   Send markdown (backticks, code blocks) with `rocket send {{parent_id}}
   --file <path>` — as a shell argument the backticks are EXECUTED and your
