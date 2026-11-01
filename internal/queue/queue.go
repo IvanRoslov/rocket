@@ -89,6 +89,10 @@ type Queue struct {
 	// Overridable by tests.
 	now func() time.Time
 
+	// confirmTimeout bounds the final journal scan of a failed native
+	// attempt (see failNativeAttempt). Overridable by tests.
+	confirmTimeout time.Duration
+
 	// confirmKick wakes the confirmer loop ahead of its ticker: sent (non-
 	// blocking) when a message becomes accepted and after Recover.
 	confirmKick chan struct{}
@@ -106,17 +110,18 @@ type Queue struct {
 // New builds a Queue. getActivity is typically Monitor.Activity.
 func New(st *store.Store, b *bus.Bus, rt runtime.Runtime, cfg *config.Config, getActivity func(sessionID string) (activity.State, bool)) *Queue {
 	return &Queue{
-		st:           st,
-		bus:          b,
-		rt:           rt,
-		cfg:          cfg,
-		getActivity:  getActivity,
-		getSession:   st.GetSession,
-		backoff:      defaultBackoff,
-		resolveAgent: agent.Get,
-		now:          time.Now,
-		confirmKick:  make(chan struct{}, 1),
-		workers:      make(map[string]bool),
+		st:             st,
+		bus:            b,
+		rt:             rt,
+		cfg:            cfg,
+		getActivity:    getActivity,
+		getSession:     st.GetSession,
+		backoff:        defaultBackoff,
+		resolveAgent:   agent.Get,
+		now:            time.Now,
+		confirmTimeout: nativeConfirmTimeout,
+		confirmKick:    make(chan struct{}, 1),
+		workers:        make(map[string]bool),
 	}
 }
 
@@ -470,11 +475,22 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 			return
 		}
 
+		// A persisted transport Rocket does not implement must never be
+		// downgraded to visual delivery: fail closed before any tmux call.
+		route := routeOf(msg, sess)
+		if route == routeUnsupported {
+			slog.Warn("queue: unsupported persisted delivery transport, failing closed",
+				"id", msg.ID, "to", msg.ToSession,
+				"message_transport", msg.DeliveryTransport, "session_transport", sess.DeliveryTransport)
+			q.fail(msg, unsupportedDeliveryTransport)
+			return
+		}
+
 		// Optional agent capabilities (Codex): busyOK makes an active
 		// recipient ready; confirmer turns a successful paste into
 		// "accepted" instead of "delivered" (see attemptDelivery).
 		busyOK, confirmer := q.recipientCaps(sess)
-		native := nativeDelivery(msg, sess)
+		native := route == routeNative
 		viaSocket := !native && q.socketReady(sess)
 
 		if sess.PendingQuiz != "" && !viaSocket && !native {

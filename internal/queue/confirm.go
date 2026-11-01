@@ -138,23 +138,31 @@ func (q *Queue) confirmPass(ctx context.Context, st *confirmState) (pending int)
 // first) and returns how many stay accepted.
 func (q *Queue) confirmRecipient(ctx context.Context, st *confirmState, to string, msgs []store.Message) (pending int) {
 	sess, _ := q.getSession(to)
+	// Read the restore marker once for BOTH route halves: one recipient can
+	// have native and legacy accepted rows at once (a legacy message accepted
+	// before its session became native), and consuming the marker in one
+	// handler would hide the restore from the other.
+	restored := st.restored[to]
+	delete(st.restored, to)
 	native := make([]store.Message, 0, len(msgs))
+	unsupported := make([]store.Message, 0, len(msgs))
 	legacy := msgs[:0]
 	for _, msg := range msgs {
-		if nativeDelivery(msg, sess) {
+		switch routeOf(msg, sess) {
+		case routeNative:
 			native = append(native, msg)
-		} else {
+		case routeUnsupported:
+			unsupported = append(unsupported, msg)
+		default:
 			legacy = append(legacy, msg)
 		}
 	}
-	pending += q.confirmNativeRecipient(ctx, st, to, native)
+	pending += q.confirmNativeRecipient(ctx, st, to, restored, native)
+	pending += q.failUnsupportedAccepted(unsupported)
 	msgs = legacy
 	if len(msgs) == 0 {
 		return pending
 	}
-
-	restored := st.restored[to]
-	delete(st.restored, to)
 
 	sess, err := q.getSession(to)
 	gone := errors.Is(err, store.ErrNotFound)
@@ -209,12 +217,10 @@ func (q *Queue) confirmRecipient(ctx context.Context, st *confirmState, to strin
 	return pending
 }
 
-func (q *Queue) confirmNativeRecipient(ctx context.Context, st *confirmState, to string, msgs []store.Message) (pending int) {
+func (q *Queue) confirmNativeRecipient(ctx context.Context, st *confirmState, to string, restored bool, msgs []store.Message) (pending int) {
 	if len(msgs) == 0 {
 		return 0
 	}
-	restored := st.restored[to]
-	delete(st.restored, to)
 
 	sess, err := q.getSession(to)
 	gone := errors.Is(err, store.ErrNotFound)
@@ -254,10 +260,46 @@ func (q *Queue) confirmNativeRecipient(ctx context.Context, st *confirmState, to
 	return pending
 }
 
-// confirmOne asks the journal for msg's text after its inject_at, skipping
-// records already spent on an identical text, and marks it delivered when
-// found. It reports whether the message was confirmed.
+// failUnsupportedAccepted settles accepted messages whose persisted transport
+// Rocket does not implement. They were never handed to a supported transport,
+// so the only safe outcome is an honest failure: no tmux probe, no requeue
+// onto the visual path. Returns how many still need attention (store errors).
+func (q *Queue) failUnsupportedAccepted(msgs []store.Message) (pending int) {
+	for _, msg := range msgs {
+		ok, err := q.st.FailAccepted(msg.ID, unsupportedDeliveryTransport)
+		if err != nil {
+			slog.Error("queue: fail unsupported-transport message", "id", msg.ID, "error", err)
+			pending++
+			continue
+		}
+		if ok {
+			slog.Warn("queue: unsupported persisted delivery transport, failing closed",
+				"id", msg.ID, "to", msg.ToSession, "transport", msg.DeliveryTransport)
+			q.announceFailure(msg, unsupportedDeliveryTransport)
+		}
+	}
+	return pending
+}
+
+// confirmOne asks the journal whether the accepted message was recorded and
+// marks it delivered when found. It reports whether the message was confirmed.
 func (q *Queue) confirmOne(ctx context.Context, st *confirmState, confirmer agent.DeliveryConfirmer, ref agent.ActivityRef, to string, msg store.Message, text string) bool {
+	return q.confirmOneFrom(ctx, st, confirmer, ref, to, msg, text, false)
+}
+
+// confirmDeliveringOne is confirmOne for a message still in status
+// "delivering" (the final scan of a failed native attempt).
+func (q *Queue) confirmDeliveringOne(ctx context.Context, st *confirmState, confirmer agent.DeliveryConfirmer, ref agent.ActivityRef, to string, msg store.Message, text string) bool {
+	return q.confirmOneFrom(ctx, st, confirmer, ref, to, msg, text, true)
+}
+
+// confirmOneFrom asks the journal for msg's text after its inject_at, skipping
+// records already spent on an identical text, and settles the message through
+// the status-appropriate CAS. Proof ownership is enforced atomically by the
+// store: if another equal-text message won the same record while this scan
+// ran, the CAS reports false and the scan moves on to a later record instead
+// of pretending the message was settled.
+func (q *Queue) confirmOneFrom(ctx context.Context, st *confirmState, confirmer agent.DeliveryConfirmer, ref agent.ActivityRef, to string, msg store.Message, text string, delivering bool) bool {
 	since := time.UnixMilli(msg.InjectAt)
 	norm := strings.Join(strings.Fields(text), " ")
 	used := st.used[to]
@@ -296,13 +338,21 @@ func (q *Queue) confirmOne(ctx context.Context, st *confirmState, confirmer agen
 			since = at
 			continue
 		}
-		ok, err := q.st.ConfirmAccepted(msg.ID, q.now().Unix(), at.UnixNano(), norm)
+		ok, err := q.settleMessage(msg.ID, delivering, q.now().Unix(), at.UnixNano(), norm)
 		if err != nil {
-			slog.Error("queue: confirm accepted message", "id", msg.ID, "error", err)
+			slog.Error("queue: confirm native/legacy message", "id", msg.ID, "delivering", delivering, "error", err)
 			return false
 		}
 		if !ok {
-			return true // someone else settled it; nothing more to do here
+			current, getErr := q.st.GetMessage(msg.ID)
+			if getErr != nil || current.Status == "delivered" || current.Status == "failed" || current.Status == "queued" {
+				return true // someone else settled this message; nothing more to do
+			}
+			// The row is still accepted/delivering: the record was atomically
+			// spent on another equal-text message. Only a later record can
+			// prove this one.
+			since = at
+			continue
 		}
 		used[key] = struct{}{}
 		slog.Info("queue: delivery confirmed from the recipient's journal", "id", msg.ID, "to", to, "at", at)
@@ -313,6 +363,14 @@ func (q *Queue) confirmOne(ctx context.Context, st *confirmState, confirmer agen
 		})
 		return true
 	}
+}
+
+// settleMessage runs the status-appropriate proof-consuming CAS.
+func (q *Queue) settleMessage(id int64, delivering bool, deliveredAt, proofAt int64, proofText string) (bool, error) {
+	if delivering {
+		return q.st.ConfirmDelivering(id, deliveredAt, proofAt, proofText)
+	}
+	return q.st.ConfirmAccepted(id, deliveredAt, proofAt, proofText)
 }
 
 // giveUpAccepted requeues an unconfirmed accepted message for one more

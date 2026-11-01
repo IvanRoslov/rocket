@@ -209,14 +209,45 @@ func (s *Store) ListAcceptedMessages() ([]Message, error) {
 	return out, rows.Err()
 }
 
+// proofUnusedGuard makes settling a message consume its journal proof
+// atomically: the UPDATE fails if any other row already carries the same
+// (proofAt, proofText) pair. SQLite serializes writers, so two confirmation
+// paths racing on one equal-text journal record cannot both settle a message
+// with it.
+const proofUnusedGuard = ` AND NOT EXISTS (
+	SELECT 1 FROM messages p
+	WHERE p.id <> ? AND p.delivery_proof_at = ? AND p.delivery_proof_text = ?
+)`
+
 // ConfirmAccepted atomically moves message id from "accepted" to
-// "delivered" with delivered_at = deliveredAt. It reports false when the
-// message was no longer accepted (already requeued, failed or confirmed by a
-// concurrent pass), so a stale decision never overwrites a newer status.
+// "delivered" with delivered_at = deliveredAt, consuming the journal proof
+// identified by (proofAt, proofText). It reports false when the message was no
+// longer accepted (already requeued, failed or confirmed by a concurrent
+// pass) or when another message already owns that proof, so a stale decision
+// never overwrites a newer status and one record never proves two equal-text
+// messages.
 func (s *Store) ConfirmAccepted(id, deliveredAt, proofAt int64, proofText string) (bool, error) {
-	return s.casAccepted(id,
-		`UPDATE messages SET status = 'delivered', delivered_at = ?, delivery_proof_at = ?, delivery_proof_text = ? WHERE id = ? AND status = 'accepted'`,
-		deliveredAt, proofAt, proofText, id)
+	return s.casMessage(id,
+		`UPDATE messages SET status = 'delivered', delivered_at = ?, delivery_proof_at = ?, delivery_proof_text = ? WHERE id = ? AND status = 'accepted'`+proofUnusedGuard,
+		deliveredAt, proofAt, proofText, id, id, proofAt, proofText)
+}
+
+// ConfirmDelivering is ConfirmAccepted for a message still in status
+// "delivering" — the final journal scan of a native delivery whose sends were
+// refused. It shares the atomic proof-consumption guard.
+func (s *Store) ConfirmDelivering(id, deliveredAt, proofAt int64, proofText string) (bool, error) {
+	return s.casMessage(id,
+		`UPDATE messages SET status = 'delivered', delivered_at = ?, delivery_proof_at = ?, delivery_proof_text = ? WHERE id = ? AND status = 'delivering'`+proofUnusedGuard,
+		deliveredAt, proofAt, proofText, id, id, proofAt, proofText)
+}
+
+// FailDelivering atomically moves message id from "delivering" to "failed"
+// with the given reason. False means it was no longer delivering (settled by
+// another path), so the caller must not announce a failure it did not cause.
+func (s *Store) FailDelivering(id int64, reason string) (bool, error) {
+	return s.casMessage(id,
+		`UPDATE messages SET status = 'failed', reason = ? WHERE id = ? AND status = 'delivering'`,
+		nullIfEmpty(reason), id)
 }
 
 // RequeueAccepted atomically moves message id from "accepted" back to
@@ -224,7 +255,7 @@ func (s *Store) ConfirmAccepted(id, deliveredAt, proofAt int64, proofText string
 // Attempts are left alone: they count pastes, and the worker increments
 // them when it pastes again. False means the message was no longer accepted.
 func (s *Store) RequeueAccepted(id int64) (bool, error) {
-	return s.casAccepted(id,
+	return s.casMessage(id,
 		`UPDATE messages SET status = 'queued', inject_at = 0 WHERE id = ? AND status = 'accepted'`,
 		id)
 }
@@ -232,19 +263,19 @@ func (s *Store) RequeueAccepted(id int64) (bool, error) {
 // FailAccepted atomically moves message id from "accepted" to "failed" with
 // the given reason. False means the message was no longer accepted.
 func (s *Store) FailAccepted(id int64, reason string) (bool, error) {
-	return s.casAccepted(id,
+	return s.casMessage(id,
 		`UPDATE messages SET status = 'failed', reason = ? WHERE id = ? AND status = 'accepted'`,
 		nullIfEmpty(reason), id)
 }
 
-func (s *Store) casAccepted(id int64, query string, args ...any) (bool, error) {
+func (s *Store) casMessage(id int64, query string, args ...any) (bool, error) {
 	res, err := s.db.Exec(query, args...)
 	if err != nil {
-		return false, fmt.Errorf("update accepted message %d: %w", id, err)
+		return false, fmt.Errorf("update message %d: %w", id, err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("update accepted message %d rows affected: %w", id, err)
+		return false, fmt.Errorf("update message %d rows affected: %w", id, err)
 	}
 	return n == 1, nil
 }
@@ -359,9 +390,30 @@ func (s *Store) CountMessagesByStatus() (map[string]int, error) {
 	return out, nil
 }
 
-// PurgeOld deletes messages and events with created_at/ts < before.
+// PurgeOld deletes messages and events with created_at/ts < before, except
+// state the native delivery guarantee still needs:
+//
+//   - a native accepted/delivering row is unresolved — with QueueTimeout
+//     disabled it waits for the recipient's exit/restore, not for retention;
+//   - a consumed journal proof (delivery_proof_at/text) is what stops a later
+//     equal-text confirmation from reusing the same record after Recover. Any
+//     proof on the recipient is kept while a native confirmation is pending
+//     there: the normalized text is not queryable here, so keeping all of that
+//     recipient's proofs is the conservative superset.
+//
+// Resolved native rows and every legacy row keep the previous retention.
 func (s *Store) PurgeOld(before int64) error {
-	if _, err := s.db.Exec(`DELETE FROM messages WHERE created_at < ?`, before); err != nil {
+	const purgeMessages = `
+		DELETE FROM messages
+		WHERE created_at < ?
+		  AND NOT (delivery_transport = 'pi-uds-v1' AND status IN ('accepted','delivering'))
+		  AND NOT (delivery_proof_at > 0 AND EXISTS (
+		      SELECT 1 FROM messages p
+		      WHERE p.to_session = messages.to_session
+		        AND p.delivery_transport = 'pi-uds-v1'
+		        AND p.status IN ('accepted','delivering')
+		  ))`
+	if _, err := s.db.Exec(purgeMessages, before); err != nil {
 		return fmt.Errorf("purge messages: %w", err)
 	}
 	if _, err := s.db.Exec(`DELETE FROM events WHERE ts < ?`, before); err != nil {

@@ -1093,6 +1093,9 @@ func (m *Manager) prepareNativeLaunch(ag agent.Agent, spec *agent.LaunchSpec, se
 	if err != nil {
 		return err
 	}
+	if err := native.Validate(); err != nil {
+		return err
+	}
 	spec.NativeDelivery = native
 	sess.DeliveryTransport = native.Transport
 	sess.DeliveryInstance = native.InstanceID

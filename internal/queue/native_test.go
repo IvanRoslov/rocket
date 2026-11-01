@@ -1,8 +1,12 @@
 package queue
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"net"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -374,6 +378,135 @@ func TestAcceptedLegacyMessageDoesNotBecomeNativeAfterRestore(t *testing.T) {
 	if msg.Status != "failed" || msg.Reason != "not_confirmed" {
 		t.Fatalf("accepted legacy message = %+v, want legacy not_confirmed", msg)
 	}
+}
+
+func TestNativeRetryClaimsBeforeSendWithPreviousAttempts(t *testing.T) {
+	h := newTestQueue(t)
+	rt := installNativeRuntime(h)
+	h.addNativeSession(t, "native")
+	id, err := h.st.AddMessage(store.Message{ToSession: "native", Body: "retry", Attempts: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, _ := h.st.GetMessage(id)
+	sess, _ := h.st.GetSession("native")
+	h.q.SetNativeSender(nativeSenderFunc(func(ctx context.Context, target nativeinput.Target, messageID int64, text string) (nativeinput.Outcome, error) {
+		current, _ := h.st.GetMessage(id)
+		if current.Status != "delivering" {
+			t.Fatalf("status before send = %q, want claimed delivering", current.Status)
+		}
+		return nativeinput.Accepted, nil
+	}))
+
+	h.q.attemptNativeDelivery(h.ctx, msg, sess, nil)
+	if got := messageStatus(t, h.st, id); got != "accepted" {
+		t.Fatalf("status = %q, want accepted", got)
+	}
+	assertNoTmux(t, rt)
+}
+
+func TestNativeDuplicateClaimDoesNotSend(t *testing.T) {
+	h := newTestQueue(t)
+	rt := installNativeRuntime(h)
+	h.addNativeSession(t, "native")
+	sender := &fakeNativeSender{}
+	h.q.SetNativeSender(sender)
+	id, err := h.st.AddMessage(store.Message{ToSession: "native", Body: "owned elsewhere", Attempts: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := h.st.ClaimMessage(id); err != nil || !ok {
+		t.Fatalf("other owner claim = %v, %v", ok, err)
+	}
+	stale, _ := h.st.GetMessage(id)
+	stale.Status = "queued"
+	sess, _ := h.st.GetSession("native")
+
+	h.q.attemptNativeDelivery(h.ctx, stale, sess, nil)
+	if sender.count() != 0 {
+		t.Fatalf("native sends after lost claim = %d, want 0", sender.count())
+	}
+	assertNoTmux(t, rt)
+}
+
+func TestUnsupportedTransportDoesNotUseTmux(t *testing.T) {
+	h := newTestQueue(t)
+	rt := installNativeRuntime(h)
+	h.addNativeSession(t, "native")
+	if err := h.st.ClearPendingQuiz("native"); err != nil {
+		t.Fatal(err)
+	}
+	id, err := h.st.AddMessage(store.Message{ToSession: "native", Body: "unknown protocol", DeliveryTransport: "other-v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued, ok, err := h.st.NextQueuedMessage("native")
+	if err != nil || !ok {
+		t.Fatalf("NextQueuedMessage = %v, %v", ok, err)
+	}
+	h.q.deliver(h.ctx, queued)
+
+	if got := messageStatus(t, h.st, id); got != "failed" {
+		t.Fatalf("status = %q, want failed for unsupported transport", got)
+	}
+	msg, _ := h.st.GetMessage(id)
+	if msg.Reason != "unsupported_delivery_transport" {
+		t.Fatalf("reason = %q, want unsupported_delivery_transport", msg.Reason)
+	}
+	assertNoTmux(t, rt)
+}
+
+func TestNativeNoResponseBecomesAcceptedWithoutRetry(t *testing.T) {
+	h := newTestQueue(t)
+	dir, err := os.MkdirTemp("", "nq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	socketPath := filepath.Join(dir, "n.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	connections := make(chan struct{}, 2)
+	release := make(chan struct{})
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		connections <- struct{}{}
+		_, _ = bufio.NewReader(conn).ReadBytes('\n')
+		<-release
+		_ = conn.Close()
+	}()
+	t.Cleanup(func() { close(release) })
+	h.addNativeSession(t, "native")
+	if err := h.st.UpdateSessionDelivery("native", "pi-uds-v1", "launch-1", socketPath); err != nil {
+		t.Fatal(err)
+	}
+	h.q.SetNativeSender(nativeinput.SenderFunc(nativeinput.Send))
+	id := addMsg(t, h, "native", "no response")
+	h.q.Wake("native")
+
+	waitUntilTimeout(t, 8*time.Second, func() bool { return messageStatus(t, h.st, id) == "accepted" }, "unknown held for confirmation after response timeout")
+	select {
+	case <-connections:
+	default:
+		t.Fatal("no native connection observed")
+	}
+	select {
+	case <-connections:
+		t.Fatal("native request was retried after response timeout")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+type nativeSenderFunc func(context.Context, nativeinput.Target, int64, string) (nativeinput.Outcome, error)
+
+func (f nativeSenderFunc) Send(ctx context.Context, target nativeinput.Target, messageID int64, text string) (nativeinput.Outcome, error) {
+	return f(ctx, target, messageID, text)
 }
 
 func (h *testHarness) addNativeSession(t *testing.T, id string) {
