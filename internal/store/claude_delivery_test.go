@@ -28,21 +28,21 @@ func claudeStoreFixture(t *testing.T, st *Store) (claudeinstance.Snapshot, int64
 	if e != nil {
 		t.Fatal(e)
 	}
-	id, e := st.AddMessage(Message{ToSession: "s", Body: "feedback", Attempts: 2})
+	id, e := st.AddMessage(Message{ToSession: "s", Body: "feedback"})
 	if e != nil {
 		t.Fatal(e)
 	}
 	env, _ := socketmsg.EnvelopeWithID("08edca10-0082-4bd4-b91a-a687a2690ba3", "", "", "feedback")
 	return claudeinstance.Snapshot{EnvelopeVersion: 1, MessageID: id, Transport: "claude-socket-v1", Target: target, WireID: "08edca10-0082-4bd4-b91a-a687a2690ba3", Envelope: env, Boundary: boundary, PreparedAt: now, Deadline: now.Add(time.Minute)}, id
 }
-func TestClaudeClaimAtomicMarkerAndNonzeroAttempts(t *testing.T) {
+func TestClaudeClaimAtomicMarkerAndSingleAttempt(t *testing.T) {
 	st := openTestStore(t)
 	v, id := claudeStoreFixture(t, st)
 	if ok, e := st.ClaimClaudeMessage(v); !ok || e != nil {
 		t.Fatalf("claim %v %v", ok, e)
 	}
 	m, _ := st.GetMessage(id)
-	if m.Status != "delivering" || m.Attempts != 3 || m.DeliveryTransport != "claude-socket-v1" {
+	if m.Status != "delivering" || m.Attempts != 1 || m.DeliveryTransport != "claude-socket-v1" {
 		t.Fatalf("marker %+v", m)
 	}
 	got, e := st.GetClaudeDelivery(id)

@@ -32,3 +32,10 @@ CREATE TABLE claude_consumed_records (
  message_id INTEGER NOT NULL UNIQUE REFERENCES claude_deliveries(message_id) ON DELETE CASCADE,
  PRIMARY KEY(target_key,device,inode,record_id)
 );
+
+-- One-time upgrade provenance. Never recapture at launch/restore/follow.
+CREATE TABLE claude_legacy_cutoff (
+ singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+ through_id INTEGER NOT NULL CHECK(through_id>=0)
+);
+INSERT INTO claude_legacy_cutoff VALUES(1,(SELECT COALESCE(MAX(id),0) FROM messages));

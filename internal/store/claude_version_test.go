@@ -1,9 +1,15 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
+	"github.com/IvanRoslov/rocket/internal/claudeinstance"
+	"github.com/IvanRoslov/rocket/internal/socketmsg"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestClaudeNewClaimRequiresEnvelopeVersion1(t *testing.T) {
@@ -62,5 +68,90 @@ func TestClaudeEqualBodyDistinctWireProof(t *testing.T) {
 	p := appendClaudeIncoming(t, a, "late-A")
 	if ok, e := st.ConfirmClaudeMessage(b.MessageID, p, b.PreparedAt); ok || e != nil {
 		t.Fatalf("A proved B %v %v", ok, e)
+	}
+}
+
+func TestClaudeCrossUUIDAndSessionT1Matrix(t *testing.T) {
+	for _, which := range []string{"same-root", "restored-root", "different-session", "legacy-v0"} {
+		t.Run(which, func(t *testing.T) {
+			st := openTestStore(t)
+			a, _ := claudeStoreFixture(t, st)
+			if which == "legacy-v0" {
+				a.EnvelopeVersion = 0
+				a.Envelope = "<cross-session-message>\nfeedback\n</cross-session-message>"
+				claimLegacyClaudeFixture(t, st, a)
+			} else if ok, e := st.ClaimClaudeMessage(a); !ok || e != nil {
+				t.Fatal(ok, e)
+			}
+			b := a
+			b.EnvelopeVersion = 1
+			b.Target.ClaudeSessionID = "239baa3b-27eb-40ed-82e1-1d9f3dde01e5"
+			b.Target.JournalPath = filepath.Join(filepath.Dir(a.Target.JournalPath), b.Target.ClaudeSessionID+".jsonl")
+			if e := os.WriteFile(b.Target.JournalPath, nil, 0600); e != nil {
+				t.Fatal(e)
+			}
+			if which == "different-session" {
+				b.Target.RocketSessionID = "other"
+				b.Target.LaunchGeneration = "other-generation"
+				b.Target.PID++
+				st.AddSession(Session{ID: "other", Kind: "worker", Agent: "deepseek", State: "running", TmuxName: "other"})
+				l, _, _ := st.GetClaudeLaunch("s")
+				l.RocketSessionID = "other"
+				l.Generation = b.Target.LaunchGeneration
+				l.StartedAt = time.Now()
+				st.PutClaudeLaunch(l)
+				if ok, e := st.BindClaudeIdentity(b.Target); !ok || e != nil {
+					t.Fatal(ok, e)
+				}
+			} else if which == "restored-root" {
+				l, _, _ := st.GetClaudeLaunch("s")
+				l.Generation = "restored"
+				l.StartedAt = time.Now()
+				st.PutClaudeLaunch(l)
+				b.Target.LaunchGeneration = l.Generation
+				b.Target.PID++
+				b.Target.ProcessStart = time.Now()
+				if ok, e := st.BindClaudeIdentity(b.Target); !ok || e != nil {
+					t.Fatal(ok, e)
+				}
+			} else {
+				l, _, at, _ := st.GetClaudeBinding(context.Background(), "s")
+				if ok, e := st.AdvanceClaudeBinding(context.Background(), a.Target, b.Target, l.BindingRevision, at, time.Now().UnixNano()); !ok || e != nil {
+					t.Fatal(ok, e)
+				}
+			}
+			l, _, barrier, _ := st.GetClaudeBinding(context.Background(), b.Target.RocketSessionID)
+			b.BindingRevision = l.BindingRevision
+			if ok, e := st.ApplyClaudeActivityForBinding(context.Background(), b.Target, l.BindingRevision, barrier, "ready", time.Now().Unix()); !ok || e != nil {
+				t.Fatal(ok, e)
+			}
+			b.MessageID, _ = st.AddMessage(Message{ToSession: b.Target.RocketSessionID, Body: "feedback"})
+			b.WireID, _ = socketmsg.NewMsgID()
+			b.Envelope, _ = socketmsg.EnvelopeWithID(b.WireID, "", "", "feedback")
+			b.Boundary, _ = claudeinstance.PinJournal(b.Target)
+			b.PreparedAt = time.Now()
+			b.Deadline = b.PreparedAt.Add(time.Hour)
+			if ok, e := st.ClaimClaudeMessage(b); !ok || e != nil {
+				t.Fatal(ok, e)
+			}
+			// M1 drains into B after M2's boundary; UUID metadata is B, text still M1.
+			late := b
+			late.Envelope = a.Envelope
+			p := appendClaudeIncoming(t, late, "surviving-writer-M1")
+			if ok, e := st.ConfirmClaudeMessage(b.MessageID, p, time.Now()); ok || e != nil {
+				t.Fatalf("late M1 proved M2 %v %v", ok, e)
+			}
+			p = appendClaudeIncoming(t, b, "actual-M2")
+			if ok, e := st.ConfirmClaudeMessage(b.MessageID, p, time.Now()); !ok || e != nil {
+				t.Fatalf("own M2 proof lost %v %v", ok, e)
+			}
+			if _, found, e := claudeinstance.FindProof(context.Background(), a); found || e != nil {
+				t.Fatalf("wrong journal proved A %v %v", found, e)
+			}
+			m, _ := st.GetMessage(a.MessageID)
+			if m.Status == "delivered" {
+				t.Fatal("wrong-journal A delivered")
+			}
+		})
 	}
 }

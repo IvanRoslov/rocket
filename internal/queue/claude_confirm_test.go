@@ -2,8 +2,13 @@ package queue
 
 import (
 	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
 	"encoding/json"
+	"github.com/IvanRoslov/rocket/internal/socketmsg"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -140,5 +145,65 @@ func TestClaudeHousekeepingOwnedQueuedUsesSavedDeadlineWithConfigDisabled(t *tes
 	m, _ = h.st.GetMessage(id)
 	if m.Status != "accepted" || m.Attempts != 1 || f.sendCount() != 1 || h.rt.callCount() != 0 {
 		t.Fatalf("generic expiry altered accepted owner %+v", m)
+	}
+}
+
+func TestClaudeMixedEnvelopeVersionsRecoverWithoutRewriteOrResend(t *testing.T) {
+	h := newTestQueue(t)
+	h.addRunningSession(t, "recv", activity.Ready)
+	f := installClaudeSocket(t, h, true)
+	// Retained v0 history is a fixture from the previous format, not a new v0 claim.
+	now := time.Now().UTC()
+	boundary, e := claudeinstance.PinJournal(f.target)
+	if e != nil {
+		t.Fatal(e)
+	}
+	legacyID, _ := h.st.AddMessage(store.Message{ToSession: "recv", Body: "same feedback", Status: "accepted", Attempts: 1, DeliveryTransport: ClaudeSocketTransport})
+	wire, e := socketmsg.NewMsgID()
+	if e != nil {
+		t.Fatal(e)
+	}
+	legacy := claudeinstance.Snapshot{MessageID: legacyID, Transport: ClaudeSocketTransport, Target: f.target, WireID: wire, Envelope: socketmsg.Envelope("", "rocket", "same feedback"), Boundary: boundary, PreparedAt: now, Deadline: now.Add(time.Hour)}
+	raw, e := json.Marshal(legacy)
+	if e != nil {
+		t.Fatal(e)
+	}
+	hash := sha256.Sum256([]byte(legacy.Envelope))
+	db, e := sql.Open("sqlite", h.dbPath)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer db.Close()
+	_, e = db.Exec(`INSERT INTO claude_deliveries(message_id,transport,wire_id,snapshot_json,claude_uuid,journal_device,journal_inode,journal_path,boundary_offset,envelope_hash,phase,deadline_ns) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, legacyID, legacy.Transport, legacy.WireID, string(raw), legacy.Target.ClaudeSessionID, boundary.Device, boundary.Inode, boundary.Path, boundary.Offset, hex.EncodeToString(hash[:]), "held", legacy.Deadline.UnixNano())
+	if e != nil {
+		t.Fatal(e)
+	}
+	id, _ := h.st.AddMessage(store.Message{ToSession: "recv", Body: "same feedback"})
+	msg, _ := h.st.GetMessage(id)
+	h.q.deliver(h.ctx, msg)
+	modern, e := h.st.GetClaudeDelivery(id)
+	if e != nil {
+		t.Fatal(e)
+	}
+	beforeOld, _ := h.st.GetClaudeDelivery(legacyID)
+	beforeNew := modern
+	h.q.Recover(h.ctx)
+	h.q.confirmPass(h.ctx, runtimeConfirmState())
+	afterOld, _ := h.st.GetClaudeDelivery(legacyID)
+	afterNew, _ := h.st.GetClaudeDelivery(id)
+	if !reflect.DeepEqual(beforeOld, afterOld) || !reflect.DeepEqual(beforeNew, afterNew) || f.sendCount() != 1 || h.rt.callCount() != 0 {
+		t.Fatalf("Recover rewrote or resent old=%+v new=%+v sends%d", afterOld, afterNew, f.sendCount())
+	}
+	appendQueueClaudeProof(t, beforeOld, "legacy-own-record")
+	appendQueueClaudeProof(t, modern, "modern-own-record")
+	h.q.confirmPass(h.ctx, runtimeConfirmState())
+	for _, mid := range []int64{legacyID, id} {
+		m, _ := h.st.GetMessage(mid)
+		if m.Status != "delivered" || m.Attempts != 1 {
+			t.Fatalf("mixed proof %+v", m)
+		}
+	}
+	if f.sendCount() != 1 {
+		t.Fatal("proof caused resend")
 	}
 }

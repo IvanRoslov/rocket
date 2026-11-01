@@ -28,6 +28,15 @@ func (q *Queue) deliverClaude(ctx context.Context, msg store.Message, sess store
 		q.fail(msg, "delivery_unconfirmed")
 		return true
 	}
+	cutoff, cutoffErr := q.st.ClaudeLegacyCutoff()
+	if cutoffErr != nil {
+		slog.Warn("queue: Claude legacy cutoff unavailable", "id", msg.ID, "error", cutoffErr)
+		return false
+	}
+	if msg.ID <= cutoff {
+		q.fail(msg, "legacy_unproven")
+		return true
+	}
 	if q.socket == nil {
 		return false
 	}

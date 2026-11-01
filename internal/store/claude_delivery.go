@@ -164,7 +164,18 @@ func (s *Store) ClaimClaudeMessage(v claudeinstance.Snapshot) (bool, error) {
 		return false, e
 	}
 	defer tx.Rollback()
-	res, e := tx.Exec(`UPDATE messages SET status='delivering',attempts=attempts+1,delivery_transport=?,inject_at=? WHERE id=? AND status='queued' AND delivery_transport='' AND to_session=? AND NOT EXISTS(SELECT 1 FROM claude_deliveries WHERE message_id=messages.id)`, claudeTransport, v.PreparedAt.UnixMilli(), v.MessageID, v.Target.RocketSessionID)
+	// Acquire the writer before reading the immutable upgrade/eligibility guards.
+	if _, e = tx.Exec(`UPDATE messages SET status=status WHERE id=?`, v.MessageID); e != nil {
+		return false, e
+	}
+	cutoff, e := claudeLegacyCutoffOn(context.Background(), tx)
+	if e != nil {
+		return false, e
+	}
+	if v.MessageID <= cutoff {
+		return false, fmt.Errorf("legacy Claude send provenance unproven")
+	}
+	res, e := tx.Exec(`UPDATE messages SET status='delivering',attempts=attempts+1,delivery_transport=?,inject_at=? WHERE id=? AND status='queued' AND attempts=0 AND delivery_transport='' AND to_session=? AND NOT EXISTS(SELECT 1 FROM claude_deliveries WHERE message_id=messages.id)`, claudeTransport, v.PreparedAt.UnixMilli(), v.MessageID, v.Target.RocketSessionID)
 	if e != nil {
 		return false, e
 	}
