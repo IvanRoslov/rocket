@@ -39,6 +39,7 @@ import (
 	"syscall"
 
 	"github.com/IvanRoslov/rocket/internal/agent"
+	"github.com/IvanRoslov/rocket/internal/prompts"
 )
 
 type Codex struct{}
@@ -85,8 +86,20 @@ func (c *Codex) SetupWorkspace(spec agent.LaunchSpec) error {
 	if err := agent.UpsertAgentsMD(spec.WorktreePath, spec.SystemPrompt, true); err != nil {
 		return fmt.Errorf("upsert AGENTS.md: %w", err)
 	}
+	if err := prompts.SyncOrchestratorSkills(filepath.Join(spec.WorktreePath, filepath.FromSlash(codexSkillsRelDir)), spec.BrainstormSkill, spec.Kind == "orchestrator"); err != nil {
+		return fmt.Errorf("sync orchestrator skills: %w", err)
+	}
+	agent.ExcludeFromGit(spec.WorktreePath, prompts.SkillExcludes(codexSkillsRelDir))
 	return nil
 }
+
+// codexSkillsRelDir is where codex discovers repository-scoped skills.
+const codexSkillsRelDir = ".agents/skills"
+
+// ShipsBrainstormSkill reports that codex lays rocket's own
+// orchestrator-brainstorming skill into orchestrator worktrees (under
+// .agents/skills, codex's repository skill directory).
+func (c *Codex) ShipsBrainstormSkill() bool { return true }
 
 // seedCodexTrust ensures worktreePath is marked trusted in
 // $CODEX_HOME/config.toml, matching the exact table shape codex itself

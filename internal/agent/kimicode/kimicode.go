@@ -83,16 +83,11 @@ func (k *KimiCode) SetupWorkspace(spec agent.LaunchSpec) error {
 		return fmt.Errorf("upsert AGENTS.md: %w", err)
 	}
 	if spec.Kind == "orchestrator" {
-		skill := filepath.Join(spec.WorktreePath, ".kimi-code", "skills", prompts.CustomBrainstormSkill)
-		if prompts.SkillName(spec.BrainstormSkill) == prompts.CustomBrainstormSkill {
-			if err := prompts.WriteOrchestratorSkill(filepath.Dir(skill)); err != nil {
-				return err
-			}
-		} else if err := os.RemoveAll(skill); err != nil {
+		if err := prompts.SyncOrchestratorSkills(filepath.Join(spec.WorktreePath, ".kimi-code", "skills"), spec.BrainstormSkill, true); err != nil {
 			return err
 		}
 	}
-	agent.ExcludeFromGit(spec.WorktreePath, []string{".kimi-code/skills/" + prompts.CustomBrainstormSkill + "/"})
+	agent.ExcludeFromGit(spec.WorktreePath, prompts.SkillExcludes(".kimi-code/skills"))
 	return nil
 }
 

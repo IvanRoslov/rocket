@@ -177,15 +177,10 @@ func (p *Pi) SetupWorkspace(spec agent.LaunchSpec) error {
 	if err := agent.UpsertAgentsMD(spec.WorktreePath, spec.SystemPrompt, false); err != nil {
 		return fmt.Errorf("upsert AGENTS.md: %w", err)
 	}
-	skillDir := filepath.Join(spec.WorktreePath, ".pi", "skills", prompts.CustomBrainstormSkill)
-	if spec.Kind == "orchestrator" && prompts.SkillName(spec.BrainstormSkill) == prompts.CustomBrainstormSkill {
-		if err := prompts.WriteOrchestratorSkill(filepath.Dir(skillDir)); err != nil {
-			return fmt.Errorf("lay orchestrator skill: %w", err)
-		}
-	} else if err := os.RemoveAll(skillDir); err != nil {
-		return fmt.Errorf("remove orchestrator skill: %w", err)
+	if err := prompts.SyncOrchestratorSkills(filepath.Join(spec.WorktreePath, ".pi", "skills"), spec.BrainstormSkill, spec.Kind == "orchestrator"); err != nil {
+		return fmt.Errorf("sync orchestrator skills: %w", err)
 	}
-	agent.ExcludeFromGit(spec.WorktreePath, []string{".pi/skills/" + prompts.CustomBrainstormSkill + "/"})
+	agent.ExcludeFromGit(spec.WorktreePath, prompts.SkillExcludes(".pi/skills"))
 	return nil
 }
 

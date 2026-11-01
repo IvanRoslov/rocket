@@ -11,6 +11,7 @@
 |---|---|---|
 | 1.0 | Дословная копия `skills/brainstorming/` из superpowers 6.4.1 (только переименование) — база метрики | #4901 |
 | 1.1 | + «Context Before Questions» (дерево фактов до первого вопроса, список «что уже есть» в «Проблеме»); + пункт «Run scenarios» перед спекой (раздел «Сценарии») | #5027 |
+| 1.2 | + «Your Altitude»: спека на уровне поведения и контрактов, без механизмов; код читать для проверки фактов; altitude check в self-review; запрет отдавать спеку cto/агенту на builder-ревью; дальше — `orchestrator-planning`, не writing-plans | разбор #5894 |
 
 Версия, с которой стартовала задача, хранится в `tasks.brainstorm_skill` как
 `orchestrator-brainstorming@<версия>` (константа `CustomBrainstormSkillVersion`
