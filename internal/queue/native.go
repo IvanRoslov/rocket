@@ -69,7 +69,10 @@ func routeOf(msg store.Message, sess store.Session) deliveryRoute {
 }
 
 func (q *Queue) attemptNativeDelivery(ctx context.Context, msg store.Message, sess store.Session, confirmer agent.DeliveryConfirmer) {
-	text := q.prepareText(msg, sess)
+	// Explicit native Pi sends carry their persisted message ID in the
+	// service header; the prepared text itself and the DB/inbox Body are
+	// unchanged. Retries of this ID reuse the same signed string.
+	text := nativePiEnvelope(msg.ID, q.prepareText(msg, sess))
 	target := nativeinput.Target{
 		SessionID: sess.ID, InstanceID: sess.DeliveryInstance, SocketPath: sess.DeliveryEndpoint,
 	}
@@ -144,26 +147,31 @@ func (q *Queue) attemptNativeDelivery(ctx context.Context, msg store.Message, se
 // that state (ConfirmDelivering), not only from "accepted".
 func (q *Queue) failNativeAttempt(ctx context.Context, msg store.Message, sess store.Session, confirmer agent.DeliveryConfirmer) {
 	if confirmer != nil {
-		deadline := q.confirmTimeout
-		if deadline <= 0 {
-			deadline = nativeConfirmTimeout
-		}
-		confirmCtx, cancel := context.WithTimeout(ctx, deadline)
-		defer cancel()
-		st := &confirmState{used: make(map[string]map[recordKey]struct{})}
-		ref := agent.ActivityRef{SessionID: sess.ID, WorktreePath: sess.WorktreePath}
-		confirmed := q.confirmDeliveringOne(confirmCtx, st, confirmer, ref, sess.ID, msg, q.injectedText(msg, sess))
-		cancel()
-		if confirmed {
-			return
-		}
-		if ctx.Err() != nil {
-			// The caller is shutting down, not the recipient. Leaving the row
-			// in "delivering" lets startup Recover turn it into "accepted" for
-			// journal confirmation; failing it here would turn a graceful
-			// shutdown into a permanent false failure.
-			slog.Warn("queue: native final confirmation interrupted by shutdown, leaving delivering for Recover", "id", msg.ID, "to", msg.ToSession)
-			return
+		// The native path never falls back to the legacy substring matcher:
+		// a missing strict capability leaves the row to the honest failure
+		// below instead of matching bare text.
+		if strict := nativePiProofConfirmer(confirmer); strict != nil {
+			deadline := q.confirmTimeout
+			if deadline <= 0 {
+				deadline = nativeConfirmTimeout
+			}
+			confirmCtx, cancel := context.WithTimeout(ctx, deadline)
+			defer cancel()
+			st := &confirmState{used: make(map[string]map[recordKey]struct{})}
+			ref := agent.ActivityRef{SessionID: sess.ID, WorktreePath: sess.WorktreePath}
+			confirmed := q.confirmDeliveringOne(confirmCtx, st, strict, ref, sess.ID, msg, q.nativePiInjectedText(msg, sess))
+			cancel()
+			if confirmed {
+				return
+			}
+			if ctx.Err() != nil {
+				// The caller is shutting down, not the recipient. Leaving the row
+				// in "delivering" lets startup Recover turn it into "accepted" for
+				// journal confirmation; failing it here would turn a graceful
+				// shutdown into a permanent false failure.
+				slog.Warn("queue: native final confirmation interrupted by shutdown, leaving delivering for Recover", "id", msg.ID, "to", msg.ToSession)
+				return
+			}
 		}
 	}
 	ok, err := q.st.FailDelivering(msg.ID, nativeDeliveryUnconfirmed)

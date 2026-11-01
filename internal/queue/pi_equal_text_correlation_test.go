@@ -123,6 +123,12 @@ func (a *corrAgent) ConfirmDelivered(ctx context.Context, ref agent.ActivityRef,
 	return false, time.Time{}, nil
 }
 
+// ConfirmNativeDelivered is the strict capability used by the Pi adapter in
+// this fixture; its whole-record matching is already exact.
+func (a *corrAgent) ConfirmNativeDelivered(ctx context.Context, ref agent.ActivityRef, text string, since time.Time) (bool, time.Time, error) {
+	return a.ConfirmDelivered(ctx, ref, text, since)
+}
+
 func (a *corrAgent) AcceptsInputWhileBusy() bool { return true }
 func (a *corrAgent) Name() string               { return "pi" }
 func (a *corrAgent) Available() error           { return nil }
@@ -214,13 +220,21 @@ type corrSender struct {
 	journal   *corrJournal
 	clock     *corrClock
 	recordFor int64
+	recordAll bool
+	// recordText, when non-empty, is appended instead of the actual wire text;
+	// it models an old unsigned sender in the compatibility test.
+	recordText string
 }
 
 func (s *corrSender) Send(ctx context.Context, target nativeinput.Target, messageID int64, text string) (nativeinput.Outcome, error) {
 	s.mu.Lock()
 	s.calls = append(s.calls, messageID)
 	s.texts = append(s.texts, text)
-	record := messageID == s.recordFor
+	record := messageID == s.recordFor || s.recordAll
+	recordText := text
+	if s.recordText != "" {
+		recordText = s.recordText
+	}
 	s.mu.Unlock()
 
 	// Every send boundary advances the fixture clock. The record belongs to
@@ -229,7 +243,7 @@ func (s *corrSender) Send(ctx context.Context, target nativeinput.Target, messag
 	// future relative to the confirmation pass.
 	s.clock.advance(time.Second)
 	if record {
-		s.journal.appendRecord(text, messageID, s.clock.now())
+		s.journal.appendRecord(recordText, messageID, s.clock.now())
 	}
 	return nativeinput.Accepted, nil
 }
@@ -403,10 +417,6 @@ func TestPiEqualTextCorrelationBRecordDoesNotConfirmA(t *testing.T) {
 		t.Fatalf("oracle: messages already carry proof before confirmation: A=%d B=%d",
 			aPersisted.DeliveryProofAt, bPersisted.DeliveryProofAt)
 	}
-	sent := h.sender.callTexts()
-	if len(sent) != 2 || sent[0] != sent[1] {
-		t.Fatalf("oracle: sent envelopes differ: %q", sent)
-	}
 	if got := h.sender.callIDs(); len(got) != 2 || got[0] == got[1] {
 		t.Fatalf("oracle: send IDs must be distinct, got %v", got)
 	}
@@ -427,10 +437,23 @@ func TestPiEqualTextCorrelationBRecordDoesNotConfirmA(t *testing.T) {
 		t.Fatalf("SAFETY VIOLATION: B's only record (owner=%d at=%d) confirmed A (id=%d proof_at=%d proof_text=%q); A=%s B=%s",
 			record.owner, record.at.UnixNano(), aID, a.DeliveryProofAt, a.DeliveryProofText, a.Status, b.Status)
 	}
-	// Passing branch: A must stay unconfirmed, and B may only be settled by
-	// its own record.
-	if b.Status == "delivered" && b.DeliveryProofAt != record.at.UnixNano() {
-		t.Fatalf("B delivered by a proof that is not its own record: proof_at=%d record_at=%d", b.DeliveryProofAt, record.at.UnixNano())
+	if b.Status != "delivered" || b.DeliveryProofAt != record.at.UnixNano() {
+		t.Fatalf("B was not settled by its own record: status=%s proof_at=%d record_at=%d", b.Status, b.DeliveryProofAt, record.at.UnixNano())
+	}
+
+	// The store keeps the same original Body; only the wire text differs by
+	// the persisted ID prefix.
+	if a.Body != b.Body {
+		t.Fatalf("oracle: original Bodies differ: %q vs %q", a.Body, b.Body)
+	}
+	sent := h.sender.callTexts()
+	wantA := nativePiEnvelope(aID, formatBody(a))
+	wantB := nativePiEnvelope(bID, formatBody(b))
+	if len(sent) != 2 || sent[0] != wantA || sent[1] != wantB {
+		t.Fatalf("sent wire texts = %q, want %q and %q", sent, wantA, wantB)
+	}
+	if sent[0] == sent[1] {
+		t.Fatal("different IDs produced the same signed wire text")
 	}
 }
 
@@ -457,27 +480,29 @@ func TestPiEqualTextCorrelationControls(t *testing.T) {
 		}
 	})
 
-	t.Run("old-only record never proves a later send", func(t *testing.T) {
+	t.Run("old-only signed records never prove a later send", func(t *testing.T) {
 		h := newCorrHarness(t)
 		h.addNativeSession(t, "native")
 		const body = "старая запись"
-		envelope := "[from sender] " + body
-		oldAt := h.clock.now().Add(-time.Minute)
-		// Seed the exact normalized envelope the sends will use, so age is the
-		// only reason this record cannot prove either send.
-		h.journal.appendRecord(envelope, 0, oldAt)
 		aID := h.addMessage(t, "sender", "native", body)
 		bID := h.addMessage(t, "sender", "native", body)
-		// recordFor stays 0: no message gets a matching record after the
-		// boundaries, so only the old record could ever match.
+		aMsg, _ := h.st.GetMessage(aID)
+		bMsg, _ := h.st.GetMessage(bID)
+		oldAt := h.clock.now().Add(-time.Minute)
+		// Seed the exact signed envelopes the sends will use, so age is the
+		// only reason these records cannot prove either send.
+		h.journal.appendRecord(nativePiEnvelope(aID, formatBody(aMsg)), 0, oldAt)
+		h.journal.appendRecord(nativePiEnvelope(bID, formatBody(bMsg)), 0, oldAt)
+		// recordFor/recordAll stay off: no matching record after the
+		// boundaries, so only the old records could ever match.
 		h.q.SetNativeSender(h.sender)
 		h.q.Wake("native")
 		corrWait(t, 5*time.Second, func() bool {
 			return h.status(t, aID) == "accepted" && h.status(t, bID) == "accepted"
 		}, "both sends accepted")
 		sent := h.sender.callTexts()
-		if len(sent) != 2 || normalizeCorrText(sent[0]) != envelope || normalizeCorrText(sent[1]) != envelope {
-			t.Fatalf("oracle: sent envelopes %q do not equal the seeded record %q", sent, envelope)
+		if len(sent) != 2 || sent[0] != nativePiEnvelope(aID, formatBody(aMsg)) || sent[1] != nativePiEnvelope(bID, formatBody(bMsg)) {
+			t.Fatalf("oracle: sent texts %q do not equal the seeded signed envelopes", sent)
 		}
 		h.confirmPass()
 		a, _ := h.st.GetMessage(aID)
@@ -487,6 +512,29 @@ func TestPiEqualTextCorrelationControls(t *testing.T) {
 		}
 		if a.DeliveryProofAt != 0 || b.DeliveryProofAt != 0 {
 			t.Fatalf("an old record was recorded as proof: A=%+v B=%+v", a, b)
+		}
+	})
+
+	t.Run("two equal bodies with two own records settle both", func(t *testing.T) {
+		h := newCorrHarness(t)
+		h.addNativeSession(t, "native")
+		const body = "две записи"
+		aID := h.addMessage(t, "sender", "native", body)
+		bID := h.addMessage(t, "sender", "native", body)
+		h.sender.recordAll = true
+		h.q.SetNativeSender(h.sender)
+		h.q.Wake("native")
+		corrWait(t, 5*time.Second, func() bool {
+			return h.status(t, aID) == "accepted" && h.status(t, bID) == "accepted"
+		}, "both sends accepted")
+		h.confirmPass()
+		a, _ := h.st.GetMessage(aID)
+		b, _ := h.st.GetMessage(bID)
+		if a.Status != "delivered" || b.Status != "delivered" {
+			t.Fatalf("two own records did not settle both: A=%s B=%s", a.Status, b.Status)
+		}
+		if a.DeliveryProofAt == 0 || b.DeliveryProofAt == 0 || a.DeliveryProofAt == b.DeliveryProofAt {
+			t.Fatalf("proofs must be distinct records: A=%d B=%d", a.DeliveryProofAt, b.DeliveryProofAt)
 		}
 	})
 
@@ -536,4 +584,94 @@ func TestPiEqualTextCorrelationControls(t *testing.T) {
 			t.Fatalf("journal appends after timeout/Recover = %d, want 1", got)
 		}
 	})
+}
+
+// TestPiDelayedTimedOutRecordDoesNotConfirmNewMessage: a message that timed
+// out before the next identical body was sent can still leave a delayed
+// record. That record must never confirm the newer message, and only the
+// newer message's own signed record may settle it.
+func TestPiDelayedTimedOutRecordDoesNotConfirmNewMessage(t *testing.T) {
+	h := newCorrHarness(t)
+	h.addNativeSession(t, "native")
+	const body = "поздняя запись"
+	aID := h.addMessage(t, "sender", "native", body)
+	h.q.SetNativeSender(h.sender)
+	h.q.Wake("native")
+	corrWait(t, 5*time.Second, func() bool { return h.status(t, aID) == "accepted" }, "A accepted")
+	if got := h.sender.callCount(); got != 1 {
+		t.Fatalf("A sends = %d, want 1", got)
+	}
+	delayedA := h.sender.callTexts()[0]
+
+	h.clock.advance(31 * time.Minute)
+	h.confirmPass()
+	a, _ := h.st.GetMessage(aID)
+	if a.Status != "failed" || a.Reason != nativeDeliveryUnconfirmed {
+		t.Fatalf("A = %+v, want failed/%s before B is sent", a, nativeDeliveryUnconfirmed)
+	}
+
+	h.q.cfg.QueueTimeout = 0 // keep B pending until its own record
+	bID := h.addMessage(t, "sender", "native", body)
+	h.q.Wake("native")
+	corrWait(t, 5*time.Second, func() bool { return h.status(t, bID) == "accepted" }, "B accepted")
+	if got := h.sender.callCount(); got != 2 {
+		t.Fatalf("total sends = %d, want 2 (A and B)", got)
+	}
+	ownB := h.sender.callTexts()[1]
+
+	// A's delayed record arrives after B's send boundary.
+	h.journal.appendRecord(delayedA, aID, h.clock.now())
+	h.confirmPass()
+	if got := h.status(t, bID); got == "delivered" {
+		t.Fatal("delayed timed-out A record confirmed B")
+	}
+
+	h.journal.appendRecord(ownB, bID, h.clock.now().Add(time.Second))
+	h.confirmPass()
+	b, _ := h.st.GetMessage(bID)
+	if b.Status != "delivered" {
+		t.Fatalf("B status = %q, want delivered by its own record", b.Status)
+	}
+	if reopened, _ := h.st.GetMessage(aID); reopened.Status != "failed" {
+		t.Fatalf("terminal A was reopened: %+v", reopened)
+	}
+	if got := h.sender.callCount(); got != 2 {
+		t.Fatalf("sender calls after delayed record = %d, want 2 (no resend)", got)
+	}
+}
+
+// TestPiOldUnsignedNativeRecordStaysUnconfirmed: a native record written by
+// the old unsigned sender must not prove the signed message; the row stays
+// accepted until the existing timeout/exit path fails it honestly.
+func TestPiOldUnsignedNativeRecordStaysUnconfirmed(t *testing.T) {
+	h := newCorrHarness(t)
+	h.addNativeSession(t, "native")
+	const body = "старая неподписанная подача"
+	id := h.addMessage(t, "sender", "native", body)
+	h.sender.recordFor = id
+	h.sender.recordText = "[from sender] " + body // old bare wire text
+	h.q.SetNativeSender(h.sender)
+	h.q.Wake("native")
+	corrWait(t, 5*time.Second, func() bool { return h.status(t, id) == "accepted" }, "signed send accepted")
+	if got := h.sender.callCount(); got != 1 {
+		t.Fatalf("sends = %d, want 1", got)
+	}
+
+	h.confirmPass()
+	if got := h.status(t, id); got == "delivered" {
+		t.Fatal("old unsigned record confirmed the signed message")
+	}
+
+	h.clock.advance(31 * time.Minute)
+	h.confirmPass()
+	msg, _ := h.st.GetMessage(id)
+	if msg.Status != "failed" || msg.Reason != nativeDeliveryUnconfirmed {
+		t.Fatalf("message = %+v, want failed/%s", msg, nativeDeliveryUnconfirmed)
+	}
+	if msg.DeliveryProofAt != 0 {
+		t.Fatalf("old unsigned record was stored as proof: %+v", msg)
+	}
+	if got := h.sender.callCount(); got != 1 {
+		t.Fatalf("sender calls after terminal failure = %d, want 1 (no resend)", got)
+	}
 }

@@ -230,7 +230,10 @@ func (q *Queue) confirmNativeRecipient(ctx context.Context, st *confirmState, to
 	}
 	state, known := q.getActivity(to)
 	exited := gone || sess.State != "running" || (known && state == activity.Exited) || restored
-	_, confirmer := q.recipientCaps(sess)
+	_, baseConfirmer := q.recipientCaps(sess)
+	// Native confirmation uses only the Pi strict whole-record method; no
+	// legacy substring/holdsLines fallback is allowed on this route.
+	confirmer := nativePiProofConfirmer(baseConfirmer)
 	ref := agent.ActivityRef{SessionID: to, WorktreePath: sess.WorktreePath}
 	now := q.now()
 
@@ -238,7 +241,7 @@ func (q *Queue) confirmNativeRecipient(ctx context.Context, st *confirmState, to
 		if ctx.Err() != nil {
 			return pending + 1
 		}
-		if confirmer != nil && q.confirmOne(ctx, st, confirmer, ref, to, msg, q.injectedText(msg, sess)) {
+		if confirmer != nil && q.confirmOne(ctx, st, confirmer, ref, to, msg, q.nativePiInjectedText(msg, sess)) {
 			continue
 		}
 		timedOut := q.cfg != nil && q.cfg.QueueTimeout > 0 && now.Sub(time.Unix(msg.CreatedAt, 0)) >= q.cfg.QueueTimeout
