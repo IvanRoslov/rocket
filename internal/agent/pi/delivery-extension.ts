@@ -36,6 +36,8 @@ export interface ExtensionApiLike {
 export interface BridgeOptions extends NativeConfig {
 	sendUserMessage: (text: string) => unknown;
 	log?: (event: string, data?: Record<string, unknown>) => void;
+	/** Permission fixup seam; defaults to fs.chmodSync. */
+	chmod?: (path: string, mode: number) => void;
 }
 
 type Outcome = "accepted" | "not_sent";
@@ -92,6 +94,7 @@ export class DeliveryBridge {
 	readonly config: NativeConfig;
 	private readonly sendUserMessage: (text: string) => unknown;
 	private readonly log: (event: string, data?: Record<string, unknown>) => void;
+	private readonly chmod: (path: string, mode: number) => void;
 	private readonly acceptedFile: string;
 	private server: net.Server | undefined;
 	private connections = new Set<net.Socket>();
@@ -110,6 +113,7 @@ export class DeliveryBridge {
 		};
 		this.sendUserMessage = options.sendUserMessage;
 		this.log = options.log ?? (() => {});
+		this.chmod = options.chmod ?? chmodSync;
 		this.acceptedFile = acceptedIDsPath(options.endpoint, options.instanceID);
 	}
 
@@ -159,7 +163,7 @@ export class DeliveryBridge {
 	async start(): Promise<void> {
 		if (this.suppressStart || this.server?.listening) return;
 		mkdirSync(dirname(this.config.endpoint), { recursive: true, mode: 0o700 });
-		chmodSync(dirname(this.config.endpoint), 0o700);
+		this.chmod(dirname(this.config.endpoint), 0o700);
 		try {
 			unlinkSync(this.config.endpoint);
 		} catch {
@@ -177,9 +181,19 @@ export class DeliveryBridge {
 				server.removeListener("error", onError);
 				server.on("error", (error) => this.log("server_error", { error: String(error) }));
 				try {
-					chmodSync(this.config.endpoint, 0o600);
+					this.chmod(this.config.endpoint, 0o600);
 				} catch (error) {
+					// Accepting connections without the 0600 contract is not
+					// allowed: refuse the endpoint and fail the start.
 					this.log("chmod_error", { error: String(error) });
+					server.close();
+					try {
+						unlinkSync(this.config.endpoint);
+					} catch {
+						// Already gone.
+					}
+					reject(error);
+					return;
 				}
 				this.server = server;
 				resolve();
@@ -254,7 +268,7 @@ export class DeliveryBridge {
 			return false;
 		}
 		try {
-			chmodSync(this.acceptedFile, 0o600);
+			this.chmod(this.acceptedFile, 0o600);
 		} catch (error) {
 			// The durable record exists; a permission fixup failure must not
 			// turn a reserved message into a resend.

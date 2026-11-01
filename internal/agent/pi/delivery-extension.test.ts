@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 
 import {
+	DeliveryBridge,
 	FrameDecoder,
 	MAX_FRAME_BYTES,
 	acceptedIDsPath,
@@ -408,6 +409,27 @@ test("persistenceFailureReturnsNotSentWithoutAPI", async (t) => {
 	assert.equal(api.calls.length, 0);
 });
 
+test("socketPermissionFailureFailsClosed", async (t) => {
+	const api = new FakeApi();
+	const endpoint = endpointFor();
+	const bridge = new DeliveryBridge({
+		sessionID: "sess-1",
+		instanceID: "instance-1",
+		endpoint,
+		protocol: 1,
+		sendUserMessage: (text) => api.sendUserMessage(text, { deliverAs: "followUp", expandPromptTemplates: false }),
+		chmod: (path, mode) => {
+			if (path === endpoint) throw new Error("chmod denied");
+			chmodSync(path, mode);
+		},
+	});
+	t.after(() => bridge.stop("quit"));
+	await assert.rejects(bridge.start(), /chmod denied/);
+	assert.equal(bridge.listening, false, "an endpoint without the 0600 contract must not accept");
+	assert.equal(existsSync(endpoint), false, "the refused endpoint must be unlinked");
+	assert.equal(api.calls.length, 0);
+});
+
 test("sessionStartOpensPrivateEndpoint", async (t) => {
 	const api = new FakeApi();
 	const endpoint = endpointFor();
@@ -438,6 +460,10 @@ test("startFailureIsContained", async (t) => {
 	assert.doesNotThrow(() => api.emit("session_start"));
 	await new Promise((resolve) => setTimeout(resolve, 20));
 	assert.equal(bridge.listening, false);
+	await assert.rejects(connectRequest(endpoint, {
+		v: 1, session_id: "sess-1", instance_id: "instance-1", message_id: 62, text: "старт не удался",
+	}));
+	assert.equal(api.calls.length, 0);
 });
 
 test("frameDecoderKeepsANewlineInsideTheByteLimit", () => {
