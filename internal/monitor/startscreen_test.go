@@ -282,7 +282,8 @@ func TestStartScreenCheckedAgainAfterRestore(t *testing.T) {
 
 	// Restore: a session.restored event after the launch, the old journal
 	// no longer counts, and the new process shows the trust screen.
-	if _, err := st.AppendEvent(store.Event{Type: "session.restored", SessionID: "sess1", TS: time.Now().Unix() + 5}); err != nil {
+	restoredAt := time.Now().Unix() + 5
+	if _, err := st.AppendEvent(store.Event{Type: "session.restored", SessionID: "sess1", TS: restoredAt}); err != nil {
 		t.Fatal(err)
 	}
 	ag.setStarted(false)
@@ -295,7 +296,7 @@ func TestStartScreenCheckedAgainAfterRestore(t *testing.T) {
 	if q, ok := pendingOf(t, st); !ok || !q.IsStartScreen() {
 		t.Errorf("pending = %+v, want a start-screen quiz", q)
 	}
-	if got, want := ag.lastSince(), time.Unix(time.Now().Unix()+5, 0); !got.Equal(want) {
+	if got, want := ag.lastSince(), time.Unix(restoredAt, 0); !got.Equal(want) {
 		t.Errorf("HasStartedTurn got Since = %v, want the restore time %v", got, want)
 	}
 }
