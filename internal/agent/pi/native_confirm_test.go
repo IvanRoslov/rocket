@@ -85,6 +85,14 @@ func TestPiNativeProofRequiresWholeUserRecord(t *testing.T) {
 		}
 	})
 
+	t.Run("expected envelope split across text parts proves", func(t *testing.T) {
+		wire := nativePiPartsLine(t, "u1", "", "user", []string{"[rocket #123]", "[from helper] Продолжай"}, 2000)
+		found, at, err := nativeConfirmStrict(t, wire, nativeProofEnvelope, 1000)
+		if err != nil || !found || !at.Equal(time.UnixMilli(2000)) {
+			t.Fatalf("got %v %v %v; a whole record split across text parts must prove", found, at, err)
+		}
+	})
+
 	t.Run("multiline Unicode with whitespace normalization proves", func(t *testing.T) {
 		wire := piMessageLine(t, "u1", "", "user", "[rocket #123] Привет,\n   мир", 2000)
 		found, _, err := nativeConfirmStrict(t, wire, "[rocket #123]  Привет,   мир", 1000)
