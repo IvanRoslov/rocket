@@ -27,7 +27,12 @@ func installFakePi(t *testing.T, version, help string) {
 
 func shortTempDir(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "rpi")
+	// Mirrors nativeTempRoot: macOS TMPDIR is too long for a UDS path.
+	base := os.TempDir()
+	if len(base) > 32 {
+		base = "/tmp"
+	}
+	dir, err := os.MkdirTemp(base, "rpi")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,10 +230,79 @@ func TestPiNativeRestoreChangesInstance(t *testing.T) {
 	if first.InstanceID == second.InstanceID {
 		t.Fatalf("restore reused launch instance %q", first.InstanceID)
 	}
-	if first.Endpoint != second.Endpoint {
-		t.Fatalf("session endpoint moved across restore: %q -> %q", first.Endpoint, second.Endpoint)
+	if first.Endpoint == second.Endpoint {
+		t.Fatalf("restore reused endpoint %q; an old cleanup could unlink the new launch", first.Endpoint)
+	}
+	if len(second.Endpoint) >= 100 {
+		t.Fatalf("endpoint too long for macOS UDS (%d bytes): %s", len(second.Endpoint), second.Endpoint)
 	}
 }
+
+func TestPiNativeCollisionIDsProduceDistinctTargets(t *testing.T) {
+	installFakePi(t, "1.4.0", fakeExtensionHelp)
+	useNativeRoot(t, shortTempDir(t))
+	p := New().(*Pi)
+	// These two session IDs collided under the earlier 32-bit session key.
+	first, err := p.PrepareNativeLaunch(agent.LaunchSpec{SessionID: "rocket-native-collision-37639"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := p.PrepareNativeLaunch(agent.LaunchSpec{SessionID: "rocket-native-collision-133628"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Endpoint == second.Endpoint {
+		t.Fatalf("colliding session IDs share an endpoint: %s", first.Endpoint)
+	}
+	if filepath.Dir(first.Endpoint) == filepath.Dir(second.Endpoint) {
+		t.Fatalf("colliding session IDs share a runtime dir: %s", filepath.Dir(first.Endpoint))
+	}
+	if _, err := os.Stat(first.Endpoint); !os.IsNotExist(err) {
+		t.Fatalf("endpoint must not exist before the extension binds it: %v", err)
+	}
+}
+
+func TestPiNativeLateCleanupKeepsNewEndpoint(t *testing.T) {
+	installFakePi(t, "1.4.0", fakeExtensionHelp)
+	useNativeRoot(t, shortTempDir(t))
+	p := New().(*Pi)
+	spec := agent.LaunchSpec{SessionID: "sess-late-cleanup"}
+	first, err := p.PrepareNativeLaunch(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A live old launch already owns its socket and dedupe state.
+	if err := os.WriteFile(first.Endpoint, []byte("old socket"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldState := filepath.Join(filepath.Dir(first.Endpoint), "accepted-"+first.InstanceID+".ids")
+	if err := os.WriteFile(oldState, []byte("1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := p.PrepareNativeLaunch(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(first.Endpoint); err != nil {
+		t.Fatalf("new launch preparation unlinked the old endpoint: %v", err)
+	}
+	if err := os.WriteFile(second.Endpoint, []byte("new socket"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The old process exits late and removes only its own resources.
+	if err := os.Remove(first.Endpoint); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(oldState); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(second.Endpoint); err != nil || string(data) != "new socket" {
+		t.Fatalf("late old cleanup damaged the new endpoint: %q %v", data, err)
+	}
+}
+
 
 func contains(args []string, want string) bool {
 	for _, arg := range args {

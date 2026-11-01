@@ -55,7 +55,9 @@ func nativeMarkerPath(dir string) string {
 
 func nativeSessionKey(sessionID string) string {
 	sum := sha256.Sum256([]byte(sessionID))
-	return hex.EncodeToString(sum[:4])
+	// 128 bits, not the earlier 32: distinct Rocket sessions must never
+	// share a runtime directory, and the path stays far below sun_path.
+	return hex.EncodeToString(sum[:16])
 }
 
 func newLaunchInstanceID() (string, error) {
@@ -151,7 +153,13 @@ func (p *Pi) PrepareNativeLaunch(spec agent.LaunchSpec) (agent.NativeLaunch, err
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return agent.NativeLaunch{}, fmt.Errorf("native launch: secure runtime dir: %w", err)
 	}
-	endpoint := filepath.Join(dir, "s")
+	// Every launch owns its own socket path. The old launch's late cleanup
+	// removes only its own endpoint, never a peer or the new launch.
+	instanceID, err := newLaunchInstanceID()
+	if err != nil {
+		return agent.NativeLaunch{}, err
+	}
+	endpoint := filepath.Join(dir, "s-"+instanceID)
 	if len(endpoint) >= maxUnixSocketPath {
 		return agent.NativeLaunch{}, fmt.Errorf("native launch: endpoint path too long for UDS (%d bytes): %s", len(endpoint), endpoint)
 	}
@@ -169,10 +177,6 @@ func (p *Pi) PrepareNativeLaunch(spec agent.LaunchSpec) (agent.NativeLaunch, err
 	}
 	if err := os.Chmod(deliveryExtensionPath(endpoint), 0o600); err != nil {
 		return agent.NativeLaunch{}, fmt.Errorf("native launch: secure extension: %w", err)
-	}
-	instanceID, err := newLaunchInstanceID()
-	if err != nil {
-		return agent.NativeLaunch{}, err
 	}
 	if err := os.WriteFile(nativeMarkerPath(dir), []byte(agent.NativeTransportPiUDS+"\n"), 0o600); err != nil {
 		return agent.NativeLaunch{}, fmt.Errorf("native launch: record native state: %w", err)
