@@ -25,25 +25,35 @@
 ```bash
 ROOT=/tmp/codex-native-recon
 mkdir -p "$ROOT/work"
+cd "$ROOT/work"
 
 ROCKET_SESSION_ID=rocket-recon-a \
 ROCKET_SOCKET=/tmp/rocket-recon-a.sock \
 codex app-server --listen "unix://$ROOT/app.sock"
 ```
 
-В другом процессе, с теми же тестовыми переменными:
+Во втором терминале `ROOT` нужно задать заново: shell-переменная не переносится между процессами. `expect` запускает TUI на PTY и записывает поток ввода-вывода в `$ROOT/tui.log`; размер терминала — 120×40.
 
 ```bash
-ROCKET_SESSION_ID=rocket-recon-a \
-ROCKET_SOCKET=/tmp/rocket-recon-a.sock \
-TERM=xterm-256color COLUMNS=120 LINES=40 \
-codex --remote "unix://$ROOT/app.sock" --no-alt-screen \
+ROOT=/tmp/codex-native-recon
+cd "$ROOT/work" && ROOT="$ROOT" expect -c '
+set timeout -1
+log_file -noappend $env(ROOT)/tui.log
+set stty_init "rows 40 cols 120"
+spawn env TERM=xterm-256color COLUMNS=120 LINES=40 \
+  ROCKET_SESSION_ID=rocket-recon-a \
+  ROCKET_SOCKET=/tmp/rocket-recon-a.sock \
+  codex --remote "unix://$env(ROOT)/app.sock" --no-alt-screen \
   -c check_for_update_on_startup=false
+expect eof
+'
 ```
 
 Найти thread, поставить сообщение и прочитать историю можно сохранёнными probe-скриптами:
 
 ```bash
+# из корня репозитория
+ROOT=/tmp/codex-native-recon
 PROBE_PYTHON=/path/to/isolated-python-with-pyte-and-websockets
 
 "$PROBE_PYTHON" scripts/probes/tmux-delivary/ws_request.py \
@@ -60,7 +70,7 @@ codex queue --thread '<thread-uuid>' \
 "$PROBE_PYTHON" scripts/probes/tmux-delivary/render_tui.py "$ROOT/tui.log"
 ```
 
-`queue` лишь принимает сообщение. Для вывода о доставке нужны последующие `thread/turns/list` и/или видимый ответ в том же TUI, а не один ответ CLI.
+`queue` лишь принимает сообщение. Для вывода о доставке нужны последующие `thread/turns/list` и/или видимый ответ в том же TUI, а не один ответ CLI. `render_tui.py` не обязателен для доставки: он только разбирает уже сохранённый PTY-поток (например, `$ROOT/tui.log`) в экран и позицию курсора.
 
 Завершать проверку следует только сигналами своим child process groups. Нельзя убивать общий app-server, менять глобальную установку или удалять чужие каталоги.
 
@@ -82,7 +92,7 @@ codex queue --thread '<thread-uuid>' \
 | Отдельный restart именно TUI | NOT TESTED | Проверен stop/restart app-server и автоматический reconnect TUI; отдельное завершение/запуск TUI не проверялось |
 | Exactly-once при дублях/сбоях | NOT CLAIMED | Повторные одинаковые маркеры в экранном логе не являются проверкой дедупликации или exactly-once |
 
-Следовательно, не подтверждён только узкий, но обязательный для полного интеграционного gate набор: mid-line cursor и отдельный TUI lifecycle. Это не отменяет успешные проверки доставки.
+Граница результата: mid-line cursor и отдельный lifecycle TUI остаются непроверенными; exactly-once и дедупликацию повторных маркеров этот эксперимент не проверял. Полный интеграционный gate поэтому не пройден, хотя доставка idle/busy, окружение и восстановление подтверждены.
 
 ## Ограниченная автоматическая проверка: отрицательный результат
 
@@ -95,13 +105,16 @@ codex queue --thread '<thread-uuid>' \
 Повторить ограниченный сценарий можно так, только в новом пустом каталоге:
 
 ```bash
+# из корня репозитория
+PROBE_PYTHON=/path/to/isolated-python-with-pyte-and-websockets
+
 "$PROBE_PYTHON" scripts/probes/tmux-delivary/codex_native_probe.py \
   --root /tmp/codex-cursor-recon \
   --session-id rocket-cursor-recon \
   --rocket-socket /tmp/rocket-cursor-recon.sock
 ```
 
-Ожидаемый результат на сохранённой конфигурации — `status=failed` через 120 секунд, а не PASS. Скрипт оставлен как воспроизводимый диагностический probe, не как рабочая интеграция. `render_tui.py` и `ws_request.py` — более узкие полезные примитивы для ручного рецепта.
+Ожидаемый результат на сохранённой конфигурации — `status=failed` через 120 секунд, а не PASS. Скрипт оставлен как воспроизводимый диагностический probe, не как рабочая интеграция. `render_tui.py` и `ws_request.py` — более узкие полезные примитивы для ручного рецепта. При cleanup `codex_native_probe.py` завершает только собственные child process groups (`start_new_session=True` и `killpg`); общий app-server daemon и чужие каталоги не затрагиваются.
 
 ## Предложение для следующей спецификации
 

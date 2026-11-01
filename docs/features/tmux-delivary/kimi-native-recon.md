@@ -33,7 +33,7 @@
 
 Реализация [prompts.ts](https://raw.githubusercontent.com/MoonshotAI/kimi-code/%40moonshot-ai/kimi-code%402.4.0/packages/kap-server/src/routes/prompts.ts) подтверждает `resolved.prompt.submit` с origin `user` и ожидание accepted, не completion. Это полезный API для клиента `kimi web`, но он не превращается в вызов внутри существующего stock-TUI процесса.
 
-Более того, [sessionLock.ts](https://raw.githubusercontent.com/MoonshotAI/kimi-code/%40moonshot-ai/kimi-code%402.4.0/packages/agent-core-v2/src/persistence/interface/sessionLock.ts) явно сообщает `This session is in use by another Kimi Code process`. В Server API `:takeover` разрешён только когда прежний процесс уже gone; иначе оба процесса пишут историю и она может перемешаться. Поэтому REST/second writer и lock takeover исключены из допустимого решения, а не предложены как workaround.
+Более того, [sessionLock.ts](https://raw.githubusercontent.com/MoonshotAI/kimi-code/%40moonshot-ai/kimi-code%402.4.0/packages/agent-core-v2/src/persistence/interface/sessionLock.ts) явно сообщает `This session is in use by another Kimi Code process`. В Server API `:takeover` разрешён только когда прежний процесс уже завершился; если он ещё работает, оба процесса пишут в сессию до её перехода в idle, и история может перемешаться. Поэтому REST/second writer и lock takeover исключены из допустимого решения, а не предложены как workaround.
 
 ### 2. ACP stdio: отдельный agent backend
 
@@ -82,7 +82,7 @@
 | --- | --- |
 | Есть ли REST prompt API в 2.4.0? | PASS, но separate server/writer |
 | Есть ли ACP? | PASS, но separate backend, не stock TUI |
-| Можно ли безопасно отобрать lock у живой сессии? | NO: официально допустим interleaved history; не использовалось |
+| Можно ли безопасно отобрать lock у живой сессии? | NO: `:takeover` официально разрешён только для уже завершившегося владельца; у живого lock не отбирается, иначе возможна перемешанная история. Не использовалось |
 | Могут ли hooks внешне разбудить idle TUI с произвольным текстом? | NOT FOUND в поддерживаемых событиях |
 | Есть ли generic prompt input в TUI reverse RPC? | NO: только approval/question |
 | Запускает ли background completion новый ход в 2.4.0? | YES, agent-owned `origin=task` |
