@@ -1,0 +1,57 @@
+{
+  "scenario": "idle-single",
+  "pi": "1.4.0",
+  "session_id": "live-idle-single",
+  "instance_id": "65a344d322abd2a2",
+  "endpoint_kind": "short /tmp UDS",
+  "extensions": [
+    "native-bridge-probe-extension.ts",
+    "delivery-extension.ts"
+  ],
+  "before": {
+    "ok": true,
+    "text": "Русский однострочный черновик",
+    "lines": [
+      "Русский однострочный черновик"
+    ],
+    "cursorLine": 0,
+    "cursorCol": 26,
+    "idle": true,
+    "model": "probe/deterministic",
+    "editorInputCount": 33,
+    "editorLastInput": "\u001b[D",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false
+  },
+  "response": {
+    "v": 1,
+    "session_id": "live-idle-single",
+    "instance_id": "65a344d322abd2a2",
+    "message_id": 101,
+    "outcome": "accepted"
+  },
+  "after_settled": {
+    "ok": true,
+    "text": "Русский однострочный черновик",
+    "lines": [
+      "Русский однострочный черновик"
+    ],
+    "cursorLine": 0,
+    "cursorCol": 26,
+    "idle": true,
+    "model": "probe/deterministic",
+    "editorInputCount": 33,
+    "editorLastInput": "\u001b[D",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false
+  },
+  "draft_preserved": true,
+  "injected_count": 1,
+  "user_texts": [
+    "Внешнее сообщение idle-single"
+  ],
+  "provider_calls": 1,
+  "status": "PASS"
+}

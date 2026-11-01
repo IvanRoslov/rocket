@@ -1,0 +1,22 @@
+{
+  "scenario": "delayed-modal",
+  "pi": "1.4.0",
+  "session_id": "live-delayed-modal",
+  "instance_id": "3e8e2e2a6d410089",
+  "endpoint_kind": "short /tmp UDS",
+  "extensions": [
+    "native-bridge-probe-extension.ts",
+    "delivery-extension.ts"
+  ],
+  "response": {
+    "v": 1,
+    "session_id": "live-delayed-modal",
+    "instance_id": "3e8e2e2a6d410089",
+    "message_id": 501,
+    "outcome": "accepted"
+  },
+  "injected_count": 1,
+  "dialog_still_open": true,
+  "ui_prompt_starts": 0,
+  "status": "PASS"
+}

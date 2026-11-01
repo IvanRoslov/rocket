@@ -1,0 +1,118 @@
+{
+  "scenario": "selector",
+  "pi": "1.4.0",
+  "session_id": "live-selector",
+  "instance_id": "a94015e27b8c6079",
+  "endpoint_kind": "short /tmp UDS",
+  "extensions": [
+    "native-bridge-probe-extension.ts",
+    "delivery-extension.ts"
+  ],
+  "before": {
+    "ok": true,
+    "text": "Первая строка черновика\nВторая строка с курсором",
+    "lines": [
+      "Первая строка черновика",
+      "Вторая строка с курсором"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 21,
+    "idle": true,
+    "model": "probe/deterministic",
+    "editorInputCount": 53,
+    "editorLastInput": "\u001b[D",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false
+  },
+  "response": {
+    "v": 1,
+    "session_id": "live-selector",
+    "instance_id": "a94015e27b8c6079",
+    "message_id": 301,
+    "outcome": "accepted"
+  },
+  "after_send": {
+    "ok": true,
+    "text": "Первая строка черновика\nВторая строка с курсором",
+    "lines": [
+      "Первая строка черновика",
+      "Вторая строка с курсором"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 21,
+    "idle": false,
+    "model": "probe/deterministic",
+    "editorInputCount": 54,
+    "editorLastInput": "\f",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false
+  },
+  "selector_still_open": true,
+  "after_search": {
+    "ok": true,
+    "text": "Первая строка черновика\nВторая строка с курсором",
+    "lines": [
+      "Первая строка черновика",
+      "Вторая строка с курсором"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 21,
+    "idle": true,
+    "model": "probe/deterministic",
+    "editorInputCount": 54,
+    "editorLastInput": "\f",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false
+  },
+  "after_escape": {
+    "ok": true,
+    "text": "Первая строка черновика\nВторая строка с курсором",
+    "lines": [
+      "Первая строка черновика",
+      "Вторая строка с курсором"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 21,
+    "idle": true,
+    "model": "probe/deterministic",
+    "editorInputCount": 54,
+    "editorLastInput": "\f",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false
+  },
+  "after_editor_typing": {
+    "ok": true,
+    "text": "Первая строка черновика\nВторая строка с курсо!ром",
+    "lines": [
+      "Первая строка черновика",
+      "Вторая строка с курсо!ром"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 22,
+    "idle": true,
+    "model": "probe/deterministic",
+    "editorInputCount": 55,
+    "editorLastInput": "!",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false
+  },
+  "expected_lines_after_typing": [
+    "Первая строка черновика",
+    "Вторая строка с курсо!ром"
+  ],
+  "draft_preserved": true,
+  "injected_count": 1,
+  "ui_prompt_events": 0,
+  "model_selects": 0,
+  "screen_evidence": [
+    "Only showing models from configured providers. Use /login to add providers. > → ✓ deterministic [probe]",
+    "> zz No matching models",
+    "Вторая строка с курсо!ром"
+  ],
+  "status": "PASS"
+}

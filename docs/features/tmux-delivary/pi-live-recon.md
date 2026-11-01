@@ -43,6 +43,19 @@ python3 scripts/probes/tmux-delivary/pty_preservation_probe.py
 
 Маленькие sanitized-доказательства сохранены в репозитории: `scripts/probes/tmux-delivary/results/<scenario>/result.json`. Полные `pty.raw`, `events.jsonl`, транскрипты и временные каталоги остаются git-ignored. Финальный `go test ./...` после исследования прошёл все пакеты; продуктовых изменений не было.
 
+## Повторная проверка production bridge после review-исправлений
+
+Дата: 1 ноября 2026. Ветка `feature/tmux-delivary/pi-bridge-cc`, коммиты `cc9bfe3`, `5220040`, `fa03bd5`, `4538d2f`, `62c5838` и обновлённый fixture.
+
+- `scripts/probes/tmux-delivary/native_bridge_probe.py` теперь запускает Pi с `--session-id`, равным ROCKET target, и после старта сверяет `ctx.sessionManager.getSessionId()` наблюдаемого процесса с этим target. Привязка проверяется по фактической истории, а не по env-строке.
+- Ограниченный прогон: `reload`, `target-frames`, `foreign-history` — PASS.
+- `reload`: после `/reload` повторный запрос с тем же ID не вызвал второй API submit (`injected_count` = 1, число вызовов provider не выросло).
+- `foreign-history`: ROCKET target `live-foreign-history`, фактическая история `live-foreign-history-b`. Endpoint не создан, подключение завершилось `ENOENT`, 0 injected и 0 вызовов provider. Это прямая проверка repro из review.
+
+Полная матрица на текущем коде не перезапускалась: сохранённые результаты остальных сценариев относятся к предыдущей версии моста. Это остаётся gap, а не PASS.
+
+Остаются source-only или непроверенными: login/OAuth и прочие ветки `showSelector`; окно задержанного async listener (допускается Spec2); реальные внешние провайдеры и auth; GitHub Actions отсутствуют.
+
 ## Вывод и ограничения
 
 Подтверждено: реальный Pi 1.4.0 Extension API в штатном TUI сохраняет исследованные черновики и курсор при `sendUserMessage` в idle и busy с `followUp`. Предварительное условие для будущей интеграции выполнено, блокера по сохранению ввода не найдено.

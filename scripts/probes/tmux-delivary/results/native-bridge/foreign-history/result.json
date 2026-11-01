@@ -1,0 +1,18 @@
+{
+  "scenario": "foreign-history",
+  "pi": "1.4.0",
+  "session_id": "live-foreign-history",
+  "pi_session_id": "live-foreign-history-b",
+  "instance_id": "cc9a03e9742c0056",
+  "endpoint_kind": "short /tmp UDS",
+  "extensions": [
+    "native-bridge-probe-extension.ts",
+    "delivery-extension.ts"
+  ],
+  "observed_pi_session": "live-foreign-history-b",
+  "endpoint_exists": false,
+  "native_error": "[Errno 2] No such file or directory",
+  "injected_count": 0,
+  "provider_calls": 0,
+  "status": "PASS"
+}

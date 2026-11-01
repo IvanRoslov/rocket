@@ -1,0 +1,30 @@
+{
+  "scenario": "reload",
+  "pi": "1.4.0",
+  "session_id": "live-reload",
+  "pi_session_id": "live-reload",
+  "instance_id": "54e7aceebde5cb4f",
+  "endpoint_kind": "short /tmp UDS",
+  "extensions": [
+    "native-bridge-probe-extension.ts",
+    "delivery-extension.ts"
+  ],
+  "first": {
+    "v": 1,
+    "session_id": "live-reload",
+    "instance_id": "54e7aceebde5cb4f",
+    "message_id": 801,
+    "outcome": "accepted"
+  },
+  "second": {
+    "v": 1,
+    "session_id": "live-reload",
+    "instance_id": "54e7aceebde5cb4f",
+    "message_id": 801,
+    "outcome": "accepted"
+  },
+  "provider_calls_before": 1,
+  "provider_calls_after": 1,
+  "injected_count": 1,
+  "status": "PASS"
+}

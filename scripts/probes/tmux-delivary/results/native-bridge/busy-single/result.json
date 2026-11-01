@@ -1,0 +1,82 @@
+{
+  "scenario": "busy-single",
+  "pi": "1.4.0",
+  "session_id": "live-busy-single",
+  "instance_id": "5723a6f3d71a8054",
+  "endpoint_kind": "short /tmp UDS",
+  "extensions": [
+    "native-bridge-probe-extension.ts",
+    "delivery-extension.ts"
+  ],
+  "before": {
+    "ok": true,
+    "text": "Русский черновик во время хода",
+    "lines": [
+      "Русский черновик во время хода"
+    ],
+    "cursorLine": 0,
+    "cursorCol": 27,
+    "idle": false,
+    "model": "probe/deterministic",
+    "editorInputCount": 38,
+    "editorLastInput": "\u001b[D",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false
+  },
+  "busy_idle": false,
+  "response": {
+    "v": 1,
+    "session_id": "live-busy-single",
+    "instance_id": "5723a6f3d71a8054",
+    "message_id": 201,
+    "outcome": "accepted"
+  },
+  "after_send": {
+    "ok": true,
+    "text": "Русский черновик во время хода",
+    "lines": [
+      "Русский черновик во время хода"
+    ],
+    "cursorLine": 0,
+    "cursorCol": 27,
+    "idle": false,
+    "model": "probe/deterministic",
+    "editorInputCount": 38,
+    "editorLastInput": "\u001b[D",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false
+  },
+  "after_settled": {
+    "ok": true,
+    "text": "Русский черновик во время хода",
+    "lines": [
+      "Русский черновик во время хода"
+    ],
+    "cursorLine": 0,
+    "cursorCol": 27,
+    "idle": true,
+    "model": "probe/deterministic",
+    "editorInputCount": 38,
+    "editorLastInput": "\u001b[D",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false
+  },
+  "draft_preserved": true,
+  "injected_count": 1,
+  "user_texts": [
+    "run",
+    "Внешнее сообщение busy-single"
+  ],
+  "provider_calls": 2,
+  "user_role_order": [
+    "system",
+    "user",
+    "assistant",
+    "user",
+    "assistant"
+  ],
+  "status": "PASS"
+}

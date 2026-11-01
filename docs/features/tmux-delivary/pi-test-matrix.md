@@ -89,9 +89,39 @@ python3 scripts/probes/tmux-delivary/pty_preservation_probe.py
 go test ./internal/agent/pi ./internal/session ./internal/queue ./internal/nativeinput
 go test ./...
 go test -race ./internal/agent/pi ./internal/queue ./internal/nativeinput
+node --experimental-strip-types --test internal/agent/pi/delivery-extension.test.ts
 ```
 
-Реальная команда Node/Pi bridge-тестов будет зафиксирована после выбора штатного runtime. Отдельно будут приложены версии, RED/GREEN результаты, live-логи, результаты restart/switch/connection-loss и очистка изолированных ресурсов. Отсутствие GitHub Actions workflows не будет выдаваться за зелёный CI.
+Отсутствие GitHub Actions workflows не выдаётся за зелёный CI.
+
+## Review-исправления 1 ноября 2026
+
+После раннего review закрыты пять блокеров в Pi-owned файлах; каждый шаг RED→GREEN.
+
+| Блокер | Исправление | RED-проверка |
+| --- | --- | --- |
+| Привязка к реальной истории после switch+reload | `ctx.sessionManager.getSessionId()` проверяется при открытии endpoint и перед каждым submit; чужой/недоступный context закрывает канал с нулём API-вызовов | `refusesStartInAForeignHistory`, `reloadAfterSwitchNeverRoutesIntoNewHistory`, `submissionRequiresBoundHistory`, `historyGetterFailureFailsClosed` |
+| Уникальность endpoint | Ключ сессии расширен до 128 бит; endpoint содержит launch instance (`s-<instance>`); поздняя очистка старого запуска не трогает новый endpoint | Go `TestPiNativeCollisionIDsProduceDistinctTargets` (`rocket-native-collision-37639`/`133628`), `TestPiNativeLateCleanupKeepsNewEndpoint`, `TestPiNativeRestoreChangesInstance` |
+| Долговечная дедупликация | Запись accepted ID синхронно до API; ошибка записи даёт `not_sent` с 0 вызовов; нечитаемое/повреждённое состояние не становится пустым набором | `reservesAcceptedIDBeforeAPI`, `unreadableAcceptedStateFailsClosed`, `corruptAcceptedStateFailsClosed`, `persistenceFailureReturnsNotSentWithoutAPI` |
+| Ограничение старта и прав | Ошибка chmod сокета закрывает и удаляет endpoint; rejection `start()` не выходит за handler-границу | `socketPermissionFailureFailsClosed`, `startFailureIsContained` |
+| Один обмен на соединение | Обрабатывается только первый JSONL-кадр; кадры в том же или следующем chunk не вызывают API | `oneExchangePerConnection`, `trailingChunkCannotSubmit` |
+
+Результат: `node --experimental-strip-types --test internal/agent/pi/delivery-extension.test.ts` — 23/23 PASS; `go test ./internal/agent/pi -count=1` — PASS; `go test -race ./internal/agent/pi` — PASS; `go vet ./...` — чисто.
+
+Полный `go test ./...`: все пакеты PASS, кроме одного intermittent падения `internal/api` `TestParticipantFanOut_SkipsAuthorAndHuman` (`TempDir RemoveAll cleanup: directory not empty`). Целевой повтор теста и повторный прогон пакета — PASS. Это известный TempDir-cleanup flake, не связанный с изменёнными Pi-файлами; зелёным полный прогон не объявляется.
+
+## Повторная live-проверка (ограниченная)
+
+Прогон только затронутых сценариев на stock Pi 1.4.0 с локальным детерминированным provider:
+
+```bash
+python3 scripts/probes/tmux-delivary/native_bridge_probe.py \
+  --scenario reload --scenario target-frames --scenario foreign-history
+```
+
+Fixture теперь запускает Pi с `--session-id` равным ROCKET target и проверяет `sessionManager.getSessionId()` наблюдаемого процесса. Результаты: `reload`, `target-frames`, `foreign-history` — PASS. В `foreign-history` фактическая история `live-foreign-history-b` при target `live-foreign-history`: endpoint не создан, подключение отсутствует (`ENOENT`), 0 injected и 0 вызовов provider.
+
+Остальные 10 сценариев сохранённой матрицы (17:12–17:14) относятся к коду до этих исправлений; полная матрица против текущего моста не перезапускалась. Это остаётся явным gap, а не PASS.
 
 ## Ограничение текущего результата
 

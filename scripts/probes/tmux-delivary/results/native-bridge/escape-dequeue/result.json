@@ -1,0 +1,56 @@
+{
+  "scenario": "escape-dequeue",
+  "pi": "1.4.0",
+  "session_id": "live-escape-dequeue",
+  "instance_id": "30492ea844e9e7e2",
+  "endpoint_kind": "short /tmp UDS",
+  "extensions": [
+    "native-bridge-probe-extension.ts",
+    "delivery-extension.ts"
+  ],
+  "before": {
+    "ok": true,
+    "text": "Черновик до Escape",
+    "lines": [
+      "Черновик до Escape"
+    ],
+    "cursorLine": 0,
+    "cursorCol": 18,
+    "idle": false,
+    "model": "probe/deterministic",
+    "editorInputCount": 23,
+    "editorLastInput": "e",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false
+  },
+  "response": {
+    "v": 1,
+    "session_id": "live-escape-dequeue",
+    "instance_id": "30492ea844e9e7e2",
+    "message_id": 701,
+    "outcome": "accepted"
+  },
+  "after_escape": {
+    "ok": true,
+    "text": "Очередное сообщение перед Escape\n\nЧерновик до Escape",
+    "lines": [
+      "Очередное сообщение перед Escape",
+      "",
+      "Черновик до Escape"
+    ],
+    "cursorLine": 2,
+    "cursorCol": 18,
+    "idle": false,
+    "model": "probe/deterministic",
+    "editorInputCount": 24,
+    "editorLastInput": "\u001b",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false
+  },
+  "editor_contains_queued": true,
+  "cursor_at_end": true,
+  "injected_count": 0,
+  "status": "PASS"
+}

@@ -1,0 +1,85 @@
+{
+  "scenario": "busy-multiline",
+  "pi": "1.4.0",
+  "session_id": "live-busy-multiline",
+  "instance_id": "e9d564c2e3d3e1c5",
+  "endpoint_kind": "short /tmp UDS",
+  "extensions": [
+    "native-bridge-probe-extension.ts",
+    "delivery-extension.ts"
+  ],
+  "before": {
+    "ok": true,
+    "text": "Первая строка\nВторая строка во время хода",
+    "lines": [
+      "Первая строка",
+      "Вторая строка во время хода"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 24,
+    "idle": false,
+    "model": "probe/deterministic",
+    "editorInputCount": 50,
+    "editorLastInput": "\u001b[D",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false
+  },
+  "busy_idle": false,
+  "response": {
+    "v": 1,
+    "session_id": "live-busy-multiline",
+    "instance_id": "e9d564c2e3d3e1c5",
+    "message_id": 201,
+    "outcome": "accepted"
+  },
+  "after_send": {
+    "ok": true,
+    "text": "Первая строка\nВторая строка во время хода",
+    "lines": [
+      "Первая строка",
+      "Вторая строка во время хода"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 24,
+    "idle": false,
+    "model": "probe/deterministic",
+    "editorInputCount": 50,
+    "editorLastInput": "\u001b[D",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false
+  },
+  "after_settled": {
+    "ok": true,
+    "text": "Первая строка\nВторая строка во время хода",
+    "lines": [
+      "Первая строка",
+      "Вторая строка во время хода"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 24,
+    "idle": true,
+    "model": "probe/deterministic",
+    "editorInputCount": 50,
+    "editorLastInput": "\u001b[D",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false
+  },
+  "draft_preserved": true,
+  "injected_count": 1,
+  "user_texts": [
+    "run",
+    "Внешнее сообщение busy-multiline"
+  ],
+  "provider_calls": 2,
+  "user_role_order": [
+    "system",
+    "user",
+    "assistant",
+    "user",
+    "assistant"
+  ],
+  "status": "PASS"
+}

@@ -1,0 +1,112 @@
+{
+  "scenario": "modal-guard",
+  "pi": "1.4.0",
+  "session_id": "live-modal-guard",
+  "instance_id": "5cd52764c2a7cb05",
+  "endpoint_kind": "short /tmp UDS",
+  "extensions": [
+    "native-bridge-probe-extension.ts",
+    "delivery-extension.ts"
+  ],
+  "kinds": {
+    "select": {
+      "refused": {
+        "v": 1,
+        "session_id": "live-modal-guard",
+        "instance_id": "5cd52764c2a7cb05",
+        "message_id": 401,
+        "outcome": "not_sent"
+      },
+      "transcript_before": 0,
+      "accepted": {
+        "v": 1,
+        "session_id": "live-modal-guard",
+        "instance_id": "5cd52764c2a7cb05",
+        "message_id": 411,
+        "outcome": "accepted"
+      },
+      "transcript_after": 1
+    },
+    "confirm": {
+      "refused": {
+        "v": 1,
+        "session_id": "live-modal-guard",
+        "instance_id": "5cd52764c2a7cb05",
+        "message_id": 402,
+        "outcome": "not_sent"
+      },
+      "transcript_before": 1,
+      "accepted": {
+        "v": 1,
+        "session_id": "live-modal-guard",
+        "instance_id": "5cd52764c2a7cb05",
+        "message_id": 412,
+        "outcome": "accepted"
+      },
+      "transcript_after": 2
+    },
+    "input": {
+      "refused": {
+        "v": 1,
+        "session_id": "live-modal-guard",
+        "instance_id": "5cd52764c2a7cb05",
+        "message_id": 403,
+        "outcome": "not_sent"
+      },
+      "transcript_before": 2,
+      "accepted": {
+        "v": 1,
+        "session_id": "live-modal-guard",
+        "instance_id": "5cd52764c2a7cb05",
+        "message_id": 413,
+        "outcome": "accepted"
+      },
+      "transcript_after": 3
+    },
+    "editor": {
+      "refused": {
+        "v": 1,
+        "session_id": "live-modal-guard",
+        "instance_id": "5cd52764c2a7cb05",
+        "message_id": 404,
+        "outcome": "not_sent"
+      },
+      "transcript_before": 3,
+      "accepted": {
+        "v": 1,
+        "session_id": "live-modal-guard",
+        "instance_id": "5cd52764c2a7cb05",
+        "message_id": 414,
+        "outcome": "accepted"
+      },
+      "transcript_after": 4
+    },
+    "custom": {
+      "refused": {
+        "v": 1,
+        "session_id": "live-modal-guard",
+        "instance_id": "5cd52764c2a7cb05",
+        "message_id": 405,
+        "outcome": "not_sent"
+      },
+      "transcript_before": 4,
+      "accepted": {
+        "v": 1,
+        "session_id": "live-modal-guard",
+        "instance_id": "5cd52764c2a7cb05",
+        "message_id": 415,
+        "outcome": "accepted"
+      },
+      "transcript_after": 5
+    }
+  },
+  "injected_texts": [
+    "после select",
+    "после confirm",
+    "после input",
+    "после editor",
+    "после custom"
+  ],
+  "provider_calls": 5,
+  "status": "PASS"
+}
