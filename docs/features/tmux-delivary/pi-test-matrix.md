@@ -67,6 +67,8 @@ python3 scripts/probes/tmux-delivary/pty_preservation_probe.py
 | Ack honesty | Возврат socket не означает delivered; Accepted/Unknown ждут journal confirmation |
 | Connection loss | До записи — NotSent; после возможной записи — Unknown, без слепого retry |
 
+Примечание по unsafe state: см. `pi-modal-safety.md`. Встроенный model selector live-доказан как safe-to-accept, общий `showSelector` — source-level. Публичного признака открытого встроенного селектора/login/reload нет, поэтому строгое «любое небезопасное встроенное модальное состояние ⇒ not_sent» текущим Extension API не реализуемо; нужен продуктовый выбор (принять safe-to-accept, upstream accessor или изоляция расширений).
+
 ### Live matrix на изолированных сессиях
 
 | Область | Сценарии и доказательства |
