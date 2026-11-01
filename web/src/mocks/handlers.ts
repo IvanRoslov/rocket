@@ -276,6 +276,9 @@ export function resetLog(): void {
   nextLogId = Math.max(...logState.map((l) => l.id)) + 1
 }
 
+// Kinds a task holds one document of; mirrors store.singleDocKinds.
+const SINGLE_DOC_KINDS: string[] = ['spec', 'plan', 'problem']
+
 const TASK_STATUSES: TaskStatus[] = ['backlog', 'brainstorm', 'in_progress', 'review', 'done', 'cancelled']
 
 function nowSeconds(): number {
@@ -789,16 +792,18 @@ export const handlers = [
     return HttpResponse.json(task)
   }),
 
-  // Mirrors store.ListTaskDocs: only the newest version of each (kind, title)
-  // unless ?history=true asks for every version.
+  // Mirrors store.ListTaskDocs: one newest doc per spec/plan/problem, the
+  // newest version of each (kind, title) otherwise, unless ?history=true.
   http.get('/v1/tasks/:id/docs', ({ params, request }) => {
     const id = Number(params.id)
     const history = new URL(request.url).searchParams.get('history') === 'true'
     const own = docsState.filter((d) => d.task_id === id)
     const docs = history
       ? own
-      : own.filter(
-          (d) => !own.some((o) => o.kind === d.kind && o.title === d.title && o.version > d.version),
+      : own.filter((d) =>
+          SINGLE_DOC_KINDS.includes(d.kind)
+            ? !own.some((o) => o.kind === d.kind && o.id > d.id)
+            : !own.some((o) => o.kind === d.kind && o.title === d.title && o.version > d.version),
         )
     return HttpResponse.json({ docs })
   }),
@@ -806,7 +811,12 @@ export const handlers = [
   http.put('/v1/tasks/:id/docs', async ({ params, request }) => {
     const id = Number(params.id)
     const body = (await request.json()) as { kind: TaskDoc['kind']; title: string; body: string }
-    const priorVersions = docsState.filter((d) => d.task_id === id && d.kind === body.kind)
+    const priorVersions = docsState.filter(
+      (d) =>
+        d.task_id === id &&
+        d.kind === body.kind &&
+        (SINGLE_DOC_KINDS.includes(body.kind) || d.title === body.title),
+    )
     const version = priorVersions.length > 0 ? Math.max(...priorVersions.map((d) => d.version)) + 1 : 1
     const doc: TaskDoc = {
       id: nextDocId++,
