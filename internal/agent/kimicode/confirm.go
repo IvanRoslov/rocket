@@ -26,12 +26,30 @@ func (k *KimiCode) AcceptsInputWhileBusy() bool { return true }
 func (k *KimiCode) PaneDialect() string { return runtime.PaneDialectKimi }
 
 // userPrompt decodes rec as a user-origin turn.prompt and returns its text
-// parts. Skill-activation steers (turn.steer) and system-triggered prompts
-// (sub-agent briefs) are not user input.
+// parts. The startup prober uses it to recognize the first turn; a steer is
+// not a new turn.
 func userPrompt(rec wireRecord) ([]string, bool) {
 	if rec.Type != "turn.prompt" {
 		return nil, false
 	}
+	return userOriginParts(rec)
+}
+
+// userInput decodes rec as input Kimi actually received from the user: a
+// turn.prompt at the start of a new turn or a turn.steer inside the running
+// turn. Skill-activation steers and system-triggered prompts (sub-agent
+// briefs) are not user input even when their text matches.
+func userInput(rec wireRecord) ([]string, bool) {
+	switch rec.Type {
+	case "turn.prompt", "turn.steer":
+	default:
+		return nil, false
+	}
+	return userOriginParts(rec)
+}
+
+// userOriginParts returns the text parts of a user-origin record.
+func userOriginParts(rec wireRecord) ([]string, bool) {
 	var r struct {
 		Input []struct {
 			Type string `json:"type"`
@@ -58,10 +76,12 @@ func hasTime(rec wireRecord) bool { return rec.Time.UnixMilli() != 0 }
 
 // ConfirmDelivered implements agent.DeliveryConfirmer over the main journal
 // of the newest session of ref.WorktreePath. A message counts as delivered
-// once a user-origin turn.prompt recorded strictly after since carries its
-// text (whitespace-normalized), or a run of whole lines of it does. A message
-// still waiting in Kimi's own queue is not in the journal yet; it is recorded
-// as its own turn.prompt when its turn starts.
+// once a user-origin turn.prompt or turn.steer recorded strictly after since
+// carries its text (whitespace-normalized), or a run of whole lines of it
+// does. Kimi records a queued message only when it receives it: as a
+// turn.prompt when a new turn starts, or as a turn.steer when the queue is
+// steered into the running turn. Text still waiting in Kimi's own queue has
+// no such record yet and is not delivery.
 //
 // The journal is read backwards and the scan stops at the first record
 // stamped at or before since.
@@ -80,7 +100,7 @@ func (k *KimiCode) ConfirmDelivered(ctx context.Context, ref agent.ActivityRef, 
 		if hasTime(rec) && !rec.Time.After(since) {
 			return true
 		}
-		parts, ok := userPrompt(rec)
+		parts, ok := userInput(rec)
 		if !ok {
 			return false
 		}
