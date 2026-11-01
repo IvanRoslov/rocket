@@ -135,6 +135,16 @@ Fixture теперь запускает Pi с `--session-id` равным ROCKET
 - Корректная формулировка: реальный witness — `action:"handled"`. Node-фикстура `mockAcceptedCallMayLeaveNoRecord` — только модель accepted/no-record, не live-доказательство.
 - Counterexample из `internal/queue/pi_equal_text_correlation_test.go` сохранён как историческое RED-доказательство (Q5); полная матрица ждёт ruling.
 
+## Строгий native proof (Pi-owned, additive)
+
+Дата: 1 ноября 2026. Ранняя независимая часть Task1 по RELEASE-5906-V3-PI-PROOF-ONLY-GO260; в очередь/маршрут не подключено, shared hunks не тронуты.
+
+- Добавлен `(*Pi).ConfirmNativeDelivered(ctx, ref, text, since)`: доказательством служит ровно одна user-запись, у которой **всё объединённое text content** после существующей нормализации пробелов равно ожидаемому тексту. Не подстрока, не `holdsLines`, не отдельные text parts.
+- Существующий `ConfirmDelivered`/`holdsLines` для legacy не изменён; это проверено контрастным тестом.
+- RED→GREEN: `go test ./internal/agent/pi -run TestPiNativeProof -count=1` (было RED со stub, затем GREEN). Покрыты: собственная полная подпись; цитата чужой полной подписи в большей записи; подпись в одном part при наличии другого текста; multiline/Unicode с нормализацией; чужой ID; assistant/custom/editor echo; запись на boundary; number-only для непустого Body; пустой Body с полным service header; earliest match; cancelled context/ErrNoSignal/чужая сессия; неизменность legacy.
+- Полный `go test ./internal/agent/pi`, `-race`, `go vet ./internal/agent/pi`, `git diff --check` — PASS/clean.
+- Ограничение: метод пока нигде не вызывается; numbered path включится только после завершённой shared-передачи и отдельного release. Q5 queue RED остаётся открытым.
+
 ## Ограничение текущего результата
 
 Preflight подтверждает только сохранение ввода и базовое поведение `sendUserMessage` в реальном Pi 1.4.0. Production integration, delivered-семантика моста, реальный DeepSeek, dialogs/compaction и lifecycle ещё не проверены и не запускаются без merged contract и явного release оркестратора.
