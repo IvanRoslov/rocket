@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -141,6 +142,15 @@ func TestPiNativeProofRequiresWholeUserRecord(t *testing.T) {
 		}
 	})
 
+	t.Run("strictly older matching record does not prove", func(t *testing.T) {
+		wire := piMessageLine(t, "u1", "", "user", nativeProofEnvelope, 500) +
+			piMessageLine(t, "u2", "u1", "user", "other", 2000)
+		found, _, err := nativeConfirmStrict(t, wire, nativeProofEnvelope, 1000)
+		if err != nil || found {
+			t.Fatalf("got %v %v; a record strictly before the boundary proved the message", found, err)
+		}
+	})
+
 	t.Run("earliest matching record is reported", func(t *testing.T) {
 		wire := piMessageLine(t, "u1", "", "user", nativeProofEnvelope, 2000) +
 			piMessageLine(t, "u2", "u1", "user", nativeProofEnvelope, 3000)
@@ -178,6 +188,26 @@ func TestPiNativeProofContextAndHistory(t *testing.T) {
 		)
 		if found || !errors.Is(err, agent.ErrNoSignal) {
 			t.Fatalf("got %v %v; want ErrNoSignal and not proved", found, err)
+		}
+	})
+
+	t.Run("read error never proves", func(t *testing.T) {
+		home := filepath.Join(t.TempDir(), "not-a-directory")
+		if err := os.WriteFile(home, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PI_CODING_AGENT_DIR", home)
+		found, _, err := New().(*Pi).ConfirmNativeDelivered(
+			context.Background(),
+			agent.ActivityRef{SessionID: "s1", WorktreePath: t.TempDir()},
+			nativeProofEnvelope,
+			time.UnixMilli(1000),
+		)
+		if err == nil || errors.Is(err, agent.ErrNoSignal) {
+			t.Fatalf("error = %v, want a real session-store read failure", err)
+		}
+		if found {
+			t.Fatal("a read error proved the message")
 		}
 	})
 
