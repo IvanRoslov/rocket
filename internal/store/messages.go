@@ -210,13 +210,16 @@ func (s *Store) ListAcceptedMessages() ([]Message, error) {
 }
 
 // proofUnusedGuard makes settling a message consume its journal proof
-// atomically: the UPDATE fails if any other row already carries the same
-// (proofAt, proofText) pair. SQLite serializes writers, so two confirmation
-// paths racing on one equal-text journal record cannot both settle a message
-// with it.
+// atomically: the UPDATE fails if another message of the SAME recipient
+// already carries the same (proofAt, proofText) pair. SQLite serializes
+// writers, so two confirmation paths racing on one equal-text journal record
+// cannot both settle a message with it. The recipient scope matters: separate
+// journals may legitimately hold the same normalized text at the same
+// timestamp, and each record proves only its own recipient's message.
 const proofUnusedGuard = ` AND NOT EXISTS (
 	SELECT 1 FROM messages p
-	WHERE p.id <> ? AND p.delivery_proof_at = ? AND p.delivery_proof_text = ?
+	WHERE p.id <> ? AND p.to_session = messages.to_session
+	  AND p.delivery_proof_at = ? AND p.delivery_proof_text = ?
 )`
 
 // ConfirmAccepted atomically moves message id from "accepted" to

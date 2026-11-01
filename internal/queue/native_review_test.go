@@ -97,6 +97,31 @@ func TestNativeRefusedSendsIgnoreJournalBeforeClaim(t *testing.T) {
 	assertNoTmux(t, rt)
 }
 
+// TestNativeProofOwnershipIsPerRecipient: equal text at the same timestamp in
+// two different recipients' journals are independent records, so each must
+// settle its own message.
+func TestNativeProofOwnershipIsPerRecipient(t *testing.T) {
+	h := newTestQueue(t)
+	h.addNativeSession(t, "native-a")
+	h.addNativeSession(t, "native-b")
+	sender := &fakeNativeSender{}
+	h.q.SetNativeSender(sender)
+	h.startConfirmer()
+	at := h.clock.now().Add(time.Second)
+	h.ag.confirmRecords(map[string][]time.Time{"same": {at}})
+	a := addMsg(t, h, "native-a", "same")
+	b := addMsg(t, h, "native-b", "same")
+	h.q.Wake("native-a")
+	h.q.Wake("native-b")
+
+	waitUntil(t, func() bool {
+		return messageStatus(t, h.st, a) == "delivered" && messageStatus(t, h.st, b) == "delivered"
+	}, "each recipient confirmed from its own journal")
+	if sender.count() != 2 {
+		t.Fatalf("native sends = %d, want 2", sender.count())
+	}
+}
+
 // TestRestoreMarkerReachesNativeAndLegacyAccepted guards the shared restore
 // marker: a recipient with both native and legacy accepted rows must let both
 // halves see one session.restored event. The legacy row keeps its documented

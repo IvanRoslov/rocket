@@ -76,6 +76,38 @@ func TestPurgeOldPreservesProofNeededByPendingNativeConfirmation(t *testing.T) {
 	}
 }
 
+// TestConfirmProofIsScopedPerRecipient pins proof ownership to the recipient's
+// journal: two recipients may legitimately record the same normalized text at
+// the same timestamp, and each record must settle its own recipient's message.
+func TestConfirmProofIsScopedPerRecipient(t *testing.T) {
+	s := openTestStore(t)
+
+	idA, _ := s.AddMessage(Message{ToSession: "a", Body: "same"})
+	idB, _ := s.AddMessage(Message{ToSession: "b", Body: "same"})
+	if err := s.UpdateMessageStatus(idA, "accepted", 1, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateMessageStatus(idB, "delivering", 1, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if ok, err := s.ConfirmAccepted(idA, 1, 777, "same"); err != nil || !ok {
+		t.Fatalf("recipient a confirm = %v, %v", ok, err)
+	}
+	if ok, err := s.ConfirmDelivering(idB, 1, 777, "same"); err != nil || !ok {
+		t.Fatalf("recipient b confirm = %v, %v (same timestamp/text in another journal)", ok, err)
+	}
+	for name, id := range map[string]int64{"a": idA, "b": idB} {
+		m, err := s.GetMessage(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m.Status != "delivered" || m.DeliveryProofAt != 777 || m.DeliveryProofText != "same" {
+			t.Errorf("recipient %s message = %+v, want delivered with its own proof", name, m)
+		}
+	}
+}
+
 // TestConfirmAcceptedConsumesJournalProofAtomically is review case 2's atomic
 // ownership requirement: one journal record may settle at most one message,
 // even when two confirmation paths race.
