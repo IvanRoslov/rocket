@@ -18,17 +18,21 @@ import (
 )
 
 type fakeSocket struct {
-	mu          sync.Mutex
-	available   bool
-	target      claudeinstance.Identity
-	outcome     SocketOutcome
-	sendErr     error
-	attempts    int
-	snapshots   []claudeinstance.Snapshot
-	beforeClaim func()
+	mu              sync.Mutex
+	available       bool
+	target          claudeinstance.Identity
+	resolutionState claudeinstance.Liveness
+	outcome         SocketOutcome
+	sendErr         error
+	attempts        int
+	snapshots       []claudeinstance.Snapshot
+	beforeClaim     func()
 }
 
 func (f *fakeSocket) Resolve(context.Context, store.Session) claudeinstance.Resolution {
+	if f.resolutionState != "" {
+		return claudeinstance.Resolution{State: f.resolutionState, Identity: f.target}
+	}
 	if !f.available {
 		return claudeinstance.Resolution{State: claudeinstance.Unknown, Reason: "fixture unavailable"}
 	}

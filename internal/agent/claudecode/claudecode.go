@@ -108,19 +108,42 @@ const activityHookRelPath = ".rocket/activity-hook.sh"
 // ignored (`|| true`, output discarded). Curl includes timeouts to prevent
 // the daemon hook from hanging.
 const activityHookScript = `#!/bin/sh
-# rocket activity push hook. Invoked by Claude Code as:
-#   ` + activityHookRelPath + ` <state>
-# Reports the given state for this session to the rocket daemon over its
-# unix socket. Never blocks or fails the agent: if the env vars needed to
-# reach the daemon aren't set, or the daemon is unreachable, this exits 0.
-if [ -z "$ROCKET_SOCKET" ] || [ -z "$ROCKET_SESSION_ID" ]; then
+# Only metadata leaves this hook. Never log stdin, prompts or tool input.
+if [ -z "$ROCKET_SOCKET" ] || [ -z "$ROCKET_SESSION_ID" ] || [ -z "$ROCKET_CLAUDE_LAUNCH" ]; then
   exit 0
 fi
-
+payload=$(python3 -c '
+import datetime, json, os, signal, subprocess, sys, time
+signal.alarm(1)
+try:
+    raw = sys.stdin.buffer.read(16385)
+    if not raw or len(raw) > 16384:
+        sys.exit(1)
+    src = json.loads(raw)
+    if not isinstance(src, dict):
+        sys.exit(1)
+    allowed = {}
+    for key in ("session_id", "hook_event_name", "reason", "agent_id"):
+        value = src.get(key, "")
+        if not isinstance(value, str) or len(value) > 256:
+            sys.exit(1)
+        allowed[key] = value
+    if not allowed["session_id"] or not allowed["hook_event_name"]:
+        sys.exit(1)
+    pid = os.getppid()
+    env = dict(os.environ, TZ="UTC", LC_ALL="C")
+    result = subprocess.run(["ps", "-p", str(pid), "-o", "lstart="], capture_output=True, text=True, timeout=0.5, env=env, check=True)
+    start = datetime.datetime.strptime(result.stdout.strip(), "%a %b %d %H:%M:%S %Y").replace(tzinfo=datetime.timezone.utc)
+    allowed.update(launch_generation=os.environ["ROCKET_CLAUDE_LAUNCH"], producer_pid=pid, producer_start=start.isoformat().replace("+00:00", "Z"), at=time.time_ns())
+    print(json.dumps(dict(session=os.environ["ROCKET_SESSION_ID"], state=sys.argv[1], ts=int(time.time()), claude=allowed), separators=(",", ":")))
+except Exception:
+    sys.exit(1)
+' "$1" 2>/dev/null) || exit 0
+[ -n "$payload" ] || exit 0
 curl -s --max-time 2 --connect-timeout 1 --unix-socket "$ROCKET_SOCKET" \
-  -X POST -H 'Content-Type: application/json' \
-  -d "{\"session\":\"$ROCKET_SESSION_ID\",\"state\":\"$1\",\"ts\":$(date +%s)}" \
+  -X POST -H 'Content-Type: application/json' -d "$payload" \
   http://rocket/v1/internal/activity >/dev/null 2>&1 || true
+exit 0
 `
 
 // writeActivityHookScript writes the push-channel hook script to

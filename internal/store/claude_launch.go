@@ -18,12 +18,33 @@ func (s *Store) PutClaudeLaunch(l claudeinstance.Launch) error {
 	if e != nil {
 		return e
 	}
-	_, e = s.db.Exec(`INSERT INTO claude_launches(session_id,generation,launch_json) VALUES(?,?,?)
+	tx, e := s.db.Begin()
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback()
+	if _, e = tx.Exec(`UPDATE sessions SET updated_at=updated_at WHERE id=?`, l.RocketSessionID); e != nil {
+		return e
+	}
+	var old string
+	err := tx.QueryRow(`SELECT generation FROM claude_launches WHERE session_id=?`, l.RocketSessionID).Scan(&old)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	_, e = tx.Exec(`INSERT INTO claude_launches(session_id,generation,launch_json) VALUES(?,?,?)
  ON CONFLICT(session_id) DO UPDATE SET generation=excluded.generation,launch_json=excluded.launch_json,
  identity_json=CASE WHEN claude_launches.generation=excluded.generation THEN claude_launches.identity_json ELSE NULL END,
  last_event_at=CASE WHEN claude_launches.generation=excluded.generation THEN claude_launches.last_event_at ELSE 0 END
  WHERE claude_launches.generation<>excluded.generation OR claude_launches.identity_json IS NULL`, l.RocketSessionID, l.Generation, string(raw))
-	return e
+	if e != nil {
+		return e
+	}
+	if old != l.Generation {
+		if _, e = tx.Exec(`UPDATE sessions SET activity=NULL,activity_ts=NULL WHERE id=?`, l.RocketSessionID); e != nil {
+			return e
+		}
+	}
+	return tx.Commit()
 }
 func (s *Store) GetClaudeLaunch(id string) (claudeinstance.Launch, *claudeinstance.Identity, error) {
 	var l claudeinstance.Launch

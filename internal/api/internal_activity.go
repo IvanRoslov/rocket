@@ -3,10 +3,12 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/activity"
+	"github.com/IvanRoslov/rocket/internal/claudeinstance"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -21,9 +23,10 @@ func registerInternalActivityRoutes(mux *http.ServeMux, d Deps) {
 }
 
 type postInternalActivityRequest struct {
-	Session string `json:"session"`
-	State   string `json:"state"`
-	TS      int64  `json:"ts"`
+	Session string                    `json:"session"`
+	State   string                    `json:"state"`
+	TS      int64                     `json:"ts"`
+	Claude  *claudeinstance.HookEvent `json:"claude,omitempty"`
 }
 
 // handlePostInternalActivity handles POST /v1/internal/activity
@@ -35,7 +38,13 @@ type postInternalActivityRequest struct {
 // monitor_unavailable.
 func handlePostInternalActivity(w http.ResponseWriter, r *http.Request, d Deps) {
 	var req postInternalActivityRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, claudeinstance.MaxHookBytes))
+	if err := decoder.Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+
+	if decoder.Decode(new(any)) != io.EOF {
 		writeErr(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
 		return
 	}
@@ -65,7 +74,11 @@ func handlePostInternalActivity(w http.ResponseWriter, r *http.Request, d Deps) 
 		ts = time.Unix(req.TS, 0)
 	}
 
-	d.Monitor.PushUpdate(req.Session, state, ts)
+	if req.Claude != nil {
+		d.Monitor.PushClaudeUpdate(r.Context(), req.Session, state, *req.Claude)
+	} else {
+		d.Monitor.PushUpdate(req.Session, state, ts)
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
