@@ -35,6 +35,32 @@ When the request already supplies the purpose and constraints, reflect
 that understanding instead of asking the same questions again. Keep the
 note concise; its accuracy and the opportunity to correct it matter.
 
+## Your Altitude
+
+You brainstorm as the ORCHESTRATOR of a feature, not as the engineer who
+will write its code. Workers brainstorm and plan their own pieces later,
+in the code. Your spec sits one level above theirs:
+
+- **In the spec:** what changes for whom, the behaviour before and after,
+  which components and teams take part and who owns what, how the parts
+  talk to each other (the contract: what one side promises the other),
+  what happens on failure, what is deliberately left out, the cost and
+  risk, and how we will know it works.
+- **Not in the spec:** files, functions, signatures, table and column
+  layouts, SQL, lock order, index choices, retry formulas, test names.
+  Those are the worker's decisions inside your contract. When you catch
+  yourself designing one, write the requirement it serves instead
+  ("one stop is reported once, however many sources report it") and
+  leave the mechanism to the worker.
+- **Reading code is allowed and often useful** — to check a fact the
+  design rests on ("does this service already keep run history?"). Read
+  to confirm or refute a fact, then come back up: the fact goes into the
+  spec, the code you read does not.
+- **Size check.** A spec for a well-scoped feature reads in a few minutes.
+  If yours keeps growing with each revision, the design is drifting down a
+  level or the scope is growing: cut back to the contract, or split the
+  work into separate tasks.
+
 ## Context Before Questions
 
 Before your first question to anyone, read what already exists:
@@ -66,9 +92,9 @@ selected path's prerequisites:
 - Spike: the human partner approves the question and probe.
 - Bounded: the human partner approves the short in-chat design.
 - Architectural: the human partner reviews and approves the written spec,
-  then reviews the written implementation plan and selects its execution
-  method. Conversational design approval only permits writing the spec;
-  written-spec approval only permits invoking writing-plans.
+  then the decomposition plan. Conversational design approval only
+  permits writing the spec; written-spec approval only permits invoking
+  orchestrator-planning.
 
 A reply approves the stage actually presented. Approval of an idea or
 feature scope does not approve artifacts that do not exist yet. Resume
@@ -103,7 +129,7 @@ override it:
 - **Architectural** — new projects, new subsystems, changes that
   restructure how components fit together or alter interfaces others
   depend on. Follow the full process: questions, approaches, sectioned
-  design, written spec, then the writing-plans skill.
+  design, written spec, then the orchestrator-planning skill.
 
 When in doubt between two paths, take the heavier one. The ratchet is
 one-way: hidden complexity discovered mid-task upgrades the path —
@@ -142,14 +168,14 @@ your path and complete them in order.
 5. **Report findings** — a recommendation; label anything built as throwaway
 
 **Bounded:**
-1. **Explore project context** — start with Context Before Questions (fact tree first); check files, docs, recent commits
+1. **Explore project context** — start with Context Before Questions (fact tree first); then docs and recent merged work; code only to check a fact
 2. **Ask clarifying questions** — one at a time, the ones that matter
-3. **Present short design in chat** — approach, files touched, testing
+3. **Present short design in chat** — approach, which components/repos change and who owns them, how we verify
 4. **Get approval** — STOP and wait for an explicit yes; presenting the design and starting in the same breath is skipping the gate
-5. **Implement** — proceed with the normal development workflow (TDD applies); no plan document
+5. **Hand off** — store the short design as the spec, pass the gate, then decompose with orchestrator-planning; workers implement
 
 **Architectural:**
-1. **Explore project context** — start with Context Before Questions (fact tree first); check files, docs, recent commits
+1. **Explore project context** — start with Context Before Questions (fact tree first); then docs and recent merged work; code only to check a fact
 2. **Offer the visual companion just-in-time** — NOT upfront. The first time a question would genuinely be clearer shown than described, offer it then (its own message); on approval its browser tab opens for you. If no visual question ever arises, never offer it. See the Visual Companion section below.
 3. **Ask clarifying questions** — one at a time, understand purpose/constraints/success criteria
 4. **Propose 2-3 approaches** — with trade-offs and your recommendation
@@ -162,7 +188,7 @@ your path and complete them in order.
 7. **Write design doc** — save to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and commit
 8. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
 9. **User reviews written spec** — ask user to review the spec file before proceeding
-10. **Transition to implementation** — invoke writing-plans skill to create implementation plan
+10. **Transition to decomposition** — invoke the orchestrator-planning skill to split the spec into deliverables for workers
 
 ## Process Flow
 
@@ -174,7 +200,7 @@ digraph brainstorming {
     "Present short design in chat" [shape=box];
     "Human approves?" [shape=diamond];
     "Investigate; report recommendation" [shape=doublecircle];
-    "Implement via normal workflow (no plan doc)" [shape=doublecircle];
+    "Hand off: spec, gate, decompose (no long plan)" [shape=doublecircle];
     "Explore project context" [shape=box];
     "Ask clarifying questions" [shape=box];
     "Propose 2-3 approaches" [shape=box];
@@ -184,7 +210,7 @@ digraph brainstorming {
     "Write design doc" [shape=box];
     "Spec self-review\n(fix inline)" [shape=box];
     "User reviews spec?" [shape=diamond];
-    "Invoke writing-plans skill" [shape=doublecircle];
+    "Invoke orchestrator-planning skill" [shape=doublecircle];
     "Hidden complexity? Upgrade path" [shape=box];
 
     "Classify: spike / bounded / architectural" -> "Present question + probe (2-3 sentences)" [label="spike"];
@@ -194,7 +220,7 @@ digraph brainstorming {
     "Ask clarifying questions (bounded)" -> "Present short design in chat";
     "Present short design in chat" -> "Human approves?";
     "Human approves?" -> "Investigate; report recommendation" [label="spike: yes"];
-    "Human approves?" -> "Implement via normal workflow (no plan doc)" [label="bounded: yes"];
+    "Human approves?" -> "Hand off: spec, gate, decompose (no long plan)" [label="bounded: yes"];
     "Hidden complexity? Upgrade path" -> "Classify: spike / bounded / architectural";
     "Explore project context" -> "Ask clarifying questions";
     "Ask clarifying questions" -> "Propose 2-3 approaches";
@@ -206,15 +232,16 @@ digraph brainstorming {
     "Write design doc" -> "Spec self-review\n(fix inline)";
     "Spec self-review\n(fix inline)" -> "User reviews spec?";
     "User reviews spec?" -> "Write design doc" [label="changes requested"];
-    "User reviews spec?" -> "Invoke writing-plans skill" [label="approved"];
+    "User reviews spec?" -> "Invoke orchestrator-planning skill" [label="approved"];
 }
 ```
 
 **Terminal states are path-bound.** Architectural: the ONLY skill you
-invoke after brainstorming is writing-plans — never frontend-design,
-mcp-builder, or any other implementation skill. Bounded: after
-approval, implementation proceeds directly through the normal
-development workflow; no plan document. Spike: the terminal state is a
+invoke after brainstorming is orchestrator-planning — never
+frontend-design, mcp-builder, writing-plans or any other implementation
+skill; those are for your workers. Bounded: after approval, store the
+short design as the spec and hand it to workers through a short
+decomposition; no long plan document. Spike: the terminal state is a
 reported recommendation.
 
 ## The Process
@@ -227,7 +254,7 @@ is the whole process.
 
 **Understanding the idea:**
 
-- Check out the current project state first (files, docs, recent commits)
+- Check out the current project state first (fact tree, docs, recent merged work; code only to check a fact)
 - Before asking detailed questions, assess scope: if the request describes multiple independent subsystems (e.g., "build a platform with chat, file storage, billing, and analytics"), flag this immediately. Don't spend questions refining details of a project that needs to be decomposed first.
 - If the project is too large for a single spec, help the user decompose into sub-projects: what are the independent pieces, how do they relate, what order should they be built? Then brainstorm the first sub-project through the normal design flow. Each sub-project gets its own spec → plan → implementation cycle.
 - For appropriately-scoped projects, ask questions one at a time to refine the idea
@@ -247,7 +274,7 @@ is the whole process.
 - Once you believe you understand what you're building, present the design
 - Scale each section to its complexity: a few sentences if straightforward, up to 200-300 words if nuanced
 - Ask after each section whether it looks right so far
-- Cover: architecture, components, data flow, error handling, testing
+- Cover: behaviour, components and who owns them, how they interact, failure behaviour, how we verify — at the level of contracts between components, not their internals (see "Your Altitude")
 - Be ready to go back and clarify if something doesn't make sense
 
 **Design for isolation and clarity:**
@@ -255,12 +282,12 @@ is the whole process.
 - Break the system into smaller units that each have one clear purpose, communicate through well-defined interfaces, and can be understood and tested independently
 - For each unit, you should be able to answer: what does it do, how do you use it, and what does it depend on?
 - Can someone understand what a unit does without reading its internals? Can you change the internals without breaking consumers? If not, the boundaries need work.
-- Smaller, well-bounded units are also easier for you to work with - you reason better about code you can hold in context at once, and your edits are more reliable when files are focused. When a file grows large, that's often a signal that it's doing too much.
+- Smaller, well-bounded units also make better worker tasks: each one fits one worker, one branch and one PR, and can be checked on its own.
 
-**Working in existing codebases:**
+**Working in an existing product:**
 
-- Explore the current structure before proposing changes. Follow existing patterns.
-- Where existing code has problems that affect the work (e.g., a file that's grown too large, unclear boundaries, tangled responsibilities), include targeted improvements as part of the design - the way a good developer improves code they're working in.
+- Learn the current responsibilities before proposing changes: which component and which team owns what today. Follow them; a new connection between components is a decision to surface, not a detail.
+- Where the current shape gets in the way of the goal, say so in the design as a requirement; how to restructure the code is the worker's call.
 - Don't propose unrelated refactoring. Stay focused on what serves the current goal.
 
 ## After the Design (architectural path)
@@ -281,7 +308,16 @@ After writing the spec document, look at it with fresh eyes:
 3. **Scope check:** Is this focused enough for a single implementation plan, or does it need decomposition?
 4. **Ambiguity check:** Could any requirement be interpreted two different ways? If so, pick one and make it explicit.
 
+5. **Altitude check:** Does any section design a mechanism (files, schema, locks, signatures) instead of stating a requirement or a contract? Lift it up a level.
+
 Fix any issues inline. No need to re-review — just fix and move on.
+
+This self-review is the only review the spec gets before the human or cto
+reads it. Do not hand the spec to cto or another agent to read "as the
+builder" or "as an implementer": that pulls the review down to code level,
+and every round adds detail nobody needs yet. cto answers questions about
+the product and the decisions; the implementation is checked later, in the
+workers' PRs.
 
 **User Review Gate:**
 After the spec review loop passes, ask the user to review the written spec before proceeding:
@@ -292,8 +328,8 @@ Wait for the user's response. If they request changes, make them and re-run the 
 
 **Implementation:**
 
-- Invoke the writing-plans skill to create a detailed implementation plan
-- Do NOT invoke any other skill. writing-plans is the next step.
+- Invoke the orchestrator-planning skill to decompose the spec into deliverables for workers
+- Do NOT invoke any other skill. orchestrator-planning is the next step; each worker writes its own detailed implementation plan later.
 
 ## Visual Companion
 

@@ -18,7 +18,7 @@ func TestBrainstormSkillName(t *testing.T) {
 }
 
 func TestBrainstormSkillRecord(t *testing.T) {
-	if got := BrainstormSkillRecord(true); got != "orchestrator-brainstorming@1.1" {
+	if got := BrainstormSkillRecord(true); got != "orchestrator-brainstorming@1.2" {
 		t.Errorf("BrainstormSkillRecord(true) = %q", got)
 	}
 	if got := BrainstormSkillRecord(false); got != "superpowers:brainstorming" {
@@ -122,5 +122,28 @@ func TestWriteOrchestratorSkill(t *testing.T) {
 	// Idempotent: a second run over the written tree succeeds.
 	if err := WriteOrchestratorSkill(skillsDir); err != nil {
 		t.Fatalf("second WriteOrchestratorSkill: %v", err)
+	}
+}
+
+func TestWriteOrchestratorPlanningSkill(t *testing.T) {
+	skillsDir := t.TempDir()
+	dest := filepath.Join(skillsDir, OrchestratorPlanningSkill)
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(dest, "stale.md")
+	if err := os.WriteFile(stale, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteOrchestratorPlanningSkill(skillsDir); err != nil {
+		t.Fatalf("WriteOrchestratorPlanningSkill: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Error("stale file survived the rewrite")
+	}
+	want, _ := orchestratorPlanningSkillFS.ReadFile("skills/" + OrchestratorPlanningSkill + "/SKILL.md")
+	got, err := os.ReadFile(filepath.Join(dest, "SKILL.md"))
+	if err != nil || string(got) != string(want) {
+		t.Errorf("SKILL.md not written as embedded: %v", err)
 	}
 }

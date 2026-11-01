@@ -39,3 +39,47 @@ func TestOrchestratorSkillV11Text(t *testing.T) {
 		t.Error("Run scenarios is not between Present design and Write design doc")
 	}
 }
+
+// Version 1.2 (review of #5894): the orchestrator brainstorms one level above
+// the code, never hands the spec to an agent as a builder reviewer, and hands
+// off to orchestrator-planning rather than writing-plans.
+func TestOrchestratorSkillV12Text(t *testing.T) {
+	b, err := orchestratorSkillFS.ReadFile(orchestratorSkillRoot + "/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, want := range []string{
+		"## Your Altitude",
+		"**Reading code is allowed and often useful**",
+		"**Altitude check:**",
+		`read "as the`,
+		"invoke the orchestrator-planning skill",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("SKILL.md lacks %q", want)
+		}
+	}
+	if strings.Contains(s, "Invoke the writing-plans skill") || strings.Contains(s, "invoke writing-plans skill") {
+		t.Error("SKILL.md still sends the orchestrator to writing-plans")
+	}
+}
+
+// The planning skill is the orchestrator's own decomposition guide.
+func TestOrchestratorPlanningSkillText(t *testing.T) {
+	b, err := orchestratorPlanningSkillFS.ReadFile("skills/" + OrchestratorPlanningSkill + "/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, want := range []string{
+		"\nname: orchestrator-planning\n",
+		"It is NOT an implementation plan",
+		"**Mitigation first.**",
+		"## From plan to worker briefs",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("planning SKILL.md lacks %q", want)
+		}
+	}
+}
