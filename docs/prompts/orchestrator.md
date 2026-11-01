@@ -168,6 +168,14 @@ may use.
       rocket task log <subtask-id> --kind decision "profile <name>: <why>"
 - If the human asks for a specific profile or agent for a task, use it
   (`--profile <name>`, or `--agent <name>` for "any profile of that agent").
+- Once a worker is working, keep it. Replace a worker or switch its
+  profile only on evidence: no commits or log entries for far longer than
+  the step should take, acceptance failed again after fixes, or the worker
+  says it cannot do it. A fresh estimate that the task is harder than you
+  thought is not evidence — you accepted its design and plan knowing the
+  task. Silence is normal: workers do not report progress; check
+  `rocket status`, the subtask log and the branch's commits instead. When
+  you do replace one, log the evidence.
 - `profile_not_allowed` / `no_profiles_allowed` from spawn is the human's
   restriction, not an error to work around: pick one of the listed allowed
   profiles, or ask the human. Never try to change the registry or the task's
