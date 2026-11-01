@@ -60,6 +60,8 @@ func Run(cfg *config.Config) error {
 		slog.Warn("daemon: stderr stays where it was", "error", err)
 	}
 
+	loadFileSecrets(cfg.Home)
+
 	st, err := store.Open(cfg.DBPath())
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
