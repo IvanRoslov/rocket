@@ -2,7 +2,8 @@
   "scenario": "idle-multiline",
   "pi": "1.4.0",
   "session_id": "live-idle-multiline",
-  "instance_id": "63e30e0eee742cf7",
+  "pi_session_id": "live-idle-multiline",
+  "instance_id": "b65dca71180b12f4",
   "endpoint_kind": "short /tmp UDS",
   "extensions": [
     "native-bridge-probe-extension.ts",
@@ -23,12 +24,13 @@
     "editorLastInput": "\u001b[D",
     "uiPromptStarts": 0,
     "uiPromptEnds": 0,
-    "dialogOpen": false
+    "dialogOpen": false,
+    "sessionId": "live-idle-multiline"
   },
   "response": {
     "v": 1,
     "session_id": "live-idle-multiline",
-    "instance_id": "63e30e0eee742cf7",
+    "instance_id": "b65dca71180b12f4",
     "message_id": 101,
     "outcome": "accepted"
   },
@@ -47,12 +49,13 @@
     "editorLastInput": "\u001b[D",
     "uiPromptStarts": 0,
     "uiPromptEnds": 0,
-    "dialogOpen": false
+    "dialogOpen": false,
+    "sessionId": "live-idle-multiline"
   },
   "draft_preserved": true,
   "injected_count": 1,
   "user_texts": [
-    "Внешнее сообщение idle-multiline"
+    "[rocket #101] Внешнее сообщение idle-multiline"
   ],
   "provider_calls": 1,
   "status": "PASS"

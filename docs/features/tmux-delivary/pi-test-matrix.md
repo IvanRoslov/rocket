@@ -123,7 +123,7 @@ python3 scripts/probes/tmux-delivary/native_bridge_probe.py \
 
 Fixture теперь запускает Pi с `--session-id` равным ROCKET target и проверяет `sessionManager.getSessionId()` наблюдаемого процесса. Результаты: `reload`, `target-frames`, `foreign-history` — PASS. В `foreign-history` фактическая история `live-foreign-history-b` при target `live-foreign-history`: endpoint не создан, подключение отсутствует (`ENOENT`), 0 injected и 0 вызовов provider.
 
-Остальные 10 сценариев сохранённой матрицы относятся к коду до этих исправлений; полная матрица против текущего моста не перезапускалась. Это остаётся явным gap, а не PASS. Сводка `/tmp/pi-live-all.out` (17:12) устарела и расходится с per-scenario JSON: три файла (`delayed-modal`, `modal-guard`, `reload`) были перезаписаны позднее отдельными прогонами. У `delayed-modal` в сохранённом файле `ui_prompt_starts = 0`, поэтому фактическое срабатывание задержанного slow listener этим артефактом не доказано; `modal-guard` и `delayed-modal` на текущем коде не перезапускались.
+Этот ограниченный прогон заменён итоговой текущей матрицей ниже: все 13 preservation-сценариев и `handled-input` перезапущены на numbered bridge, старые pre-fix JSON перезаписаны.
 
 ## Q5 correlation witness (supported public API)
 
@@ -133,7 +133,7 @@ Fixture теперь запускает Pi с `--session-id` равным ROCKET
 - Результат PASS: оба bridge-ответа `accepted`; sources `["extension","extension"]`; одна `handled`, одна `continued`; в транскрипте ровно одна совпадающая user-запись; 1 вызов provider; наблюдаемая Pi-сессия равна ROCKET target. Sanitized: `scripts/probes/tmux-delivary/results/native-bridge/handled-input/result.json`.
 - Источник Pi 1.4.0: `agent-session.js` `prompt` → `_runInputHandlers`; `{action:"handled"}` возвращается до записи user record. `runner.js` `emitInput` перехватывает исключения handler'а, вызывает `emitError` и продолжает к следующему handler'у (итог — continue/transform). Поэтому брошенная ошибка input-handler'а сама по себе **не** доказывает отсутствие записи.
 - Корректная формулировка: реальный witness — `action:"handled"`. Node-фикстура `mockAcceptedCallMayLeaveNoRecord` — только модель accepted/no-record, не live-доказательство.
-- Counterexample из `internal/queue/pi_equal_text_correlation_test.go` сохранён как историческое RED-доказательство (Q5); полная матрица ждёт ruling.
+- Counterexample из `internal/queue/pi_equal_text_correlation_test.go` сохранён как историческое RED-доказательство (Q5). Текущая версия теста проверяет уже исправленное поведение numbered path: A не подтверждается записью B, B подтверждается только своей подписанной записью.
 
 ## Строгий native proof (Pi-owned, additive)
 
@@ -143,8 +143,28 @@ Fixture теперь запускает Pi с `--session-id` равным ROCKET
 - Существующий `ConfirmDelivered`/`holdsLines` для legacy не изменён; это проверено контрастным тестом.
 - RED→GREEN: `go test ./internal/agent/pi -run TestPiNativeProof -count=1` (было RED со stub, затем GREEN). Покрыты: собственная полная подпись; цитата чужой полной подписи в большей записи; подпись в одном part при наличии другого текста; multiline/Unicode с нормализацией; чужой ID; assistant/custom/editor echo; запись на boundary; number-only для непустого Body; пустой Body с полным service header; earliest match; cancelled context/ErrNoSignal/чужая сессия; неизменность legacy.
 - Полный `go test ./internal/agent/pi`, `-race`, `go vet ./internal/agent/pi`, `git diff --check` — PASS/clean.
-- Ограничение: метод пока нигде не вызывается; numbered path включится только после завершённой shared-передачи и отдельного release. Q5 queue RED остаётся открытым.
+- Метод подключён в Task2 через приватный адаптер: `attemptNativeDelivery` подписывает отправку, accepted-native и финальный delivering scan используют ту же read-only реконструкцию; при отсутствии strict capability native остаётся unconfirmed без legacy-fallback.
 
-## Ограничение текущего результата
+## Итоговая текущая матрица numbered path (1 ноября 2026)
 
-Preflight подтверждает только сохранение ввода и базовое поведение `sendUserMessage` в реальном Pi 1.4.0. Production integration, delivered-семантика моста, реальный DeepSeek, dialogs/compaction и lifecycle ещё не проверены и не запускаются без merged contract и явного release оркестратора.
+Прогон: `python3 scripts/probes/tmux-delivary/native_bridge_probe.py --all` — 14/14 PASS, exit 0 (13 preservation + `handled-input`). Fixture эмулирует numbered NativeSender: подпись `[rocket #<id>] ` ставится на wire/transcript, сам bridge остаётся текстово-агностичным; проверки транскрипта используют точный подписанный текст. Все 13 — current evidence, старые pre-fix JSON заменены этим прогоном.
+
+| Сценарий | Ключевое evidence |
+| --- | --- |
+| idle-single | русский draft/cursor сохранены, injected 1, provider 1 |
+| idle-multiline | многострочный draft/cursor сохранены, injected 1, provider 1 |
+| empty | пустое поле остаётся пустым, injected 1, provider 1 |
+| long-pointer | draft/cursor сохранены на inbox-pointer, injected 1, provider 1 |
+| busy-single | draft/cursor сохранены во время хода, injected 1, provider 2 |
+| busy-multiline | то же для многострочного draft, injected 1, provider 2 |
+| selector | окно открыто, поиск/стрелки работают, Escape возвращает draft/cursor, injected 1, model_selects 0 |
+| modal-guard | select/confirm/input/editor/custom: отказ `not_sent` при открытом окне, `accepted` после закрытия, provider 5 |
+| delayed-modal | delayed: `accepted` при открытом окне, `ui_prompt_start` через 1202 ms, slow listener 1201 ms; control без slow listener: `ui_prompt_start` через 1 ms, `not_sent`, provider 0 |
+| target-frames | неверные session/instance/version/id — `not_sent`, delta транскрипта 0; oversized `not_sent`; split UTF-8 1; два разных ID с равным текстом 2; повтор ID 1 |
+| escape-dequeue | подписанный queued текст оказался в редакторе, курсор в конце, injected 0 |
+| reload | тот же ID после `/reload` не отправлен повторно, injected 1, provider не вырос |
+| foreign-history | endpoint отсутствует, 0 injected, 0 provider, наблюдаемая история `live-foreign-history-b` |
+
+Сквозной queue→Pi (отдельно, opt-in): `ROCKET_PI_STOCK_E2E=1 go test -count=1 -timeout=90s ./internal/queue -run ^TestPiNativeQueueStockE2E$` — PASS (3.82 s): A `failed/native_delivery_unconfirmed` после timeout, B `delivered` своей записью; sender 1 вызов/ID, bridge API 1/ID, records A0/B1, tmux 0, Body не изменён. Evidence: `scripts/probes/tmux-delivary/results/native-bridge/pi-stock-e2e/result.json`.
+
+Остаточные ограничения: login/OAuth и часть `showSelector`-веток — source-only; отложенный async `ui_prompt_start` — принятое исключение Spec2; отменённый switch оставляет канал закрытым до `/reload`; повреждённое accepted-состояние fail-closed до нового Rocket launch; возврат в старую историю после non-reload завершения требует restore; `queue_timeout`-политика для nil-confirmer не расширялась. GitHub workflows отсутствуют — пустой CI не считается зелёным.

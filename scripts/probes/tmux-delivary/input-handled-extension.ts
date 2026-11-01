@@ -38,7 +38,10 @@ export default function inputHandledExtension(api: ExtensionAPI) {
 			log("continued", { text: event.text });
 			return { action: "continue" };
 		}
-		if (event.text !== target) return { action: "continue" };
+		if (event.text !== target) {
+			log("continued", { text: event.text });
+			return { action: "continue" };
+		}
 		if (handled === 0) {
 			handled += 1;
 			log("handled", { text: event.text });

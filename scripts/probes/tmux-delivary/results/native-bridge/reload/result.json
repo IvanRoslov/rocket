@@ -3,7 +3,7 @@
   "pi": "1.4.0",
   "session_id": "live-reload",
   "pi_session_id": "live-reload",
-  "instance_id": "8c861d982b86e7c9",
+  "instance_id": "e9f7b127ba616e82",
   "endpoint_kind": "short /tmp UDS",
   "extensions": [
     "native-bridge-probe-extension.ts",
@@ -12,14 +12,14 @@
   "first": {
     "v": 1,
     "session_id": "live-reload",
-    "instance_id": "8c861d982b86e7c9",
+    "instance_id": "e9f7b127ba616e82",
     "message_id": 801,
     "outcome": "accepted"
   },
   "second": {
     "v": 1,
     "session_id": "live-reload",
-    "instance_id": "8c861d982b86e7c9",
+    "instance_id": "e9f7b127ba616e82",
     "message_id": 801,
     "outcome": "accepted"
   },

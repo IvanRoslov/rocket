@@ -2,7 +2,8 @@
   "scenario": "long-pointer",
   "pi": "1.4.0",
   "session_id": "live-long-pointer",
-  "instance_id": "52705dcf1505c3be",
+  "pi_session_id": "live-long-pointer",
+  "instance_id": "2639d05b3aed09eb",
   "endpoint_kind": "short /tmp UDS",
   "extensions": [
     "native-bridge-probe-extension.ts",
@@ -22,12 +23,13 @@
     "editorLastInput": "\u001b[D",
     "uiPromptStarts": 0,
     "uiPromptEnds": 0,
-    "dialogOpen": false
+    "dialogOpen": false,
+    "sessionId": "live-long-pointer"
   },
   "response": {
     "v": 1,
     "session_id": "live-long-pointer",
-    "instance_id": "52705dcf1505c3be",
+    "instance_id": "2639d05b3aed09eb",
     "message_id": 101,
     "outcome": "accepted"
   },
@@ -45,12 +47,13 @@
     "editorLastInput": "\u001b[D",
     "uiPromptStarts": 0,
     "uiPromptEnds": 0,
-    "dialogOpen": false
+    "dialogOpen": false,
+    "sessionId": "live-long-pointer"
   },
   "draft_preserved": true,
   "injected_count": 1,
   "user_texts": [
-    "Внешнее сообщение long-pointer"
+    "[rocket #101] Внешнее сообщение long-pointer"
   ],
   "provider_calls": 1,
   "status": "PASS"

@@ -2,7 +2,8 @@
   "scenario": "busy-single",
   "pi": "1.4.0",
   "session_id": "live-busy-single",
-  "instance_id": "5723a6f3d71a8054",
+  "pi_session_id": "live-busy-single",
+  "instance_id": "384a5274fccd3f49",
   "endpoint_kind": "short /tmp UDS",
   "extensions": [
     "native-bridge-probe-extension.ts",
@@ -22,13 +23,14 @@
     "editorLastInput": "\u001b[D",
     "uiPromptStarts": 0,
     "uiPromptEnds": 0,
-    "dialogOpen": false
+    "dialogOpen": false,
+    "sessionId": "live-busy-single"
   },
   "busy_idle": false,
   "response": {
     "v": 1,
     "session_id": "live-busy-single",
-    "instance_id": "5723a6f3d71a8054",
+    "instance_id": "384a5274fccd3f49",
     "message_id": 201,
     "outcome": "accepted"
   },
@@ -46,7 +48,8 @@
     "editorLastInput": "\u001b[D",
     "uiPromptStarts": 0,
     "uiPromptEnds": 0,
-    "dialogOpen": false
+    "dialogOpen": false,
+    "sessionId": "live-busy-single"
   },
   "after_settled": {
     "ok": true,
@@ -62,13 +65,14 @@
     "editorLastInput": "\u001b[D",
     "uiPromptStarts": 0,
     "uiPromptEnds": 0,
-    "dialogOpen": false
+    "dialogOpen": false,
+    "sessionId": "live-busy-single"
   },
   "draft_preserved": true,
   "injected_count": 1,
   "user_texts": [
     "run",
-    "Внешнее сообщение busy-single"
+    "[rocket #201] Внешнее сообщение busy-single"
   ],
   "provider_calls": 2,
   "user_role_order": [

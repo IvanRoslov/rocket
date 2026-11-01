@@ -2,7 +2,8 @@
   "scenario": "escape-dequeue",
   "pi": "1.4.0",
   "session_id": "live-escape-dequeue",
-  "instance_id": "30492ea844e9e7e2",
+  "pi_session_id": "live-escape-dequeue",
+  "instance_id": "63ee2a13a4f7060a",
   "endpoint_kind": "short /tmp UDS",
   "extensions": [
     "native-bridge-probe-extension.ts",
@@ -22,20 +23,21 @@
     "editorLastInput": "e",
     "uiPromptStarts": 0,
     "uiPromptEnds": 0,
-    "dialogOpen": false
+    "dialogOpen": false,
+    "sessionId": "live-escape-dequeue"
   },
   "response": {
     "v": 1,
     "session_id": "live-escape-dequeue",
-    "instance_id": "30492ea844e9e7e2",
+    "instance_id": "63ee2a13a4f7060a",
     "message_id": 701,
     "outcome": "accepted"
   },
   "after_escape": {
     "ok": true,
-    "text": "Очередное сообщение перед Escape\n\nЧерновик до Escape",
+    "text": "[rocket #701] Очередное сообщение перед Escape\n\nЧерновик до Escape",
     "lines": [
-      "Очередное сообщение перед Escape",
+      "[rocket #701] Очередное сообщение перед Escape",
       "",
       "Черновик до Escape"
     ],
@@ -47,7 +49,8 @@
     "editorLastInput": "\u001b",
     "uiPromptStarts": 0,
     "uiPromptEnds": 0,
-    "dialogOpen": false
+    "dialogOpen": false,
+    "sessionId": "live-escape-dequeue"
   },
   "editor_contains_queued": true,
   "cursor_at_end": true,

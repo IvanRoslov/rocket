@@ -2,7 +2,8 @@
   "scenario": "empty",
   "pi": "1.4.0",
   "session_id": "live-empty",
-  "instance_id": "a76d376898f61255",
+  "pi_session_id": "live-empty",
+  "instance_id": "432c17994e6d9f94",
   "endpoint_kind": "short /tmp UDS",
   "extensions": [
     "native-bridge-probe-extension.ts",
@@ -11,7 +12,7 @@
   "response": {
     "v": 1,
     "session_id": "live-empty",
-    "instance_id": "a76d376898f61255",
+    "instance_id": "432c17994e6d9f94",
     "message_id": 101,
     "outcome": "accepted"
   },
@@ -29,12 +30,13 @@
     "editorLastInput": "\u001b[D",
     "uiPromptStarts": 0,
     "uiPromptEnds": 0,
-    "dialogOpen": false
+    "dialogOpen": false,
+    "sessionId": "live-empty"
   },
   "draft_empty": true,
   "injected_count": 1,
   "user_texts": [
-    "Внешнее сообщение empty"
+    "[rocket #101] Внешнее сообщение empty"
   ],
   "provider_calls": 1,
   "status": "PASS"

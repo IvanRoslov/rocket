@@ -3,7 +3,7 @@
   "pi": "1.4.0",
   "session_id": "live-handled-input",
   "pi_session_id": "live-handled-input",
-  "instance_id": "b2d0fd682439bd7e",
+  "instance_id": "bb2b90408d57af90",
   "endpoint_kind": "short /tmp UDS",
   "extensions": [
     "input-handled-extension.ts",
@@ -14,57 +14,57 @@
   "first": {
     "v": 1,
     "session_id": "live-handled-input",
-    "instance_id": "b2d0fd682439bd7e",
+    "instance_id": "bb2b90408d57af90",
     "message_id": 1001,
     "outcome": "accepted"
   },
   "second": {
     "v": 1,
     "session_id": "live-handled-input",
-    "instance_id": "b2d0fd682439bd7e",
+    "instance_id": "bb2b90408d57af90",
     "message_id": 1002,
     "outcome": "accepted"
   },
   "input_events": [
     {
       "event": "input",
-      "time": 1793552214657,
-      "text": "Q5 одинаковый witness",
+      "time": 1793561011174,
+      "text": "[rocket #1001] Q5 одинаковый witness",
       "source": "extension",
       "streamingBehavior": null,
       "identical": true
     },
     {
       "event": "handled",
-      "time": 1793552214657,
-      "text": "Q5 одинаковый witness"
+      "time": 1793561011174,
+      "text": "[rocket #1001] Q5 одинаковый witness"
     },
     {
       "event": "input",
-      "time": 1793552214658,
-      "text": "Q5 одинаковый witness",
+      "time": 1793561011175,
+      "text": "[rocket #1002] Q5 одинаковый witness",
       "source": "extension",
       "streamingBehavior": null,
-      "identical": true
+      "identical": false
     },
     {
       "event": "continued",
-      "time": 1793552214658,
-      "text": "Q5 одинаковый witness"
+      "time": 1793561011175,
+      "text": "[rocket #1002] Q5 одинаковый witness"
     }
   ],
   "handled_events": [
     {
       "event": "handled",
-      "time": 1793552214657,
-      "text": "Q5 одинаковый witness"
+      "time": 1793561011174,
+      "text": "[rocket #1001] Q5 одинаковый witness"
     }
   ],
   "continued_events": [
     {
       "event": "continued",
-      "time": 1793552214658,
-      "text": "Q5 одинаковый witness"
+      "time": 1793561011175,
+      "text": "[rocket #1002] Q5 одинаковый witness"
     }
   ],
   "input_sources": [
@@ -72,7 +72,7 @@
     "extension"
   ],
   "user_texts": [
-    "Q5 одинаковый witness"
+    "[rocket #1002] Q5 одинаковый witness"
   ],
   "matching_records": 1,
   "provider_calls": 1,

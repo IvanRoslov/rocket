@@ -47,6 +47,17 @@ def plain(text):
     return ANSI_RE.sub("", text).replace("\r", "")
 
 
+def signed(message_id, text):
+    """The exact pi-uds-v1 wire/transcript text for a native send."""
+    return f"[rocket #{message_id}] {text}"
+
+
+def read_jsonl(path):
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line]
+
+
 def compact(text, limit):
     return " ".join(text.split())[:limit]
 
@@ -282,7 +293,10 @@ class Session:
         )
 
     def native(self, message_id, text, **kwargs):
-        return native_request(self.endpoint, self.session_id, self.instance_id, message_id, text, **kwargs)
+        # Emulate the production numbered NativeSender: the queue, not the
+        # bridge, prefixes the persisted Rocket ID. The bridge stays
+        # text-agnostic.
+        return native_request(self.endpoint, self.session_id, self.instance_id, message_id, signed(message_id, text), **kwargs)
 
     def transcript_messages(self):
         messages = []
@@ -410,7 +424,7 @@ def scenario_idle(name, text, multiline=False):
             result["after_settled"] = after
             result["draft_empty"] = after["text"] == ""
         users = s.user_texts()
-        result["injected_count"] = users.count(injected)
+        result["injected_count"] = users.count(signed(101, injected))
         result["user_texts"] = users
         result["provider_calls"] = s.provider_calls()
         result["status"] = "PASS" if result["injected_count"] == 1 and result.get("draft_preserved", True) else "FAIL"
@@ -443,7 +457,7 @@ def scenario_busy(name, text, multiline=False):
             and after["cursorCol"] == before["cursorCol"]
         )
         users = s.user_texts()
-        result["injected_count"] = users.count(injected)
+        result["injected_count"] = users.count(signed(201, injected))
         result["user_texts"] = users
         result["provider_calls"] = s.provider_calls()
         result["user_role_order"] = [m["role"] for m in s.transcript_messages()]
@@ -489,7 +503,7 @@ def scenario_selector():
         result["draft_preserved"] = all(
             after_send[k] == before[k] for k in ("text", "lines", "cursorLine", "cursorCol")
         ) and all(after_escape[k] == before[k] for k in ("text", "lines", "cursorLine", "cursorCol"))
-        result["injected_count"] = s.user_texts().count(injected)
+        result["injected_count"] = s.user_texts().count(signed(301, injected))
         result["ui_prompt_events"] = s.event_names().count("ui_prompt_start") + s.event_names().count("ui_prompt_end")
         result["model_selects"] = s.event_names().count("model_select")
         result["screen_evidence"] = s.screen_evidence([
@@ -540,24 +554,83 @@ def scenario_modal_guard():
 
 
 def scenario_delayed_modal():
+    # Delayed window: an earlier-loaded extension awaits 1200 ms in its
+    # ui_prompt_start handler, so the production guard is set late. The
+    # accepted Spec2 exception allows the turn to start while the dialog is
+    # open. The control has no slow listener and must refuse before the API.
     s = Session("delayed-modal", slow=True, extra_env={"PI_TIMING_SLOW_MS": "1200"})
     try:
         result = s.base_result()
+        dialog_opened_ms = int(time.time() * 1000)
         s.open_dialog("select")
         wait_until(lambda: s.state()["dialogOpen"], 5, "dialog open", s.pty_text, s.read_available)
-        # The production guard is delayed by the earlier async listener; the
-        # accepted spec exception allows the turn to start while the dialog is open.
         injected = "доставка при задержанном guard"
         response = s.native(501, injected)
-        result["response"] = response
+        # The observer's ui_prompt_start handler runs after the slow listener;
+        # ui_prompt_starts=0 would be unknown, not PASS.
+        wait_until(
+            lambda: s.event_names().count("ui_prompt_start") >= 1,
+            15, "delayed ui_prompt_start", s.pty_text, s.read_available,
+        )
+        starts = [event for event in s.events_list() if event["event"] == "ui_prompt_start"]
+        slow = read_jsonl(s.dir / "slow-events.jsonl")
+        begins = [event["time"] for event in slow if event["event"] == "slow_start_begin"]
+        ends = [event["time"] for event in slow if event["event"] == "slow_start_end"]
         s.wait_idle(True)
-        result["injected_count"] = s.user_texts().count(injected)
+        result["response"] = response
+        result["ui_prompt_starts"] = len(starts)
+        result["ui_prompt_start_first"] = starts[0]
+        result["ui_prompt_delay_ms"] = starts[0]["time"] - dialog_opened_ms
+        result["slow_events"] = slow
+        result["slow_delay_ms"] = (ends[0] - begins[0]) if begins and ends else None
+        result["injected_count"] = s.user_texts().count(signed(501, injected))
         result["dialog_still_open"] = s.state()["dialogOpen"]
-        result["ui_prompt_starts"] = s.event_names().count("ui_prompt_start")
-        result["status"] = "PASS" if response["outcome"] == "accepted" and result["injected_count"] == 1 else "FAIL"
-        return result
+        delayed_ok = (
+            response["outcome"] == "accepted"
+            and result["injected_count"] == 1
+            and result["dialog_still_open"]
+            and result["ui_prompt_starts"] >= 1
+            and (result["slow_delay_ms"] or 0) >= 1000
+            and result["ui_prompt_delay_ms"] >= 1000
+        )
     finally:
         s.cleanup()
+
+    control = Session("delayed-modal-control")
+    try:
+        control_result = control.base_result()
+        control_opened_ms = int(time.time() * 1000)
+        control.open_dialog("select")
+        wait_until(lambda: control.state()["dialogOpen"], 5, "control dialog open", control.pty_text, control.read_available)
+        wait_until(
+            lambda: control.event_names().count("ui_prompt_start") >= 1,
+            5, "control ui_prompt_start", control.pty_text, control.read_available,
+        )
+        control_starts = [event for event in control.events_list() if event["event"] == "ui_prompt_start"]
+        control_injected = "доставка при быстром guard"
+        control_response = control.native(502, control_injected)
+        control.wait_idle(True)
+        control_result["response"] = control_response
+        control_result["ui_prompt_starts"] = len(control_starts)
+        control_result["ui_prompt_delay_ms"] = control_starts[0]["time"] - control_opened_ms
+        control_result["injected_count"] = control.user_texts().count(signed(502, control_injected))
+        control_result["dialog_still_open"] = control.state()["dialogOpen"]
+        control_result["provider_calls"] = control.provider_calls()
+        control_ok = (
+            control_response["outcome"] == "not_sent"
+            and control_result["injected_count"] == 0
+            and control_result["dialog_still_open"]
+            and control_result["ui_prompt_starts"] >= 1
+            and control_result["ui_prompt_delay_ms"] < 500
+            and control_result["provider_calls"] == 0
+        )
+        control_result["status"] = "PASS" if control_ok else "FAIL"
+    finally:
+        control.cleanup()
+
+    result["control"] = control_result
+    result["status"] = "PASS" if delayed_ok and control_result["status"] == "PASS" else "FAIL"
+    return result
 
 
 def scenario_target_and_frames():
@@ -581,16 +654,17 @@ def scenario_target_and_frames():
         result["oversized_transcript_delta"] = len(s.user_texts()) - before_users
 
         text = "Привет, мир — UTF-8"
+        wire = signed(605, text)
         frame = json.dumps({
-            "v": 1, "session_id": s.session_id, "instance_id": s.instance_id, "message_id": 605, "text": text,
+            "v": 1, "session_id": s.session_id, "instance_id": s.instance_id, "message_id": 605, "text": wire,
         }, ensure_ascii=False).encode() + b"\n"
         split = frame.index("Привет".encode()) + 3
         result["split_utf8"] = native_request(
-            s.endpoint, s.session_id, s.instance_id, 605, text,
+            s.endpoint, s.session_id, s.instance_id, 605, wire,
             chunks=[frame[:split], frame[split:]],
         )
         s.wait_idle(True)
-        result["split_utf8_count"] = s.user_texts().count(text)
+        result["split_utf8_count"] = s.user_texts().count(signed(605, text))
 
         equal = "Одинаковый текст"
         result["equal_1"] = s.native(606, equal)
@@ -599,8 +673,8 @@ def scenario_target_and_frames():
         result["duplicate_repeat"] = s.native(608, "Повторный ID")
         s.wait_idle(True)
         users = s.user_texts()
-        result["equal_count"] = users.count(equal)
-        result["duplicate_count"] = users.count("Повторный ID")
+        result["equal_count"] = users.count(signed(606, equal)) + users.count(signed(607, equal))
+        result["duplicate_count"] = users.count(signed(608, "Повторный ID"))
         result["provider_calls"] = s.provider_calls()
         result["status"] = "PASS" if (
             all(item["outcome"] == "not_sent" for item in wrong)
@@ -633,9 +707,9 @@ def scenario_escape_dequeue():
         time.sleep(1.0)
         after = s.state()
         result["after_escape"] = after
-        result["editor_contains_queued"] = injected in after["text"]
+        result["editor_contains_queued"] = signed(701, injected) in after["text"]
         result["cursor_at_end"] = after["cursorLine"] == len(after["lines"]) - 1 and after["cursorCol"] == len(after["lines"][-1])
-        result["injected_count"] = s.user_texts().count(injected)
+        result["injected_count"] = s.user_texts().count(signed(701, injected))
         result["status"] = "PASS" if result["editor_contains_queued"] and result["cursor_at_end"] and result["injected_count"] == 0 else "FAIL"
         return result
     finally:
@@ -663,7 +737,7 @@ def scenario_reload():
         s.wait_idle(True)
         result["provider_calls_before"] = first_provider
         result["provider_calls_after"] = s.provider_calls()
-        result["injected_count"] = s.user_texts().count(injected)
+        result["injected_count"] = s.user_texts().count(signed(801, injected))
         result["status"] = "PASS" if (
             result["first"]["outcome"] == "accepted"
             and result["second"]["outcome"] == "accepted"
@@ -710,14 +784,17 @@ def scenario_handled_input():
     # {action:"handled"} (no user record), the second identical input
     # continues and is recorded. Both bridge responses stay accepted.
     witness = "Q5 одинаковый witness"
-    s = Session("handled-input", input_handled_text=witness)
+    # The production bridge signs its native sends, so the public input
+    # handler targets the first numbered envelope and the transcript record
+    # of the second one.
+    s = Session("handled-input", input_handled_text=signed(1001, witness))
     try:
         result = s.base_result()
         result["extensions"] = [INPUT_HANDLED.name, OBSERVER.name, PRODUCTION.name]
         result["witness_text"] = witness
         result["first"] = s.native(1001, witness)
         result["second"] = s.native(1002, witness)
-        wait_until(lambda: s.user_texts().count(witness) >= 1, 10, "witness user record", s.pty_text, s.read_available)
+        wait_until(lambda: s.user_texts().count(signed(1002, witness)) >= 1, 10, "witness user record", s.pty_text, s.read_available)
         s.wait_idle(True)
         rows = s.input_events()
         result["input_events"] = rows
@@ -725,7 +802,7 @@ def scenario_handled_input():
         result["continued_events"] = [row for row in rows if row["event"] == "continued"]
         result["input_sources"] = [row.get("source") for row in rows if row["event"] == "input"]
         result["user_texts"] = s.user_texts()
-        result["matching_records"] = s.user_texts().count(witness)
+        result["matching_records"] = s.user_texts().count(signed(1002, witness))
         result["provider_calls"] = s.provider_calls()
         result["status"] = "PASS" if (
             result["first"]["outcome"] == "accepted"

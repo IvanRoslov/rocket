@@ -1,71 +1,82 @@
 # Pi bridge: индекс evidence и остаточных ограничений
 
-Дата: 1 ноября 2026. Документ только для чтения и ревью; новых проб и production-изменений не вводит.
+Дата: 1 ноября 2026. Документ только для чтения и ревью; новых проб не вводит.
 
-## Текущий bridge
+## Текущий numbered bridge (pi-uds-v1)
 
-SHA-256 на этом коммите (head цепочки — `be01768`, плюс docs/test-comment правка):
+SHA-256 проверенных blobs:
 
 | Файл | SHA-256 |
 | --- | --- |
 | `internal/agent/pi/delivery-extension.ts` | `c593bb8df1da212c7e67fb0156ce864b22bc9a3c23db01dd3aaf271343043b4a` |
-| `internal/agent/pi/delivery-extension.test.ts` | `e64334259977399dcb780df07b26f284d86a05bd35dbf7103577c857880ba239` |
 | `internal/agent/pi/delivery.go` | `153d63d05068c96979f91c04725d378f48be9957bfcddf6da39b562a3d2e4f0d` |
-| `internal/queue/pi_equal_text_correlation_test.go` | `14867db43fb4422d94b03e2e659c523fc38101b55918ec015317452a8340ee17` |
-| `scripts/probes/tmux-delivary/native_bridge_probe.py` | `ace4f8d457fcdbddcc0ea1fcc52ba5bccc0956853642d96f73dbe52516b29764` |
-| `scripts/probes/tmux-delivary/input-handled-extension.ts` | `f2409c10efaa504e0cd6688b8f386e1722dcdc7bf3ea05f48602d40f2a35b2b6` |
-
-`pi_equal_text_correlation_test.go` — осознанно RED (Q5); все остальные перечисленные checks по Pi-модулю зелёные.
+| `internal/agent/pi/confirm.go` | `a14aa3833a19a0bbbf574bc670f418da7b70324e3785e3d71e4bd5d043b8af73` |
+| `internal/queue/native.go` | `f42bcf7e27613e18d6c15d600a56a01321bd8cb990d66d658bddb20962446bdb` |
+| `internal/queue/confirm.go` | `086492a29306b5e0e2af71e2b6c864dacfc498d0e20b5bb79ae9018789783a4b` |
+| `internal/queue/pi_envelope.go` | `374849eabc2cb2d4a01e9f2df81484553a34aae14d5fb801a1ea3d026e9edc52` |
+| `internal/queue/pi_equal_text_correlation_test.go` | `461345fcad4f6d9b5568caec648f39245e3ac944a36fdd5c641a9012c6dfd25f` |
+| `internal/queue/pi_envelope_test.go` | `5c3b7b228b17908b05e53a18c0abfffa431f38ecf78b7c47cf6c2c125fbfa34e` |
+| `internal/queue/pi_stock_e2e_test.go` | `0cf85de0935be063383f771e20ed22bf99539aca70c01a0409db948919c1be36` |
+| `scripts/probes/tmux-delivary/pi_queue_e2e_fixture.py` | `4a039f6c78e6f6fd5c12c065c4f267140739f915d4c77dfaa85f81acb6ecb55a` |
+| `scripts/probes/tmux-delivary/native_bridge_probe.py` | `99de8bb1f4efcd7486b5567d3465a1fa83c81d46d5d62e73318ebf7ea0d99150` |
+| `scripts/probes/tmux-delivary/input-handled-extension.ts` | `29227bf1ce0e1d3e8d0a2040d6d4ec4c3186174fbe0a5e6201211acbc4802ee4` |
+| `scripts/probes/tmux-delivary/native-bridge-probe-extension.ts` | `7a497a2aa7fc6fb45f4fc957e60283082eafdca5af1b16666b463fe99df4a2b3` |
+| `scripts/probes/tmux-delivary/slow-ui-listener-extension.ts` | `312a064888cbe98177e64fca903174b4080f8375eb509f4c781ff43955a966bb` |
 
 ## Точные команды harness
 
 ```bash
 node --experimental-strip-types --test internal/agent/pi/delivery-extension.test.ts   # 29/29 PASS
 go test ./internal/agent/pi -count=1                                                  # PASS
-go test ./internal/agent/pi ./internal/session ./internal/queue ./internal/nativeinput -count=1  # Pi/session/nativeinput PASS; queue RED только Q5-тестом
-go test -race ./internal/agent/pi -count=1                                            # PASS
-go vet ./...                                                                          # clean
-git diff --check                                                                      # clean
+go test ./internal/agent/pi ./internal/session ./internal/queue ./internal/nativeinput -count=1
+go test -race ./internal/agent/pi ./internal/queue ./internal/nativeinput
+go vet ./... && git diff --check
 
-# bounded live, current bridge
-python3 scripts/probes/tmux-delivary/native_bridge_probe.py \
-  --scenario reload --scenario target-frames --scenario foreign-history
-python3 scripts/probes/tmux-delivary/native_bridge_probe.py --scenario handled-input
+# Текущая preservation-матрица + handled-input (14 сценариев)
+python3 scripts/probes/tmux-delivary/native_bridge_probe.py --all
 
-# Q5 counterexample (intentional RED)
-go test ./internal/queue -run 'TestPiEqualTextCorrelation' -count=1 -v
+# Сквозной queue -> stock Pi (opt-in; без флага обычный suite только SKIP этого теста)
+ROCKET_PI_STOCK_E2E=1 go test -count=1 -timeout=90s ./internal/queue -run ^TestPiNativeQueueStockE2E$
 ```
 
-## Матрица сохранения: pre-fix vs current
+## Матрица: current evidence
 
-Всего 13 preservation-сценариев (12 исходных + `foreign-history`) плюс новый Q5-witness `handled-input`.
+`--all` — 14/14 PASS, exit 0. Подпись `[rocket #<id>] ` ставится sender'ом (fixture её эмулирует), bridge остаётся текстово-агностичным. Старых pre-fix PASS в этой таблице нет.
 
-| Сценарий | Состояние evidence |
+| Сценарий | Evidence |
 | --- | --- |
-| `reload`, `target-frames`, `foreign-history` | current: перезапущены после review-исправлений, PASS |
-| `handled-input` (Q5 witness, вне preservation-матрицы) | current: PASS, 1 matching record, 2 accepted |
-| `idle-single`, `idle-multiline`, `empty`, `long-pointer`, `busy-single`, `busy-multiline`, `selector`, `escape-dequeue` | pre-fix JSON (17:12–17:14); на текущем bridge не перезапускались |
-| `modal-guard`, `delayed-modal` | pre-fix; у `delayed-modal` в файле `ui_prompt_starts = 0`, задержка slow listener этим артефактом не доказана; сводка `/tmp/pi-live-all.out` устарела относительно per-scenario JSON |
+| `idle-single`, `idle-multiline`, `long-pointer` | русский draft и mid-line cursor сохранены до/после, injected 1, provider 1 |
+| `empty` | пустое поле остаётся пустым, injected 1, provider 1 |
+| `busy-single`, `busy-multiline` | draft/cursor сохранены во время хода, injected 1, provider 2 |
+| `selector` | окно открыто, поиск/стрелки, Escape возвращает draft/cursor, model_selects 0 |
+| `modal-guard` | все 5 видов: `not_sent` при открытом окне, `accepted` после закрытия |
+| `delayed-modal` | delayed `accepted` при открытом окне, `ui_prompt_start` 1202 ms, slow listener 1201 ms; control 1 ms и `not_sent`, provider 0 |
+| `target-frames` | wrong target `not_sent`/delta 0, oversized `not_sent`, split UTF-8 1, equal text 2 записи, duplicate 1 |
+| `escape-dequeue` | queued подписанный текст в редакторе (действие Pi), cursor в конце, injected 0 |
+| `reload` | тот же ID не переотправлен после `/reload`, injected 1 |
+| `foreign-history` | endpoint отсутствует, 0 injected/0 provider, observed session B |
+| `handled-input` (отдельно) | 1 handled + 1 continued, 1 user record, provider 1 |
+
+Сквозной queue→Pi: PASS, A `failed/native_delivery_unconfirmed` после test-only +31m offset, B `delivered` своей записью; sender 1/ID, API 1/ID, records A0/B1, tmux 0. Evidence: `results/native-bridge/pi-stock-e2e/result.json`.
 
 ## Остаточные ограничения
 
 **Lifecycle/restore**
-- Отменённый `session_before_switch` оставляет endpoint закрытым до `/reload`.
-- Повреждённый accepted-state переводит launch в fail-closed до нового Rocket launch.
-- Политика очистки старого runtime предполагает штатный restore, который сначала гасит старый process.
-- После не-reload завершения launch ретирован; возврат в ту же историю требует Rocket restore, а не переиспользования старого моста.
-- Нет единого end-to-end queue→Pi теста: Q5 собран из двух дополнительных проб (queue counterexample + реальный handled witness).
+- Отменённый `session_before_switch` закрывает приём до `/reload`.
+- Повреждённое accepted-состояние — fail-closed до нового Rocket launch.
+- После non-reload завершения launch ретирован; возврат в ту же историю требует Rocket restore.
+- Старые неподписанные native-записи не подтверждаются; timeout/exit/restore → `native_delivery_unconfirmed`.
+- nil-confirmer timeout policy не расширялась (восстановлено прежнее поведение non-nil legacy-only).
 
 **Modal/deferred**
-- Окно задержанного async `ui_prompt_start` допускается Spec2; guard best-effort, без изменения порядка handlers.
-- Login/OAuth и прочие ветки `showSelector` — source-only; live-доказательство только для встроенного model selector (pre-fix).
-- `modal-guard`/`delayed-modal` на текущем коде не перезапускались.
+- Окно задержанного async `ui_prompt_start` допускается Spec2; guard best-effort.
+- Login/OAuth и часть `showSelector`-веток — source-only; live только встроенный model selector.
+- `{action:"handled"}` — доказанный no-record witness; брошенная ошибка input-handler'а Pi ловится и продолжается, отсутствие записи не доказывает.
 
 **Compaction**
-- Guard построен на `session_before_compact` / `session_compact` / `session_compact_failed`; current-code live evidence компакции нет (pre-fix/plan-level).
+- Guard на `session_before_compact`/`session_compact`/`session_compact_failed`; отдельного fake-vs-live разбора интервалов в текущей матрице нет.
 
 **Операционные**
-- Q5 RED открыт; shared `internal/queue/confirm.go` held до отдельного ruling.
-- Полная live-матрица остановлена до triage.
 - GitHub Actions отсутствуют; пустой CI не считается зелёным.
-- PR163 остаётся draft; root владеет интеграцией/merge.
+- PR163 остаётся draft до принятия root; merge/verify — root.
+- 5914/Claude shared hunks не входят; `confirm_test.go` не менялся.

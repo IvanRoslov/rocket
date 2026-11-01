@@ -54,6 +54,8 @@ python3 scripts/probes/tmux-delivary/pty_preservation_probe.py
 
 Полная матрица на текущем коде не перезапускалась: сохранённые результаты остальных сценариев относятся к предыдущей версии моста. Это остаётся gap, а не PASS.
 
+**Обновление 1 ноября 2026 (numbered path):** этот раздел исторический. Итоговая текущая матрица 13 preservation-сценариев + `handled-input`, сквозной queue→stock-Pi E2E и ограничения сведены в [pi-test-matrix.md](pi-test-matrix.md) и [pi-evidence-index.md](pi-evidence-index.md); все 13 перезапущены на текущем подписанном мосте.
+
 Остаются source-only или непроверенными: login/OAuth и прочие ветки `showSelector`; окно задержанного async listener (допускается Spec2); реальные внешние провайдеры и auth; GitHub Actions отсутствуют.
 
 ## Вывод и ограничения

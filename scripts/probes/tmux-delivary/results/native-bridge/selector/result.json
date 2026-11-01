@@ -2,7 +2,8 @@
   "scenario": "selector",
   "pi": "1.4.0",
   "session_id": "live-selector",
-  "instance_id": "a94015e27b8c6079",
+  "pi_session_id": "live-selector",
+  "instance_id": "a885afb673e40999",
   "endpoint_kind": "short /tmp UDS",
   "extensions": [
     "native-bridge-probe-extension.ts",
@@ -23,12 +24,13 @@
     "editorLastInput": "\u001b[D",
     "uiPromptStarts": 0,
     "uiPromptEnds": 0,
-    "dialogOpen": false
+    "dialogOpen": false,
+    "sessionId": "live-selector"
   },
   "response": {
     "v": 1,
     "session_id": "live-selector",
-    "instance_id": "a94015e27b8c6079",
+    "instance_id": "a885afb673e40999",
     "message_id": 301,
     "outcome": "accepted"
   },
@@ -47,7 +49,8 @@
     "editorLastInput": "\f",
     "uiPromptStarts": 0,
     "uiPromptEnds": 0,
-    "dialogOpen": false
+    "dialogOpen": false,
+    "sessionId": "live-selector"
   },
   "selector_still_open": true,
   "after_search": {
@@ -65,7 +68,8 @@
     "editorLastInput": "\f",
     "uiPromptStarts": 0,
     "uiPromptEnds": 0,
-    "dialogOpen": false
+    "dialogOpen": false,
+    "sessionId": "live-selector"
   },
   "after_escape": {
     "ok": true,
@@ -82,7 +86,8 @@
     "editorLastInput": "\f",
     "uiPromptStarts": 0,
     "uiPromptEnds": 0,
-    "dialogOpen": false
+    "dialogOpen": false,
+    "sessionId": "live-selector"
   },
   "after_editor_typing": {
     "ok": true,
@@ -99,7 +104,8 @@
     "editorLastInput": "!",
     "uiPromptStarts": 0,
     "uiPromptEnds": 0,
-    "dialogOpen": false
+    "dialogOpen": false,
+    "sessionId": "live-selector"
   },
   "expected_lines_after_typing": [
     "Первая строка черновика",
