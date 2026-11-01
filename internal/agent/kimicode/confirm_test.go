@@ -29,12 +29,16 @@ func promptLine(t *testing.T, kind, text string, at int64) string {
 }
 
 func steerLine(t *testing.T, text string, at int64) string {
+	return steerLineOrigin(t, "skill_activation", text, at)
+}
+
+func steerLineOrigin(t *testing.T, kind, text string, at int64) string {
 	t.Helper()
 	b, err := json.Marshal(map[string]any{
 		"type":    "turn.steer",
 		"agentId": "main",
 		"input":   []map[string]string{{"type": "text", "text": text}},
-		"origin":  map[string]string{"kind": "skill_activation"},
+		"origin":  map[string]string{"kind": kind},
 		"time":    at,
 	})
 	if err != nil {
@@ -104,10 +108,85 @@ func TestConfirmQueuedMessageByLaterTurnPrompt(t *testing.T) {
 	}
 }
 
-func TestConfirmSteerAndNonUserOriginDoNotCount(t *testing.T) {
+func TestConfirmSkillAndSystemOriginDoNotCount(t *testing.T) {
 	wire := steerLine(t, "do it", 2000) + promptLine(t, "system_trigger", "do it", 3000)
 	if found, _, err := confirm(t, wire, "do it", 1000); err != nil || found {
 		t.Fatalf("got %v %v", found, err)
+	}
+}
+
+// The 2026-11-01 incident: several complete Rocket messages were steered
+// into the running Kimi turn as one user-origin turn.steer record. Each of
+// them was received and must confirm from that record.
+func TestConfirmCombinedUserSteerReceipt(t *testing.T) {
+	wire := string(fixture(t, "user-steer-combined.wire.jsonl"))
+	var rec struct {
+		Input []struct{ Text string } `json:"input"`
+	}
+	for _, line := range strings.Split(wire, "\n") {
+		if strings.Contains(line, `"turn.steer"`) {
+			if err := json.Unmarshal([]byte(line), &rec); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if len(rec.Input) != 1 {
+		t.Fatalf("fixture has %d steer text parts, want 1", len(rec.Input))
+	}
+	parts := strings.Split(rec.Input[0].Text, "\n\n")
+	if len(parts) != 3 {
+		t.Fatalf("fixture combines %d messages, want 3", len(parts))
+	}
+	for _, text := range parts {
+		if !strings.HasPrefix(text, "[from orch] ") {
+			t.Fatalf("combined message is not sender-prefixed: %q", text)
+		}
+		found, at, err := confirm(t, wire, text, 1793559750000)
+		if err != nil || !found {
+			t.Errorf("message %.50q not confirmed: found=%v at=%v err=%v", text, found, at, err)
+			continue
+		}
+		if !at.Equal(time.UnixMilli(1793560206149)) {
+			t.Errorf("message %.50q confirmed at %v, want the steer record time", text, at)
+		}
+	}
+}
+
+func TestConfirmUserSteerReceiptRules(t *testing.T) {
+	const text = "steered message"
+	cases := []struct {
+		name  string
+		wire  string
+		since int64
+		want  bool
+	}{
+		{"user-origin steer after since", steerLineOrigin(t, "user", text, 2000), 1000, true},
+		{"user-origin steer at since", steerLineOrigin(t, "user", text, 2000), 2000, false},
+		{"user-origin steer before since", steerLineOrigin(t, "user", text, 1000), 2000, false},
+		{"system-origin steer", steerLineOrigin(t, "system_trigger", text, 2000), 1000, false},
+		{"skill-activation steer", steerLineOrigin(t, "skill_activation", text, 2000), 1000, false},
+		{"partial text in a steer", steerLineOrigin(t, "user", "prefix "+text+" suffix", 2000), 1000, false},
+		{"absent from a steer", steerLineOrigin(t, "user", "another message", 2000), 1000, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			found, at, err := confirm(t, tc.wire, text, tc.since)
+			if err != nil || found != tc.want {
+				t.Fatalf("got found=%v at=%v err=%v, want found=%v", found, at, err, tc.want)
+			}
+		})
+	}
+}
+
+// The queue spends one record per message, then asks again strictly after it;
+// a second equal message must wait for its own steer record.
+func TestConfirmUserSteerEarliestAndDuplicateWindow(t *testing.T) {
+	wire := steerLineOrigin(t, "user", "same text", 2000) + steerLineOrigin(t, "user", "same text", 3000)
+	if found, at, err := confirm(t, wire, "same text", 1000); err != nil || !found || !at.Equal(time.UnixMilli(2000)) {
+		t.Fatalf("first proof: found=%v at=%v err=%v, want 2000", found, at, err)
+	}
+	if found, at, err := confirm(t, wire, "same text", 2000); err != nil || !found || !at.Equal(time.UnixMilli(3000)) {
+		t.Fatalf("second proof after consuming 2000: found=%v at=%v err=%v, want 3000", found, at, err)
 	}
 }
 
