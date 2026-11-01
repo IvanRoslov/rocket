@@ -119,7 +119,7 @@ func (s *ClaudeSocketSender) Send(ctx context.Context, v claudeinstance.Snapshot
 	if e != nil || saved.WireID != v.WireID || !claudeinstance.SameIdentity(saved.Target, v.Target) || saved.Envelope != v.Envelope || saved.Boundary != v.Boundary || saved.ReplyPath != v.ReplyPath {
 		return SocketNotSent, fmt.Errorf("missing immutable Claude claim")
 	}
-	if !time.Now().Before(saved.Deadline) {
+	if claudeAgeExpired(saved.Deadline, time.Now()) {
 		return SocketNotSent, fmt.Errorf("Claude deadline expired")
 	}
 	var wait <-chan socketmsg.Message
@@ -144,12 +144,12 @@ func (s *ClaudeSocketSender) Send(ctx context.Context, v claudeinstance.Snapshot
 		return SocketNotSent, ErrNoSocket
 	}
 	m, e := s.st.GetMessage(v.MessageID)
-	if e != nil || (m.Status != "delivering" && m.Status != "accepted") || !time.Now().Before(saved.Deadline) {
+	if e != nil || (m.Status != "delivering" && m.Status != "accepted") || claudeAgeExpired(saved.Deadline, time.Now()) {
 		return SocketNotSent, fmt.Errorf("Claude claim no longer active")
 	}
-	timeout := time.Until(saved.Deadline)
-	if timeout > socketmsg.DefaultTimeout {
-		timeout = socketmsg.DefaultTimeout
+	timeout := socketmsg.DefaultTimeout
+	if !saved.Deadline.IsZero() && time.Until(saved.Deadline) < timeout {
+		timeout = time.Until(saved.Deadline)
 	}
 	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < timeout {
 		timeout = time.Until(deadline)

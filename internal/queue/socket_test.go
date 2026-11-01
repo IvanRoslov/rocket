@@ -103,6 +103,7 @@ func productionSocketFixture(t *testing.T) (*testHarness, *ClaudeSocketSender, s
 	s := NewClaudeSocketSender(reg)
 	s.SetStore(h.st)
 	s.probe = probe
+	h.q.claudeProbe = probe
 	s.heldWait = time.Millisecond
 	h.q.SetSocketSender(s)
 	return h, s, cc, received
@@ -189,7 +190,7 @@ func validFixtureReceipt(v claudeinstance.Snapshot) socketmsg.Message {
 	return socketmsg.Message{MsgV: 1, Type: "control", Action: "peer_message_status", OrigMsgID: v.WireID, SessionID: v.Target.ClaudeSessionID, From: socketmsg.EncodeAddr(v.Target.SocketPath), Status: "delivered"}
 }
 func TestClaudeReceiptRequiresEveryCorrelationField(t *testing.T) {
-	for _, which := range []string{"valid", "missing UUID", "foreign UUID", "foreign socket", "wrong wire", "wrong type", "wrong action", "wrong version", "unknown status", "replacement"} {
+	for _, which := range []string{"valid", "missing UUID", "foreign UUID", "foreign socket", "wrong wire", "wrong type", "wrong action", "wrong version", "unknown status", "unconfirmed status", "replacement"} {
 		t.Run(which, func(t *testing.T) {
 			h, s, _, _ := productionSocketFixture(t)
 			v := claimSocketFixture(t, h, s)
@@ -211,6 +212,8 @@ func TestClaudeReceiptRequiresEveryCorrelationField(t *testing.T) {
 				m.MsgV = 2
 			case "unknown status":
 				m.Status = "other"
+			case "unconfirmed status":
+				m.Status = "unconfirmed"
 			case "replacement":
 				l, _, _ := h.st.GetClaudeLaunch("recv")
 				l.Generation = "g2"
@@ -300,5 +303,36 @@ func TestClaudeUnreadableRegistryAlternativeCannotProveUniqueness(t *testing.T) 
 	case <-incoming:
 		t.Fatal("wrote while uniqueness unknown")
 	default:
+	}
+}
+
+func TestClaudeDisabledAgeRetainsBoundedSocketOperation(t *testing.T) {
+	h, s, _, incoming := productionSocketFixture(t)
+	sess, _ := h.st.GetSession("recv")
+	v, e := s.Prepare(h.ctx, sess, "rocket", "feedback")
+	if e != nil {
+		t.Fatal(e)
+	}
+	v.MessageID, _ = h.st.AddMessage(store.Message{ToSession: "recv", Body: "feedback"})
+	v.PreparedAt = time.Now().UTC()
+	v.Deadline = time.Time{}
+	if ok, e := h.st.ClaimClaudeMessage(v); !ok || e != nil {
+		t.Fatalf("disabled claim %v %v", ok, e)
+	}
+	ctx, cancel := context.WithTimeout(h.ctx, time.Second)
+	defer cancel()
+	start := time.Now()
+	out, e := s.Send(ctx, v)
+	elapsed := time.Since(start)
+	if out != SocketUnknown || e != nil || elapsed > time.Second {
+		t.Fatalf("disabled-age operation %s error=%v elapsed=%s", out, e, elapsed)
+	}
+	select {
+	case m := <-incoming:
+		if m.SessionID != v.Target.ClaudeSessionID || m.MsgID != v.WireID {
+			t.Fatal("unpinned wire")
+		}
+	case <-ctx.Done():
+		t.Fatal("no exact temporary fixture send")
 	}
 }

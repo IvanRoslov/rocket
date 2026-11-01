@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"errors"
 	"github.com/IvanRoslov/rocket/internal/activity"
 	"github.com/IvanRoslov/rocket/internal/claudeinstance"
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -10,17 +11,16 @@ import (
 )
 
 func (q *Queue) claudeDeadline(msg store.Message) time.Time {
-	timeout := 30 * time.Minute
-	if q.cfg != nil && q.cfg.QueueTimeout > 0 {
-		timeout = q.cfg.QueueTimeout
+	if q.cfg == nil || q.cfg.QueueTimeout <= 0 {
+		return time.Time{}
 	}
-	return time.Unix(msg.CreatedAt, 0).Add(timeout)
+	return time.Unix(msg.CreatedAt, 0).Add(q.cfg.QueueTimeout)
 }
 
 // deliverClaude returns false only while an unsent row should wait. It never
 // dispatches through the legacy sender, regardless of probe or send outcome.
 func (q *Queue) deliverClaude(ctx context.Context, msg store.Message, sess store.Session) bool {
-	if !q.now().Before(q.claudeDeadline(msg)) {
+	if claudeAgeExpired(q.claudeDeadline(msg), q.now()) {
 		q.fail(msg, "timeout")
 		return true
 	}
@@ -65,13 +65,16 @@ func (q *Queue) deliverClaude(ctx context.Context, msg store.Message, sess store
 	snapshot.PreparedAt = q.now().UTC()
 	snapshot.Deadline = q.claudeDeadline(msg).UTC()
 	snapshot.Phase = "possible_write"
-	if !snapshot.PreparedAt.Before(snapshot.Deadline) {
+	if claudeAgeExpired(snapshot.Deadline, snapshot.PreparedAt) {
 		q.fail(msg, "timeout")
 		return true
 	}
 	ok, e := q.st.ClaimClaudeMessage(snapshot)
 	if e != nil || !ok {
 		slog.Warn("queue: Claude prewrite claim rejected", "id", msg.ID, "error", e)
+		if e != nil {
+			return false
+		}
 		return true
 	}
 	outcome, sendErr := q.socket.Send(ctx, snapshot)
@@ -89,19 +92,86 @@ func (q *Queue) deliverClaude(ctx context.Context, msg store.Message, sess store
 	q.kickConfirmer()
 	return true
 }
+func claudeAgeExpired(deadline, now time.Time) bool {
+	return !deadline.IsZero() && !now.Before(deadline)
+}
+
+// Lifecycle evidence belongs to the immutable saved target. Current generation
+// changes and exited activity hints cannot decide an older process's fate.
+func (q *Queue) claudeTargetEnded(ctx context.Context, v claudeinstance.Snapshot) bool {
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if claudeinstance.ExactLiveness(probeCtx, v.Target, q.claudeProbe) == claudeinstance.Dead {
+		return true
+	}
+	if ctx.Err() != nil {
+		return false
+	}
+	sess, e := q.getSession(v.Target.RocketSessionID)
+	gone := errors.Is(e, store.ErrNotFound)
+	if e != nil && !gone {
+		return false
+	}
+	terminal := sess.State == "done" || sess.State == "killed" || sess.State == "errored"
+	if !gone && !terminal {
+		return false
+	}
+	launch, _, e := q.st.GetClaudeLaunch(v.Target.RocketSessionID)
+	return e == nil && launch.Generation == v.Target.LaunchGeneration
+}
 func (q *Queue) confirmClaudeRecipient(ctx context.Context, msgs []store.Message) (pending int) {
-	for _, msg := range msgs {
+	for i, msg := range msgs {
 		if ctx.Err() != nil {
-			return pending + 1
+			return pending + len(msgs) - i
 		}
-		// Journal settlement is added in the delivery-proof stage; even now this
-		// route can only wait/expire, never resend through a legacy confirmer.
+		v, e := q.st.GetClaudeDelivery(msg.ID)
+		if e == nil && !claudeAgeExpired(v.Deadline, q.now()) && !claudeAgeExpired(v.Deadline, time.Now()) {
+			ended := q.claudeTargetEnded(ctx, v)
+			scanCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			proof, found, scanErr := claudeinstance.FindProof(scanCtx, v)
+			if found && scanErr == nil && scanCtx.Err() == nil && ctx.Err() == nil {
+				ok, confirmErr := q.st.ConfirmClaudeMessageContext(scanCtx, msg.ID, proof, q.now())
+				if confirmErr != nil {
+					slog.Warn("queue: Claude proof remains uncertain", "id", msg.ID, "error", confirmErr)
+				}
+				if ok {
+					cancel()
+					q.bus.Publish("message.delivered", msg.ToSession, map[string]any{"id": msg.ID, "to": msg.ToSession, "from": msg.FromSession})
+					continue
+				}
+			}
+			cancel()
+			if ctx.Err() != nil {
+				return pending + len(msgs) - i
+			}
+			if ended {
+				ok, err := q.st.SetClaudePhase(msg.ID, v.WireID, v.Target, "unconfirmed", q.now())
+				if err != nil {
+					pending++
+					continue
+				}
+				if ok {
+					q.announceFailure(msg, "delivery_unconfirmed")
+					continue
+				}
+			}
+		}
+		if ctx.Err() != nil {
+			return pending + len(msgs) - i
+		}
 		ok, e := q.st.ExpireClaudeMessage(msg.ID, q.now())
-		if e != nil || !ok {
+		if e != nil {
 			pending++
 			continue
 		}
-		q.announceFailure(msg, "delivery_unconfirmed")
+		if ok {
+			q.announceFailure(msg, "delivery_unconfirmed")
+			continue
+		}
+		current, e := q.st.GetMessage(msg.ID)
+		if e != nil || (current.Status != "delivered" && current.Status != "failed") {
+			pending++
+		}
 	}
 	return pending
 }

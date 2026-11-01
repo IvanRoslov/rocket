@@ -17,6 +17,7 @@ import (
 	"github.com/IvanRoslov/rocket/internal/activity"
 	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/bus"
+	"github.com/IvanRoslov/rocket/internal/claudeinstance"
 	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/runtime"
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -64,11 +65,11 @@ type Queue struct {
 	cfg         *config.Config
 	getActivity func(sessionID string) (activity.State, bool)
 
-	// socket, when non-nil, is consulted before tmux injection for every
-	// delivery: it hands the message to the recipient's Claude Code inbox
-	// without touching their composer. nil means "tmux only".
-	socket SocketSender
-	native NativeSender
+	// socket serves the explicitly selected Claude inbox route. A nil sender
+	// leaves that route unavailable; it never enables visual fallback.
+	socket      SocketSender
+	claudeProbe claudeinstance.Probe
+	native      NativeSender
 
 	// getSession looks up a recipient's session. Defaults to st.GetSession;
 	// overridable by tests to simulate transient (non-ErrNotFound) lookup
@@ -116,6 +117,7 @@ func New(st *store.Store, b *bus.Bus, rt runtime.Runtime, cfg *config.Config, ge
 		cfg:            cfg,
 		getActivity:    getActivity,
 		getSession:     st.GetSession,
+		claudeProbe:    claudeinstance.SystemProbe{},
 		backoff:        defaultBackoff,
 		resolveAgent:   agent.Get,
 		now:            time.Now,
@@ -191,14 +193,9 @@ func (q *Queue) injectOpts(sess store.Session) runtime.InjectOpts {
 	return runtime.InjectOpts{Bracketed: agent.WantsBracketedPaste(a), Dialect: agent.PaneDialectOf(a)}
 }
 
-// runCtx returns the context passed to Run, or context.Background() if Run
-// hasn't been called yet (e.g. Wake is invoked very early, before the
-// daemon's goroutine running Queue.Run has had a chance to start — the
-// normal daemon wiring calls Run before serving, so this fallback is only
-// hit in that narrow startup window).
-// SetSocketSender installs the socket transport consulted before tmux
-// injection. Passing nil disables it. It is called once during daemon wiring,
-// before Recover/Run, and must not be called concurrently with delivery.
+// SetSocketSender installs the Claude transport before Recover/Run. A nil
+// sender leaves selected Claude traffic unavailable without changing route.
+// It must not be called concurrently with delivery.
 func (q *Queue) SetSocketSender(s SocketSender) { q.socket = s }
 
 // claudeSelected chooses the route before any sender/probe availability check.
@@ -498,9 +495,8 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 		// "accepted" instead of "delivered" (see attemptDelivery).
 		busyOK, confirmer := q.recipientCaps(sess)
 		native := route == routeNative
-		viaSocket := false // selected Claude traffic is handled above, never here
 
-		if sess.PendingQuiz != "" && !viaSocket && !native {
+		if sess.PendingQuiz != "" && !native {
 			// Recipient has a pending AskUserQuestion quiz on screen: text
 			// injected now would corrupt the TUI widget, and no socket is
 			// available to route around it. Hold the message (stays queued,
@@ -575,9 +571,7 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 		// exists. Leaving busySince zero on that path is deliberate: a socket
 		// delivery must not accumulate "busyness" toward the force deadline.
 		force := false
-		if viaSocket {
-			busySince = time.Time{}
-		} else {
+		{
 			dialect := q.injectOpts(sess).Dialect
 			window := composerWindow
 			if dialect == runtime.PaneDialectKimi {
@@ -664,7 +658,7 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 			}
 		}
 
-		if !q.attemptDelivery(ctx, msg, sess, force, viaSocket, confirmer) {
+		if !q.attemptDelivery(ctx, msg, sess, force, confirmer) {
 			// Inject hit the draft guard after all (the human started
 			// typing between the probe above and the C-u): the message is
 			// back to "queued" untouched. Wait a tick and re-evaluate from
@@ -729,15 +723,12 @@ func (q *Queue) waitForReady(ctx context.Context, to string) bool {
 // message is back to "queued" for the caller to re-evaluate. Every other
 // outcome (delivered, failed, ctx cancelled) is terminal for this message
 // and returns true.
-// viaSocket selects the Claude Code socket transport for the first attempt;
-// it is cleared as soon as the socket fails, so retries fall to tmux.
-//
 // confirmer, when non-nil, is the recipient agent's journal-backed proof of
 // delivery: a successful paste (submitted, or taken into the agent's own
 // queue) then ends in status "accepted" rather than "delivered", with
 // inject_at taken right before the paste, and the confirmer loop
 // (confirm.go) finishes the job. nil keeps the historical behaviour.
-func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess store.Session, force, viaSocket bool, confirmer agent.DeliveryConfirmer) bool {
+func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess store.Session, force bool, confirmer agent.DeliveryConfirmer) bool {
 	handle := runtime.Handle{Name: sess.TmuxName}
 	text := q.prepareText(msg, sess)
 

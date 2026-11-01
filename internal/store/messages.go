@@ -28,6 +28,12 @@ type Message struct {
 
 // AddMessage inserts a new message with status "queued" (unless already set)
 // and CreatedAt defaulted to now (unless already set). Returns the assigned id.
+// An intact or damaged side row is positive ownership even if a legacy
+// mutation erased the redundant main marker. Never expose it as visual work.
+const effectiveClaudeTransport = `CASE WHEN delivery_transport<>'claude-socket-v1' AND EXISTS(SELECT 1 FROM claude_deliveries WHERE message_id=messages.id) THEN CASE WHEN delivery_transport='' THEN 'claude-socket-v1' ELSE 'claude-snapshot-conflict' END ELSE delivery_transport END`
+
+// AddMessage inserts a new message with status "queued" (unless already set)
+// and CreatedAt defaulted to now (unless already set).
 func (s *Store) AddMessage(m Message) (int64, error) {
 	if m.CreatedAt == 0 {
 		m.CreatedAt = time.Now().Unix()
@@ -50,7 +56,7 @@ func (s *Store) AddMessage(m Message) (int64, error) {
 // GetMessage returns the message with the given id, or ErrNotFound.
 func (s *Store) GetMessage(id int64) (Message, error) {
 	row := s.db.QueryRow(
-		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport, delivery_proof_at, delivery_proof_text
+		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, `+effectiveClaudeTransport+`, delivery_proof_at, delivery_proof_text
 		 FROM messages WHERE id = ?`, id,
 	)
 	return scanMessage(row)
@@ -60,7 +66,7 @@ func (s *Store) GetMessage(id int64) (Message, error) {
 // or from_session = sessionID, in ascending id order. A limit <= 0 means no
 // limit.
 func (s *Store) ListMessages(sessionID string, limit int) ([]Message, error) {
-	query := `SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport, delivery_proof_at, delivery_proof_text
+	query := `SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, ` + effectiveClaudeTransport + `, delivery_proof_at, delivery_proof_text
 	          FROM messages WHERE to_session = ? OR from_session = ? ORDER BY id DESC`
 	args := []any{sessionID, sessionID}
 	if limit > 0 {
@@ -98,7 +104,7 @@ func (s *Store) ListMessages(sessionID string, limit int) ([]Message, error) {
 // message for to.
 func (s *Store) NextQueuedMessage(to string) (Message, bool, error) {
 	row := s.db.QueryRow(
-		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport, delivery_proof_at, delivery_proof_text
+		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, `+effectiveClaudeTransport+`, delivery_proof_at, delivery_proof_text
 		 FROM messages WHERE to_session = ? AND status = 'queued' ORDER BY id LIMIT 1`, to,
 	)
 	m, err := scanMessage(row)
@@ -190,7 +196,7 @@ func (s *Store) SetMessageInjectAt(id int64, injectAt int64) error {
 // messages oldest-first in a single pass.
 func (s *Store) ListAcceptedMessages() ([]Message, error) {
 	rows, err := s.db.Query(
-		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport, delivery_proof_at, delivery_proof_text
+		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, ` + effectiveClaudeTransport + `, delivery_proof_at, delivery_proof_text
 		 FROM messages WHERE status = 'accepted' ORDER BY to_session, id`,
 	)
 	if err != nil {
@@ -302,7 +308,9 @@ func (s *Store) ExpireQueuedBefore(ts int64) ([]Message, error) {
 	rows, err := tx.Query(
 		`UPDATE messages SET status = 'failed', reason = 'timeout'
 		 WHERE status = 'queued' AND created_at < ?
-		 RETURNING id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, delivery_transport, delivery_proof_at, delivery_proof_text`, ts,
+ AND delivery_transport<>'claude-socket-v1'
+ AND NOT EXISTS(SELECT 1 FROM claude_deliveries WHERE message_id=messages.id)
+		 RETURNING id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, `+effectiveClaudeTransport+`, delivery_proof_at, delivery_proof_text`, ts,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("expire messages: %w", err)
@@ -334,7 +342,7 @@ func (s *Store) ExpireQueuedBefore(ts int64) ([]Message, error) {
 // daemon crash. Legacy rows become queued for another attempt; native rows
 // become accepted so their journal, not a blind re-send, settles delivery.
 func (s *Store) ResetDelivering() (int, error) {
-	res, err := s.db.Exec(`UPDATE messages SET status = CASE WHEN delivery_transport IN ('pi-uds-v1','claude-socket-v1') THEN 'accepted' ELSE 'queued' END WHERE status = 'delivering'`)
+	res, err := s.db.Exec(`UPDATE messages SET status = CASE WHEN delivery_transport IN ('pi-uds-v1','claude-socket-v1') OR EXISTS(SELECT 1 FROM claude_deliveries WHERE message_id=messages.id) THEN 'accepted' ELSE 'queued' END, delivery_transport=CASE WHEN delivery_transport='' AND EXISTS(SELECT 1 FROM claude_deliveries WHERE message_id=messages.id) THEN 'claude-socket-v1' ELSE delivery_transport END WHERE status = 'delivering'`)
 	if err != nil {
 		return 0, fmt.Errorf("reset delivering messages: %w", err)
 	}
@@ -409,6 +417,7 @@ func (s *Store) PurgeOld(before int64) error {
 	const purgeMessages = `
 		DELETE FROM messages
 		WHERE created_at < ?
+ AND id NOT IN (SELECT id FROM rocket_claude_retention)
 		  AND NOT (delivery_transport = 'pi-uds-v1' AND status IN ('accepted','delivering'))
 		  AND NOT (delivery_proof_at > 0 AND EXISTS (
 		      SELECT 1 FROM messages p
@@ -416,13 +425,25 @@ func (s *Store) PurgeOld(before int64) error {
 		        AND p.delivery_transport = 'pi-uds-v1'
 		        AND p.status IN ('accepted','delivering')
 		  ))`
-	if _, err := s.db.Exec(purgeMessages, before); err != nil {
-		return fmt.Errorf("purge messages: %w", err)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
 	}
-	if _, err := s.db.Exec(`DELETE FROM events WHERE ts < ?`, before); err != nil {
+	defer tx.Rollback()
+	// Acquire the main writer before reading correlation history.
+	if _, err = tx.Exec(`DELETE FROM events WHERE ts < ?`, before); err != nil {
 		return fmt.Errorf("purge events: %w", err)
 	}
-	return nil
+	if err = protectClaudeHistory(tx); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(purgeMessages, before); err != nil {
+		return fmt.Errorf("purge messages: %w", err)
+	}
+	if _, err = tx.Exec(`DROP TABLE rocket_claude_retention`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func scanMessage(row interface{ Scan(...any) error }) (Message, error) {

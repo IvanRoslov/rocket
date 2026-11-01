@@ -158,11 +158,12 @@ func (f *fakeActivity) set(id string, s activity.State) {
 
 // testHarness bundles a Queue with its dependencies for assertions.
 type testHarness struct {
-	q  *Queue
-	st *store.Store
-	b  *bus.Bus
-	rt *fakeRuntime
-	ac *fakeActivity
+	dbPath string // temporary SQLite fixture path for ownership-corruption tests
+	q      *Queue
+	st     *store.Store
+	b      *bus.Bus
+	rt     *fakeRuntime
+	ac     *fakeActivity
 	// ag is what the resolver returns for sessions whose Agent is "codex";
 	// every other agent name resolves to an error, i.e. the Claude path.
 	ag    *fakeAgent
@@ -231,7 +232,7 @@ func newTestQueue(t *testing.T) *testHarness {
 		}, "delivery workers to exit after context cancellation")
 	})
 
-	return &testHarness{q: q, st: st, b: b, rt: rt, ac: ac, ag: ag, clock: clock, ctx: ctx, cancel: cancel}
+	return &testHarness{dbPath: path, q: q, st: st, b: b, rt: rt, ac: ac, ag: ag, clock: clock, ctx: ctx, cancel: cancel}
 }
 
 // addRunningSession inserts a session row in state "running" with the given

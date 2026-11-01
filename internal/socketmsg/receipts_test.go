@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -161,5 +162,62 @@ func TestReceiptsSweepsStaleSockets(t *testing.T) {
 	}
 	if _, err := os.Stat(foreign); err != nil {
 		t.Errorf("чужой сокет %s снесли: %v", foreign, err)
+	}
+}
+
+func TestReceiptsPurePathOptionalObserverAndWatcher(t *testing.T) {
+	r := NewReceipts("rocket-observer")
+	defer r.Close()
+	dir := shortDir(t)
+	path := r.Path(dir)
+	if _, e := os.Stat(path); !os.IsNotExist(e) {
+		t.Fatalf("Path created filesystem state: %v", e)
+	}
+	ch, cancel := r.Watch("wire")
+	defer cancel()
+	r.dispatch(Message{OrigMsgID: "wire", Status: "held"}) // nil observer preserves watcher
+	if m := <-ch; m.Status != "held" {
+		t.Fatal(m.Status)
+	}
+	done := make(chan struct{})
+	r.SetHandler(func(m Message) {
+		// Each call acquires Receipts.mu; invoking under that mutex deadlocks.
+		_, stop := r.Watch("inside")
+		stop()
+		r.SetHandler(nil)
+		r.Close()
+		close(done)
+	})
+	go r.dispatch(Message{OrigMsgID: "wire", Status: "delivered"})
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("observer held receipts mutex")
+	}
+	select {
+	case m := <-ch:
+		if m.Status != "delivered" {
+			t.Fatal(m.Status)
+		}
+	default:
+		t.Fatal("observer stole watcher event")
+	}
+}
+
+func TestReceiptsCloseHandlerRace(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		r := NewReceipts("rocket-observer-race")
+		ch, cancel := r.Watch("wire")
+		var wg sync.WaitGroup
+		wg.Add(3)
+		go func() { defer wg.Done(); r.dispatch(Message{OrigMsgID: "wire"}) }()
+		go func() { defer wg.Done(); r.SetHandler(func(Message) { r.waiterCount() }) }()
+		go func() { defer wg.Done(); r.Close(); cancel() }()
+		wg.Wait()
+		r.dispatch(Message{OrigMsgID: "wire"}) // closed channel owner must stay inert
+		select {
+		case <-ch:
+		default:
+		}
 	}
 }
