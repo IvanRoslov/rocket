@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/activity"
@@ -71,8 +72,43 @@ type ChatEntry struct {
 	Quiz json.RawMessage
 }
 
+// NativeTransportPiUDS is the only native transport implemented so far.
+const NativeTransportPiUDS = "pi-uds-v1"
+
+type NativeLaunch struct {
+	Transport  string
+	InstanceID string
+	Endpoint   string
+}
+
+// Validate rejects a native declaration Rocket cannot honor. The zero value is
+// the supported legacy transport; pi-uds-v1 needs both its launch instance and
+// its endpoint. Anything else must fail the launch before the runtime starts,
+// never silently start the session on another transport.
+func (n NativeLaunch) Validate() error {
+	if n.Transport == "" {
+		if n.InstanceID != "" || n.Endpoint != "" {
+			return fmt.Errorf("native launch: instance/endpoint declared without a transport")
+		}
+		return nil
+	}
+	if n.Transport != NativeTransportPiUDS {
+		return fmt.Errorf("native launch: unsupported transport %q", n.Transport)
+	}
+	if n.InstanceID == "" || n.Endpoint == "" {
+		return fmt.Errorf("native launch: incomplete %s declaration (instance=%q endpoint=%q)", n.Transport, n.InstanceID, n.Endpoint)
+	}
+	return nil
+}
+
+type NativeLaunchProvider interface {
+	PrepareNativeLaunch(spec LaunchSpec) (NativeLaunch, error)
+}
+
 // LaunchSpec contains all configuration needed to launch an agent.
 type LaunchSpec struct {
+	NativeDelivery NativeLaunch
+
 	SessionID    string
 	Kind         string
 	ParentID     string

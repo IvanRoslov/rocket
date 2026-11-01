@@ -1,0 +1,38 @@
+{
+  "source": "isolated Codex server A, selected fields only",
+  "codexVersion": "codex-cli 0.160.0",
+  "threadId": "01a19403-6bbc-7f53-ad7d-16c45c63a357",
+  "initialTurn": {
+    "id": "01a19403-75b3-7550-bd22-2d4e5bc85280",
+    "status": "completed",
+    "agentText": "TUI_THREAD_H",
+    "startedAt": 1793484617,
+    "completedAt": 1793484619
+  },
+  "longTurn": {
+    "id": "01a19403-9cfd-7050-8789-b8ec3bdb874f",
+    "queueMessageId": "01a19403-9cfc-7812-9edd-434af217cfad",
+    "status": "completed",
+    "agentText": "BUSY_DONE_F",
+    "startedAt": 1793484627,
+    "completedAt": 1793484651,
+    "shellOutput": "ROCKET_SESSION_ID=rocket-5907-a\nROCKET_SOCKET=/tmp/rocket-5907-a.sock\n"
+  },
+  "followUpTurn": {
+    "id": "01a19403-fc28-7e83-8389-22436c0b4565",
+    "queueMessageId": "01a19403-a8e0-7940-af79-287bad5a03db",
+    "status": "completed",
+    "agentText": "BUSY_G_OK",
+    "startedAt": 1793484651,
+    "completedAt": 1793484653
+  },
+  "offlineQueue": {
+    "exitCode": 1,
+    "error": "failed to connect to remote app server at unix:///tmp/rocket-codex-5907-a/app.sock: No such file or directory (os error 2)"
+  },
+  "restartQueue": {
+    "messageId": "01a19407-9f7f-7ac0-98ee-fafc8082265b",
+    "acceptedForThread": "01a19403-6bbc-7f53-ad7d-16c45c63a357",
+    "visibleAgentText": "RESTART_I_OK"
+  }
+}
