@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/IvanRoslov/rocket/internal/activity"
 	"github.com/IvanRoslov/rocket/internal/agent"
@@ -334,5 +335,49 @@ func TestClaudeDisabledAgeRetainsBoundedSocketOperation(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("no exact temporary fixture send")
+	}
+}
+
+// Investigation I-4: conditional synthetic CLI registry UUID rotation, not a
+// claim that any installed version actually rewrites its registry on /clear.
+func TestClaudeSameRootUUIDRotationPreservesOldSnapshotAndRejectsNewBinding(t *testing.T) {
+	h, s, cc, incoming := productionSocketFixture(t)
+	id, e := h.st.AddMessage(store.Message{ToSession: "recv", Body: "old feedback"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	m, _ := h.st.GetMessage(id)
+	h.q.deliver(h.ctx, m)
+	select {
+	case <-incoming:
+	case <-time.After(time.Second):
+		t.Fatal("old message did not reach temporary socket")
+	}
+	old, e := h.st.GetClaudeDelivery(id)
+	if e != nil {
+		t.Fatal(e)
+	}
+	cc.SessionID = "239baa3b-27eb-40ed-82e1-1d9f3dde01e5"
+	writeRegistry(t, s.sessionsDir, cc) // fixture only: PID/start/pane/socket unchanged
+	sess, _ := h.st.GetSession("recv")
+	r := s.Resolve(h.ctx, sess)
+	if r.State != claudeinstance.Rejected || r.Reason != "binding_changed" {
+		t.Fatalf("UUID rotation behavior: %+v", r)
+	}
+	if live := claudeinstance.ExactLiveness(h.ctx, old.Target, h.q.claudeProbe); live != claudeinstance.Verified {
+		t.Fatalf("UUID change is not OS death: %s", live)
+	}
+	if _, e = s.Prepare(h.ctx, sess, "rocket", "new feedback"); !errors.Is(e, ErrNoSocket) {
+		t.Fatalf("rotated UUID unexpectedly adopted: %v", e)
+	}
+	after, e := h.st.GetClaudeDelivery(id)
+	if e != nil || !claudeinstance.SameIdentity(old.Target, after.Target) || old.WireID != after.WireID || old.Boundary != after.Boundary {
+		t.Fatalf("old snapshot rebound: %+v error=%v", after, e)
+	}
+	appendQueueClaudeProof(t, old, "old-target-proof")
+	h.q.confirmPass(h.ctx, runtimeConfirmState())
+	m, _ = h.st.GetMessage(id)
+	if m.Status != "delivered" || m.Attempts != 1 || h.rt.callCount() != 0 {
+		t.Fatalf("saved proof lost after UUID rotation: %+v", m)
 	}
 }

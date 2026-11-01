@@ -177,3 +177,43 @@ func TestSocketKeepsDraftAndQuizUntouched(t *testing.T) {
 		t.Fatal("quiz modified")
 	}
 }
+
+func TestSocketFromNameForSystemMessages(t *testing.T) {
+	h, _, _, incoming := productionSocketFixture(t)
+	const body = "system notice without sender prefix"
+	id, e := h.st.AddMessage(store.Message{ToSession: "recv", Body: body})
+	if e != nil {
+		t.Fatal(e)
+	}
+	m, e := h.st.GetMessage(id)
+	if e != nil {
+		t.Fatal(e)
+	}
+	h.q.deliver(h.ctx, m) // exercise queue -> Prepare -> actual temporary socket
+	v, e := h.st.GetClaudeDelivery(id)
+	if e != nil {
+		t.Fatal(e)
+	}
+	expected := socketmsg.Envelope("", "rocket", body)
+	if v.Envelope != expected {
+		t.Fatalf("queue system envelope=%q want=%q", v.Envelope, expected)
+	}
+	select {
+	case wire := <-incoming:
+		if wire.Message == nil || wire.Message.Content != expected || wire.SessionID != v.Target.ClaudeSessionID || wire.MsgID != v.WireID {
+			t.Fatalf("wrong system wire: %+v", wire)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("system message did not reach temporary socket")
+	}
+	m, _ = h.st.GetMessage(id)
+	if m.Status != "accepted" {
+		t.Fatalf("socket alone is not final proof: %+v", m)
+	}
+	appendQueueClaudeProof(t, v, "system-proof")
+	h.q.confirmPass(h.ctx, runtimeConfirmState())
+	m, _ = h.st.GetMessage(id)
+	if m.Status != "delivered" || m.Attempts != 1 || h.rt.callCount() != 0 {
+		t.Fatalf("system proof settlement: %+v", m)
+	}
+}
