@@ -35,6 +35,19 @@ When the request already supplies the purpose and constraints, reflect
 that understanding instead of asking the same questions again. Keep the
 note concise; its accuracy and the opportunity to correct it matter.
 
+**The first question is always "did I understand you".** Even when the
+request seems clear, your first question to your partner restates what
+you understood and, when the request points at something ("make it like
+the showcase", "as in issue N"), names exactly which thing you found —
+with a link. Ask it before you research neighbouring topics: a short
+request read the wrong way sends every later question the wrong way.
+
+**A closing summary adds nothing.** When you ask your partner to confirm
+the whole picture before writing the spec, list only decisions already
+taken. If writing the summary turns up something new — an action, a piece
+of data, a state, a promise to the client — ask it as its own question
+first. A yes to a summary is not a yes to what was slipped into it.
+
 ## Your Altitude
 
 You brainstorm as the ORCHESTRATOR of a feature, not as the engineer who

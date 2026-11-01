@@ -18,7 +18,7 @@ func TestBrainstormSkillName(t *testing.T) {
 }
 
 func TestBrainstormSkillRecord(t *testing.T) {
-	if got := BrainstormSkillRecord(true); got != "orchestrator-brainstorming@1.2" {
+	if got := BrainstormSkillRecord(true); got != "orchestrator-brainstorming@1.3" {
 		t.Errorf("BrainstormSkillRecord(true) = %q", got)
 	}
 	if got := BrainstormSkillRecord(false); got != "superpowers:brainstorming" {
