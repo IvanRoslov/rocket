@@ -68,6 +68,7 @@ type Queue struct {
 	// delivery: it hands the message to the recipient's Claude Code inbox
 	// without touching their composer. nil means "tmux only".
 	socket SocketSender
+	native NativeSender
 
 	// getSession looks up a recipient's session. Defaults to st.GetSession;
 	// overridable by tests to simulate transient (non-ErrNotFound) lookup
@@ -88,6 +89,10 @@ type Queue struct {
 	// Overridable by tests.
 	now func() time.Time
 
+	// confirmTimeout bounds the final journal scan of a failed native
+	// attempt (see failNativeAttempt). Overridable by tests.
+	confirmTimeout time.Duration
+
 	// confirmKick wakes the confirmer loop ahead of its ticker: sent (non-
 	// blocking) when a message becomes accepted and after Recover.
 	confirmKick chan struct{}
@@ -105,17 +110,18 @@ type Queue struct {
 // New builds a Queue. getActivity is typically Monitor.Activity.
 func New(st *store.Store, b *bus.Bus, rt runtime.Runtime, cfg *config.Config, getActivity func(sessionID string) (activity.State, bool)) *Queue {
 	return &Queue{
-		st:           st,
-		bus:          b,
-		rt:           rt,
-		cfg:          cfg,
-		getActivity:  getActivity,
-		getSession:   st.GetSession,
-		backoff:      defaultBackoff,
-		resolveAgent: agent.Get,
-		now:          time.Now,
-		confirmKick:  make(chan struct{}, 1),
-		workers:      make(map[string]bool),
+		st:             st,
+		bus:            b,
+		rt:             rt,
+		cfg:            cfg,
+		getActivity:    getActivity,
+		getSession:     st.GetSession,
+		backoff:        defaultBackoff,
+		resolveAgent:   agent.Get,
+		now:            time.Now,
+		confirmTimeout: nativeConfirmTimeout,
+		confirmKick:    make(chan struct{}, 1),
+		workers:        make(map[string]bool),
 	}
 }
 
@@ -232,17 +238,16 @@ func (q *Queue) runCtx() context.Context {
 	return context.Background()
 }
 
-// Recover performs the queue's startup recovery pass: it resets messages
-// orphaned in status "delivering" by a previous crash back to "queued" (see
-// store.ResetDelivering for why this is necessary — no query anywhere reads
-// "delivering" back into the live queue, so without this they would be
-// silently lost, breaking FIFO for anything queued behind them), then wakes
-// a delivery worker for every recipient with a queued message.
+// Recover performs the queue's startup recovery pass: legacy messages
+// orphaned in "delivering" become queued, while native ones become accepted
+// for journal confirmation rather than a blind re-send (see
+// store.ResetDelivering). It then wakes a delivery worker for every recipient
+// with a queued message.
 //
-// Messages in status "accepted" are deliberately left alone: the paste did
-// happen, so requeueing them blindly would duplicate; the confirmer loop
-// (started by Run) picks them up and confirms, requeues or fails them by
-// its own rules. Recover only kicks it so the first pass is prompt.
+// Messages in status "accepted" are deliberately left alone: requeueing them
+// blindly would duplicate; the confirmer loop (started by Run) picks them up
+// and confirms, requeues or fails them by its own rules. Recover only kicks
+// it so the first pass is prompt.
 //
 // Callers MUST call Recover synchronously (not in a goroutine) and have it
 // complete BEFORE the API starts serving requests. Otherwise an early
@@ -470,17 +475,25 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 			return
 		}
 
-		// Resolve the transport once per pass: it decides both gates below
-		// and the delivery itself, and each resolution costs a connect() to
-		// the recipient's socket.
-		viaSocket := q.socketReady(sess)
+		// A persisted transport Rocket does not implement must never be
+		// downgraded to visual delivery: fail closed before any tmux call.
+		route := routeOf(msg, sess)
+		if route == routeUnsupported {
+			slog.Warn("queue: unsupported persisted delivery transport, failing closed",
+				"id", msg.ID, "to", msg.ToSession,
+				"message_transport", msg.DeliveryTransport, "session_transport", sess.DeliveryTransport)
+			q.fail(msg, unsupportedDeliveryTransport)
+			return
+		}
 
 		// Optional agent capabilities (Codex): busyOK makes an active
 		// recipient ready; confirmer turns a successful paste into
 		// "accepted" instead of "delivered" (see attemptDelivery).
 		busyOK, confirmer := q.recipientCaps(sess)
+		native := route == routeNative
+		viaSocket := !native && q.socketReady(sess)
 
-		if sess.PendingQuiz != "" && !viaSocket {
+		if sess.PendingQuiz != "" && !viaSocket && !native {
 			// Recipient has a pending AskUserQuestion quiz on screen: text
 			// injected now would corrupt the TUI widget, and no socket is
 			// available to route around it. Hold the message (stays queued,
@@ -499,7 +512,7 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 		}
 
 		state, known := q.getActivity(msg.ToSession)
-		if known && state == activity.Blocked && q.beforeFirstTurn(ctx, sess) {
+		if !native && known && state == activity.Blocked && q.beforeFirstTurn(ctx, sess) {
 			// Kimi takes its first message (the brief) from the queue, and
 			// before its first turn "blocked" can only come from a start
 			// screen — possibly one the human has just answered, with the
@@ -525,6 +538,11 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 				return // ctx cancelled
 			}
 			continue
+		}
+
+		if native {
+			q.attemptNativeDelivery(ctx, msg, sess, confirmer)
+			return
 		}
 
 		// Draft guard. Someone may be typing into the recipient's composer
@@ -918,10 +936,9 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 	}
 }
 
-// accept marks a message accepted — pasted into a recipient whose agent
-// will confirm the delivery from its journal — publishes message.accepted
-// and nudges the confirmer loop. Attempts are kept: a later requeue counts
-// this paste as one of them.
+// accept marks a message accepted by the legacy or native transport, publishes
+// message.accepted and nudges journal confirmation. Attempts are kept: a later
+// legacy requeue counts this send as one of them.
 func (q *Queue) accept(msg store.Message) {
 	if err := q.st.UpdateMessageStatus(msg.ID, "accepted", msg.Attempts, 0, ""); err != nil {
 		slog.Error("queue: update message accepted", "id", msg.ID, "error", err)

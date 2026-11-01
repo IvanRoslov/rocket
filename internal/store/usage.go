@@ -118,7 +118,8 @@ func (s *Store) SessionsNeedingUsage(limit int, now int64) ([]Session, error) {
 		s.parent_id, s.agent, s.branch, s.worktree_path, s.tmux_name, s.state,
 		s.activity, s.activity_ts, s.pr_number, s.pr_state, s.ci_state, s.prompt,
 		s.pending_quiz, s.pr_checked_at, s.profile, s.model, s.effort,
-		s.created_at, s.updated_at, s.task_id, s.subtask_id
+		s.created_at, s.updated_at, s.task_id, s.subtask_id,
+		s.delivery_transport, s.delivery_instance, s.delivery_endpoint
 		FROM sessions s LEFT JOIN session_stats st ON st.session_id = s.id
 		WHERE s.state IN ('done', 'killed', 'errored')
 		AND (st.session_id IS NULL OR st.final = 0 OR

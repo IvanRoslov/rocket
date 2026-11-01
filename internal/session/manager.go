@@ -464,6 +464,10 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 		spec.SystemPrompt = sysPrompt
 	}
 
+	if err := m.prepareNativeLaunch(ag, &spec, &sess); err != nil {
+		m.markErrored(id, err)
+		return store.Session{}, err
+	}
 	if err := ag.SetupWorkspace(spec); err != nil {
 		m.markErrored(id, err)
 		return store.Session{}, err
@@ -681,6 +685,10 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 		Effort:          prof.Effort,
 	}
 
+	if err := m.prepareNativeLaunch(ag, &spec, &sess); err != nil {
+		m.markErrored(id, err)
+		return store.Session{}, err
+	}
 	if err := ag.SetupWorkspace(spec); err != nil {
 		m.markErrored(id, err)
 		return store.Session{}, err
@@ -1030,6 +1038,10 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 
 	m.fillRestorePrompt(&spec, ag, sess, repo, path)
 
+	if err := m.prepareNativeLaunch(ag, &spec, &sess); err != nil {
+		m.markErrored(id, err)
+		return err
+	}
 	if err := ag.SetupWorkspace(spec); err != nil {
 		m.markErrored(id, err)
 		return err
@@ -1070,6 +1082,25 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 	}
 
 	return nil
+}
+
+func (m *Manager) prepareNativeLaunch(ag agent.Agent, spec *agent.LaunchSpec, sess *store.Session) error {
+	provider, ok := ag.(agent.NativeLaunchProvider)
+	if !ok {
+		return nil
+	}
+	native, err := provider.PrepareNativeLaunch(*spec)
+	if err != nil {
+		return err
+	}
+	if err := native.Validate(); err != nil {
+		return err
+	}
+	spec.NativeDelivery = native
+	sess.DeliveryTransport = native.Transport
+	sess.DeliveryInstance = native.InstanceID
+	sess.DeliveryEndpoint = native.Endpoint
+	return m.st.UpdateSessionDelivery(sess.ID, native.Transport, native.InstanceID, native.Endpoint)
 }
 
 // launchArgs validates the interactive command before queueing a prompt.

@@ -38,11 +38,14 @@ type Session struct {
 	// Profile, Model and Effort snapshot the model profile the session was
 	// launched with (task #5026). Restore relaunches from this snapshot, so
 	// later edits to the registry never change a running session.
-	Profile   string
-	Model     string
-	Effort    string
-	CreatedAt int64
-	UpdatedAt int64
+	Profile           string
+	Model             string
+	Effort            string
+	DeliveryTransport string
+	DeliveryInstance  string
+	DeliveryEndpoint  string
+	CreatedAt         int64
+	UpdatedAt         int64
 }
 
 // SessionFilter narrows the results of ListSessions. If All is false, only
@@ -71,8 +74,8 @@ func (s *Store) AddSession(sess Session) error {
 			id, kind, project_id, repo_id, feature_slug, parent_id, agent, branch,
 			worktree_path, tmux_name, state, activity, activity_ts, pr_number, pr_state,
 			ci_state, prompt, pending_quiz, pr_checked_at, profile, model, effort, created_at, updated_at,
-			task_id, subtask_id
-		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			task_id, subtask_id, delivery_transport, delivery_instance, delivery_endpoint
+		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sess.ID, sess.Kind, sess.ProjectID, sess.RepoID, sess.FeatureSlug,
 		nullIfEmpty(sess.ParentID), sess.Agent, sess.Branch, sess.WorktreePath,
 		sess.TmuxName, sess.State, nullIfEmpty(sess.Activity), nullIfZero(sess.ActivityTS),
@@ -80,6 +83,7 @@ func (s *Store) AddSession(sess Session) error {
 		nullIfEmpty(sess.Prompt), nullIfEmpty(sess.PendingQuiz), nullIfZero(sess.PRCheckedAt),
 		sess.Profile, sess.Model, sess.Effort, sess.CreatedAt, sess.UpdatedAt,
 		nullIfZero(sess.TaskID), nullIfZero(sess.SubtaskID),
+		sess.DeliveryTransport, sess.DeliveryInstance, sess.DeliveryEndpoint,
 	)
 	if isUniqueViolation(err) {
 		return ErrExists
@@ -96,7 +100,7 @@ func (s *Store) GetSession(id string) (Session, error) {
 		`SELECT id, kind, project_id, repo_id, feature_slug, parent_id, agent, branch,
 		        worktree_path, tmux_name, state, activity, activity_ts, pr_number, pr_state,
 		        ci_state, prompt, pending_quiz, pr_checked_at, profile, model, effort, created_at, updated_at,
-		        task_id, subtask_id
+		        task_id, subtask_id, delivery_transport, delivery_instance, delivery_endpoint
 		 FROM sessions WHERE id = ?`, id,
 	)
 	return scanSession(row)
@@ -107,7 +111,7 @@ func (s *Store) ListSessions(f SessionFilter) ([]Session, error) {
 	query := `SELECT id, kind, project_id, repo_id, feature_slug, parent_id, agent, branch,
 	                  worktree_path, tmux_name, state, activity, activity_ts, pr_number, pr_state,
 	                  ci_state, prompt, pending_quiz, pr_checked_at, profile, model, effort, created_at, updated_at,
-	                  task_id, subtask_id
+	                  task_id, subtask_id, delivery_transport, delivery_instance, delivery_endpoint
 	          FROM sessions`
 
 	var conds []string
@@ -195,6 +199,7 @@ func (s *Store) UpdateSession(sess Session) error {
 			activity = ?, activity_ts = ?, pr_number = ?, pr_state = ?, ci_state = ?,
 			prompt = ?, pending_quiz = ?, pr_checked_at = ?, profile = ?, model = ?, effort = ?,
 			task_id = ?, subtask_id = ?,
+			delivery_transport = ?, delivery_instance = ?, delivery_endpoint = ?,
 			updated_at = ?
 		 WHERE id = ?`,
 		sess.Kind, sess.ProjectID, sess.RepoID, sess.FeatureSlug, nullIfEmpty(sess.ParentID),
@@ -203,10 +208,22 @@ func (s *Store) UpdateSession(sess Session) error {
 		nullIfZero(int64(sess.PRNumber)), nullIfEmpty(sess.PRState), nullIfEmpty(sess.CIState),
 		nullIfEmpty(sess.Prompt), nullIfEmpty(sess.PendingQuiz), nullIfZero(sess.PRCheckedAt),
 		sess.Profile, sess.Model, sess.Effort, nullIfZero(sess.TaskID), nullIfZero(sess.SubtaskID),
+		sess.DeliveryTransport, sess.DeliveryInstance, sess.DeliveryEndpoint,
 		time.Now().Unix(), sess.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update session: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
+func (s *Store) UpdateSessionDelivery(id, transport, instance, endpoint string) error {
+	res, err := s.db.Exec(
+		`UPDATE sessions SET delivery_transport = ?, delivery_instance = ?, delivery_endpoint = ?, updated_at = ? WHERE id = ?`,
+		transport, instance, endpoint, time.Now().Unix(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("update session delivery: %w", err)
 	}
 	return checkRowsAffected(res)
 }
@@ -247,7 +264,7 @@ func (s *Store) ListSessionsForPRPoll() ([]Session, error) {
 		`SELECT id, kind, project_id, repo_id, feature_slug, parent_id, agent, branch,
 		        worktree_path, tmux_name, state, activity, activity_ts, pr_number, pr_state,
 		        ci_state, prompt, pending_quiz, pr_checked_at, profile, model, effort, created_at, updated_at,
-		        task_id, subtask_id
+		        task_id, subtask_id, delivery_transport, delivery_instance, delivery_endpoint
 		 FROM sessions
 		 WHERE kind = 'worker'
 		   AND (state IN ('spawning', 'running')
@@ -341,6 +358,7 @@ func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 		&sess.State, &activity, &activityTS, &prNumber, &prState, &ciState, &prompt,
 		&pendingQuiz, &prCheckedAt, &sess.Profile, &sess.Model, &sess.Effort,
 		&sess.CreatedAt, &sess.UpdatedAt, &taskID, &subtaskID,
+		&sess.DeliveryTransport, &sess.DeliveryInstance, &sess.DeliveryEndpoint,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, ErrNotFound
