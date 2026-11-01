@@ -290,6 +290,13 @@ whatever skill drives your thinking:
 2. Every fork that needs the human's decision is a storm question — even when
    you are talking it through in the terminal, and it is
    one decision per question — never bundle several into one thread.
+   A product decision the human can see in the result (what is kept, what
+   is dropped, what looks or behaves differently) is never settled
+   silently in the spec: before the gate, each one rests on the human's
+   words, a checked fact, or a storm answer — otherwise it is a question.
+   An answer counts only for the question it actually answers.
+   "Work on your own", "cto is not around" and the like lift only the
+   constraint they name; the storm with the human and the gate stay.
    Always recommend:
        rocket task ask {{task_id}} --brainstorm --recommend 2 \
          --title "<the decision>" --brief "$(cat brief.md)" --file q.md \
