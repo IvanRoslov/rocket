@@ -45,6 +45,14 @@ Reading code while planning is fine — to learn which repo and component
 owns something, or whether a capability already exists. Bring back the
 fact, not the code.
 
+**Scope of a deliverable is a closed list.** Name what it delivers:
+the screens, the data, the actions, the states. Words like "whatever is
+needed", "if necessary", "within the scope of the page" without a list
+let a worker grow the deliverable on its own. If you cannot list it yet,
+that is a storm question, not a plan line. When a worker's design needs
+something not on the list, it comes back to you, and a product-visible
+addition goes to your brainstorm partner.
+
 ## Shape
 
 1. **Mitigation first.** If a small change stops the harm the human
@@ -102,8 +110,10 @@ Before storing the plan, check:
 1. **Coverage:** every requirement of the spec lands in some deliverable's
    acceptance.
 2. **Altitude:** no file paths, signatures, schemas or step lists.
-3. **Mitigation:** if one exists, it is deliverable 1 and independent.
-4. **Each deliverable can be briefed alone:** a worker who reads only its
+3. **Closed scope:** every deliverable lists what it delivers; no
+   "whatever is needed" without a list.
+4. **Mitigation:** if one exists, it is deliverable 1 and independent.
+5. **Each deliverable can be briefed alone:** a worker who reads only its
    row, the contracts and the spec knows what to build and how it will be
    accepted.
 

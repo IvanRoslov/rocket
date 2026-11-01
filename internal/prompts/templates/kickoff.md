@@ -47,7 +47,7 @@ Start now:
    implementation-detail edits are stored without a new gate.
    If a small mitigation stops the reported harm, it is the first
    deliverable — spec and gate it on its own, ahead of any larger redesign
-   (see "Levels" in your instructions).
+   (see "Size the work, and finish it" in your instructions).
    Do not spawn workers and do not move the task yourself. On Go the gate
    moves the task to in_progress and you receive
    "[rocket gate] Go …" — that is your signal to start executing. On

@@ -31,7 +31,7 @@ func BrainstormSkill(custom bool) string {
 // orchestrator-brainstorming skill (see its README). A task stores the skill
 // it started with as "<name>@<version>" so the brainstorm metric can tell
 // versions apart; bump it with every change to the skill's meaning.
-const CustomBrainstormSkillVersion = "1.2"
+const CustomBrainstormSkillVersion = "1.3"
 
 // BrainstormSkillRecord is the value a task stores in brainstorm_skill when
 // it starts: the custom skill with its version, the stock skill as is.

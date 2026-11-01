@@ -235,8 +235,9 @@ export function useTaskDocs(id: number | undefined): UseQueryResult<TaskDoc[]> {
 
 /**
  * `GET /v1/tasks/{id}/docs?history=true` — every version of every doc. The
- * plain list carries only the newest version of each (kind, title), so a
- * gate's pinned "Spec v1" is only resolvable from here.
+ * plain list carries only the newest spec, plan and problem (and the newest
+ * version of each other doc), so a gate's pinned "Spec v1" is only
+ * resolvable from here.
  */
 export function useTaskDocHistory(id: number | undefined): UseQueryResult<TaskDoc[]> {
   return useQuery({

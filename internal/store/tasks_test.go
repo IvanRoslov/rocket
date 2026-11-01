@@ -309,89 +309,101 @@ func TestTaskDocVersioning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddTask: %v", err)
 	}
-
-	v1, err := s.PutTaskDoc(TaskDoc{TaskID: taskID, Kind: "spec", Title: "Spec A", Body: "body v1", Author: "sess-1"})
-	if err != nil {
-		t.Fatalf("PutTaskDoc v1: %v", err)
-	}
-	if v1.Version != 1 {
-		t.Errorf("v1.Version = %d, want 1", v1.Version)
-	}
-	if v1.ID == 0 {
-		t.Error("v1.ID not assigned")
-	}
-	if v1.CreatedAt == 0 {
-		t.Error("v1.CreatedAt not set")
+	put := func(kind, title, body, author string) TaskDoc {
+		t.Helper()
+		d, err := s.PutTaskDoc(TaskDoc{TaskID: taskID, Kind: kind, Title: title, Body: body, Author: author})
+		if err != nil {
+			t.Fatalf("PutTaskDoc %s/%s: %v", kind, title, err)
+		}
+		return d
 	}
 
-	// Same task+kind+title -> version 2.
-	v2, err := s.PutTaskDoc(TaskDoc{TaskID: taskID, Kind: "spec", Title: "Spec A", Body: "body v2"})
-	if err != nil {
-		t.Fatalf("PutTaskDoc v2: %v", err)
+	v1 := put("spec", "Spec A", "body v1", "sess-1")
+	if v1.Version != 1 || v1.ID == 0 || v1.CreatedAt == 0 {
+		t.Errorf("v1 = %+v, want version 1 with id and created_at", v1)
 	}
-	if v2.Version != 2 {
-		t.Errorf("v2.Version = %d, want 2", v2.Version)
+	if v2 := put("spec", "Spec A", "body v2", ""); v2.Version != 2 {
+		t.Errorf("same title: version = %d, want 2", v2.Version)
 	}
-
-	// Different title -> version 1.
-	other, err := s.PutTaskDoc(TaskDoc{TaskID: taskID, Kind: "spec", Title: "Spec B", Body: "other body"})
-	if err != nil {
-		t.Fatalf("PutTaskDoc other: %v", err)
+	// spec, plan and problem are one document per task: a new title is the
+	// next version of the same document, not a second spec (#5917).
+	renamed := put("spec", "Spec A — renamed", "body v3", "")
+	if renamed.Version != 3 {
+		t.Errorf("renamed spec: version = %d, want 3", renamed.Version)
 	}
-	if other.Version != 1 {
-		t.Errorf("other.Version = %d, want 1", other.Version)
+	plan := put("plan", "Spec A", "plan body", "")
+	if plan.Version != 1 {
+		t.Errorf("plan: version = %d, want 1 (versions count per kind)", plan.Version)
 	}
-
-	// Different kind, same title -> version 1.
-	otherKind, err := s.PutTaskDoc(TaskDoc{TaskID: taskID, Kind: "plan", Title: "Spec A", Body: "plan body"})
-	if err != nil {
-		t.Fatalf("PutTaskDoc otherKind: %v", err)
-	}
-	if otherKind.Version != 1 {
-		t.Errorf("otherKind.Version = %d, want 1", otherKind.Version)
+	// Free-form docs stay per title.
+	n1 := put("doc", "Notes", "n1", "")
+	n2 := put("doc", "Other notes", "o1", "")
+	if n1.Version != 1 || n2.Version != 1 {
+		t.Errorf("doc versions = %d, %d, want 1, 1", n1.Version, n2.Version)
 	}
 
-	// history=false: only latest version per (kind,title).
 	latest, err := s.ListTaskDocs(taskID, false)
 	if err != nil {
 		t.Fatalf("ListTaskDocs latest: %v", err)
 	}
-	if len(latest) != 3 {
-		t.Fatalf("latest len = %d, want 3", len(latest))
-	}
-	byKey := map[string]TaskDoc{}
+	byKind := map[string][]TaskDoc{}
 	for _, d := range latest {
-		byKey[d.Kind+"|"+d.Title] = d
+		byKind[d.Kind] = append(byKind[d.Kind], d)
 	}
-	if d := byKey["spec|Spec A"]; d.Version != 2 || d.Body != "body v2" {
-		t.Errorf("latest spec|Spec A = %+v, want version 2, body v2", d)
+	if got := byKind["spec"]; len(got) != 1 || got[0].ID != renamed.ID {
+		t.Errorf("latest spec = %+v, want only the renamed v3", got)
 	}
-	if d := byKey["spec|Spec B"]; d.Version != 1 {
-		t.Errorf("latest spec|Spec B = %+v, want version 1", d)
+	if got := byKind["plan"]; len(got) != 1 || got[0].ID != plan.ID {
+		t.Errorf("latest plan = %+v, want the single plan", got)
 	}
-	if d := byKey["plan|Spec A"]; d.Version != 1 {
-		t.Errorf("latest plan|Spec A = %+v, want version 1", d)
+	if got := byKind["doc"]; len(got) != 2 {
+		t.Errorf("latest doc = %+v, want both titles", got)
 	}
 
-	// history=true: all versions, ascending by id.
 	history, err := s.ListTaskDocs(taskID, true)
 	if err != nil {
 		t.Fatalf("ListTaskDocs history: %v", err)
 	}
-	if len(history) != 4 {
-		t.Fatalf("history len = %d, want 4", len(history))
+	if len(history) != 6 {
+		t.Fatalf("history len = %d, want 6", len(history))
 	}
-	wantIDOrder := []int64{v1.ID, v2.ID, other.ID, otherKind.ID}
-	for i, want := range wantIDOrder {
-		if history[i].ID != want {
-			t.Errorf("history[%d].ID = %d, want %d", i, history[i].ID, want)
+	if history[0].ID != v1.ID || history[0].Author != "sess-1" || history[1].Author != "" {
+		t.Errorf("history order/authors wrong: %+v", history[:2])
+	}
+}
+
+// Tasks written before per-kind versioning may hold several titles of one
+// kind, each counting from v1. The next put continues after the highest
+// version of the kind, and the list shows only the newest row.
+func TestTaskDocVersioning_LegacyTitles(t *testing.T) {
+	s := openTestStore(t)
+	taskID, err := s.AddTask(Task{Title: "T", ProjectID: "billing"})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+	for _, d := range []TaskDoc{
+		{Kind: "plan", Title: "Old", Version: 1},
+		{Kind: "plan", Title: "Old", Version: 2},
+		{Kind: "plan", Title: "New", Version: 1},
+	} {
+		if _, err := s.db.Exec(`INSERT INTO task_docs (task_id, kind, title, body, version, created_at) VALUES (?, ?, ?, 'b', ?, 1)`,
+			taskID, d.Kind, d.Title, d.Version); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if history[0].Author != "sess-1" {
-		t.Errorf("history[0].Author = %q, want sess-1", history[0].Author)
+	latest, err := s.ListTaskDocs(taskID, false)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if history[1].Author != "" {
-		t.Errorf("history[1].Author = %q, want empty", history[1].Author)
+	if len(latest) != 1 || latest[0].Title != "New" {
+		t.Errorf("latest = %+v, want only the newest row (New)", latest)
+	}
+	next, err := s.PutTaskDoc(TaskDoc{TaskID: taskID, Kind: "plan", Title: "New", Body: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Version != 3 {
+		t.Errorf("next version = %d, want 3", next.Version)
 	}
 }
 

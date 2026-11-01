@@ -65,6 +65,31 @@ func TestOrchestratorSkillV12Text(t *testing.T) {
 	}
 }
 
+// Version 1.3 (review of #5917): the first question confirms the request,
+// and a closing summary may not add scope.
+func TestOrchestratorSkillV13Text(t *testing.T) {
+	b, err := orchestratorSkillFS.ReadFile(orchestratorSkillRoot + "/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, want := range []string{
+		`**The first question is always "did I understand you".**`,
+		"**A closing summary adds nothing.**",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("SKILL.md lacks %q", want)
+		}
+	}
+	pb, err := orchestratorPlanningSkillFS.ReadFile("skills/" + OrchestratorPlanningSkill + "/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(pb), "**Scope of a deliverable is a closed list.**") {
+		t.Error("planning SKILL.md lacks the closed-scope rule")
+	}
+}
+
 // The planning skill is the orchestrator's own decomposition guide.
 func TestOrchestratorPlanningSkillText(t *testing.T) {
 	b, err := orchestratorPlanningSkillFS.ReadFile("skills/" + OrchestratorPlanningSkill + "/SKILL.md")
