@@ -163,25 +163,50 @@ func TestPiNativeLaunchKeepsUserExtensions(t *testing.T) {
 }
 
 func TestPiNativeUnavailableNeverFallsBack(t *testing.T) {
-	installFakePi(t, "1.4.0", fakeExtensionHelp)
-	badRoot := filepath.Join(shortTempDir(t), "not-a-directory")
-	if err := os.WriteFile(badRoot, []byte("file"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	useNativeRoot(t, badRoot)
+	t.Run("unusable runtime dir fails the launch", func(t *testing.T) {
+		installFakePi(t, "1.4.0", fakeExtensionHelp)
+		badRoot := filepath.Join(shortTempDir(t), "not-a-directory")
+		if err := os.WriteFile(badRoot, []byte("file"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		useNativeRoot(t, badRoot)
 
-	p := New().(*Pi)
-	native, err := p.PrepareNativeLaunch(agent.LaunchSpec{SessionID: "sess-fail", WorktreePath: t.TempDir()})
-	if err == nil {
-		t.Fatalf("PrepareNativeLaunch accepted an unusable native runtime dir: %+v", native)
-	}
-	if native != (agent.NativeLaunch{}) {
-		t.Fatalf("failed native preparation leaked a declaration: %+v", native)
-	}
-	cmd := p.LaunchCommand(agent.LaunchSpec{SessionID: "sess-fail"})
-	if contains(cmd, "--extension") {
-		t.Fatalf("failed native preparation must not start legacy with a half declaration: %v", cmd)
-	}
+		p := New().(*Pi)
+		native, err := p.PrepareNativeLaunch(agent.LaunchSpec{SessionID: "sess-fail", WorktreePath: t.TempDir()})
+		if err == nil {
+			t.Fatalf("PrepareNativeLaunch accepted an unusable native runtime dir: %+v", native)
+		}
+		if native != (agent.NativeLaunch{}) {
+			t.Fatalf("failed native preparation leaked a declaration: %+v", native)
+		}
+		cmd := p.LaunchCommand(agent.LaunchSpec{SessionID: "sess-fail"})
+		if contains(cmd, "--extension") {
+			t.Fatalf("failed native preparation must not start legacy with a half declaration: %v", cmd)
+		}
+	})
+
+	t.Run("downgrade after a native launch fails closed", func(t *testing.T) {
+		installFakePi(t, "1.4.0", fakeExtensionHelp)
+		useNativeRoot(t, shortTempDir(t))
+		p := New().(*Pi)
+		spec := agent.LaunchSpec{SessionID: "sess-downgrade", WorktreePath: t.TempDir()}
+		first, err := p.PrepareNativeLaunch(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(nativeMarkerPath(filepath.Dir(first.Endpoint))); err != nil {
+			t.Fatalf("native marker missing: %v", err)
+		}
+
+		installFakePi(t, "1.3.9", fakeExtensionHelp)
+		native, err := p.PrepareNativeLaunch(spec)
+		if err == nil {
+			t.Fatalf("native session silently fell back to legacy: %+v", native)
+		}
+		if native != (agent.NativeLaunch{}) {
+			t.Fatalf("failed downgrade leaked a declaration: %+v", native)
+		}
+	})
 }
 
 func TestPiNativeRestoreChangesInstance(t *testing.T) {

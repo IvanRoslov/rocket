@@ -49,6 +49,10 @@ func deliveryExtensionPath(endpoint string) string {
 	return filepath.Join(filepath.Dir(endpoint), "delivery-extension.ts")
 }
 
+func nativeMarkerPath(dir string) string {
+	return filepath.Join(dir, "native.marker")
+}
+
 func nativeSessionKey(sessionID string) string {
 	sum := sha256.Sum256([]byte(sessionID))
 	return hex.EncodeToString(sum[:4])
@@ -113,23 +117,34 @@ func (p *Pi) PrepareNativeLaunch(spec agent.LaunchSpec) (agent.NativeLaunch, err
 	if spec.SessionID == "" {
 		return agent.NativeLaunch{}, fmt.Errorf("native launch: empty session id")
 	}
-	bin, err := exec.LookPath("pi")
-	if err != nil {
-		return agent.NativeLaunch{}, nil
-	}
-	versionOut, err := exec.Command(bin, "--version").Output()
-	if err != nil {
-		return agent.NativeLaunch{}, nil
-	}
-	numbers, err := parsePiVersion(string(versionOut))
-	if err != nil || !supportsNativeDelivery(numbers) {
-		return agent.NativeLaunch{}, nil
-	}
-	if !supportsExtensionFlag(bin) {
+	dir := filepath.Join(nativeTempRoot(), "rocket-pi-"+nativeSessionKey(spec.SessionID))
+	_, markerErr := os.Stat(nativeMarkerPath(dir))
+	wasNative := markerErr == nil
+	unsupported := func() (agent.NativeLaunch, error) {
+		if wasNative {
+			// A session whose transport was already chosen as pi-uds-v1 must
+			// never silently start on tmux because Pi got older or broken.
+			return agent.NativeLaunch{}, fmt.Errorf("native launch: session %s already uses pi-uds-v1; Pi 1.4+ with --extension is required", spec.SessionID)
+		}
 		return agent.NativeLaunch{}, nil
 	}
 
-	dir := filepath.Join(nativeTempRoot(), "rocket-pi-"+nativeSessionKey(spec.SessionID))
+	bin, err := exec.LookPath("pi")
+	if err != nil {
+		return unsupported()
+	}
+	versionOut, err := exec.Command(bin, "--version").Output()
+	if err != nil {
+		return unsupported()
+	}
+	numbers, err := parsePiVersion(string(versionOut))
+	if err != nil || !supportsNativeDelivery(numbers) {
+		return unsupported()
+	}
+	if !supportsExtensionFlag(bin) {
+		return unsupported()
+	}
+
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return agent.NativeLaunch{}, fmt.Errorf("native launch: create runtime dir: %w", err)
 	}
@@ -158,6 +173,12 @@ func (p *Pi) PrepareNativeLaunch(spec agent.LaunchSpec) (agent.NativeLaunch, err
 	instanceID, err := newLaunchInstanceID()
 	if err != nil {
 		return agent.NativeLaunch{}, err
+	}
+	if err := os.WriteFile(nativeMarkerPath(dir), []byte(agent.NativeTransportPiUDS+"\n"), 0o600); err != nil {
+		return agent.NativeLaunch{}, fmt.Errorf("native launch: record native state: %w", err)
+	}
+	if err := os.Chmod(nativeMarkerPath(dir), 0o600); err != nil {
+		return agent.NativeLaunch{}, fmt.Errorf("native launch: secure native state: %w", err)
 	}
 	return agent.NativeLaunch{
 		Transport:  agent.NativeTransportPiUDS,
