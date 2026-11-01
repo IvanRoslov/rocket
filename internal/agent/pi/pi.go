@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/IvanRoslov/rocket/internal/agent"
@@ -48,33 +47,12 @@ func (p *Pi) Available() error {
 	if err != nil {
 		return fmt.Errorf("check pi version: %w", err)
 	}
-	version := strings.TrimPrefix(strings.TrimSpace(string(out)), "v")
-	parts := strings.Split(version, ".")
-	if len(parts) != 3 {
-		return fmt.Errorf("parse pi version %q", version)
-	}
-	var numbers [3]int
-	for i, part := range parts {
-		if part == "" || part[0] < '0' || part[0] > '9' {
-			return fmt.Errorf("parse pi version %q", version)
-		}
-		if i == 2 {
-			if at := strings.IndexAny(part, "-+"); at >= 0 {
-				part = part[:at]
-			}
-		}
-		for _, digit := range part {
-			if digit < '0' || digit > '9' {
-				return fmt.Errorf("parse pi version %q", version)
-			}
-		}
-		numbers[i], err = strconv.Atoi(part)
-		if err != nil {
-			return fmt.Errorf("parse pi version %q: %w", version, err)
-		}
+	numbers, err := parsePiVersion(string(out))
+	if err != nil {
+		return err
 	}
 	if numbers[0] < 1 {
-		return fmt.Errorf("pi 1.0.0 or newer is required (got %s)", version)
+		return fmt.Errorf("pi 1.0.0 or newer is required (got %s)", strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -87,6 +65,7 @@ func (p *Pi) LaunchCommand(spec agent.LaunchSpec) []string {
 	if spec.Effort != "" {
 		cmd = append(cmd, "--thinking", spec.Effort)
 	}
+	cmd = withNativeArgs(cmd, spec)
 	if spec.FirstMessage != "" {
 		cmd = append(cmd, "--", spec.FirstMessage)
 	}
@@ -155,6 +134,9 @@ func (p *Pi) Env(spec agent.LaunchSpec) map[string]string {
 		if value := os.Getenv(key); value != "" {
 			env[key] = value
 		}
+	}
+	for key, value := range nativeEnv(spec) {
+		env[key] = value
 	}
 	return env
 }

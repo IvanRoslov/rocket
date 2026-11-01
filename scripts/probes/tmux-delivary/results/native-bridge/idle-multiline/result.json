@@ -1,0 +1,62 @@
+{
+  "scenario": "idle-multiline",
+  "pi": "1.4.0",
+  "session_id": "live-idle-multiline",
+  "pi_session_id": "live-idle-multiline",
+  "instance_id": "b65dca71180b12f4",
+  "endpoint_kind": "short /tmp UDS",
+  "extensions": [
+    "native-bridge-probe-extension.ts",
+    "delivery-extension.ts"
+  ],
+  "before": {
+    "ok": true,
+    "text": "Первая строка\nВторая строка с курсором",
+    "lines": [
+      "Первая строка",
+      "Вторая строка с курсором"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 21,
+    "idle": true,
+    "model": "probe/deterministic",
+    "editorInputCount": 43,
+    "editorLastInput": "\u001b[D",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false,
+    "sessionId": "live-idle-multiline"
+  },
+  "response": {
+    "v": 1,
+    "session_id": "live-idle-multiline",
+    "instance_id": "b65dca71180b12f4",
+    "message_id": 101,
+    "outcome": "accepted"
+  },
+  "after_settled": {
+    "ok": true,
+    "text": "Первая строка\nВторая строка с курсором",
+    "lines": [
+      "Первая строка",
+      "Вторая строка с курсором"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 21,
+    "idle": true,
+    "model": "probe/deterministic",
+    "editorInputCount": 43,
+    "editorLastInput": "\u001b[D",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false,
+    "sessionId": "live-idle-multiline"
+  },
+  "draft_preserved": true,
+  "injected_count": 1,
+  "user_texts": [
+    "[rocket #101] Внешнее сообщение idle-multiline"
+  ],
+  "provider_calls": 1,
+  "status": "PASS"
+}

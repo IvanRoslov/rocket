@@ -1,0 +1,68 @@
+{
+  "scenario": "delayed-modal",
+  "pi": "1.4.0",
+  "session_id": "live-delayed-modal",
+  "pi_session_id": "live-delayed-modal",
+  "instance_id": "62bb98016b7511da",
+  "endpoint_kind": "short /tmp UDS",
+  "extensions": [
+    "native-bridge-probe-extension.ts",
+    "delivery-extension.ts"
+  ],
+  "response": {
+    "v": 1,
+    "session_id": "live-delayed-modal",
+    "instance_id": "62bb98016b7511da",
+    "message_id": 501,
+    "outcome": "accepted"
+  },
+  "ui_prompt_starts": 1,
+  "ui_prompt_start_first": {
+    "event": "ui_prompt_start",
+    "time": 1793561111521,
+    "kind": "select",
+    "title": "Probe modal"
+  },
+  "ui_prompt_delay_ms": 1202,
+  "slow_events": [
+    {
+      "event": "slow_start_begin",
+      "time": 1793561110320,
+      "kind": "select"
+    },
+    {
+      "event": "slow_start_end",
+      "time": 1793561111521,
+      "kind": "select"
+    }
+  ],
+  "slow_delay_ms": 1201,
+  "injected_count": 1,
+  "dialog_still_open": true,
+  "control": {
+    "scenario": "delayed-modal-control",
+    "pi": "1.4.0",
+    "session_id": "live-delayed-modal-control",
+    "pi_session_id": "live-delayed-modal-control",
+    "instance_id": "4dcf40a386cf3eba",
+    "endpoint_kind": "short /tmp UDS",
+    "extensions": [
+      "native-bridge-probe-extension.ts",
+      "delivery-extension.ts"
+    ],
+    "response": {
+      "v": 1,
+      "session_id": "live-delayed-modal-control",
+      "instance_id": "4dcf40a386cf3eba",
+      "message_id": 502,
+      "outcome": "not_sent"
+    },
+    "ui_prompt_starts": 1,
+    "ui_prompt_delay_ms": 1,
+    "injected_count": 0,
+    "dialog_still_open": true,
+    "provider_calls": 0,
+    "status": "PASS"
+  },
+  "status": "PASS"
+}

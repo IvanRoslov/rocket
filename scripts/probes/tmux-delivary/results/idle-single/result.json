@@ -1,0 +1,38 @@
+{
+  "scenario": "idle-single",
+  "pi": "1.4.0",
+  "before": {
+    "ok": true,
+    "text": "Черновик одной строки",
+    "lines": [
+      "Черновик одной строки"
+    ],
+    "cursorLine": 0,
+    "cursorCol": 18,
+    "idle": true
+  },
+  "after_send": {
+    "ok": true,
+    "text": "Черновик одной строки",
+    "lines": [
+      "Черновик одной строки"
+    ],
+    "cursorLine": 0,
+    "cursorCol": 18,
+    "idle": false
+  },
+  "after_settled": {
+    "ok": true,
+    "text": "Черновик одной строки",
+    "lines": [
+      "Черновик одной строки"
+    ],
+    "cursorLine": 0,
+    "cursorCol": 18,
+    "idle": true
+  },
+  "provider_calls": 1,
+  "injected_message_id": "eddb3035",
+  "injected_transcript_count": 1,
+  "status": "PASS"
+}

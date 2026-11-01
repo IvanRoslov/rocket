@@ -1,0 +1,38 @@
+{
+  "scenario": "busy-single",
+  "pi": "1.4.0",
+  "before": {
+    "ok": true,
+    "text": "Черновик во время работы",
+    "lines": [
+      "Черновик во время работы"
+    ],
+    "cursorLine": 0,
+    "cursorCol": 21,
+    "idle": false
+  },
+  "after_send": {
+    "ok": true,
+    "text": "Черновик во время работы",
+    "lines": [
+      "Черновик во время работы"
+    ],
+    "cursorLine": 0,
+    "cursorCol": 21,
+    "idle": false
+  },
+  "after_settled": {
+    "ok": true,
+    "text": "Черновик во время работы",
+    "lines": [
+      "Черновик во время работы"
+    ],
+    "cursorLine": 0,
+    "cursorCol": 21,
+    "idle": true
+  },
+  "provider_calls": 2,
+  "injected_message_id": "48cf7f10",
+  "injected_transcript_count": 1,
+  "status": "PASS"
+}

@@ -1,0 +1,41 @@
+{
+  "scenario": "idle-multiline",
+  "pi": "1.4.0",
+  "before": {
+    "ok": true,
+    "text": "Первая строка\nВторая строка черновика",
+    "lines": [
+      "Первая строка",
+      "Вторая строка черновика"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 20,
+    "idle": true
+  },
+  "after_send": {
+    "ok": true,
+    "text": "Первая строка\nВторая строка черновика",
+    "lines": [
+      "Первая строка",
+      "Вторая строка черновика"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 20,
+    "idle": false
+  },
+  "after_settled": {
+    "ok": true,
+    "text": "Первая строка\nВторая строка черновика",
+    "lines": [
+      "Первая строка",
+      "Вторая строка черновика"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 20,
+    "idle": true
+  },
+  "provider_calls": 1,
+  "injected_message_id": "53ac94a4",
+  "injected_transcript_count": 1,
+  "status": "PASS"
+}

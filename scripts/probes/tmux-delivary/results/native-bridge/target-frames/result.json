@@ -1,0 +1,91 @@
+{
+  "scenario": "target-frames",
+  "pi": "1.4.0",
+  "session_id": "live-target-frames",
+  "pi_session_id": "live-target-frames",
+  "instance_id": "ff6df71726cc2ef1",
+  "endpoint_kind": "short /tmp UDS",
+  "extensions": [
+    "native-bridge-probe-extension.ts",
+    "delivery-extension.ts"
+  ],
+  "wrong_targets": [
+    {
+      "v": 1,
+      "session_id": "other",
+      "instance_id": "ff6df71726cc2ef1",
+      "message_id": 601,
+      "outcome": "not_sent"
+    },
+    {
+      "v": 1,
+      "session_id": "live-target-frames",
+      "instance_id": "other",
+      "message_id": 602,
+      "outcome": "not_sent"
+    },
+    {
+      "v": 1,
+      "session_id": "live-target-frames",
+      "instance_id": "ff6df71726cc2ef1",
+      "message_id": 603,
+      "outcome": "not_sent"
+    },
+    {
+      "v": 1,
+      "session_id": "live-target-frames",
+      "instance_id": "ff6df71726cc2ef1",
+      "message_id": 0,
+      "outcome": "not_sent"
+    }
+  ],
+  "wrong_target_transcript_delta": 0,
+  "oversized": {
+    "v": 1,
+    "session_id": "live-target-frames",
+    "instance_id": "ff6df71726cc2ef1",
+    "message_id": 0,
+    "outcome": "not_sent"
+  },
+  "oversized_transcript_delta": 0,
+  "split_utf8": {
+    "v": 1,
+    "session_id": "live-target-frames",
+    "instance_id": "ff6df71726cc2ef1",
+    "message_id": 605,
+    "outcome": "accepted"
+  },
+  "split_utf8_count": 1,
+  "equal_1": {
+    "v": 1,
+    "session_id": "live-target-frames",
+    "instance_id": "ff6df71726cc2ef1",
+    "message_id": 606,
+    "outcome": "accepted"
+  },
+  "equal_2": {
+    "v": 1,
+    "session_id": "live-target-frames",
+    "instance_id": "ff6df71726cc2ef1",
+    "message_id": 607,
+    "outcome": "accepted"
+  },
+  "duplicate": {
+    "v": 1,
+    "session_id": "live-target-frames",
+    "instance_id": "ff6df71726cc2ef1",
+    "message_id": 608,
+    "outcome": "accepted"
+  },
+  "duplicate_repeat": {
+    "v": 1,
+    "session_id": "live-target-frames",
+    "instance_id": "ff6df71726cc2ef1",
+    "message_id": 608,
+    "outcome": "accepted"
+  },
+  "equal_count": 2,
+  "duplicate_count": 1,
+  "provider_calls": 4,
+  "status": "PASS"
+}

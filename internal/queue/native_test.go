@@ -86,9 +86,9 @@ func TestNativeDeliveryDoesNotTouchTmux(t *testing.T) {
 	h.q.SetNativeSender(sender)
 	h.startConfirmer()
 	h.addNativeSession(t, "native")
-	at := h.clock.now().Add(time.Second)
-	h.ag.confirmRecords(map[string][]time.Time{"hello native": {at}})
 	id := addMsg(t, h, "native", "hello native")
+	at := h.clock.now().Add(time.Second)
+	h.ag.confirmRecords(map[string][]time.Time{nativePiEnvelope(id, "hello native"): {at}})
 	h.q.Wake("native")
 
 	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" }, "native journal confirmation")
@@ -101,7 +101,7 @@ func TestNativeDeliveryDoesNotTouchTmux(t *testing.T) {
 		t.Fatalf("native snapshot = %+v", msg)
 	}
 	call := sender.calls[0]
-	if call.target.SessionID != "native" || call.target.InstanceID != "launch-1" || call.target.SocketPath != "/tmp/native.sock" || call.messageID != id || call.text != "hello native" {
+	if call.target.SessionID != "native" || call.target.InstanceID != "launch-1" || call.target.SocketPath != "/tmp/native.sock" || call.messageID != id || call.text != nativePiEnvelope(id, "hello native") {
 		t.Fatalf("native call = %+v", call)
 	}
 }
@@ -189,11 +189,14 @@ func TestNativeDuplicateTextUsesDistinctMessageIDs(t *testing.T) {
 	h.q.SetNativeSender(sender)
 	h.startConfirmer()
 	h.addNativeSession(t, "native")
-	t1 := h.clock.now().Add(time.Second)
-	t2 := t1.Add(time.Second)
-	h.ag.confirmRecords(map[string][]time.Time{"same": {t1, t2}})
 	id1 := addMsg(t, h, "native", "same")
 	id2 := addMsg(t, h, "native", "same")
+	t1 := h.clock.now().Add(time.Second)
+	t2 := t1.Add(time.Second)
+	h.ag.confirmRecords(map[string][]time.Time{
+		nativePiEnvelope(id1, "same"): {t1},
+		nativePiEnvelope(id2, "same"): {t2},
+	})
 	h.q.Wake("native")
 
 	waitUntil(t, func() bool {
@@ -222,7 +225,7 @@ func TestNativeLateConfirmationDoesNotRequeue(t *testing.T) {
 	if sender.count() != 1 {
 		t.Fatalf("native sends = %d, want 1", sender.count())
 	}
-	h.ag.confirmRecords(map[string][]time.Time{"late": {h.clock.now()}})
+	h.ag.confirmRecords(map[string][]time.Time{nativePiEnvelope(id, "late"): {h.clock.now()}})
 	h.q.kickConfirmer()
 	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" }, "late confirmation")
 }
@@ -276,7 +279,7 @@ func TestNativeTerminalFailureChecksJournalFirst(t *testing.T) {
 	id := addMsg(t, h, "native", "recorded before exit")
 	h.q.Wake("native")
 	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "accepted" }, "accepted")
-	h.ag.confirmRecords(map[string][]time.Time{"recorded before exit": {h.clock.now().Add(time.Second)}})
+	h.ag.confirmRecords(map[string][]time.Time{nativePiEnvelope(id, "recorded before exit"): {h.clock.now().Add(time.Second)}})
 
 	h.activityTo("native", activity.Exited)
 	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" }, "delivery proven after exit")
@@ -291,7 +294,7 @@ func TestNativeRestoreChecksJournalBeforeFailure(t *testing.T) {
 	id := addMsg(t, h, "native", "recorded before restore")
 	h.q.Wake("native")
 	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "accepted" }, "accepted")
-	h.ag.confirmRecords(map[string][]time.Time{"recorded before restore": {h.clock.now().Add(time.Second)}})
+	h.ag.confirmRecords(map[string][]time.Time{nativePiEnvelope(id, "recorded before restore"): {h.clock.now().Add(time.Second)}})
 
 	h.b.Publish("session.restored", "native", nil)
 	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" }, "delivery proven after restore")
@@ -329,8 +332,12 @@ func TestNativeRecoveryDoesNotReuseEqualTextProof(t *testing.T) {
 			if collision {
 				proofAt = base
 			}
-			h.ag.confirmRecords(map[string][]time.Time{"same": {proofAt}})
 			first := addMsg(t, h, "native", "same")
+			second := addMsg(t, h, "native", "same")
+			// The consumed record is exactly the later native signed envelope,
+			// so the no-reuse guard is genuinely exercised.
+			sharedProof := nativePiEnvelope(second, "same")
+			h.ag.confirmRecords(map[string][]time.Time{sharedProof: {proofAt}})
 			firstMsg, _ := h.st.GetMessage(first)
 			firstMsg.Status = "accepted"
 			firstMsg.Attempts = 1
@@ -343,11 +350,10 @@ func TestNativeRecoveryDoesNotReuseEqualTextProof(t *testing.T) {
 			}
 			st1 := &confirmState{used: make(map[string]map[recordKey]struct{}), restored: make(map[string]bool)}
 			_, confirmer := h.q.recipientCaps(store.Session{Agent: "codex"})
-			if !h.q.confirmOne(h.ctx, st1, confirmer, agent.ActivityRef{SessionID: "native"}, "native", firstMsg, "same") {
+			if !h.q.confirmOne(h.ctx, st1, confirmer, agent.ActivityRef{SessionID: "native"}, "native", firstMsg, sharedProof) {
 				t.Fatal("first equal-text message was not confirmed")
 			}
 
-			second := addMsg(t, h, "native", "same")
 			if ok, err := h.st.ClaimNativeMessage(second, "pi-uds-v1", base.Add(-time.Second).UnixMilli()); err != nil || !ok {
 				t.Fatalf("second claim = %v, %v", ok, err)
 			}
@@ -356,6 +362,10 @@ func TestNativeRecoveryDoesNotReuseEqualTextProof(t *testing.T) {
 			st2 := &confirmState{used: make(map[string]map[recordKey]struct{}), restored: make(map[string]bool)}
 			h.q.confirmPass(h.ctx, st2)
 
+			calls := h.ag.confirmCalls()
+			if len(calls) == 0 || calls[len(calls)-1].text != sharedProof {
+				t.Fatalf("recovery scan did not query the spent signed record: %+v", calls)
+			}
 			msg, _ := h.st.GetMessage(second)
 			if msg.Status != "failed" || msg.Reason != "native_delivery_unconfirmed" {
 				t.Fatalf("unsent equal-text message = %+v, want conservative failure, not false delivery", msg)

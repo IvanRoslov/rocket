@@ -1,0 +1,440 @@
+import { appendFileSync, chmodSync, lstatSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import net from "node:net";
+import { dirname, join } from "node:path";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+// Rocket's native Pi delivery bridge (pi-uds-v1). It is an isolated embedded
+// extension loaded with an explicit --extension flag only for supported Pi
+// 1.4+ launches. It never touches the editor: requests are submitted through
+// the public Extension API with followUp and without prompt expansion.
+
+export const PROTOCOL_VERSION = 1;
+export const MAX_FRAME_BYTES = 1 << 20; // including the newline
+
+export const NATIVE_ENV = {
+	session: "ROCKET_PI_NATIVE_SESSION_ID",
+	instance: "ROCKET_PI_NATIVE_INSTANCE_ID",
+	endpoint: "ROCKET_PI_NATIVE_ENDPOINT",
+	protocol: "ROCKET_PI_NATIVE_PROTOCOL",
+} as const;
+
+export interface NativeConfig {
+	sessionID: string;
+	instanceID: string;
+	endpoint: string;
+	protocol: number;
+}
+
+export interface ExtensionApiLike {
+	on(event: string, handler: (event: any, ctx?: any) => unknown): unknown;
+	sendUserMessage(
+		text: string,
+		options: { deliverAs: "followUp"; expandPromptTemplates: false },
+	): unknown;
+}
+
+export interface BridgeOptions extends NativeConfig {
+	sendUserMessage: (text: string) => unknown;
+	log?: (event: string, data?: Record<string, unknown>) => void;
+	/** Permission fixup seam; defaults to fs.chmodSync. */
+	chmod?: (path: string, mode: number) => void;
+}
+
+type Outcome = "accepted" | "not_sent";
+
+/**
+ * Incremental JSONL frame reader. Bytes are buffered until a newline, so a
+ * UTF-8 sequence split across chunks is decoded only after the whole line is
+ * available. MAX_FRAME_BYTES includes the newline.
+ */
+export class FrameDecoder {
+	private buffer = Buffer.alloc(0);
+
+	push(chunk: Buffer): { lines: string[]; overflow: boolean } {
+		this.buffer = this.buffer.length === 0 ? chunk : Buffer.concat([this.buffer, chunk]);
+		const lines: string[] = [];
+		while (true) {
+			const newline = this.buffer.indexOf(0x0a);
+			if (newline === -1) break;
+			const frame = this.buffer.subarray(0, newline + 1);
+			this.buffer = this.buffer.subarray(newline + 1);
+			if (frame.length > MAX_FRAME_BYTES) return { lines, overflow: true };
+			lines.push(frame.subarray(0, newline).toString("utf8"));
+		}
+		if (this.buffer.length >= MAX_FRAME_BYTES) return { lines, overflow: true };
+		return { lines, overflow: false };
+	}
+}
+
+export function acceptedIDsPath(endpoint: string, instanceID: string): string {
+	return join(dirname(endpoint), `accepted-${instanceID}.ids`);
+}
+
+export function retiredLaunchPath(endpoint: string, instanceID: string): string {
+	return join(dirname(endpoint), `retired-${instanceID}.marker`);
+}
+
+function statePathExists(path: string): boolean {
+	try {
+		lstatSync(path);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+export function configFromEnv(
+	env: Record<string, string | undefined> = process.env,
+): NativeConfig | undefined {
+	const sessionID = env[NATIVE_ENV.session];
+	const instanceID = env[NATIVE_ENV.instance];
+	const endpoint = env[NATIVE_ENV.endpoint];
+	const protocol = Number(env[NATIVE_ENV.protocol] ?? String(PROTOCOL_VERSION));
+	if (!sessionID || !instanceID || !endpoint || protocol !== PROTOCOL_VERSION) return undefined;
+	return { sessionID, instanceID, endpoint, protocol };
+}
+
+export class DeliveryBridge {
+	readonly config: NativeConfig;
+	private readonly sendUserMessage: (text: string) => unknown;
+	private readonly log: (event: string, data?: Record<string, unknown>) => void;
+	private readonly chmod: (path: string, mode: number) => void;
+	private readonly acceptedFile: string;
+	private readonly retiredFile: string;
+	private server: net.Server | undefined;
+	private connections = new Set<net.Socket>();
+	private accepted = new Set<number>();
+	private modalOpen = false;
+	private compaction = false;
+	private suppressStart = false;
+	private context: any;
+
+	constructor(options: BridgeOptions) {
+		this.config = {
+			sessionID: options.sessionID,
+			instanceID: options.instanceID,
+			endpoint: options.endpoint,
+			protocol: options.protocol,
+		};
+		this.sendUserMessage = options.sendUserMessage;
+		this.log = options.log ?? (() => {});
+		this.chmod = options.chmod ?? chmodSync;
+		this.acceptedFile = acceptedIDsPath(options.endpoint, options.instanceID);
+		this.retiredFile = retiredLaunchPath(options.endpoint, options.instanceID);
+	}
+
+	get listening(): boolean {
+		return this.server?.listening === true;
+	}
+
+	get compactionActive(): boolean {
+		return this.compaction;
+	}
+
+	setModal(open: boolean): void {
+		this.modalOpen = open;
+	}
+
+	setCompaction(active: boolean): void {
+		this.compaction = active;
+	}
+
+	/**
+	 * Bind the bridge to the Pi history reported by the supported extension
+	 * context. The ROCKET_* environment alone can outlive a switch: after
+	 * /reload a fresh module instance still sees the old launch env.
+	 */
+	bindContext(ctx: any): boolean {
+		let sessionID: unknown;
+		try {
+			sessionID = ctx?.sessionManager?.getSessionId?.();
+		} catch {
+			sessionID = undefined;
+		}
+		if (typeof sessionID !== "string" || sessionID !== this.config.sessionID) return false;
+		this.context = ctx;
+		return true;
+	}
+
+	/** The history Pi would submit into must still be the bound one. */
+	historyMatches(): boolean {
+		if (!this.context) return false;
+		try {
+			return this.context.sessionManager.getSessionId() === this.config.sessionID;
+		} catch {
+			return false;
+		}
+	}
+
+	async start(): Promise<void> {
+		if (this.suppressStart || this.server?.listening) return;
+		if (statePathExists(this.retiredFile)) {
+			// The launch left its history. Returning to the same history must
+			// not resurrect it; only a new Rocket launch clears the marker.
+			this.suppressStart = true;
+			throw new Error(`native launch ${this.config.instanceID} is retired`);
+		}
+		mkdirSync(dirname(this.config.endpoint), { recursive: true, mode: 0o700 });
+		this.chmod(dirname(this.config.endpoint), 0o700);
+		try {
+			unlinkSync(this.config.endpoint);
+		} catch {
+			// A stale socket from a killed launch is expected.
+		}
+		this.loadAccepted();
+		await new Promise<void>((resolve, reject) => {
+			const server = net.createServer((socket) => this.handleConnection(socket));
+			const onError = (error: Error) => {
+				server.close();
+				reject(error);
+			};
+			server.once("error", onError);
+			server.listen(this.config.endpoint, () => {
+				server.removeListener("error", onError);
+				server.on("error", (error) => this.log("server_error", { error: String(error) }));
+				try {
+					this.chmod(this.config.endpoint, 0o600);
+				} catch (error) {
+					// Accepting connections without the 0600 contract is not
+					// allowed: refuse the endpoint and fail the start.
+					this.log("chmod_error", { error: String(error) });
+					server.close();
+					try {
+						unlinkSync(this.config.endpoint);
+					} catch {
+						// Already gone.
+					}
+					reject(error);
+					return;
+				}
+				this.server = server;
+				resolve();
+			});
+		});
+	}
+
+	/** Start from an extension event without an unhandled rejection. */
+	startSafely(): void {
+		void this.start().catch((error) => this.log("start_error", { error: String(error) }));
+	}
+
+	stop(reason = ""): void {
+		if (reason === "reload") {
+			// A reload continues the same live launch: keep the dedupe state
+			// and leave the stale path for the new module's start().
+			this.closeListener();
+			return;
+		}
+		this.retire(reason);
+	}
+
+	/**
+	 * Close acceptance while a switch is only pending. A cancelled switch
+	 * must not retire the launch or destroy its dedupe state.
+	 */
+	suspend(): void {
+		this.closeListener();
+		this.unlinkEndpoint();
+	}
+
+	private retire(reason: string): void {
+		this.suppressStart = true;
+		try {
+			writeFileSync(this.retiredFile, `${reason}\n`, { mode: 0o600 });
+			this.chmod(this.retiredFile, 0o600);
+		} catch (error) {
+			// The accepted set is still preserved, so a module that manages to
+			// reopen this launch cannot resend an admitted ID.
+			this.log("retire_error", { reason, error: String(error) });
+		}
+		this.closeListener();
+		this.unlinkEndpoint();
+	}
+
+	private closeListener(): void {
+		const server = this.server;
+		this.server = undefined;
+		if (server) server.close();
+		for (const socket of this.connections) socket.destroy();
+		this.connections.clear();
+	}
+
+	private unlinkEndpoint(): void {
+		try {
+			unlinkSync(this.config.endpoint);
+		} catch {
+			// Already gone.
+		}
+	}
+
+	private loadAccepted(): void {
+		let data: string;
+		try {
+			data = readFileSync(this.acceptedFile, "utf8");
+		} catch (error) {
+			// Only a genuinely absent state file means an empty accepted set.
+			// Unreadable or corrupt state must fail the start instead of
+			// silently admitting a duplicate submission after a reload.
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT" || statePathExists(this.acceptedFile)) {
+				throw new Error(`accepted state ${this.acceptedFile} is unreadable: ${String(error)}`);
+			}
+			return;
+		}
+		if (data !== "" && !data.endsWith("\n")) {
+			throw new Error(`accepted state ${this.acceptedFile} has an unterminated record`);
+		}
+		for (const record of data.split("\n")) {
+			if (record === "") continue;
+			// Canonical decimal only: a partial append such as "4" must never
+			// fold into ID 4, and "0x10"/"007"/"+4"/"4.0" must not become IDs.
+			if (!/^[1-9][0-9]*$/.test(record)) {
+				throw new Error(`accepted state ${this.acceptedFile} is corrupt`);
+			}
+			const id = Number(record);
+			if (!Number.isSafeInteger(id)) {
+				throw new Error(`accepted state ${this.acceptedFile} is corrupt`);
+			}
+			this.accepted.add(id);
+		}
+	}
+
+	/**
+	 * Durably record the ID before the API call. Without this record a
+	 * reload could admit the same message again after a successful call.
+	 * A write failure therefore means zero calls and a truthful not_sent.
+	 */
+	private reserveAccepted(messageID: number): boolean {
+		try {
+			appendFileSync(this.acceptedFile, `${messageID}\n`, { mode: 0o600 });
+		} catch (error) {
+			this.log("persist_error", { message_id: messageID, error: String(error) });
+			return false;
+		}
+		try {
+			this.chmod(this.acceptedFile, 0o600);
+		} catch (error) {
+			// The durable record exists; a permission fixup failure must not
+			// turn a reserved message into a resend.
+			this.log("chmod_error", { path: this.acceptedFile, error: String(error) });
+		}
+		return true;
+	}
+
+	private handleConnection(socket: net.Socket): void {
+		this.connections.add(socket);
+		const decoder = new FrameDecoder();
+		// pi-uds-v1 is one request/response per connection. A second frame —
+		// in the same chunk or a later one — must never reach the API,
+		// because its outcome would not be read.
+		let handled = false;
+		const onData = (chunk: Buffer) => {
+			if (handled) return;
+			const { lines, overflow } = decoder.push(chunk);
+			if (overflow) {
+				this.log("frame_overflow");
+				handled = true;
+				socket.end(`${this.responseLine(undefined, "not_sent")}\n`);
+				return;
+			}
+			if (lines.length === 0) return;
+			handled = true;
+			socket.end(`${this.handleLine(lines[0])}\n`);
+		};
+		const close = () => this.connections.delete(socket);
+		socket.on("data", onData);
+		socket.on("close", close);
+		socket.on("error", close);
+	}
+
+	private handleLine(line: string): string {
+		let request: any;
+		try {
+			request = JSON.parse(line);
+		} catch {
+			return this.responseLine(undefined, "not_sent");
+		}
+		if (!this.validRequest(request)) return this.responseLine(request, "not_sent");
+		// The request must address the history Pi is in right now, not just
+		// the one named by the launch environment.
+		if (!this.historyMatches()) return this.responseLine(request, "not_sent");
+		// Only known states refuse before the API. isIdle alone cannot
+		// distinguish ordinary busy from compaction, so it is not a guard.
+		if (this.modalOpen || this.compaction) return this.responseLine(request, "not_sent");
+		if (this.accepted.has(request.message_id)) return this.responseLine(request, "accepted");
+		// The ID must be durable before the API, or a reload after a
+		// successful call could submit the same message twice.
+		if (!this.reserveAccepted(request.message_id)) return this.responseLine(request, "not_sent");
+
+		this.accepted.add(request.message_id);
+		try {
+			this.sendUserMessage(request.text);
+		} catch (error) {
+			// The call may already have reached the agent. Never report
+			// not_sent after a possible submission.
+			this.log("send_error", { message_id: request.message_id, error: String(error) });
+		}
+		return this.responseLine(request, "accepted");
+	}
+
+	private validRequest(request: any): boolean {
+		return (
+			typeof request === "object" &&
+			request !== null &&
+			request.v === PROTOCOL_VERSION &&
+			request.session_id === this.config.sessionID &&
+			request.instance_id === this.config.instanceID &&
+			Number.isSafeInteger(request.message_id) &&
+			request.message_id > 0 &&
+			typeof request.text === "string"
+		);
+	}
+
+	private responseLine(request: any, outcome: Outcome): string {
+		const sessionID = typeof request?.session_id === "string" ? request.session_id : this.config.sessionID;
+		const instanceID = typeof request?.instance_id === "string" ? request.instance_id : this.config.instanceID;
+		const messageID = Number.isSafeInteger(request?.message_id) ? request.message_id : 0;
+		return JSON.stringify({
+			v: PROTOCOL_VERSION,
+			session_id: sessionID,
+			instance_id: instanceID,
+			message_id: messageID,
+			outcome,
+		});
+	}
+}
+
+export function createDeliveryExtension(
+	api: ExtensionApiLike,
+	env: Record<string, string | undefined> = process.env,
+): DeliveryBridge | undefined {
+	const config = configFromEnv(env);
+	if (!config) return undefined;
+	const bridge = new DeliveryBridge({
+		...config,
+		sendUserMessage: (text) =>
+			api.sendUserMessage(text, { deliverAs: "followUp", expandPromptTemplates: false }),
+	});
+	api.on("session_start", (_event: any, ctx: any) => {
+		if (!bridge.bindContext(ctx)) {
+			// A reloaded module with a stale env must never open the old
+			// target inside a different history. Neutralize the old path.
+			bridge.stop("foreign-history");
+			return;
+		}
+		bridge.startSafely();
+	});
+	api.on("session_shutdown", (event: any) => {
+		bridge.stop(String(event?.reason ?? ""));
+	});
+	api.on("session_before_switch", () => bridge.suspend());
+	api.on("ui_prompt_start", () => bridge.setModal(true));
+	api.on("ui_prompt_end", () => bridge.setModal(false));
+	api.on("session_before_compact", () => bridge.setCompaction(true));
+	api.on("session_compact", () => bridge.setCompaction(false));
+	api.on("session_compact_failed", () => bridge.setCompaction(false));
+	return bridge;
+}
+
+export default function deliveryExtension(api: ExtensionAPI): void {
+	createDeliveryExtension(api as unknown as ExtensionApiLike);
+}

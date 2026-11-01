@@ -1,0 +1,41 @@
+{
+  "scenario": "busy-multiline",
+  "pi": "1.4.0",
+  "before": {
+    "ok": true,
+    "text": "Первая busy строка\nВторая busy строка",
+    "lines": [
+      "Первая busy строка",
+      "Вторая busy строка"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 15,
+    "idle": false
+  },
+  "after_send": {
+    "ok": true,
+    "text": "Первая busy строка\nВторая busy строка",
+    "lines": [
+      "Первая busy строка",
+      "Вторая busy строка"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 15,
+    "idle": false
+  },
+  "after_settled": {
+    "ok": true,
+    "text": "Первая busy строка\nВторая busy строка",
+    "lines": [
+      "Первая busy строка",
+      "Вторая busy строка"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 15,
+    "idle": true
+  },
+  "provider_calls": 2,
+  "injected_message_id": "ee75ed6d",
+  "injected_transcript_count": 1,
+  "status": "PASS"
+}

@@ -32,7 +32,8 @@ func TestNativeFinalProofTransitionsDeliveringToDelivered(t *testing.T) {
 	injectAt := h.clock.now()
 	claimNativeForTest(t, h, id, injectAt)
 	proofAt := injectAt.Add(time.Second)
-	h.ag.confirmRecords(map[string][]time.Time{"final proof": {proofAt}})
+	proofText := nativePiEnvelope(id, "final proof")
+	h.ag.confirmRecords(map[string][]time.Time{proofText: {proofAt}})
 
 	msg, _ := h.st.GetMessage(id)
 	sess, _ := h.st.GetSession("native")
@@ -46,8 +47,8 @@ func TestNativeFinalProofTransitionsDeliveringToDelivered(t *testing.T) {
 	if got.Status != "delivered" {
 		t.Fatalf("status = %q, want delivered for a proof-backed final scan", got.Status)
 	}
-	if got.DeliveryProofAt != proofAt.UnixNano() || got.DeliveryProofText != "final proof" {
-		t.Fatalf("proof = %d/%q, want %d/%q", got.DeliveryProofAt, got.DeliveryProofText, proofAt.UnixNano(), "final proof")
+	if got.DeliveryProofAt != proofAt.UnixNano() || got.DeliveryProofText != proofText {
+		t.Fatalf("proof = %d/%q, want %d/%q", got.DeliveryProofAt, got.DeliveryProofText, proofAt.UnixNano(), proofText)
 	}
 }
 
@@ -62,9 +63,9 @@ func TestNativeRefusedSendsStillCheckJournal(t *testing.T) {
 	h.q.SetNativeSender(&fakeNativeSender{outcomes: []nativeinput.Outcome{
 		nativeinput.NotSent, nativeinput.NotSent, nativeinput.NotSent, nativeinput.NotSent, nativeinput.NotSent,
 	}})
-	proofAt := h.clock.now().Add(time.Minute)
-	h.ag.confirmRecords(map[string][]time.Time{"refused but recorded": {proofAt}})
 	id := addMsg(t, h, "native", "refused but recorded")
+	proofAt := h.clock.now().Add(time.Minute)
+	h.ag.confirmRecords(map[string][]time.Time{nativePiEnvelope(id, "refused but recorded"): {proofAt}})
 	h.q.Wake("native")
 
 	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "delivered" }, "delivered from the final journal scan")
@@ -82,8 +83,10 @@ func TestNativeRefusedSendsIgnoreJournalBeforeClaim(t *testing.T) {
 	h.q.SetNativeSender(&fakeNativeSender{outcomes: []nativeinput.Outcome{
 		nativeinput.NotSent, nativeinput.NotSent, nativeinput.NotSent, nativeinput.NotSent, nativeinput.NotSent,
 	}})
-	h.ag.confirmRecords(map[string][]time.Time{"old same text": {h.clock.now().Add(-time.Hour)}})
 	id := addMsg(t, h, "native", "old same text")
+	oldEnvelope := nativePiEnvelope(id, "old same text")
+	oldAt := h.clock.now().Add(-time.Hour)
+	h.ag.confirmRecords(map[string][]time.Time{oldEnvelope: {oldAt}})
 	h.q.Wake("native")
 
 	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "failed" }, "old journal record must not prove a refused message")
@@ -93,6 +96,15 @@ func TestNativeRefusedSendsIgnoreJournalBeforeClaim(t *testing.T) {
 	}
 	if msg.InjectAt == 0 {
 		t.Fatal("claim must persist the proof window before the send attempts")
+	}
+	// The matching signed record existed but must have been excluded by the
+	// persisted proof window, not by a missing journal entry.
+	calls := h.ag.confirmCalls()
+	if len(calls) == 0 || calls[0].text != oldEnvelope {
+		t.Fatalf("final scan did not query the signed record: %+v", calls)
+	}
+	if !calls[0].since.Equal(time.UnixMilli(msg.InjectAt)) || !calls[0].since.After(oldAt) {
+		t.Fatalf("final scan since = %v, want the persisted inject_at %v after the old record %v", calls[0].since, time.UnixMilli(msg.InjectAt), oldAt)
 	}
 	assertNoTmux(t, rt)
 }
@@ -107,10 +119,13 @@ func TestNativeProofOwnershipIsPerRecipient(t *testing.T) {
 	sender := &fakeNativeSender{}
 	h.q.SetNativeSender(sender)
 	h.startConfirmer()
-	at := h.clock.now().Add(time.Second)
-	h.ag.confirmRecords(map[string][]time.Time{"same": {at}})
 	a := addMsg(t, h, "native-a", "same")
 	b := addMsg(t, h, "native-b", "same")
+	at := h.clock.now().Add(time.Second)
+	h.ag.confirmRecords(map[string][]time.Time{
+		nativePiEnvelope(a, "same"): {at},
+		nativePiEnvelope(b, "same"): {at},
+	})
 	h.q.Wake("native-a")
 	h.q.Wake("native-b")
 
@@ -182,23 +197,30 @@ func TestNativeFinalProofDoesNotReuseEarlierEqualRecord(t *testing.T) {
 	h := newTestQueue(t)
 	h.addNativeSession(t, "native")
 	first := addMsg(t, h, "native", "same")
+	second := addMsg(t, h, "native", "same")
 	if err := h.st.UpdateMessageStatus(first, "accepted", 1, 0, ""); err != nil {
 		t.Fatal(err)
 	}
 	proofAt := h.clock.now().Add(time.Second)
-	if ok, err := h.st.ConfirmAccepted(first, h.clock.now().Unix(), proofAt.UnixNano(), "same"); err != nil || !ok {
+	// The earlier message consumed exactly the record the later native
+	// message would need: its saved proof text is the later signed envelope.
+	sharedProof := nativePiEnvelope(second, "same")
+	if ok, err := h.st.ConfirmAccepted(first, h.clock.now().Unix(), proofAt.UnixNano(), sharedProof); err != nil || !ok {
 		t.Fatalf("confirm first = %v, %v", ok, err)
 	}
 
-	second := addMsg(t, h, "native", "same")
 	claimNativeForTest(t, h, second, h.clock.now().Add(-time.Second))
-	h.ag.confirmRecords(map[string][]time.Time{"same": {proofAt}})
+	h.ag.confirmRecords(map[string][]time.Time{sharedProof: {proofAt}})
 
 	msg, _ := h.st.GetMessage(second)
 	sess, _ := h.st.GetSession("native")
 	_, confirmer := h.q.recipientCaps(sess)
 	h.q.failNativeAttempt(h.ctx, msg, sess, confirmer)
 
+	calls := h.ag.confirmCalls()
+	if len(calls) == 0 || calls[len(calls)-1].text != sharedProof {
+		t.Fatalf("final scan did not query the spent signed record: %+v", calls)
+	}
 	got, _ := h.st.GetMessage(second)
 	if got.Status != "failed" || got.Reason != nativeDeliveryUnconfirmed {
 		t.Fatalf("second message = %+v, want conservative failed/%s", got, nativeDeliveryUnconfirmed)
@@ -210,6 +232,13 @@ func TestNativeFinalProofDoesNotReuseEarlierEqualRecord(t *testing.T) {
 type blockingFinalConfirmer struct{ *fakeAgent }
 
 func (c *blockingFinalConfirmer) ConfirmDelivered(ctx context.Context, ref agent.ActivityRef, text string, since time.Time) (bool, time.Time, error) {
+	<-ctx.Done()
+	return false, time.Time{}, ctx.Err()
+}
+
+// ConfirmNativeDelivered keeps the same blocking behavior on the strict
+// native adapter path.
+func (c *blockingFinalConfirmer) ConfirmNativeDelivered(ctx context.Context, ref agent.ActivityRef, text string, since time.Time) (bool, time.Time, error) {
 	<-ctx.Done()
 	return false, time.Time{}, ctx.Err()
 }
@@ -344,20 +373,23 @@ func TestNativePurgeKeepsProofForPendingConfirmationAcrossRecover(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.st.UpdateMessageStatus(first, "accepted", 1, 0, ""); err != nil {
-		t.Fatal(err)
-	}
-	if ok, err := h.st.ConfirmAccepted(first, h.clock.now().Unix(), proofAt.UnixNano(), "same"); err != nil || !ok {
-		t.Fatalf("confirm first = %v, %v", ok, err)
-	}
-
 	second, err := h.st.AddMessage(store.Message{ToSession: "native", Body: "same", CreatedAt: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := h.st.UpdateMessageStatus(first, "accepted", 1, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	// The first row's consumed proof is exactly the later native signed
+	// envelope, so the retention/ownership guard is genuinely loaded.
+	sharedProof := nativePiEnvelope(second, "same")
+	if ok, err := h.st.ConfirmAccepted(first, h.clock.now().Unix(), proofAt.UnixNano(), sharedProof); err != nil || !ok {
+		t.Fatalf("confirm first = %v, %v", ok, err)
+	}
+
 	claimNativeForTest(t, h, second, h.clock.now().Add(-time.Second))
 
-	h.ag.confirmRecords(map[string][]time.Time{"same": {proofAt}})
+	h.ag.confirmRecords(map[string][]time.Time{sharedProof: {proofAt}})
 	h.q.Recover(h.ctx) // native delivering -> accepted for journal confirmation
 	if err := h.st.PurgeOld(500); err != nil {
 		t.Fatalf("PurgeOld: %v", err)
@@ -371,6 +403,10 @@ func TestNativePurgeKeepsProofForPendingConfirmationAcrossRecover(t *testing.T) 
 
 	st := &confirmState{used: make(map[string]map[recordKey]struct{}), restored: make(map[string]bool)}
 	h.q.confirmPass(h.ctx, st)
+	calls := h.ag.confirmCalls()
+	if len(calls) == 0 || calls[len(calls)-1].text != sharedProof {
+		t.Fatalf("pending native scan did not query the spent signed record: %+v", calls)
+	}
 	if got := messageStatus(t, h.st, second); got != "accepted" {
 		t.Fatalf("pending native message settled with another message's proof: %q", got)
 	}

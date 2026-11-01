@@ -85,6 +85,48 @@ func (p *Pi) ConfirmDelivered(ctx context.Context, ref agent.ActivityRef, text s
 	return found, at, nil
 }
 
+// ConfirmNativeDelivered reports whether the bound session's active branch
+// holds one user record whose complete joined text content equals text after
+// whitespace normalization. Unlike ConfirmDelivered it never matches a
+// substring, a run of whole lines, or individual text parts.
+func (p *Pi) ConfirmNativeDelivered(ctx context.Context, ref agent.ActivityRef, text string, since time.Time) (bool, time.Time, error) {
+	want := normalizeSpace(text)
+	if want == "" {
+		return false, time.Time{}, nil
+	}
+	path, err := findSession(piHome(), ref.WorktreePath, ref.SessionID)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	records, err := readActiveBranch(path)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	var at time.Time
+	found := false
+	for i := len(records) - 1; i >= 0; i-- {
+		if err := ctx.Err(); err != nil {
+			return false, time.Time{}, err
+		}
+		rec := records[i]
+		if !rec.Timestamp.IsZero() && !rec.Timestamp.After(since) {
+			break
+		}
+		parts, ok := userText(rec)
+		if !ok || rec.Timestamp.IsZero() || !rec.Timestamp.After(since) {
+			continue
+		}
+		// One record proves the text only as a whole: all text parts joined,
+		// normalized, and equal. A quoted envelope in a larger record, an
+		// envelope in one part plus other text, or a number-only record for a
+		// nonempty body never match.
+		if normalizeSpace(strings.Join(parts, "\n")) == want {
+			at, found = rec.Timestamp, true
+		}
+	}
+	return found, at, nil
+}
+
 func holdsLines(recorded, want string) bool {
 	if !strings.Contains(normalizeSpace(recorded), want) {
 		return false

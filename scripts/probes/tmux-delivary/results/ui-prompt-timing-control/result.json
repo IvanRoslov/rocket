@@ -1,0 +1,31 @@
+{
+  "scenario": "ui-prompt-timing-control",
+  "pi": "1.4.0",
+  "mode": "control-synchronous-handler",
+  "slow_handler_ms": null,
+  "extension_order": [
+    "ui-timing-probe-extension.ts"
+  ],
+  "state_during_window": {
+    "ok": true,
+    "flag": true,
+    "promptOpen": true,
+    "idle": true,
+    "model": "timing/deterministic"
+  },
+  "timeline": {
+    "opened_at": 1793529878670.4253,
+    "prompt_requested_at": 1793529878671,
+    "flag_set_at": 1793529878671
+  },
+  "guard_delay_from_prompt_ms": 0,
+  "state_final": {
+    "ok": true,
+    "flag": false,
+    "promptOpen": false,
+    "idle": true,
+    "model": "timing/deterministic"
+  },
+  "transcript_messages": 0,
+  "status": "PASS"
+}

@@ -1,0 +1,89 @@
+{
+  "scenario": "busy-multiline",
+  "pi": "1.4.0",
+  "session_id": "live-busy-multiline",
+  "pi_session_id": "live-busy-multiline",
+  "instance_id": "bdbb418ebec39eaa",
+  "endpoint_kind": "short /tmp UDS",
+  "extensions": [
+    "native-bridge-probe-extension.ts",
+    "delivery-extension.ts"
+  ],
+  "before": {
+    "ok": true,
+    "text": "Первая строка\nВторая строка во время хода",
+    "lines": [
+      "Первая строка",
+      "Вторая строка во время хода"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 24,
+    "idle": false,
+    "model": "probe/deterministic",
+    "editorInputCount": 50,
+    "editorLastInput": "\u001b[D",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false,
+    "sessionId": "live-busy-multiline"
+  },
+  "busy_idle": false,
+  "response": {
+    "v": 1,
+    "session_id": "live-busy-multiline",
+    "instance_id": "bdbb418ebec39eaa",
+    "message_id": 201,
+    "outcome": "accepted"
+  },
+  "after_send": {
+    "ok": true,
+    "text": "Первая строка\nВторая строка во время хода",
+    "lines": [
+      "Первая строка",
+      "Вторая строка во время хода"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 24,
+    "idle": false,
+    "model": "probe/deterministic",
+    "editorInputCount": 50,
+    "editorLastInput": "\u001b[D",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false,
+    "sessionId": "live-busy-multiline"
+  },
+  "after_settled": {
+    "ok": true,
+    "text": "Первая строка\nВторая строка во время хода",
+    "lines": [
+      "Первая строка",
+      "Вторая строка во время хода"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 24,
+    "idle": true,
+    "model": "probe/deterministic",
+    "editorInputCount": 50,
+    "editorLastInput": "\u001b[D",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false,
+    "sessionId": "live-busy-multiline"
+  },
+  "draft_preserved": true,
+  "injected_count": 1,
+  "user_texts": [
+    "run",
+    "[rocket #201] Внешнее сообщение busy-multiline"
+  ],
+  "provider_calls": 2,
+  "user_role_order": [
+    "system",
+    "user",
+    "assistant",
+    "user",
+    "assistant"
+  ],
+  "status": "PASS"
+}

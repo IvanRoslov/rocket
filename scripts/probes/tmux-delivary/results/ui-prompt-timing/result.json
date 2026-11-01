@@ -1,0 +1,61 @@
+{
+  "scenario": "ui-prompt-timing",
+  "pi": "1.4.0",
+  "mode": "reproducer-async-earlier-handler",
+  "slow_handler_ms": 1200,
+  "extension_order": [
+    "slow-ui-listener-extension.ts",
+    "ui-timing-probe-extension.ts"
+  ],
+  "state_during_window": {
+    "ok": true,
+    "flag": false,
+    "promptOpen": true,
+    "idle": true,
+    "model": "timing/deterministic"
+  },
+  "screen_evidence": [
+    "Probe modal → one two"
+  ],
+  "injected_message_id": "3f6d8ccb",
+  "injected_transcript_count": 1,
+  "timeline": {
+    "opened_at": 1793530618192.021,
+    "send_at": 1793530618249.4258,
+    "prompt_requested_at": 1793530618192,
+    "provider_start_at": 1793530618253,
+    "slow_start_begin_at": 1793530618192,
+    "slow_start_end_at": 1793530619394,
+    "flag_set_at": 1793530619394,
+    "slow_end_end_at": 1793530620648,
+    "flag_cleared_at": 1793530620648
+  },
+  "send_result": {
+    "ok": true,
+    "flagAtSend": false,
+    "promptOpen": true
+  },
+  "state_after_run": {
+    "ok": true,
+    "flag": false,
+    "promptOpen": true,
+    "idle": true,
+    "model": "timing/deterministic"
+  },
+  "state_flag_late": {
+    "ok": true,
+    "flag": true,
+    "promptOpen": true,
+    "idle": true,
+    "model": "timing/deterministic"
+  },
+  "state_final": {
+    "ok": true,
+    "flag": false,
+    "promptOpen": false,
+    "idle": true,
+    "model": "timing/deterministic"
+  },
+  "guard_delay_from_prompt_ms": 1202,
+  "status": "PASS"
+}
