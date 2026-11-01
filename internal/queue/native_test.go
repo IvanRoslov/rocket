@@ -332,8 +332,12 @@ func TestNativeRecoveryDoesNotReuseEqualTextProof(t *testing.T) {
 			if collision {
 				proofAt = base
 			}
-			h.ag.confirmRecords(map[string][]time.Time{"same": {proofAt}})
 			first := addMsg(t, h, "native", "same")
+			second := addMsg(t, h, "native", "same")
+			// The consumed record is exactly the later native signed envelope,
+			// so the no-reuse guard is genuinely exercised.
+			sharedProof := nativePiEnvelope(second, "same")
+			h.ag.confirmRecords(map[string][]time.Time{sharedProof: {proofAt}})
 			firstMsg, _ := h.st.GetMessage(first)
 			firstMsg.Status = "accepted"
 			firstMsg.Attempts = 1
@@ -346,11 +350,10 @@ func TestNativeRecoveryDoesNotReuseEqualTextProof(t *testing.T) {
 			}
 			st1 := &confirmState{used: make(map[string]map[recordKey]struct{}), restored: make(map[string]bool)}
 			_, confirmer := h.q.recipientCaps(store.Session{Agent: "codex"})
-			if !h.q.confirmOne(h.ctx, st1, confirmer, agent.ActivityRef{SessionID: "native"}, "native", firstMsg, "same") {
+			if !h.q.confirmOne(h.ctx, st1, confirmer, agent.ActivityRef{SessionID: "native"}, "native", firstMsg, sharedProof) {
 				t.Fatal("first equal-text message was not confirmed")
 			}
 
-			second := addMsg(t, h, "native", "same")
 			if ok, err := h.st.ClaimNativeMessage(second, "pi-uds-v1", base.Add(-time.Second).UnixMilli()); err != nil || !ok {
 				t.Fatalf("second claim = %v, %v", ok, err)
 			}
@@ -359,6 +362,10 @@ func TestNativeRecoveryDoesNotReuseEqualTextProof(t *testing.T) {
 			st2 := &confirmState{used: make(map[string]map[recordKey]struct{}), restored: make(map[string]bool)}
 			h.q.confirmPass(h.ctx, st2)
 
+			calls := h.ag.confirmCalls()
+			if len(calls) == 0 || calls[len(calls)-1].text != sharedProof {
+				t.Fatalf("recovery scan did not query the spent signed record: %+v", calls)
+			}
 			msg, _ := h.st.GetMessage(second)
 			if msg.Status != "failed" || msg.Reason != "native_delivery_unconfirmed" {
 				t.Fatalf("unsent equal-text message = %+v, want conservative failure, not false delivery", msg)

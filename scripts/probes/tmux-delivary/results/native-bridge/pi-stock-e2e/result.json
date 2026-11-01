@@ -4,10 +4,33 @@
   "command": "ROCKET_PI_STOCK_E2E=1 go test -count=1 -timeout=90s ./internal/queue -run ^TestPiNativeQueueStockE2E$",
   "provider": "local deterministic probe/deterministic",
   "result": "PASS",
-  "a": {"rocket_id": 1, "status": "failed", "reason": "native_delivery_unconfirmed", "proof_at": 0, "api_calls": 1, "sender_invocations": 1, "user_records": 0},
-  "b": {"rocket_id": 2, "status": "delivered", "proof_at": 1793560000226000000, "api_calls": 1, "sender_invocations": 1, "user_records": 1},
-  "input_events": {"handled": 1, "continued": 1, "sources": ["extension", "extension"]},
+  "a": {
+    "rocket_id": 1,
+    "status": "failed",
+    "reason": "native_delivery_unconfirmed",
+    "proof_at": 0,
+    "api_calls": 1,
+    "sender_invocations": 1,
+    "user_records": 0
+  },
+  "b": {
+    "rocket_id": 2,
+    "status": "delivered",
+    "proof_at": 1793562563860000000,
+    "api_calls": 1,
+    "sender_invocations": 1,
+    "user_records": 1
+  },
+  "input_events": {
+    "handled": 1,
+    "continued": 1,
+    "sources": [
+      "extension",
+      "extension"
+    ]
+  },
   "tmux_calls": 0,
   "body_unchanged": true,
-  "note": "First run showed B delivered while A stayed accepted with no proof; after the test-only +31m clock offset and a normal confirmer wake, A became failed/native_delivery_unconfirmed with no resend. Private temp paths and raw PTY/logs are not committed."
+  "note": "First run showed B delivered while A stayed accepted with no proof; after the test-only +31m clock offset and a normal confirmer wake, A became failed/native_delivery_unconfirmed with no resend. Private temp paths and raw PTY/logs are not committed. Final rerun used a synchronized test clock; -race passed with the same counters.",
+  "race": "PASS (ROCKET_PI_STOCK_E2E=1 go test -race ...)"
 }

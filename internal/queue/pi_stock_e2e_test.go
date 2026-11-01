@@ -208,6 +208,25 @@ func (s *piStockSender) counts() map[int64]int {
 	return counts
 }
 
+// piStockClock is a synchronized test clock: the confirm loop reads it while
+// the test changes the offset, so the opt-in E2E is race-free under -race.
+type piStockClock struct {
+	mu     sync.Mutex
+	offset time.Duration
+}
+
+func (c *piStockClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return time.Now().Add(c.offset)
+}
+
+func (c *piStockClock) setOffset(offset time.Duration) {
+	c.mu.Lock()
+	c.offset = offset
+	c.mu.Unlock()
+}
+
 type piStockInputEvent struct {
 	Event  string `json:"event"`
 	Text   string `json:"text"`
@@ -394,6 +413,8 @@ func TestPiNativeQueueStockE2E(t *testing.T) {
 		t.Fatalf("AddSession: %v", err)
 	}
 
+	testClock := &piStockClock{}
+	q.now = testClock.now
 	q.Recover(ctx)
 	go q.Run(ctx)
 
@@ -473,7 +494,7 @@ func TestPiNativeQueueStockE2E(t *testing.T) {
 
 	// Test-only synchronized clock offset; the config stays untouched. Pi is
 	// alive and B is proven before this point.
-	q.now = func() time.Time { return time.Now().Add(31 * time.Minute) }
+	testClock.setOffset(31 * time.Minute)
 	q.kickConfirmer()
 	piStockWait(t, 10*time.Second, func() bool {
 		return piStockStatus(t, st, aID) == "failed"
