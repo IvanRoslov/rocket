@@ -217,11 +217,13 @@ func (s *corrSender) Send(ctx context.Context, target nativeinput.Target, messag
 	record := messageID == s.recordFor
 	s.mu.Unlock()
 
-	// Every send boundary advances the fixture clock; the record belongs to
-	// the recipient's turn and appears after the boundary of its own send.
+	// Every send boundary advances the fixture clock. The record belongs to
+	// the recipient's turn and is appended at the clock's current value, so
+	// it is strictly after both persisted send boundaries and never in the
+	// future relative to the confirmation pass.
 	s.clock.advance(time.Second)
 	if record {
-		s.journal.appendRecord(text, messageID, s.clock.now().Add(time.Second))
+		s.journal.appendRecord(text, messageID, s.clock.now())
 	}
 	return nativeinput.Accepted, nil
 }
@@ -381,6 +383,27 @@ func TestPiEqualTextCorrelationBRecordDoesNotConfirmA(t *testing.T) {
 	if record.owner != bID {
 		t.Fatalf("oracle: the only record was appended by %d, want B=%d", record.owner, bID)
 	}
+	aPersisted, _ := h.st.GetMessage(aID)
+	bPersisted, _ := h.st.GetMessage(bID)
+	if !record.at.After(time.UnixMilli(aPersisted.InjectAt)) || !record.at.After(time.UnixMilli(bPersisted.InjectAt)) {
+		t.Fatalf("oracle: record at=%d must be strictly after both persisted boundaries A=%d B=%d",
+			record.at.UnixNano(), aPersisted.InjectAt, bPersisted.InjectAt)
+	}
+	if record.at.After(h.clock.now()) {
+		t.Fatalf("oracle: record at=%d is in the future relative to the confirmation clock %d",
+			record.at.UnixNano(), h.clock.now().UnixNano())
+	}
+	if aPersisted.DeliveryProofAt != 0 || bPersisted.DeliveryProofAt != 0 {
+		t.Fatalf("oracle: messages already carry proof before confirmation: A=%d B=%d",
+			aPersisted.DeliveryProofAt, bPersisted.DeliveryProofAt)
+	}
+	sent := h.sender.callTexts()
+	if len(sent) != 2 || sent[0] != sent[1] {
+		t.Fatalf("oracle: sent envelopes differ: %q", sent)
+	}
+	if got := h.sender.callIDs(); len(got) != 2 || got[0] == got[1] {
+		t.Fatalf("oracle: send IDs must be distinct, got %v", got)
+	}
 	if got := h.rt.tmuxCalls(); got != 0 {
 		t.Fatalf("tmux calls on the native route = %d, want 0", got)
 	}
@@ -428,25 +451,36 @@ func TestPiEqualTextCorrelationControls(t *testing.T) {
 		}
 	})
 
-	t.Run("record before both boundaries is never proof", func(t *testing.T) {
+	t.Run("old-only record never proves a later send", func(t *testing.T) {
 		h := newCorrHarness(t)
 		h.addNativeSession(t, "native")
 		const body = "старая запись"
+		envelope := "[from sender] " + body
 		oldAt := h.clock.now().Add(-time.Minute)
-		h.journal.appendRecord(body, 0, oldAt)
+		// Seed the exact normalized envelope the sends will use, so age is the
+		// only reason this record cannot prove either send.
+		h.journal.appendRecord(envelope, 0, oldAt)
 		aID := h.addMessage(t, "sender", "native", body)
 		bID := h.addMessage(t, "sender", "native", body)
-		h.sender.recordFor = bID
+		// recordFor stays 0: no message gets a matching record after the
+		// boundaries, so only the old record could ever match.
 		h.q.SetNativeSender(h.sender)
 		h.q.Wake("native")
 		corrWait(t, 5*time.Second, func() bool {
 			return h.status(t, aID) == "accepted" && h.status(t, bID) == "accepted"
 		}, "both sends accepted")
+		sent := h.sender.callTexts()
+		if len(sent) != 2 || normalizeCorrText(sent[0]) != envelope || normalizeCorrText(sent[1]) != envelope {
+			t.Fatalf("oracle: sent envelopes %q do not equal the seeded record %q", sent, envelope)
+		}
 		h.confirmPass()
 		a, _ := h.st.GetMessage(aID)
 		b, _ := h.st.GetMessage(bID)
-		if a.DeliveryProofAt == oldAt.UnixNano() || b.DeliveryProofAt == oldAt.UnixNano() {
-			t.Fatalf("a record before the inject_at boundary was used as proof: A=%+v B=%+v", a, b)
+		if a.Status == "delivered" || b.Status == "delivered" {
+			t.Fatalf("an old record before the boundaries proved a later send: A=%+v B=%+v", a, b)
+		}
+		if a.DeliveryProofAt != 0 || b.DeliveryProofAt != 0 {
+			t.Fatalf("an old record was recorded as proof: A=%+v B=%+v", a, b)
 		}
 	})
 

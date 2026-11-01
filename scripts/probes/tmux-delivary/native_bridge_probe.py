@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[3]
 OBSERVER = ROOT / "scripts" / "probes" / "tmux-delivary" / "native-bridge-probe-extension.ts"
 PRODUCTION = ROOT / "internal" / "agent" / "pi" / "delivery-extension.ts"
 SLOW = ROOT / "scripts" / "probes" / "tmux-delivary" / "slow-ui-listener-extension.ts"
+INPUT_HANDLED = ROOT / "scripts" / "probes" / "tmux-delivary" / "input-handled-extension.ts"
 PI_VERSION = subprocess.check_output(["pi", "--version"], text=True).strip()
 if PI_VERSION != "1.4.0":
     raise RuntimeError(f"Pi 1.4.0 is required, found {PI_VERSION}")
@@ -108,7 +109,7 @@ def native_request(endpoint, session_id, instance_id, message_id, text, version=
 
 class Session:
     def __init__(self, scenario, delay_ms=150, slow=False, extra_env=None,
-                 native_expected=True, pi_session_id=None):
+                 native_expected=True, pi_session_id=None, input_handled_text=None):
         self.scenario = scenario
         self.dir = Path(tempfile.mkdtemp(prefix="rpi-live-", dir="/tmp"))
         os.chmod(self.dir, 0o700)
@@ -120,8 +121,10 @@ class Session:
         self.endpoint = self.dir / "s"
         self.probe_socket = self.dir / "p"
         self.events = self.dir / "events.jsonl"
+        self.input_log = self.dir / "input-handled.jsonl"
         self.pty_raw = self.dir / "pty.raw"
         self.native_expected = native_expected
+        self.input_handled_text = input_handled_text
         self.session_id = "live-" + scenario
         self.pi_session_id = pi_session_id or self.session_id
         self.instance_id = secrets.token_hex(8)
@@ -150,6 +153,9 @@ class Session:
         })
         if slow:
             env["PI_TIMING_SLOW_LOG"] = str(self.dir / "slow-events.jsonl")
+        if input_handled_text is not None:
+            env["PI_INPUT_HANDLED_LOG"] = str(self.input_log)
+            env["PI_INPUT_HANDLED_TEXT"] = input_handled_text
         if extra_env:
             env.update(extra_env)
         self.env = env
@@ -161,6 +167,8 @@ class Session:
         ]
         if slow:
             command.extend(["--extension", str(SLOW)])
+        if input_handled_text is not None:
+            command.extend(["--extension", str(INPUT_HANDLED)])
         command.extend(["--extension", str(OBSERVER), "--extension", str(PRODUCTION)])
         master, slave = pty.openpty()
         import fcntl
@@ -249,6 +257,11 @@ class Session:
         if not self.events.exists():
             return []
         return [json.loads(line) for line in self.events.read_text().splitlines() if line]
+
+    def input_events(self):
+        if not self.input_log.exists():
+            return []
+        return [json.loads(line) for line in self.input_log.read_text().splitlines() if line]
 
     def wait_event_count(self, name, count, timeout=15):
         return wait_until(
@@ -691,6 +704,42 @@ def scenario_foreign_history():
         s.cleanup()
 
 
+def scenario_handled_input():
+    # Q5 witness through the supported public Extension API: the first
+    # extension-sourced input identical to the witness text is answered with
+    # {action:"handled"} (no user record), the second identical input
+    # continues and is recorded. Both bridge responses stay accepted.
+    witness = "Q5 одинаковый witness"
+    s = Session("handled-input", input_handled_text=witness)
+    try:
+        result = s.base_result()
+        result["extensions"] = [INPUT_HANDLED.name, OBSERVER.name, PRODUCTION.name]
+        result["witness_text"] = witness
+        result["first"] = s.native(1001, witness)
+        result["second"] = s.native(1002, witness)
+        wait_until(lambda: s.user_texts().count(witness) >= 1, 10, "witness user record", s.pty_text, s.read_available)
+        s.wait_idle(True)
+        rows = s.input_events()
+        result["input_events"] = rows
+        result["handled_events"] = [row for row in rows if row["event"] == "handled"]
+        result["continued_events"] = [row for row in rows if row["event"] == "continued"]
+        result["input_sources"] = [row.get("source") for row in rows if row["event"] == "input"]
+        result["user_texts"] = s.user_texts()
+        result["matching_records"] = s.user_texts().count(witness)
+        result["provider_calls"] = s.provider_calls()
+        result["status"] = "PASS" if (
+            result["first"]["outcome"] == "accepted"
+            and result["second"]["outcome"] == "accepted"
+            and len(result["handled_events"]) == 1
+            and len(result["continued_events"]) == 1
+            and result["matching_records"] == 1
+            and result["input_sources"] == ["extension", "extension"]
+        ) else "FAIL"
+        return result
+    finally:
+        s.cleanup()
+
+
 SCENARIOS = {
     "idle-single": lambda: scenario_idle("idle-single", "Русский однострочный черновик", multiline=False),
     "idle-multiline": lambda: scenario_idle("idle-multiline", "Первая строка\nВторая строка с курсором", multiline=True),
@@ -709,6 +758,7 @@ SCENARIOS = {
     "escape-dequeue": scenario_escape_dequeue,
     "reload": scenario_reload,
     "foreign-history": scenario_foreign_history,
+    "handled-input": scenario_handled_input,
 }
 
 

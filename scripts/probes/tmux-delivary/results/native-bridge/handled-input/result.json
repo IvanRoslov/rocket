@@ -1,0 +1,80 @@
+{
+  "scenario": "handled-input",
+  "pi": "1.4.0",
+  "session_id": "live-handled-input",
+  "pi_session_id": "live-handled-input",
+  "instance_id": "b2d0fd682439bd7e",
+  "endpoint_kind": "short /tmp UDS",
+  "extensions": [
+    "input-handled-extension.ts",
+    "native-bridge-probe-extension.ts",
+    "delivery-extension.ts"
+  ],
+  "witness_text": "Q5 одинаковый witness",
+  "first": {
+    "v": 1,
+    "session_id": "live-handled-input",
+    "instance_id": "b2d0fd682439bd7e",
+    "message_id": 1001,
+    "outcome": "accepted"
+  },
+  "second": {
+    "v": 1,
+    "session_id": "live-handled-input",
+    "instance_id": "b2d0fd682439bd7e",
+    "message_id": 1002,
+    "outcome": "accepted"
+  },
+  "input_events": [
+    {
+      "event": "input",
+      "time": 1793552214657,
+      "text": "Q5 одинаковый witness",
+      "source": "extension",
+      "streamingBehavior": null,
+      "identical": true
+    },
+    {
+      "event": "handled",
+      "time": 1793552214657,
+      "text": "Q5 одинаковый witness"
+    },
+    {
+      "event": "input",
+      "time": 1793552214658,
+      "text": "Q5 одинаковый witness",
+      "source": "extension",
+      "streamingBehavior": null,
+      "identical": true
+    },
+    {
+      "event": "continued",
+      "time": 1793552214658,
+      "text": "Q5 одинаковый witness"
+    }
+  ],
+  "handled_events": [
+    {
+      "event": "handled",
+      "time": 1793552214657,
+      "text": "Q5 одинаковый witness"
+    }
+  ],
+  "continued_events": [
+    {
+      "event": "continued",
+      "time": 1793552214658,
+      "text": "Q5 одинаковый witness"
+    }
+  ],
+  "input_sources": [
+    "extension",
+    "extension"
+  ],
+  "user_texts": [
+    "Q5 одинаковый witness"
+  ],
+  "matching_records": 1,
+  "provider_calls": 1,
+  "status": "PASS"
+}

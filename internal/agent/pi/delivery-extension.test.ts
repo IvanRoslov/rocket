@@ -587,29 +587,26 @@ test("danglingAcceptedSymlinkFailsClosed", async (t) => {
 	assert.equal(api.calls.length, 0);
 });
 
-test("deferredHandlerErrorAdmitsNoRecord", async (t) => {
-	// Q5 fixture: the supported Pi API accepts sendUserMessage and returns
-	// void. A later handler error can drop the turn, so an accepted call may
-	// leave no user record; a later call with the same text can leave the
-	// only one. The bridge cannot report NotSent after either call.
+test("mockAcceptedCallMayLeaveNoRecord", async (t) => {
+	// Q5 fixture only: this mocks the supported API shape in which one
+	// accepted sendUserMessage call leaves no user record and a later
+	// identical call leaves the only one. It does not execute an input
+	// handler or an error and is not real Pi evidence; the actual handler
+	// witness is the isolated stock-Pi probe scenario.
 	const api = new FakeApi();
 	const journal: string[] = [];
-	let deferNext = false;
-	const recordSend = (text: string, options: any): void => {
+	let dropNext = false;
+	api.sendUserMessage = (text: string, options: any): void => {
 		api.calls.push({ text, options });
-		if (deferNext) {
-			deferNext = false;
-			setTimeout(() => {
-				// Deferred handler error: the turn is dropped, no record.
-			}, 0);
+		if (dropNext) {
+			dropNext = false;
 			return;
 		}
 		journal.push(text);
 	};
-	api.sendUserMessage = recordSend;
 	const { endpoint, sessionID, instanceID } = await makeBridge(t, api);
 
-	deferNext = true;
+	dropNext = true;
 	const first = await connectRequest(endpoint, {
 		v: 1, session_id: sessionID, instance_id: instanceID, message_id: 401, text: "одинаковый",
 	});
