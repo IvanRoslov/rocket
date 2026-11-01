@@ -144,9 +144,19 @@ python3 scripts/probes/tmux-delivary/ui_prompt_timing_probe.py
 - `session_compact_failed` — после ошибки/отмены, включая отмену расширением (`types.d.ts:622-635`; регистрация `:1195`).
 - `ctx.isIdle()` ложен для agent run и compaction/branch summary (`agent-session.js:1067-1074`, `1223-1228`); `prompt()` независимо отказывает при активном `_compactionAbortController` (`agent-session.js:1648-1650`).
 
-Это позволяет вернуть `not_sent` до вызова API в подавляющем большинстве случаев.
+Это позволяет вернуть `not_sent` до вызова API, если признак активной compaction проверен синхронно перед вызовом. **Гонки guard→call здесь нет**: синхронная проверка в расширении и непосредственный вызов `pi.sendUserMessage(...)` выполняются в одной задаче JavaScript; без `await` между ними compaction не может вклиниться. Прежняя формулировка «compaction между проверкой и вызовом» была бы неверной.
 
-Остаточная гонка: compaction может начаться между проверкой флага и `sendUserMessage`. Тогда `prompt()` бросит ошибку, но `ExtensionAPI.sendUserMessage` — fire-and-forget: ошибка уходит только в error-listener раннера (`agent-session.js:2774-2782`, `runner.js:493-499`) без идентификатора сообщения. Мост вернёт `accepted`, а journal подтвердит недоставку и завершит `native_delivery_unconfirmed`. Это соответствует честной семантике accepted/unknown, но не «`not_sent` до API». Повреждения черновика при этом нет: `prompt()` падает до запуска хода.
+Остающаяся граница — отложенные и асинхронные шаги внутри `prompt()`, а не интервал перед вызовом API:
+
+- при `_isEmittingAgentSettled` вызов не выполняется сразу, а кладётся в `_deferredSettledActions` (`agent-session.js:1632-1635`) и выполнится позже, на settled-границе; compaction может стать активной к этому моменту;
+- после синхронной проверки `_compactionAbortController` (`agent-session.js:1648-1650`) идут `await this._runInputHandlers(...)` (`:1652`), затем `await this._queueFollowUp(...)`/`_queueSteer` (`:1670`, `:1673`) для streaming или `await this._startRun(...)` (`:1693`) для idle. На этих await-границах compaction может начаться уже после того, как мост вызвал API;
+- при `expandPromptTemplates: false` (контракт моста) ветка `await this._tryExecuteExtensionCommand(...)` (`:1640-1647`) не выполняется, поэтому при обычном вызове синхронная проверка действительно достигается в той же задаче, что и вызов.
+
+Отдельная source-level граница — лаг собственного флага моста: `session_before_compact` эмитится через тот же последовательный `Runner.emit`, поэтому при чужом async-обработчике обновление флага моста может произойти позже. Core выставляет `_compactionAbortController` **до** эмита события (manual `:2231-2232`, auto `:2537-2538`; эмит `:2253-2262`, `:2543-2552`), поэтому `prompt()` увидит активную compaction на синхронной проверке `:1648-1650` и отклонит вызов. Итог: запуск хода во время compaction предотвращается core-проверкой, но мост может вернуть accepted без per-message ошибки (fire-and-forget). Этот лаг не воспроизводился живым сценарием; это source-level вывод, а не доказанная гонка.
+
+Если ошибка возникает на await-границе после проверки (`_runInputHandlers`, `_queueFollowUp`/`_queueSteer`, `_startRun`), промис `sendUserMessage` отклоняется, и его `.catch` в `bindCore` (`agent-session.js:2774-2782`) отправляет ошибку в error-listener раннера (`runner.js:493-501`) без идентификатора сообщения — мост не получает delivered-подтверждения. Если же вызов попал в `_deferredSettledActions` (`_isEmittingAgentSettled`), исходный `prompt()` уже вернулся успешно; отложенное действие выполняется позже в `_emitAgentSettled` (`:695-704`), и его ошибка не проходит через catch исходного `sendUserMessage`, то есть мост тем более не получает per-message ошибки. Конкретный исход и частота этих границ живым сценарием **не продемонстрированы**; это неизвестная граница, требующая отдельного воспроизводимого теста, а не доказанная гонка.
+
+Прямого доступа к редактору в пути `prompt()` нет. В ветке синхронной проверки `:1648-1650` отказ происходит до `_runInputHandlers` и запуска хода, поэтому черновик не затрагивается; для отложенных границ повреждение ввода не проверялось отдельно.
 
 ## 5. Ответ по спецификации
 
@@ -154,7 +164,7 @@ python3 scripts/probes/tmux-delivary/ui_prompt_timing_probe.py
 
 1. **Встроенный model selector (общий путь `showSelector`)** — безопасное состояние для внешнего followUp: селектор остаётся открытым и управляемым, выбор не синтезируется, черновик и mid-line курсор сохраняются, сообщение появляется один раз в правильной истории. Это проверено на реальном Pi 1.4.0 и сохранено в `result.json`.
 2. **Остальные встроенные селекторы через `showSelector`** — source-level вывод из общей ветки: доставка не вызывает `done()` и не трогает `editorContainer`; живых прогонов для settings/trust/session/tree/login/thinking/scoped-models/MCP нет. Это сильнее, чем «неизвестно», но слабее живого доказательства.
-3. **Compaction** — отказ реализуем на поддерживаемых событиях; остаточная гонка приводит к `accepted` + `native_delivery_unconfirmed`, а не к порче ввода.
+3. **Compaction** — отказ реализуем на поддерживаемых событиях, если признак активной compaction проверяется синхронно перед вызовом API; между такой проверкой и вызовом без `await` compaction вклиниться не может. Остаётся недемонстрированная отложенная граница внутри `prompt()` (`_deferredSettledActions`, `await _runInputHandlers`/`_queueFollowUp`/`_startRun`); её исход нужно проверять отдельным сценарием, а не называть доказанной гонкой. Редактор Pi в этом пути не затрагивается.
 4. **Extension UI prompts** — `ui_prompt_start/end` покрывают их, но только с точностью до описанной ordering-гонки; при отсутствии чужих async-обработчиков флаг выставляется до socket callback (control).
 
 Что **невозможно** гарантировать только поддерживаемым API:
@@ -180,6 +190,7 @@ Production не начинается до явного release финально�
 - Extension-диалоги под внешней доставкой (select/confirm/input/editor/custom) — не прогонялись; проверен только тайминг их события.
 - Встроенные login-диалоги, OAuth auth-select и reload-бокс — source-level; живых прогонов нет.
 - Поведение при пользовательском `Escape`/dequeue с уже стоящим в очереди внешним сообщением (см. раздел 3) — source-level.
+- Отложенная граница compaction внутри `prompt()` (`_deferredSettledActions`, `await _runInputHandlers`/`_queueFollowUp`/`_startRun`) и лаг флага `session_before_compact` при чужом async-обработчике — source-level; конкретный исход не воспроизведён отдельным сценарием.
 - Реальный DeepSeek, платные/внешние модельные ответы, production UDS lifecycle, restore/kill/switch, дедупликация ID, oversized frames, разрыв соединения — после merged task-1 contract и явного release.
 
 ## Команды проверки
