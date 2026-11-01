@@ -60,6 +60,7 @@ func claudeJournalActivity(ctx context.Context, id claudeinstance.Identity) (act
 		var record struct {
 			SessionID string    `json:"sessionId"`
 			Type      string    `json:"type"`
+			Subtype   string    `json:"subtype"`
 			Timestamp time.Time `json:"timestamp"`
 			Error     bool      `json:"isApiErrorMessage"`
 			Message   struct {
@@ -71,6 +72,21 @@ func claudeJournalActivity(ctx context.Context, id claudeinstance.Identity) (act
 		}
 		if record.SessionID != id.ClaudeSessionID {
 			continue
+		}
+		// Claude intersperses non-lifecycle metadata with conversation records;
+		// several of these types have no timestamp. They cannot establish activity
+		// or clear an API-error block. Keep decoding strict and let error flags
+		// take precedence, including on an otherwise metadata-only record.
+		if !record.Error && !record.Message.Error {
+			switch record.Type {
+			case "last-prompt", "mode", "permission-mode", "atis-latch", "ai-title", "tools-used", "api-request-blob",
+				"attachment", "api-request-shape", "api-request":
+				continue
+			case "system":
+				if record.Subtype == "stop_hook_summary" || record.Subtype == "turn_duration" {
+					continue
+				}
+			}
 		}
 		if record.Timestamp.IsZero() || record.Timestamp.Before(id.ProcessStart) || record.Timestamp.After(time.Now()) {
 			return "", time.Time{}, agent.ErrNoSignal
