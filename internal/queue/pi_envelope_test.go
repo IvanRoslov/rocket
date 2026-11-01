@@ -177,7 +177,8 @@ func TestNativeFinalCancellationWithoutStrictCapabilityLeavesDelivering(t *testi
 	assertNoTmux(t, rt)
 }
 
-func TestNativePiProofAdapter(t *testing.T) {	if got := nativePiProofConfirmer(nil); got != nil {
+func TestNativePiProofAdapter(t *testing.T) {
+	if got := nativePiProofConfirmer(nil); got != nil {
 		t.Fatalf("nil base produced %#v, want nil", got)
 	}
 	legacy := &legacyOnlyFake{}
@@ -238,13 +239,19 @@ func TestNativePiEnvelopeFrameBoundary(t *testing.T) {
 	target := nativeinput.Target{SessionID: "s1", InstanceID: "launch-1", SocketPath: socket}
 	const id int64 = 123
 	prefix := nativePiEnvelope(id, "")
-	base := nativePiFrameLen(t, target, id, "")
-	total := nativeinput.MaxFrameSize - base
-	if total <= len(prefix) {
-		t.Fatalf("frame base %d leaves no room for the envelope", base)
+	// A genuinely JSON-escaped prepared component: the newline, quote and
+	// backslash all expand inside the serialized frame. The padding is derived
+	// from the actual json.Marshal length, not from ASCII-only assumptions.
+	escapedHead := "строка\n\"кавычки\"\\конец "
+	baseText := prefix + escapedHead
+	base := nativePiFrameLen(t, target, id, baseText)
+	pad := nativeinput.MaxFrameSize - base
+	if pad < 0 {
+		t.Fatalf("escaped frame base %d already exceeds %d", base, nativeinput.MaxFrameSize)
 	}
-	text := prefix + strings.Repeat("a", total-len(prefix))
-	if text != nativePiEnvelope(id, strings.Repeat("a", total-len(prefix))) {
+	prepared := escapedHead + strings.Repeat("a", pad)
+	text := nativePiEnvelope(id, prepared)
+	if text != baseText+strings.Repeat("a", pad) {
 		t.Fatal("the exact-bound text is not the numbered prepared text")
 	}
 	if got := nativePiFrameLen(t, target, id, text); got != nativeinput.MaxFrameSize {

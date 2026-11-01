@@ -11,6 +11,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const logPath = process.env.PI_INPUT_HANDLED_LOG!;
 const target = process.env.PI_INPUT_HANDLED_TEXT ?? "";
+const firstMode = process.env.PI_INPUT_HANDLED_FIRST === "1";
 mkdirSync(dirname(logPath), { recursive: true });
 const log = (event: string, data: Record<string, unknown> = {}) => {
 	appendFileSync(logPath, `${JSON.stringify({ event, time: Date.now(), ...data })}\n`);
@@ -25,7 +26,19 @@ export default function inputHandledExtension(api: ExtensionAPI) {
 			streamingBehavior: event.streamingBehavior ?? null,
 			identical: event.text === target,
 		});
-		if (event.source !== "extension" || event.text !== target) return { action: "continue" };
+		if (event.source !== "extension") return { action: "continue" };
+		if (firstMode) {
+			// Queue E2E mode: the first extension-sourced input is handled,
+			// every later one continues.
+			if (handled === 0) {
+				handled += 1;
+				log("handled", { text: event.text });
+				return { action: "handled" };
+			}
+			log("continued", { text: event.text });
+			return { action: "continue" };
+		}
+		if (event.text !== target) return { action: "continue" };
 		if (handled === 0) {
 			handled += 1;
 			log("handled", { text: event.text });

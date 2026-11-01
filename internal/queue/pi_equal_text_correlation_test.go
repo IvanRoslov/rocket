@@ -130,8 +130,8 @@ func (a *corrAgent) ConfirmNativeDelivered(ctx context.Context, ref agent.Activi
 }
 
 func (a *corrAgent) AcceptsInputWhileBusy() bool { return true }
-func (a *corrAgent) Name() string               { return "pi" }
-func (a *corrAgent) Available() error           { return nil }
+func (a *corrAgent) Name() string                { return "pi" }
+func (a *corrAgent) Available() error            { return nil }
 func (a *corrAgent) SetupWorkspace(spec agent.LaunchSpec) error {
 	return nil
 }
@@ -201,7 +201,7 @@ func (r *corrRuntime) ScrollHistory(ctx context.Context, h runtime.Handle, lines
 	return nil
 }
 func (r *corrRuntime) ExitHistory(ctx context.Context, h runtime.Handle) error { return nil }
-func (r *corrRuntime) List(ctx context.Context) ([]string, error)             { return nil, nil }
+func (r *corrRuntime) List(ctx context.Context) ([]string, error)              { return nil, nil }
 
 func (r *corrRuntime) tmuxCalls() int {
 	r.mu.Lock()
