@@ -121,8 +121,9 @@ func (t *immediateTx) Rollback() {
 }
 
 // latestDocVersion returns the version of the most recently written doc of
-// kind on taskID. Doc versions count per (kind, title), so "latest" is the
-// newest row, not the largest number across titles.
+// kind on taskID. Versions count per kind for spec and plan, but tasks
+// written before that may hold several titles each counting from v1, so
+// "latest" is the newest row, not the largest number.
 func latestDocVersion(q queryer, taskID int64, kind string) (int64, bool, error) {
 	var v int64
 	err := q.QueryRow(

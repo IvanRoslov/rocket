@@ -361,9 +361,16 @@ type TaskDoc struct {
 	CreatedAt int64
 }
 
+// singleDocKinds are the kinds a task holds exactly one document of: its
+// title may change between versions, but it stays the same document with one
+// version line (and the gate pins its versions). Other kinds ("doc",
+// "report") are free-form and versioned per title.
+var singleDocKinds = map[string]bool{"spec": true, "plan": true, "problem": true}
+
 // PutTaskDoc inserts a new version of a doc. The version is one greater than
-// the max existing version for the same (task_id, kind, title); if none
-// exist, version 1 is used. CreatedAt defaults to now if unset. Returns the
+// the max existing version for the same (task_id, kind) for single-document
+// kinds (spec, plan, problem), or for the same (task_id, kind, title)
+// otherwise; if none exist, version 1 is used. CreatedAt defaults to now if unset. Returns the
 // stored doc, including its assigned ID and Version.
 func (s *Store) PutTaskDoc(d TaskDoc) (TaskDoc, error) {
 	if d.CreatedAt == 0 {
@@ -377,10 +384,17 @@ func (s *Store) PutTaskDoc(d TaskDoc) (TaskDoc, error) {
 	defer tx.Rollback() //nolint:errcheck // no-op if committed
 
 	var maxVersion int64
-	err = tx.QueryRow(
-		`SELECT COALESCE(MAX(version), 0) FROM task_docs WHERE task_id = ? AND kind = ? AND title = ?`,
-		d.TaskID, d.Kind, d.Title,
-	).Scan(&maxVersion)
+	if singleDocKinds[d.Kind] {
+		err = tx.QueryRow(
+			`SELECT COALESCE(MAX(version), 0) FROM task_docs WHERE task_id = ? AND kind = ?`,
+			d.TaskID, d.Kind,
+		).Scan(&maxVersion)
+	} else {
+		err = tx.QueryRow(
+			`SELECT COALESCE(MAX(version), 0) FROM task_docs WHERE task_id = ? AND kind = ? AND title = ?`,
+			d.TaskID, d.Kind, d.Title,
+		).Scan(&maxVersion)
+	}
 	if err != nil {
 		return TaskDoc{}, fmt.Errorf("query max doc version: %w", err)
 	}
@@ -408,15 +422,22 @@ func (s *Store) PutTaskDoc(d TaskDoc) (TaskDoc, error) {
 }
 
 // ListTaskDocs returns docs for taskID. If history is true, every version of
-// every (kind, title) is returned, ascending by id. If false, only the
-// highest-version row for each (kind, title) is returned.
+// every doc is returned, ascending by id. If false, only the newest row of
+// each single-document kind (spec, plan, problem) and the highest-version
+// row of each (kind, title) for the other kinds are returned.
 func (s *Store) ListTaskDocs(taskID int64, history bool) ([]TaskDoc, error) {
 	query := `SELECT id, task_id, kind, title, body, version, author, created_at
 	          FROM task_docs WHERE task_id = ?`
 	if !history {
-		query += ` AND version = (
-			SELECT MAX(version) FROM task_docs AS t2
-			WHERE t2.task_id = task_docs.task_id AND t2.kind = task_docs.kind AND t2.title = task_docs.title
+		query += ` AND (
+			(kind IN ('spec', 'plan', 'problem') AND id = (
+				SELECT MAX(id) FROM task_docs AS t2
+				WHERE t2.task_id = task_docs.task_id AND t2.kind = task_docs.kind
+			))
+			OR (kind NOT IN ('spec', 'plan', 'problem') AND version = (
+				SELECT MAX(version) FROM task_docs AS t2
+				WHERE t2.task_id = task_docs.task_id AND t2.kind = task_docs.kind AND t2.title = task_docs.title
+			))
 		)`
 	}
 	query += ` ORDER BY id`
