@@ -102,7 +102,7 @@ Pi — мультипровайдерный агент для воркеров �
 
 DeepSeek — отдельный адаптер поверх полной реализации Claude Code, использующий официальную Anthropic-совместимую интеграцию. Launch, system prompt, Superpowers/orchestrator skill, activity, chat, delivery, restore и startup behavior наследуются; обычный `claude-code` остаётся на Anthropic и не получает DeepSeek-настройки.
 
-- **Доступность.** Требуются бинарь `claude` и непустой `DEEPSEEK_API_KEY` в окружении демона. Общая проверка `agent:deepseek` сообщает об отсутствии любого из них; ключ не хранится в профиле/SQLite/git/task docs/log.
+- **Доступность.** Требуются бинарь `claude` и непустой `DEEPSEEK_API_KEY` в окружении демона. Если в окружении его нет, демон при старте читает его из `$ROCKET_HOME/deepseek-api-key` (окружение демона зависит от того, кто его запустил: при `make restart` это может быть CLI-вызов агента). Общая проверка `agent:deepseek` сообщает об отсутствии любого из них; ключ не хранится в профиле/SQLite/git/task docs/log.
 - **Env.** К базовому Claude Code env адаптер добавляет только свои значения, которые выигрывают у repo-level env:
   ```
   ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
