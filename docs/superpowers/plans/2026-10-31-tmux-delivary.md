@@ -1,4 +1,4 @@
-# Tmux Delivery — полный план первого этапа, проект v2
+# Tmux Delivery — полный план первого этапа, v2
 
 > **Для воркеров:** REQUIRED SUB-SKILL: используйте superpowers:executing-plans для выполнения своего брифа по шагам. Для продуктового кода обязательны superpowers:test-driven-development, systematic-debugging при сбоях и verification-before-completion; перед PR — requesting-code-review. Оркестратор координирует через Rocket, код реализуют воркеры.
 
