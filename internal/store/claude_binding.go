@@ -125,9 +125,16 @@ func (s *Store) writeClaudeActivity(ctx context.Context, target claudeinstance.I
 	}
 	// Empty hook state only records ordering (SessionEnd); empty poll state clears uncertainty.
 	if observed != nil || state != "" {
-		_, e = tx.ExecContext(ctx, `UPDATE sessions SET activity=?,activity_ts=? WHERE id=? AND (activity_ts IS NULL OR activity_ts<=? OR ?='exited' OR activity IS NULL OR activity='' OR activity='exited')`, nullIfEmpty(state), nullIfZero(activityTS), target.RocketSessionID, activityTS, state)
-		if e != nil {
-			return false, e
+		res, err := tx.ExecContext(ctx, `UPDATE sessions SET activity=?,activity_ts=? WHERE id=? AND (activity_ts IS NULL OR activity_ts<=? OR ?='exited' OR activity IS NULL OR activity='' OR activity='exited')`, nullIfEmpty(state), nullIfZero(activityTS), target.RocketSessionID, activityTS, state)
+		if err != nil {
+			return false, err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return false, err
+		}
+		if n != 1 {
+			return false, nil
 		}
 	}
 	if e = ctx.Err(); e != nil {

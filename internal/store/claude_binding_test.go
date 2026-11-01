@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/IvanRoslov/rocket/internal/claudeinstance"
 	"path/filepath"
 	"testing"
 	"time"
@@ -63,8 +65,11 @@ func TestClaudeBindingRejectsStaleActivityAndCapture(t *testing.T) {
 		t.Fatal("pre-notification poll cleared wait")
 	}
 	l.BindingRevision = ^uint64(0)
-	raw := `{"RocketSessionID":"s","Generation":"g","BindingRevision":18446744073709551615}`
-	st.db.Exec(`UPDATE claude_launches SET launch_json=? WHERE session_id='s'`, raw)
+	raw, marshalErr := json.Marshal(l)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	st.db.Exec(`UPDATE claude_launches SET launch_json=? WHERE session_id='s'`, string(raw))
 	_, _, at, _ = st.GetClaudeBinding(ctx, "s")
 	b := v.Target
 	b.ClaudeSessionID = "239baa3b-27eb-40ed-82e1-1d9f3dde01e5"
@@ -91,5 +96,47 @@ func TestClaudeStalePaneCompletionCannotRestoreGeneration(t *testing.T) {
 	got, _, e := st.GetClaudeLaunch("s")
 	if e != nil || got.Generation != "replacement" {
 		t.Fatalf("stale capture rolled back generation: %+v %v", got, e)
+	}
+}
+
+func TestClaudeBindingObservedABARejectsOldA(t *testing.T) {
+	st := openTestStore(t)
+	v, _ := claudeStoreFixture(t, st)
+	ctx := context.Background()
+	a := v.Target
+	a.JournalPath = filepath.Join(filepath.Dir(a.JournalPath), a.ClaudeSessionID+".jsonl")
+	raw, _ := json.Marshal(a)
+	st.db.Exec(`UPDATE claude_launches SET identity_json=? WHERE session_id='s'`, string(raw))
+	l, _, event, _ := st.GetClaudeBinding(ctx, "s")
+	originalRevision, originalEvent := l.BindingRevision, event
+	b := a
+	b.ClaudeSessionID = "239baa3b-27eb-40ed-82e1-1d9f3dde01e5"
+	b.JournalPath = filepath.Join(filepath.Dir(a.JournalPath), b.ClaudeSessionID+".jsonl")
+	if ok, e := st.AdvanceClaudeBinding(ctx, a, b, l.BindingRevision, event, time.Now().UnixNano()); !ok || e != nil {
+		t.Fatal(ok, e)
+	}
+	l, _, event, _ = st.GetClaudeBinding(ctx, "s")
+	if ok, e := st.AdvanceClaudeBinding(ctx, b, a, l.BindingRevision, event, time.Now().UnixNano()); !ok || e != nil {
+		t.Fatal(ok, e)
+	}
+	l, now, event, e := st.GetClaudeBinding(ctx, "s")
+	if e != nil || l.BindingRevision != originalRevision+2 || !claudeinstance.SameIdentity(*now, a) {
+		t.Fatal(l, now, e)
+	}
+	if ok, _ := st.ApplyClaudeActivityForBinding(ctx, a, originalRevision, originalEvent, "ready", time.Now().Unix()); ok {
+		t.Fatal("observed ABA accepted old A activity")
+	}
+	if ok, e := st.ApplyClaudeActivityForBinding(ctx, a, l.BindingRevision, event, "waiting_input", time.Now().Unix()); !ok || e != nil {
+		t.Fatal(ok, e)
+	}
+}
+
+func TestClaudeBindingOlderActivityReportsNotApplied(t *testing.T) {
+	st := openTestStore(t)
+	v, _ := claudeStoreFixture(t, st)
+	ctx := context.Background()
+	l, _, event, _ := st.GetClaudeBinding(ctx, "s")
+	if ok, e := st.ApplyClaudeActivityForBinding(ctx, v.Target, l.BindingRevision, event, "active", time.Now().Add(-time.Minute).Unix()); ok || e != nil {
+		t.Fatalf("old poll reported applied: %v %v", ok, e)
 	}
 }
