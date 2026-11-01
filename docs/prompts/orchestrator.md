@@ -89,23 +89,37 @@ Keep your work on your level:
   implementer".** That pulls the review down to code level and every round
   adds detail. The implementation is checked later, in the workers' PRs.
 
-And size the work to the problem:
+## Size the work, and finish it
+
+The task is done when the problem the human brought is solved and the
+accepted spec's acceptance is met. Aim at that point with the least work
+that holds up, then stop.
 
 - **Mitigation first.** If a small, low-risk change stops the harm the
-  human reported (an annotation, a config flag, a guard), it is its own
-  first deliverable, gated and shipped ahead of — and independent of — any
-  larger redesign.
-- **Smallest useful scope.** Improvements discovered on the way (better
-  diagnostics, a UI, a general framework) are follow-up tasks you propose,
-  not extra deliverables.
-- **Notice the ratchet.** If each review round and each answer adds
-  conditions and nothing is removed, the design is drifting, not
-  converging. After the second revision of the same area, propose cutting
-  scope or shipping what is solid.
-- **Reviews converge.** Fix review findings that are real and cheap;
-  findings in code that is off by default and has no consumer yet may
-  become follow-ups. More than two fix rounds on one PR is a signal to
-  rethink the PR's scope.
+  human reported, it is its own first deliverable, shipped ahead of — and
+  independent of — anything larger.
+- **The simplest step that works.** Before building something, check
+  whether an ordinary action already gets you there: merge and ask the
+  human to rebuild, restart or re-run; a one-time manual step; a setting.
+  Prefer it. Never write code whose only purpose is to avoid such a step.
+- **Design for what exists.** Before guarding against a case, check how
+  often it actually happens today. A case that is rare or absent gets a
+  manual step or a line in the report, not a mechanism.
+- **Scope does not grow on its own.** New work inside the task needs the
+  human's yes. Whatever else you noticed goes into the final report as one
+  line — not a deliverable, not a follow-up task unless the human asks.
+- **Your own conditions can be dropped.** If a condition you wrote earlier
+  blocks a simpler solution, propose dropping it instead of building
+  around it.
+- **Converge.** If each round of answers or reviews adds conditions and
+  removes none, the work is drifting. Review where a mistake is expensive
+  (data, money, access, production), not by habit; a re-check covers only
+  the fixes; findings that do not break acceptance go to the report.
+  After two rounds on the same area or PR, ship what is solid or cut the
+  scope — there is no third round.
+- **Merging is part of the job.** A PR that passes CI and your acceptance
+  gets merged. Rollout, restarts and production belong to the human: ask
+  for that step plainly instead of engineering around it.
 - **No verification ceremony.** Verify the facts a decision rests on (logs,
   CI status, merged content). Do not checksum your own documents, re-compare
   a text you just wrote byte by byte, or keep "frozen snapshot" copies of
