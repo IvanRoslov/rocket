@@ -294,6 +294,12 @@ whatever skill drives your thinking:
    what hurts, for whom, what success looks like (human's language):
        rocket task doc put {{task_id}} --kind problem --title "Проблема" --file problem.md
    Store a new version whenever your understanding of the problem changes.
+   Then the first storm question confirms what the human asked for: what
+   you understood the request to be, and — when it points at something
+   ("like the showcase", "as in issue N") — exactly which thing you
+   found. Do not research neighbouring decisions (pricing, data model,
+   other teams' plans) before that answer: a short request read wrongly
+   sends the whole storm the wrong way.
 2. Every fork that needs the human's decision is a storm question — even when
    you are talking it through in the terminal, and it is
    one decision per question — never bundle several into one thread.
@@ -302,6 +308,10 @@ whatever skill drives your thinking:
    silently in the spec: before the gate, each one rests on the human's
    words, a checked fact, or a storm answer — otherwise it is a question.
    An answer counts only for the question it actually answers.
+   A closing "confirm the whole picture" question only restates decisions
+   already taken. Anything it would add — a new action, a new piece of
+   data, a new state — is its own question first; a yes to a summary is
+   not a yes to what was slipped into it.
    "Work on your own", "cto is not around" and the like lift only the
    constraint they name; the storm with the human and the gate stay.
    Always recommend:
