@@ -2,13 +2,16 @@ package daemon
 
 import (
 	"bufio"
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // TestRedirectFDToFile: whatever the runtime writes to the redirected
@@ -63,7 +66,10 @@ func TestCaptureStderrKeepsQuitDump(t *testing.T) {
 			os.Exit(3)
 		}
 		fmt.Println("ready")
-		select {} // wait for SIGQUIT
+		// A live parent-owned pipe keeps the helper waiting on external I/O.
+		// Bare select{} lets Go report deadlock before the parent sends SIGQUIT.
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		return
 	}
 
 	logPath := filepath.Join(t.TempDir(), "logs", "rocketd.log")
@@ -73,9 +79,16 @@ func TestCaptureStderrKeepsQuitDump(t *testing.T) {
 	}
 	defer devNull.Close()
 
-	cmd := exec.Command(os.Args[0], "-test.run=^TestCaptureStderrKeepsQuitDump$")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCaptureStderrKeepsQuitDump$")
 	cmd.Env = append(os.Environ(), "ROCKET_TEST_CAPTURE_HELPER="+logPath)
 	cmd.Stderr = devNull
+	input, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -83,6 +96,12 @@ func TestCaptureStderrKeepsQuitDump(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if cmd.ProcessState == nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	}()
 	if line, _ := bufio.NewReader(out).ReadString('\n'); line != "ready\n" {
 		cmd.Process.Kill()
 		t.Fatalf("helper did not start: %q", line)

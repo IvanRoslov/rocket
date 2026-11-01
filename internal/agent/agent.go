@@ -107,7 +107,8 @@ type NativeLaunchProvider interface {
 
 // LaunchSpec contains all configuration needed to launch an agent.
 type LaunchSpec struct {
-	NativeDelivery NativeLaunch
+	NativeDelivery         NativeLaunch
+	ClaudeLaunchGeneration string
 
 	SessionID    string
 	Kind         string
@@ -307,4 +308,13 @@ var builders = map[string]func() Agent{}
 // Register registers an agent builder under the given name.
 func Register(name string, builder func() Agent) {
 	builders[name] = builder
+}
+
+// ClaudeSocketCompatible is an explicitly inherited optional inbox capability.
+// Wrappers that expose only Agent do not acquire it through their names.
+type ClaudeSocketCompatible interface{ ClaudeSocketCompatible() bool }
+
+func SupportsClaudeSocket(a Agent) bool {
+	v, ok := a.(ClaudeSocketCompatible)
+	return ok && v.ClaudeSocketCompatible()
 }

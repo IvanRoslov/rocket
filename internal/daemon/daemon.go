@@ -106,6 +106,7 @@ func Run(cfg *config.Config) error {
 	receipts := socketmsg.NewReceipts("rocketd")
 	defer receipts.Close()
 	socketSender := queue.NewClaudeSocketSender(socketmsg.SessionsDir())
+	socketSender.SetStore(st)
 	socketSender.SetReceipts(receipts)
 	q.SetSocketSender(socketSender)
 	hb := heartbeat.New(st, b, cfg, mon.Activity, q.Wake)

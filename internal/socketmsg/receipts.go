@@ -27,6 +27,7 @@ type Receipts struct {
 
 	mu        sync.Mutex
 	closed    bool
+	handler   func(Message)
 	listeners map[string]net.Listener // каталог -> слушатель
 	paths     map[string]string       // каталог -> путь нашего сокета
 	waiters   map[string]chan Message // orig_msg_id -> ожидающий
@@ -57,7 +58,7 @@ func (r *Receipts) Addr(dir string) (string, error) {
 	}
 	r.mu.Unlock()
 
-	path := filepath.Join(dir, fmt.Sprintf("%s-%d.sock", r.prefix, os.Getpid()))
+	path := r.Path(dir)
 	r.sweepStale(dir, path)
 	// Наш собственный сокет от прошлого запуска с тем же pid тоже мешает bind.
 	_ = os.Remove(path)
@@ -165,24 +166,32 @@ func (r *Receipts) read(conn net.Conn) {
 	}
 }
 
+// Path is pure: preparing a durable envelope must not create a listener.
+func (r *Receipts) Path(dir string) string {
+	return filepath.Join(dir, fmt.Sprintf("%s-%d.sock", r.prefix, os.Getpid()))
+}
+func (r *Receipts) SetHandler(handler func(Message)) { r.mu.Lock(); r.handler = handler; r.mu.Unlock() }
 func (r *Receipts) dispatch(m Message) {
 	if m.OrigMsgID == "" {
 		return
 	}
 	r.mu.Lock()
-	ch, ok := r.waiters[m.OrigMsgID]
+	ch := r.waiters[m.OrigMsgID]
+	handler := r.handler
+	closed := r.closed
 	r.mu.Unlock()
-	if !ok {
-		// Ожидающего нет: квитанция опоздала. denied/expired приходят много
-		// позже окна ожидания, когда доставка уже ушла в tmux, — реагировать
-		// на них уже нечем, но в журнале это видеть полезно.
-		slog.Info("socketmsg: квитанция без ожидающего",
-			"status", m.Status, "orig_msg_id", m.OrigMsgID)
+	if closed {
 		return
 	}
-	select {
-	case ch <- m:
-	default: // одну квитанцию уже положили — больше не нужно
+	if ch != nil {
+		select {
+		case ch <- m:
+		default:
+		}
+	}
+	// Observer never steals watcher events and never runs under the mutex.
+	if handler != nil {
+		handler(m)
 	}
 }
 

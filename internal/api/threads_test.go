@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -127,6 +129,14 @@ func TestThreadPrefix(t *testing.T) {
 // and the human is never injected into.
 func TestParticipantFanOut_SkipsAuthorAndHuman(t *testing.T) {
 	d := messagesTestDeps(t)
+	// Bind Wake workers to this test before fan-out. The terminal bus event
+	// follows the actual delivery status AND its final persisted event write.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d.Queue.Recover(ctx)
+	events, unsubscribe := d.Bus.Subscribe()
+	defer unsubscribe()
+
 	addTestProject(t, d, "proj1")
 	addTestSession(t, d, "orch-1", "orchestrator", "proj1")
 	addLiveAgentSession(t, d, "cto")
@@ -157,6 +167,21 @@ func TestParticipantFanOut_SkipsAuthorAndHuman(t *testing.T) {
 	}
 	if len(ctoMsgs) != 0 {
 		t.Errorf("the author must not be delivered to, got %d messages", len(ctoMsgs))
+	}
+
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	for {
+		select {
+		case event := <-events:
+			if event.Type == "message.delivered" && event.SessionID == "orch-1" {
+				waitForMsgStatus(t, d, orchMsgs[0].ID, "delivered")
+				cancel() // no worker may start further queue passes during store teardown
+				return
+			}
+		case <-deadline.C:
+			t.Fatal("fan-out delivery did not finish before teardown")
+		}
 	}
 }
 

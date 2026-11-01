@@ -17,6 +17,7 @@ import (
 
 	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/bus"
+	"github.com/IvanRoslov/rocket/internal/claudeinstance"
 	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/mirror"
 	"github.com/IvanRoslov/rocket/internal/prompts"
@@ -75,12 +76,13 @@ type LaunchProfile struct {
 
 // Manager owns session lifecycle: spawn, kill, restore.
 type Manager struct {
-	st   *store.Store
-	bus  *bus.Bus
-	rt   runtime.Runtime
-	ws   workspace.Workspace
-	cfg  *config.Config
-	wake func(string) // wakes queued first-message delivery after launch
+	st          *store.Store
+	bus         *bus.Bus
+	rt          runtime.Runtime
+	ws          workspace.Workspace
+	cfg         *config.Config
+	claudeProbe claudeinstance.Probe
+	wake        func(string) // wakes queued first-message delivery after launch
 
 	// mu serializes Spawn, Kill, Restore, and Reconcile end-to-end. Without
 	// it, a Kill racing a concurrent Spawn between the session's
@@ -142,6 +144,7 @@ func NewManager(st *store.Store, b *bus.Bus, rt runtime.Runtime, ws workspace.Wo
 	m := &Manager{
 		st: st, bus: b, rt: rt, ws: ws, cfg: cfg,
 		paneOnlyShell:          runtime.PaneOnlyShell,
+		claudeProbe:            claudeinstance.SystemProbe{},
 		quizSleepFn:            time.Sleep,
 		quizUnconfirmedTimeout: 60 * time.Second,
 	}
@@ -468,6 +471,10 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 		m.markErrored(id, err)
 		return store.Session{}, err
 	}
+	if err := m.prepareClaudeLaunch(ag, &spec, &sess); err != nil {
+		m.markErrored(id, err)
+		return store.Session{}, err
+	}
 	if err := ag.SetupWorkspace(spec); err != nil {
 		m.markErrored(id, err)
 		return store.Session{}, err
@@ -498,6 +505,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 		return store.Session{}, err
 	}
 
+	m.captureClaudeLaunch(ctx, spec)
 	sess.State = "running"
 	if err := m.st.UpdateSession(sess); err != nil {
 		return store.Session{}, err
@@ -689,6 +697,10 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 		m.markErrored(id, err)
 		return store.Session{}, err
 	}
+	if err := m.prepareClaudeLaunch(ag, &spec, &sess); err != nil {
+		m.markErrored(id, err)
+		return store.Session{}, err
+	}
 	if err := ag.SetupWorkspace(spec); err != nil {
 		m.markErrored(id, err)
 		return store.Session{}, err
@@ -719,6 +731,7 @@ func (m *Manager) SpawnOrchestrator(ctx context.Context, task store.Task, projec
 		return store.Session{}, err
 	}
 
+	m.captureClaudeLaunch(ctx, spec)
 	sess.State = "running"
 	if err := m.st.UpdateSession(sess); err != nil {
 		return store.Session{}, err
@@ -1042,6 +1055,10 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 		m.markErrored(id, err)
 		return err
 	}
+	if err := m.prepareClaudeLaunch(ag, &spec, &sess); err != nil {
+		m.markErrored(id, err)
+		return err
+	}
 	if err := ag.SetupWorkspace(spec); err != nil {
 		m.markErrored(id, err)
 		return err
@@ -1071,6 +1088,7 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 		return err
 	}
 
+	m.captureClaudeLaunch(ctx, spec)
 	sess.WorktreePath = path
 	sess.State = "running"
 	if err := m.st.UpdateSession(sess); err != nil {

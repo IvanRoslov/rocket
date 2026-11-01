@@ -17,9 +17,11 @@ import (
 	"github.com/IvanRoslov/rocket/internal/activity"
 	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/bus"
+	"github.com/IvanRoslov/rocket/internal/claudeinstance"
 	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/runtime"
 	"github.com/IvanRoslov/rocket/internal/session"
+	"github.com/IvanRoslov/rocket/internal/socketmsg"
 	"github.com/IvanRoslov/rocket/internal/store"
 )
 
@@ -59,12 +61,14 @@ type chatStat struct {
 // Monitor runs the activity polling cascade and exposes a push path for
 // out-of-band updates (e.g. from an API endpoint fed by the agent itself).
 type Monitor struct {
-	st           *store.Store
-	bus          *bus.Bus
-	rt           runtime.Runtime
-	cfg          *config.Config
-	resolveAgent func(name string) (agent.Agent, error)
-	prober       paneProber
+	st                *store.Store
+	bus               *bus.Bus
+	rt                runtime.Runtime
+	cfg               *config.Config
+	resolveAgent      func(name string) (agent.Agent, error)
+	prober            paneProber
+	claudeProbe       claudeinstance.Probe
+	claudeSessionsDir string
 
 	mu       sync.Mutex
 	push     map[string]pushEntry
@@ -73,7 +77,8 @@ type Monitor struct {
 	quizMiss map[string]int
 	// inputWaitMiss counts consecutive sweeps that saw no prompt on the
 	// pane of a session claiming waiting_input — see correctStaleInputWait.
-	inputWaitMiss map[string]int
+	inputWaitMiss  map[string]int
+	claudeWaitMiss map[string]claudeWaitCounter
 	// permMiss counts consecutive sweeps that saw no permission dialog on
 	// the pane of a session holding a permission quiz — see pollPermission.
 	permMiss map[string]int
@@ -93,16 +98,18 @@ type Monitor struct {
 // New builds a Monitor. resolveAgent is typically agent.Get.
 func New(st *store.Store, b *bus.Bus, rt runtime.Runtime, cfg *config.Config, resolveAgent func(name string) (agent.Agent, error)) *Monitor {
 	return &Monitor{
-		st:           st,
-		bus:          b,
-		rt:           rt,
-		cfg:          cfg,
-		resolveAgent: resolveAgent,
-		prober:       execProber{},
-		push:         make(map[string]pushEntry),
-		cache:        make(map[string]activity.State),
-		chat:         make(map[string]chatStat),
-		quizMiss:     make(map[string]int),
+		st:                st,
+		bus:               b,
+		rt:                rt,
+		cfg:               cfg,
+		resolveAgent:      resolveAgent,
+		prober:            execProber{},
+		claudeProbe:       claudeinstance.SystemProbe{},
+		claudeSessionsDir: socketmsg.SessionsDir(),
+		push:              make(map[string]pushEntry),
+		cache:             make(map[string]activity.State),
+		chat:              make(map[string]chatStat),
+		quizMiss:          make(map[string]int),
 
 		inputWaitMiss: make(map[string]int),
 		permMiss:      make(map[string]int),
@@ -147,6 +154,10 @@ func (m *Monitor) Run(ctx context.Context) {
 // immediately applies the merge+store+event logic for it (the fast reaction
 // path). Invalid states are ignored.
 func (m *Monitor) PushUpdate(sessionID string, state activity.State, ts time.Time) {
+	if sess, e := m.st.GetSession(sessionID); e == nil && m.isClaude(sess) {
+		return
+	}
+
 	if !state.Valid() {
 		slog.Warn("monitor: ignoring invalid pushed activity state", "session", sessionID, "state", state)
 		return
@@ -170,6 +181,10 @@ func (m *Monitor) PushUpdate(sessionID string, state activity.State, ts time.Tim
 // Activity returns the last known activity state for sessionID: from the
 // in-memory cache if present, else falling back to the store.
 func (m *Monitor) Activity(sessionID string) (activity.State, bool) {
+	if sess, e := m.st.GetSession(sessionID); e == nil && m.isClaude(sess) {
+		return activity.State(sess.Activity), sess.Activity != ""
+	}
+
 	m.mu.Lock()
 	st, ok := m.cache[sessionID]
 	m.mu.Unlock()
@@ -233,6 +248,11 @@ func (m *Monitor) sweep(ctx context.Context) {
 	for id := range m.quizMiss {
 		if !sessionIDs[id] {
 			delete(m.quizMiss, id)
+		}
+	}
+	for id := range m.claudeWaitMiss {
+		if !sessionIDs[id] {
+			delete(m.claudeWaitMiss, id)
 		}
 	}
 	for id := range m.inputWaitMiss {
@@ -374,6 +394,13 @@ func (m *Monitor) pollChat(ctx context.Context, sess store.Session) {
 // result. For spawning sessions, tmux checks are skipped since the session
 // may not exist yet; only the agent Activity signal applies.
 func (m *Monitor) pollSession(ctx context.Context, sess store.Session, liveSet map[string]bool, haveLiveSet bool) {
+	if m.resolveAgent != nil {
+		if a, e := m.resolveAgent(sess.Agent); e == nil && agent.SupportsClaudeSocket(a) {
+			m.pollClaudeSession(ctx, sess, a, liveSet, haveLiveSet)
+			return
+		}
+	}
+
 	var (
 		state  activity.State
 		ts     time.Time

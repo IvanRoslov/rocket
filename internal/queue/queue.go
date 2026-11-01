@@ -17,6 +17,7 @@ import (
 	"github.com/IvanRoslov/rocket/internal/activity"
 	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/bus"
+	"github.com/IvanRoslov/rocket/internal/claudeinstance"
 	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/runtime"
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -64,11 +65,11 @@ type Queue struct {
 	cfg         *config.Config
 	getActivity func(sessionID string) (activity.State, bool)
 
-	// socket, when non-nil, is consulted before tmux injection for every
-	// delivery: it hands the message to the recipient's Claude Code inbox
-	// without touching their composer. nil means "tmux only".
-	socket SocketSender
-	native NativeSender
+	// socket serves the explicitly selected Claude inbox route. A nil sender
+	// leaves that route unavailable; it never enables visual fallback.
+	socket      SocketSender
+	claudeProbe claudeinstance.Probe
+	native      NativeSender
 
 	// getSession looks up a recipient's session. Defaults to st.GetSession;
 	// overridable by tests to simulate transient (non-ErrNotFound) lookup
@@ -116,6 +117,7 @@ func New(st *store.Store, b *bus.Bus, rt runtime.Runtime, cfg *config.Config, ge
 		cfg:            cfg,
 		getActivity:    getActivity,
 		getSession:     st.GetSession,
+		claudeProbe:    claudeinstance.SystemProbe{},
 		backoff:        defaultBackoff,
 		resolveAgent:   agent.Get,
 		now:            time.Now,
@@ -191,32 +193,18 @@ func (q *Queue) injectOpts(sess store.Session) runtime.InjectOpts {
 	return runtime.InjectOpts{Bracketed: agent.WantsBracketedPaste(a), Dialect: agent.PaneDialectOf(a)}
 }
 
-// runCtx returns the context passed to Run, or context.Background() if Run
-// hasn't been called yet (e.g. Wake is invoked very early, before the
-// daemon's goroutine running Queue.Run has had a chance to start — the
-// normal daemon wiring calls Run before serving, so this fallback is only
-// hit in that narrow startup window).
-// SetSocketSender installs the socket transport consulted before tmux
-// injection. Passing nil disables it. It is called once during daemon wiring,
-// before Recover/Run, and must not be called concurrently with delivery.
+// SetSocketSender installs the Claude transport before Recover/Run. A nil
+// sender leaves selected Claude traffic unavailable without changing route.
+// It must not be called concurrently with delivery.
 func (q *Queue) SetSocketSender(s SocketSender) { q.socket = s }
 
-// socketReady reports whether this delivery may go over the socket at all: the
-// transport must be wired, enabled by config, the recipient must be an agent
-// that has such a socket, and it must be reachable right now.
-//
-// The agent check is repeated here (ClaudeSocketSender.lookup enforces it too)
-// so that a non-Claude recipient costs nothing: Available scans the session
-// registry and dials a socket, which is pure waste for an agent that never has
-// one.
-func (q *Queue) socketReady(sess store.Session) bool {
-	if q.socket == nil || q.cfg == nil || !q.cfg.SocketDelivery {
+// claudeSelected chooses the route before any sender/probe availability check.
+func (q *Queue) claudeSelected(sess store.Session) bool {
+	if q.cfg == nil || !q.cfg.SocketDelivery || q.resolveAgent == nil {
 		return false
 	}
-	if sess.Agent != claudeCodeAgent {
-		return false
-	}
-	return q.socket.Available(sess)
+	a, e := q.resolveAgent(sess.Agent)
+	return e == nil && agent.SupportsClaudeSocket(a)
 }
 
 // socketFromName is the display name the recipient sees for this message: the
@@ -486,14 +474,29 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 			return
 		}
 
+		if route == routeClaude {
+			// The durable marker owns every later pass, even with missing side data,
+			// changed config/capability or a replacement current launch.
+			q.kickConfirmer()
+			return
+		}
+		if route == routeLegacy && q.claudeSelected(sess) {
+			if q.deliverClaude(ctx, msg, sess) {
+				return
+			}
+			if !q.waitForReady(ctx, msg.ToSession) {
+				return
+			}
+			continue
+		}
+
 		// Optional agent capabilities (Codex): busyOK makes an active
 		// recipient ready; confirmer turns a successful paste into
 		// "accepted" instead of "delivered" (see attemptDelivery).
 		busyOK, confirmer := q.recipientCaps(sess)
 		native := route == routeNative
-		viaSocket := !native && q.socketReady(sess)
 
-		if sess.PendingQuiz != "" && !viaSocket && !native {
+		if sess.PendingQuiz != "" && !native {
 			// Recipient has a pending AskUserQuestion quiz on screen: text
 			// injected now would corrupt the TUI widget, and no socket is
 			// available to route around it. Hold the message (stays queued,
@@ -568,9 +571,7 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 		// exists. Leaving busySince zero on that path is deliberate: a socket
 		// delivery must not accumulate "busyness" toward the force deadline.
 		force := false
-		if viaSocket {
-			busySince = time.Time{}
-		} else {
+		{
 			dialect := q.injectOpts(sess).Dialect
 			window := composerWindow
 			if dialect == runtime.PaneDialectKimi {
@@ -657,7 +658,7 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 			}
 		}
 
-		if !q.attemptDelivery(ctx, msg, sess, force, viaSocket, confirmer) {
+		if !q.attemptDelivery(ctx, msg, sess, force, confirmer) {
 			// Inject hit the draft guard after all (the human started
 			// typing between the probe above and the C-u): the message is
 			// back to "queued" untouched. Wait a tick and re-evaluate from
@@ -722,15 +723,12 @@ func (q *Queue) waitForReady(ctx context.Context, to string) bool {
 // message is back to "queued" for the caller to re-evaluate. Every other
 // outcome (delivered, failed, ctx cancelled) is terminal for this message
 // and returns true.
-// viaSocket selects the Claude Code socket transport for the first attempt;
-// it is cleared as soon as the socket fails, so retries fall to tmux.
-//
 // confirmer, when non-nil, is the recipient agent's journal-backed proof of
 // delivery: a successful paste (submitted, or taken into the agent's own
 // queue) then ends in status "accepted" rather than "delivered", with
 // inject_at taken right before the paste, and the confirmer loop
 // (confirm.go) finishes the job. nil keeps the historical behaviour.
-func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess store.Session, force, viaSocket bool, confirmer agent.DeliveryConfirmer) bool {
+func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess store.Session, force bool, confirmer agent.DeliveryConfirmer) bool {
 	handle := runtime.Handle{Name: sess.TmuxName}
 	text := q.prepareText(msg, sess)
 
@@ -759,62 +757,6 @@ func (q *Queue) attemptDelivery(ctx context.Context, msg store.Message, sess sto
 
 		if err := q.st.UpdateMessageStatus(msg.ID, "delivering", msg.Attempts, 0, ""); err != nil {
 			slog.Error("queue: update message delivering", "id", msg.ID, "error", err)
-		}
-
-		// Socket first: it delivers without touching the composer, so a
-		// half-typed human draft survives. A socket failure is not the
-		// message's failure — fall through to tmux in this same attempt.
-		if viaSocket {
-			sendErr := q.socket.Send(sess, socketFromName(msg), text)
-			if sendErr == nil {
-				// No ack exists in the protocol: an accepted write is as
-				// much confirmation as there is, and is treated exactly like
-				// a confirmed injection (docs/06-messaging.md).
-				q.deliverSuccess(msg)
-				return true
-			}
-			if errors.Is(sendErr, ErrHeld) {
-				// Not a transport failure: the recipient took the bytes and
-				// parked them for user approval, where they expire silently.
-				// Worth a warning — it means that worker's inbound policy is
-				// not the accept we spawn workers with.
-				//
-				// Do NOT inject in this same pass. A hold is precisely what
-				// puts the approval dialog on the recipient's screen, and it
-				// takes a moment to render: an injection racing it types into
-				// the dialog, which dismisses it — the held copy is dropped
-				// and the typed text never reaches the conversation, while
-				// the dialog's scrollback banner echoes our own text back and
-				// fools the delivery confirmation. Hand the message back
-				// untouched (no attempt consumed) and let deliver's
-				// held-dialog gate decide when the pane is safe again.
-				slog.Warn("queue: recipient held the message, deferring the tmux fallback until its dialog clears",
-					"id", msg.ID, "to", msg.ToSession, "error", sendErr)
-				msg.Attempts--
-				if err := q.st.UpdateMessageStatus(msg.ID, "queued", msg.Attempts, 0, ""); err != nil {
-					slog.Error("queue: requeue message after a hold", "id", msg.ID, "error", err)
-				}
-				return false
-			}
-			slog.Info("queue: socket delivery failed, falling back to tmux injection",
-				"id", msg.ID, "to", msg.ToSession, "error", sendErr)
-			// Don't retry the socket on later attempts of this delivery: it
-			// just failed, and tmux is the fallback we want from here on.
-			viaSocket = false
-
-			if sess.PendingQuiz != "" {
-				// The socket died between deliver's gate and here, and a quiz
-				// is on screen: injecting would corrupt the widget. Hand the
-				// message back exactly like the composer-busy deferral below
-				// — nothing was sent, so no attempt is consumed.
-				msg.Attempts--
-				if err := q.st.UpdateMessageStatus(msg.ID, "queued", msg.Attempts, 0, ""); err != nil {
-					slog.Error("queue: requeue message after socket loss during quiz", "id", msg.ID, "error", err)
-				}
-				slog.Info("queue: socket lost during a pending quiz, message requeued",
-					"id", msg.ID, "to", msg.ToSession)
-				return false
-			}
 		}
 
 		if confirmer != nil {
