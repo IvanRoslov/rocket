@@ -1,4 +1,4 @@
-import { appendFileSync, chmodSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
+import { appendFileSync, chmodSync, lstatSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import net from "node:net";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -66,6 +66,15 @@ export class FrameDecoder {
 
 export function acceptedIDsPath(endpoint: string, instanceID: string): string {
 	return join(dirname(endpoint), `accepted-${instanceID}.ids`);
+}
+
+function statePathExists(path: string): boolean {
+	try {
+		lstatSync(path);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 export function configFromEnv(
@@ -213,24 +222,45 @@ export class DeliveryBridge {
 		let data: string;
 		try {
 			data = readFileSync(this.acceptedFile, "utf8");
-		} catch {
+		} catch (error) {
+			// Only a genuinely absent state file means an empty accepted set.
+			// Unreadable or corrupt state must fail the start instead of
+			// silently admitting a duplicate submission after a reload.
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT" || statePathExists(this.acceptedFile)) {
+				throw new Error(`accepted state ${this.acceptedFile} is unreadable: ${String(error)}`);
+			}
 			return;
 		}
 		for (const line of data.split("\n")) {
+			if (line === "") continue;
 			const id = Number(line);
-			if (Number.isSafeInteger(id) && id > 0) this.accepted.add(id);
+			if (!Number.isSafeInteger(id) || id <= 0) {
+				throw new Error(`accepted state ${this.acceptedFile} is corrupt`);
+			}
+			this.accepted.add(id);
 		}
 	}
 
-	private persistAccepted(messageID: number): void {
+	/**
+	 * Durably record the ID before the API call. Without this record a
+	 * reload could admit the same message again after a successful call.
+	 * A write failure therefore means zero calls and a truthful not_sent.
+	 */
+	private reserveAccepted(messageID: number): boolean {
 		try {
 			appendFileSync(this.acceptedFile, `${messageID}\n`, { mode: 0o600 });
+		} catch (error) {
+			this.log("persist_error", { message_id: messageID, error: String(error) });
+			return false;
+		}
+		try {
 			chmodSync(this.acceptedFile, 0o600);
 		} catch (error) {
-			// The API call already happened; losing the dedupe record must not
-			// turn a possible submission into a false NotSent.
-			this.log("persist_error", { message_id: messageID, error: String(error) });
+			// The durable record exists; a permission fixup failure must not
+			// turn a reserved message into a resend.
+			this.log("chmod_error", { path: this.acceptedFile, error: String(error) });
 		}
+		return true;
 	}
 
 	private handleConnection(socket: net.Socket): void {
@@ -262,11 +292,15 @@ export class DeliveryBridge {
 		// The request must address the history Pi is in right now, not just
 		// the one named by the launch environment.
 		if (!this.historyMatches()) return this.responseLine(request, "not_sent");
-		if (this.accepted.has(request.message_id)) return this.responseLine(request, "accepted");
 		// Only known states refuse before the API. isIdle alone cannot
 		// distinguish ordinary busy from compaction, so it is not a guard.
 		if (this.modalOpen || this.compaction) return this.responseLine(request, "not_sent");
+		if (this.accepted.has(request.message_id)) return this.responseLine(request, "accepted");
+		// The ID must be durable before the API, or a reload after a
+		// successful call could submit the same message twice.
+		if (!this.reserveAccepted(request.message_id)) return this.responseLine(request, "not_sent");
 
+		this.accepted.add(request.message_id);
 		try {
 			this.sendUserMessage(request.text);
 		} catch (error) {
@@ -274,8 +308,6 @@ export class DeliveryBridge {
 			// not_sent after a possible submission.
 			this.log("send_error", { message_id: request.message_id, error: String(error) });
 		}
-		this.accepted.add(request.message_id);
-		this.persistAccepted(request.message_id);
 		return this.responseLine(request, "accepted");
 	}
 

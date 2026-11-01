@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -19,6 +19,7 @@ class FakeApi {
 	sessionID = "sess-1";
 	historyThrows = false;
 	ctxOverride: any;
+	onSend?: (text: string) => void;
 
 	readonly ctx = {
 		isIdle: () => true,
@@ -38,6 +39,7 @@ class FakeApi {
 	}
 
 	sendUserMessage(text: string, options: any): void {
+		this.onSend?.(text);
 		this.calls.push({ text, options });
 		if (this.throwOnSend) throw new Error("send failed after submission");
 	}
@@ -331,6 +333,78 @@ test("historyGetterFailureFailsClosed", async (t) => {
 		v: 1, session_id: sessionID, instance_id: instanceID, message_id: 92, text: "нет истории",
 	});
 	assert.equal(response.outcome, "not_sent");
+	assert.equal(api.calls.length, 0);
+});
+
+test("reservesAcceptedIDBeforeAPI", async (t) => {
+	const api = new FakeApi();
+	const { endpoint, instanceID } = await makeBridge(t, api);
+	const ids = acceptedIDsPath(endpoint, instanceID);
+	let observedDuringSend = "";
+	api.onSend = () => {
+		observedDuringSend = readFileSync(ids, "utf8");
+	};
+	const response = await connectRequest(endpoint, {
+		v: 1, session_id: "sess-1", instance_id: "instance-1", message_id: 101, text: "резерв",
+	});
+	assert.equal(response.outcome, "accepted");
+	assert.match(observedDuringSend, /^101$/m, "the accepted ID must be durable before the API call");
+});
+
+test("unreadableAcceptedStateFailsClosed", async (t) => {
+	const api = new FakeApi();
+	const endpoint = endpointFor();
+	setNativeEnv(endpoint, "sess-1", "instance-1");
+	api.sessionID = "sess-1";
+	mkdirSync(acceptedIDsPath(endpoint, "instance-1"), { recursive: true, mode: 0o700 });
+	const bridge = createDeliveryExtension(api);
+	assert.ok(bridge);
+	t.after(() => bridge.stop("quit"));
+	api.emit("session_start", { reason: "reload" });
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	assert.equal(bridge.listening, false, "an unreadable accepted set must not become empty");
+	await assert.rejects(connectRequest(endpoint, {
+		v: 1, session_id: "sess-1", instance_id: "instance-1", message_id: 102, text: "нет состояния",
+	}));
+	assert.equal(api.calls.length, 0);
+});
+
+test("corruptAcceptedStateFailsClosed", async (t) => {
+	const api = new FakeApi();
+	const endpoint = endpointFor();
+	setNativeEnv(endpoint, "sess-1", "instance-1");
+	api.sessionID = "sess-1";
+	writeFileSync(acceptedIDsPath(endpoint, "instance-1"), "not-a-message-id\n", { mode: 0o600 });
+	const bridge = createDeliveryExtension(api);
+	assert.ok(bridge);
+	t.after(() => bridge.stop("quit"));
+	api.emit("session_start", { reason: "reload" });
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	assert.equal(bridge.listening, false, "corrupt accepted state must not become empty");
+	assert.equal(api.calls.length, 0);
+});
+
+test("persistenceFailureReturnsNotSentWithoutAPI", async (t) => {
+	if (process.getuid?.() === 0) {
+		t.skip("root bypasses file permission bits");
+		return;
+	}
+	const api = new FakeApi();
+	const endpoint = endpointFor();
+	setNativeEnv(endpoint, "sess-1", "instance-1");
+	api.sessionID = "sess-1";
+	const ids = acceptedIDsPath(endpoint, "instance-1");
+	writeFileSync(ids, "5\n", { mode: 0o600 });
+	chmodSync(ids, 0o400);
+	const bridge = createDeliveryExtension(api);
+	assert.ok(bridge);
+	t.after(() => bridge.stop("quit"));
+	api.emit("session_start", { reason: "reload" });
+	await waitForListening(bridge);
+	const response = await connectRequest(endpoint, {
+		v: 1, session_id: "sess-1", instance_id: "instance-1", message_id: 103, text: "не записан",
+	});
+	assert.equal(response.outcome, "not_sent", "no durable reservation means no submission");
 	assert.equal(api.calls.length, 0);
 });
 
