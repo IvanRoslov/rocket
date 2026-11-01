@@ -139,6 +139,35 @@ function frameFor(body: unknown): Buffer {
 	return Buffer.from(`${JSON.stringify(body)}\n`);
 }
 
+function nativeFrame(sessionID: string, instanceID: string, messageID: number, text: string): Buffer {
+	return frameFor({ v: 1, session_id: sessionID, instance_id: instanceID, message_id: messageID, text });
+}
+
+function sendTrailingFrame(endpoint: string, first: Buffer, second: Buffer): Promise<string> {
+	return new Promise((resolve) => {
+		const socket = net.createConnection(endpoint);
+		let data = "";
+		socket.on("connect", () => socket.write(first));
+		socket.once("data", () => {
+			// The response for the first frame arrived; try one more frame on
+			// the same connection after the server ended its side.
+			try {
+				socket.write(second);
+			} catch {
+				// A fully closed connection is also acceptable.
+			}
+		});
+		socket.on("data", (chunk) => {
+			data += chunk.toString("utf8");
+		});
+		socket.on("error", () => {});
+		setTimeout(() => {
+			socket.destroy();
+			resolve(data);
+		}, 100);
+	});
+}
+
 test("rejectsWrongSessionOrInstance", async (t) => {
 	const api = new FakeApi();
 	const { endpoint, sessionID } = await makeBridge(t, api);
@@ -407,6 +436,27 @@ test("persistenceFailureReturnsNotSentWithoutAPI", async (t) => {
 	});
 	assert.equal(response.outcome, "not_sent", "no durable reservation means no submission");
 	assert.equal(api.calls.length, 0);
+});
+
+test("oneExchangePerConnection", async (t) => {
+	const api = new FakeApi();
+	const { endpoint, sessionID, instanceID } = await makeBridge(t, api);
+	const first = nativeFrame(sessionID, instanceID, 201, "первый");
+	const second = nativeFrame(sessionID, instanceID, 202, "второй");
+	const response = await connectRequest(endpoint, null, [Buffer.concat([first, second])]);
+	assert.equal(response.message_id, 201);
+	assert.equal(api.calls.length, 1, "only the first frame of a chunk may reach the API");
+	assert.equal(api.calls[0].text, "первый");
+});
+
+test("trailingChunkCannotSubmit", async (t) => {
+	const api = new FakeApi();
+	const { endpoint, sessionID, instanceID } = await makeBridge(t, api);
+	const first = nativeFrame(sessionID, instanceID, 211, "первый");
+	const second = nativeFrame(sessionID, instanceID, 212, "второй");
+	const received = await sendTrailingFrame(endpoint, first, second);
+	assert.match(received, /"message_id":211/);
+	assert.equal(api.calls.length, 1, "a later chunk after the response must not reach the API");
 });
 
 test("socketPermissionFailureFailsClosed", async (t) => {

@@ -280,19 +280,27 @@ export class DeliveryBridge {
 	private handleConnection(socket: net.Socket): void {
 		this.connections.add(socket);
 		const decoder = new FrameDecoder();
-		const close = () => this.connections.delete(socket);
-		socket.on("close", close);
-		socket.on("error", close);
-		socket.on("data", (chunk: Buffer) => {
+		// pi-uds-v1 is one request/response per connection. A second frame —
+		// in the same chunk or a later one — must never reach the API,
+		// because its outcome would not be read.
+		let handled = false;
+		const onData = (chunk: Buffer) => {
+			if (handled) return;
 			const { lines, overflow } = decoder.push(chunk);
 			if (overflow) {
 				this.log("frame_overflow");
+				handled = true;
 				socket.end(`${this.responseLine(undefined, "not_sent")}\n`);
 				return;
 			}
-			for (const line of lines) socket.write(`${this.handleLine(line)}\n`);
-			if (lines.length > 0) socket.end();
-		});
+			if (lines.length === 0) return;
+			handled = true;
+			socket.end(`${this.handleLine(lines[0])}\n`);
+		};
+		const close = () => this.connections.delete(socket);
+		socket.on("data", onData);
+		socket.on("close", close);
+		socket.on("error", close);
 	}
 
 	private handleLine(line: string): string {
