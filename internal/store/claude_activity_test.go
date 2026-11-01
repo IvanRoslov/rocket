@@ -27,6 +27,8 @@ func TestClaudeHookOrderingAndGenerationAtomicActivity(t *testing.T) {
 	}
 	l, _, _ := st.GetClaudeLaunch("s")
 	l.Generation = "new"
+
+	l.StartedAt = l.StartedAt.Add(time.Nanosecond)
 	st.PutClaudeLaunch(l)
 	if ok, _ := st.AcceptClaudeHook("s", v.Target.LaunchGeneration, at+3, "exited", now.Unix()); ok {
 		t.Fatal("old generation event applied")
@@ -46,6 +48,8 @@ func TestClaudeRestoreRacingValidatedEventNeverAppliesToNewGeneration(t *testing
 		v, _ := claudeStoreFixture(t, st)
 		l, _, _ := st.GetClaudeLaunch("s")
 		l.Generation = "replacement"
+
+		l.StartedAt = l.StartedAt.Add(time.Nanosecond)
 		start := make(chan struct{})
 		done := make(chan error, 2)
 		go func() {

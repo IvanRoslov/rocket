@@ -172,8 +172,20 @@ func (s *Store) ClaimClaudeMessage(v claudeinstance.Snapshot) (bool, error) {
 	if e != nil || n != 1 {
 		return false, e
 	}
+	launch, pinned, _, e := readClaudeBinding(context.Background(), tx, v.Target.RocketSessionID)
 	var binding string
-	e = tx.QueryRow(`SELECT identity_json FROM claude_launches WHERE session_id=? AND generation=?`, v.Target.RocketSessionID, v.Target.LaunchGeneration).Scan(&binding)
+	if e == nil && pinned != nil {
+		raw, _ := json.Marshal(pinned)
+		binding = string(raw)
+	}
+	var state string
+	if e == nil {
+		e = tx.QueryRow(`SELECT COALESCE(activity,'') FROM sessions WHERE id=?`, v.Target.RocketSessionID).Scan(&state)
+	}
+	eligible := state == "active" || state == "ready" || state == "idle" || state == "waiting_input"
+	if e == nil && (launch.BindingRevision != v.BindingRevision || !eligible) {
+		return false, fmt.Errorf("Claude eligibility changed before claim")
+	}
 	if e != nil {
 		return false, e
 	}

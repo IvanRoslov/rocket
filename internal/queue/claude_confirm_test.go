@@ -44,6 +44,8 @@ func TestClaudeConfirmationRequiresExactProofAndSurvivesRestore(t *testing.T) {
 	// A replacement current generation/config cannot redirect the immutable send.
 	l, _, _ := h.st.GetClaudeLaunch("recv")
 	l.Generation = "replacement"
+
+	l.StartedAt = l.StartedAt.Add(time.Nanosecond)
 	h.st.PutClaudeLaunch(l)
 	h.q.cfg.SocketDelivery = false
 	h.q.SetSocketSender(nil)
@@ -107,7 +109,12 @@ func TestClaudePrewritePersistenceFailureSendsNothing(t *testing.T) {
 	h := newTestQueue(t)
 	h.addRunningSession(t, "recv", activity.Ready)
 	f := installClaudeSocket(t, h, true)
-	f.beforeClaim = func() { l, _, _ := h.st.GetClaudeLaunch("recv"); l.Generation = "replaced"; h.st.PutClaudeLaunch(l) }
+	f.beforeClaim = func() {
+		l, _, _ := h.st.GetClaudeLaunch("recv")
+		l.Generation = "replaced"
+		l.StartedAt = l.StartedAt.Add(time.Nanosecond)
+		h.st.PutClaudeLaunch(l)
+	}
 	id, _ := h.st.AddMessage(store.Message{ToSession: "recv", Body: "feedback"})
 	msg, _ := h.st.GetMessage(id)
 	sess, _ := h.st.GetSession("recv")

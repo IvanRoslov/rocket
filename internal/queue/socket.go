@@ -69,7 +69,7 @@ func (s *ClaudeSocketSender) Resolve(ctx context.Context, sess store.Session) cl
 	if e != nil || !agent.SupportsClaudeSocket(a) {
 		return rejected("incompatible_adapter")
 	}
-	l, pinned, e := s.st.GetClaudeLaunch(sess.ID)
+	l, pinned, observed, e := s.st.GetClaudeBinding(ctx, sess.ID)
 	if e != nil {
 		return rejected("unproven_launch")
 	}
@@ -81,7 +81,21 @@ func (s *ClaudeSocketSender) Resolve(ctx context.Context, sess store.Session) cl
 	}
 	resolution := claudeinstance.Resolve(ctx, l, pinned, registry, s.probe, filepath.Join(filepath.Dir(s.sessionsDir), "projects"))
 	if resolution.State == claudeinstance.Verified {
-		ok, e := s.st.BindClaudeIdentity(resolution.Identity)
+		var ok bool
+		if pinned != nil && !claudeinstance.SameIdentity(*pinned, resolution.Identity) {
+			// Repeat the full physical validation immediately before the transition CAS.
+			fresh, err := claudeinstance.ReadRegistry(ctx, s.sessionsDir)
+			if err != nil {
+				return rejected("registry_lookup")
+			}
+			again := claudeinstance.Resolve(ctx, l, pinned, fresh, s.probe, filepath.Join(filepath.Dir(s.sessionsDir), "projects"))
+			if again.State != claudeinstance.Verified || !claudeinstance.SameIdentity(again.Identity, resolution.Identity) {
+				return rejected("binding_changed")
+			}
+			ok, e = s.st.AdvanceClaudeBinding(ctx, *pinned, resolution.Identity, l.BindingRevision, observed, time.Now().UnixNano())
+		} else {
+			ok, e = s.st.BindClaudeIdentity(resolution.Identity)
+		}
 		if e != nil || !ok {
 			return rejected("binding_persistence")
 		}
@@ -109,18 +123,22 @@ func (s *ClaudeSocketSender) Prepare(ctx context.Context, sess store.Session, fr
 	if reply != "" {
 		from = socketmsg.EncodeAddr(reply)
 	}
+	launch, pinned, _, e := s.st.GetClaudeBinding(ctx, sess.ID)
+	if e != nil || pinned == nil || !claudeinstance.SameIdentity(*pinned, result.Identity) {
+		return claudeinstance.Snapshot{}, ErrNoSocket
+	}
 	envelope, e := socketmsg.EnvelopeWithID(wire, from, fromName, text)
 	if e != nil {
 		return claudeinstance.Snapshot{}, e
 	}
-	return claudeinstance.Snapshot{EnvelopeVersion: 1, Transport: ClaudeSocketTransport, Target: result.Identity, WireID: wire, Envelope: envelope, ReplyPath: reply, Boundary: boundary}, nil
+	return claudeinstance.Snapshot{BindingRevision: launch.BindingRevision, EnvelopeVersion: 1, Transport: ClaudeSocketTransport, Target: result.Identity, WireID: wire, Envelope: envelope, ReplyPath: reply, Boundary: boundary}, nil
 }
 func (s *ClaudeSocketSender) Send(ctx context.Context, v claudeinstance.Snapshot) (SocketOutcome, error) {
 	if s.st == nil {
 		return SocketNotSent, ErrNoSocket
 	}
 	saved, e := s.st.GetClaudeDelivery(v.MessageID)
-	if e != nil || saved.EnvelopeVersion != v.EnvelopeVersion || saved.WireID != v.WireID || !claudeinstance.SameIdentity(saved.Target, v.Target) || saved.Envelope != v.Envelope || saved.Boundary != v.Boundary || saved.ReplyPath != v.ReplyPath {
+	if e != nil || saved.BindingRevision != v.BindingRevision || saved.EnvelopeVersion != v.EnvelopeVersion || saved.WireID != v.WireID || !claudeinstance.SameIdentity(saved.Target, v.Target) || saved.Envelope != v.Envelope || saved.Boundary != v.Boundary || saved.ReplyPath != v.ReplyPath {
 		return SocketNotSent, fmt.Errorf("missing immutable Claude claim")
 	}
 	if claudeAgeExpired(saved.Deadline, time.Now()) {
@@ -145,6 +163,11 @@ func (s *ClaudeSocketSender) Send(ctx context.Context, v claudeinstance.Snapshot
 	}
 	result := s.Resolve(ctx, sess)
 	if result.State != claudeinstance.Verified || !claudeinstance.SameIdentity(result.Identity, v.Target) {
+		return SocketNotSent, ErrNoSocket
+	}
+	launch, pinned, _, err := s.st.GetClaudeBinding(ctx, v.Target.RocketSessionID)
+	current, sessionErr := s.st.GetSession(v.Target.RocketSessionID)
+	if err != nil || sessionErr != nil || pinned == nil || launch.BindingRevision != v.BindingRevision || !claudeinstance.SameIdentity(*pinned, v.Target) || !claudeEligible(current.Activity) {
 		return SocketNotSent, ErrNoSocket
 	}
 	m, e := s.st.GetMessage(v.MessageID)

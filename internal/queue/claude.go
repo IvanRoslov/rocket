@@ -28,11 +28,6 @@ func (q *Queue) deliverClaude(ctx context.Context, msg store.Message, sess store
 		q.fail(msg, "delivery_unconfirmed")
 		return true
 	}
-	state, known := q.getActivity(sess.ID)
-	if known && state == activity.Blocked {
-		q.fail(msg, "recipient_unavailable")
-		return true
-	}
 	if q.socket == nil {
 		return false
 	}
@@ -44,21 +39,25 @@ func (q *Queue) deliverClaude(ctx context.Context, msg store.Message, sess store
 	if r.State != claudeinstance.Verified {
 		return false
 	}
-	// Liveness does not assert readiness; an old unqualified exited hint waits
-	// for independent activity instead of causing a zero-attempt terminal fail.
-	if !known || state == activity.Exited {
+	// Eligibility belongs to the resolved durable binding, never a pre-follow cache.
+	l, pinned, event, e := q.st.GetClaudeBinding(ctx, sess.ID)
+	current, sessionErr := q.st.GetSession(sess.ID)
+	check, again, observed, checkErr := q.st.GetClaudeBinding(ctx, sess.ID)
+	if e != nil || sessionErr != nil || checkErr != nil || pinned == nil || again == nil || l.BindingRevision != check.BindingRevision || event != observed || !claudeinstance.SameIdentity(*pinned, *again) || !claudeinstance.SameIdentity(*again, r.Identity) {
 		return false
 	}
-	switch state {
-	case activity.Active, activity.Ready, activity.Idle, activity.WaitingInput:
-	default:
+	if current.Activity == string(activity.Blocked) {
+		q.fail(msg, "recipient_unavailable")
+		return true
+	}
+	if !claudeEligible(current.Activity) {
 		return false
 	}
 	snapshot, e := q.socket.Prepare(ctx, sess, socketFromName(msg), q.prepareText(msg, sess))
 	if e != nil {
 		return false
 	}
-	if !claudeinstance.SameIdentity(snapshot.Target, r.Identity) {
+	if snapshot.BindingRevision != l.BindingRevision || !claudeinstance.SameIdentity(snapshot.Target, r.Identity) {
 		return false
 	}
 	snapshot.MessageID = msg.ID
@@ -174,4 +173,12 @@ func (q *Queue) confirmClaudeRecipient(ctx context.Context, msgs []store.Message
 		}
 	}
 	return pending
+}
+
+func claudeEligible(state string) bool {
+	switch activity.State(state) {
+	case activity.Active, activity.Ready, activity.Idle, activity.WaitingInput:
+		return true
+	}
+	return false
 }

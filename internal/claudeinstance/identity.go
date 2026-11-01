@@ -11,6 +11,7 @@ import (
 )
 
 type Launch struct {
+	BindingRevision                           uint64
 	RocketSessionID, Generation, PaneIdentity string
 	PanePID                                   int
 	PaneStart                                 time.Time
@@ -150,7 +151,15 @@ func Resolve(ctx context.Context, launch Launch, pinned *Identity, registry []so
 	}
 	id := Identity{RocketSessionID: launch.RocketSessionID, LaunchGeneration: launch.Generation, ClaudeSessionID: r.SessionID, PID: r.PID, ProcessStart: start.UTC(), PaneIdentity: r.Tmux, PeerProtocol: r.PeerProtocol, Kind: r.Kind, SocketPath: r.MessagingSocketPath, JournalPath: filepath.Join(projectsDir, projectSlug.Replace(cwd), r.SessionID+".jsonl")}
 	if pinned != nil && !SameIdentity(*pinned, id) {
-		return result(Rejected, "binding_changed")
+		prior := *pinned
+		prior.ClaudeSessionID = id.ClaudeSessionID
+		prior.JournalPath = id.JournalPath
+		if !uuidPattern.MatchString(pinned.ClaudeSessionID) || !SameIdentity(prior, id) || filepath.Dir(pinned.JournalPath) != filepath.Dir(id.JournalPath) {
+			return result(Rejected, "binding_changed")
+		}
+		if _, e := PinJournal(id); e != nil {
+			return result(Rejected, "binding_changed")
+		}
 	}
 	return Resolution{Identity: id, State: Verified}
 }

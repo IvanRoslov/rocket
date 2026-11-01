@@ -95,6 +95,10 @@ func installClaudeSocket(t *testing.T, h *testHarness, available bool) *fakeSock
 	if ok, e := h.st.BindClaudeIdentity(target); !ok || e != nil {
 		t.Fatalf("bind %v %v", ok, e)
 	}
+	state, known := h.ac.get("recv")
+	if known {
+		h.st.UpdateSessionActivity("recv", string(state), time.Now().Unix())
+	}
 	f := &fakeSocket{available: available, target: target}
 	h.q.claudeProbe = socketProbe{root: claudeinstance.Process{PID: target.PID, Start: target.ProcessStart, Name: "claude"}}
 	h.q.SetSocketSender(f)

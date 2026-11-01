@@ -48,6 +48,7 @@ func nextClaudeSnapshot(t *testing.T, st *Store, old claudeinstance.Snapshot, ge
 	if ok, e := st.BindClaudeIdentity(v.Target); !ok || e != nil {
 		t.Fatalf("bind new %v %v", ok, e)
 	}
+	st.UpdateSessionActivity("s", "ready", time.Now().Unix())
 	v.MessageID, e = st.AddMessage(Message{ToSession: "s", Body: "feedback"})
 	if e != nil {
 		t.Fatal(e)

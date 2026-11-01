@@ -101,6 +101,7 @@ func productionSocketFixture(t *testing.T) (*testHarness, *ClaudeSocketSender, s
 	identity := claudeinstance.Resolve(context.Background(), l, nil, []socketmsg.Session{cc}, probe, filepath.Join(dir, "projects")).Identity
 	os.MkdirAll(filepath.Dir(identity.JournalPath), 0700)
 	os.WriteFile(identity.JournalPath, nil, 0600)
+	h.st.UpdateSessionActivity("recv", "ready", time.Now().Unix())
 	s := NewClaudeSocketSender(reg)
 	s.SetStore(h.st)
 	s.probe = probe
@@ -145,6 +146,8 @@ func TestProductionSocketRevalidatesBeforeWrite(t *testing.T) {
 	v := claimSocketFixture(t, h, s)
 	l, _, _ := h.st.GetClaudeLaunch("recv")
 	l.Generation = "replacement"
+
+	l.StartedAt = l.StartedAt.Add(time.Nanosecond)
 	h.st.PutClaudeLaunch(l)
 	if out, _ := s.Send(h.ctx, v); out != SocketNotSent {
 		t.Fatalf("changed generation wrote: %s", out)
@@ -218,6 +221,8 @@ func TestClaudeReceiptRequiresEveryCorrelationField(t *testing.T) {
 			case "replacement":
 				l, _, _ := h.st.GetClaudeLaunch("recv")
 				l.Generation = "g2"
+
+				l.StartedAt = l.StartedAt.Add(time.Nanosecond)
 				h.st.PutClaudeLaunch(l)
 			}
 			want := SocketUnknown

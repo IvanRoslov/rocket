@@ -18,25 +18,75 @@ func (m *Monitor) isClaude(sess store.Session) bool {
 	a, e := m.resolveAgent(sess.Agent)
 	return e == nil && agent.SupportsClaudeSocket(a)
 }
-func (m *Monitor) resolveClaude(ctx context.Context, sess store.Session) claudeinstance.Resolution {
-	l, pinned, e := m.st.GetClaudeLaunch(sess.ID)
+
+type claudeObservation struct {
+	target   claudeinstance.Identity
+	revision uint64
+	eventAt  int64
+}
+
+func (a claudeObservation) same(b claudeObservation) bool {
+	return a.revision == b.revision && a.eventAt == b.eventAt && claudeinstance.SameIdentity(a.target, b.target)
+}
+
+type claudeResolution struct {
+	claudeinstance.Resolution
+	observation claudeObservation
+}
+
+func (m *Monitor) currentClaude(ctx context.Context, id string) (claudeObservation, error) {
+	l, target, event, e := m.st.GetClaudeBinding(ctx, id)
 	if e != nil {
-		return claudeinstance.Resolution{State: claudeinstance.Unknown, Reason: "unproven_launch"}
+		return claudeObservation{}, e
+	}
+	if target == nil {
+		return claudeObservation{}, agent.ErrNoSignal
+	}
+	return claudeObservation{*target, l.BindingRevision, event}, nil
+}
+func (m *Monitor) resolveClaude(ctx context.Context, sess store.Session) claudeResolution {
+	unknown := func(reason string) claudeResolution {
+		return claudeResolution{Resolution: claudeinstance.Resolution{State: claudeinstance.Unknown, Reason: reason}}
+	}
+	l, pinned, event, e := m.st.GetClaudeBinding(ctx, sess.ID)
+	if e != nil {
+		return unknown("unproven_launch")
 	}
 	all, e := claudeinstance.ReadRegistry(ctx, m.claudeSessionsDir)
 	if e != nil {
-		return claudeinstance.Resolution{State: claudeinstance.Unknown, Reason: "registry_lookup"}
+		return unknown("registry_lookup")
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	r := claudeinstance.Resolve(probeCtx, l, pinned, all, m.claudeProbe, filepath.Join(filepath.Dir(m.claudeSessionsDir), "projects"))
+	projects := filepath.Join(filepath.Dir(m.claudeSessionsDir), "projects")
+	r := claudeinstance.Resolve(probeCtx, l, pinned, all, m.claudeProbe, projects)
 	if r.State == claudeinstance.Verified {
-		ok, e := m.st.BindClaudeIdentity(r.Identity)
+		var ok bool
+		if pinned != nil && !claudeinstance.SameIdentity(*pinned, r.Identity) {
+			fresh, err := claudeinstance.ReadRegistry(probeCtx, m.claudeSessionsDir)
+			if err != nil {
+				return unknown("registry_lookup")
+			}
+			again := claudeinstance.Resolve(probeCtx, l, pinned, fresh, m.claudeProbe, projects)
+			if again.State != claudeinstance.Verified || !claudeinstance.SameIdentity(again.Identity, r.Identity) {
+				return unknown("binding_changed")
+			}
+			ok, e = m.st.AdvanceClaudeBinding(probeCtx, *pinned, r.Identity, l.BindingRevision, event, time.Now().UnixNano())
+		} else {
+			ok, e = m.st.BindClaudeIdentity(r.Identity)
+		}
 		if e != nil || !ok {
-			return claudeinstance.Resolution{State: claudeinstance.Unknown, Reason: "binding_changed"}
+			return unknown("binding_changed")
 		}
 	}
-	return r
+	observation, e := m.currentClaude(ctx, sess.ID)
+	if e != nil {
+		return unknown("unbound_launch")
+	}
+	if r.State == claudeinstance.Verified && !claudeinstance.SameIdentity(r.Identity, observation.target) {
+		return unknown("binding_changed")
+	}
+	return claudeResolution{r, observation}
 }
 func (m *Monitor) PushClaudeUpdate(ctx context.Context, sessionID string, state activity.State, event claudeinstance.HookEvent) {
 	sess, e := m.st.GetSession(sessionID)
@@ -48,6 +98,10 @@ func (m *Monitor) PushClaudeUpdate(ctx context.Context, sessionID string, state 
 		return
 	}
 	if claudeinstance.ValidateHook(ctx, r.Identity, event, string(state), 0, time.Now(), m.claudeProbe) != nil {
+		return
+	}
+	sess, e = m.st.GetSession(sessionID)
+	if e != nil {
 		return
 	}
 	next := string(state)
@@ -63,7 +117,7 @@ func (m *Monitor) PushClaudeUpdate(ctx context.Context, sessionID string, state 
 			next = "blocked"
 		}
 	} // SessionEnd != OS death.
-	ok, e := m.st.AcceptClaudeHook(sessionID, event.LaunchGeneration, event.At, next, event.At/int64(time.Second))
+	ok, e := m.st.AcceptClaudeHookForBinding(ctx, r.observation.target, r.observation.revision, event.At, next, event.At/int64(time.Second))
 	if e != nil || !ok {
 		return
 	}
@@ -75,11 +129,11 @@ func (m *Monitor) PushClaudeUpdate(ctx context.Context, sessionID string, state 
 		m.bus.Publish("session.activity_changed", sessionID, map[string]any{"from": sess.Activity, "to": next, "source": "claude-qualified-hook"})
 	}
 }
-func (m *Monitor) applyClaude(sess store.Session, generation string, state activity.State, ts time.Time, source string) {
+func (m *Monitor) applyClaude(ctx context.Context, sess store.Session, observation claudeObservation, state activity.State, ts time.Time, source string) {
 	if state == activity.Ready && time.Since(ts) > m.cfg.ReadyToIdle {
 		state = activity.Idle
 	}
-	ok, e := m.st.ApplyClaudeActivity(sess.ID, generation, string(state), ts.Unix())
+	ok, e := m.st.ApplyClaudeActivityForBinding(ctx, observation.target, observation.revision, observation.eventAt, string(state), ts.Unix())
 	if e != nil || !ok {
 		return
 	}
@@ -92,20 +146,24 @@ func (m *Monitor) applyClaude(sess store.Session, generation string, state activ
 	}
 }
 func (m *Monitor) pollClaudeSession(ctx context.Context, sess store.Session, a agent.Agent, liveSet map[string]bool, haveLiveSet bool) {
-	l, _, _ := m.st.GetClaudeLaunch(sess.ID)
-	if sess.State != "spawning" && haveLiveSet && !liveSet[sess.TmuxName] {
-		m.applyClaude(sess, l.Generation, activity.Exited, time.Now(), "claude-runtime-gone")
+	r := m.resolveClaude(ctx, sess)
+	// Even runtime disappearance is applied only to the captured exact binding.
+	if r.observation.target.RocketSessionID == "" {
 		return
 	}
-	r := m.resolveClaude(ctx, sess)
-	if r.State == claudeinstance.Dead {
-		m.applyClaude(sess, l.Generation, activity.Exited, time.Now(), "claude-exact-root-dead")
+	current, err := m.st.GetSession(sess.ID)
+	if err != nil {
+		return
+	}
+	sess = current
+	if (sess.State != "spawning" && haveLiveSet && !liveSet[sess.TmuxName]) || r.State == claudeinstance.Dead {
+		m.applyClaude(ctx, sess, r.observation, activity.Exited, time.Now(), "claude-exact-root-dead")
 		return
 	}
 	state, ts, e := claudeJournalActivity(ctx, r.Identity)
 	if e != nil {
 		if sess.Activity != "blocked" && sess.Activity != "waiting_input" {
-			m.applyClaude(sess, l.Generation, "", time.Now(), "claude-journal-uncertain")
+			m.applyClaude(ctx, sess, r.observation, "", time.Now(), "claude-journal-uncertain")
 		}
 		return
 	}
@@ -114,7 +172,7 @@ func (m *Monitor) pollClaudeSession(ctx context.Context, sess store.Session, a a
 		// Neither a transcript/hook hint nor an old persisted/cache exit proves
 		// root death. Clear only the old hint; preserve a prior valid activity.
 		if sess.Activity == "exited" {
-			m.applyClaude(sess, l.Generation, "", time.Now(), "claude-exit-unverified")
+			m.applyClaude(ctx, sess, r.observation, "", time.Now(), "claude-exit-unverified")
 		}
 		return
 	}
@@ -127,7 +185,7 @@ func (m *Monitor) pollClaudeSession(ctx context.Context, sess store.Session, a a
 	if sess.Activity == string(activity.WaitingInput) && state != activity.Blocked {
 		// A qualified Notification is a suspicion until the pane has been
 		// prompt-free for two sweeps. Quiz/capture uncertainty retains it.
-		if !m.clearClaudeWait(ctx, sess, l.Generation) {
+		if !m.clearClaudeWait(ctx, sess, r.observation) {
 			return
 		}
 		if now := time.Now(); now.After(ts) {
@@ -135,21 +193,25 @@ func (m *Monitor) pollClaudeSession(ctx context.Context, sess store.Session, a a
 		}
 	} else {
 		m.mu.Lock()
-		delete(m.claudeWaitMiss, sess.ID)
+		m.resetClaudeWaitLocked(sess.ID, r.observation)
 		m.mu.Unlock()
 	}
-	m.applyClaude(sess, l.Generation, state, ts, "claude-journal-poll")
+	m.applyClaude(ctx, sess, r.observation, state, ts, "claude-journal-poll")
 }
 
-// A generation travels with the miss count, so a delayed G1 capture can never
-// contribute to G2's correction, even when replacement races with Capture.
+// Full observation tokens isolate captures and misses from transitions/notifications.
 type claudeWaitCounter struct {
-	generation string
-	misses     int
+	observation claudeObservation
+	misses      int
 }
 
-func (m *Monitor) clearClaudeWait(ctx context.Context, sess store.Session, generation string) bool {
-	reset := func() { m.mu.Lock(); delete(m.claudeWaitMiss, sess.ID); m.mu.Unlock() }
+func (m *Monitor) resetClaudeWaitLocked(id string, observation claudeObservation) {
+	if count, ok := m.claudeWaitMiss[id]; ok && count.observation.same(observation) {
+		delete(m.claudeWaitMiss, id)
+	}
+}
+func (m *Monitor) clearClaudeWait(ctx context.Context, sess store.Session, observation claudeObservation) bool {
+	reset := func() { m.mu.Lock(); defer m.mu.Unlock(); m.resetClaudeWaitLocked(sess.ID, observation) }
 	if sess.PendingQuiz != "" {
 		reset()
 		return false
@@ -162,18 +224,18 @@ func (m *Monitor) clearClaudeWait(ctx context.Context, sess store.Session, gener
 		reset()
 		return false
 	}
-	current, _, e := m.st.GetClaudeLaunch(sess.ID)
-	if e != nil || current.Generation != generation {
-		return false
-	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	current, e := m.currentClaude(ctx, sess.ID)
+	if e != nil || !current.same(observation) {
+		return false
+	}
 	if m.claudeWaitMiss == nil {
 		m.claudeWaitMiss = make(map[string]claudeWaitCounter)
 	}
 	count := m.claudeWaitMiss[sess.ID]
-	if count.generation != generation {
-		count = claudeWaitCounter{generation: generation}
+	if !count.observation.same(observation) {
+		count = claudeWaitCounter{observation: observation}
 	}
 	count.misses++
 	m.claudeWaitMiss[sess.ID] = count

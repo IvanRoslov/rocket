@@ -50,6 +50,7 @@ func TestClaudeFalseExitedWaitsWithoutBurningAttempt(t *testing.T) {
 				f.resolutionState = claudeinstance.Unknown
 			case "genuine blocked":
 				h.ac.set("recv", activity.Blocked)
+				h.st.UpdateSessionActivity("recv", "blocked", time.Now().Unix())
 			case "genuine root dead":
 				f.resolutionState = claudeinstance.Dead
 			}

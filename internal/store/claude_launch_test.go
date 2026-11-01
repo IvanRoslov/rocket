@@ -37,6 +37,8 @@ func TestClaudeLaunchGenerationBindingCAS(t *testing.T) {
 		t.Fatalf("same generation erased binding %+v %v", pinned, e)
 	}
 	l.Generation = "g2"
+
+	l.StartedAt = l.StartedAt.Add(time.Nanosecond)
 	if e = st.PutClaudeLaunch(l); e != nil {
 		t.Fatal(e)
 	}

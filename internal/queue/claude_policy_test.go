@@ -80,6 +80,8 @@ func TestClaudeSavedTargetLifecycleIsIndependentOfCurrentHints(t *testing.T) {
 				case "new generation terminal old live", "new generation old unknown":
 					l, _, _ := h.st.GetClaudeLaunch("recv")
 					l.Generation = "new"
+
+					l.StartedAt = l.StartedAt.Add(time.Nanosecond)
 					h.st.PutClaudeLaunch(l)
 					sess, _ := h.st.GetSession("recv")
 					sess.State = "killed"
@@ -92,6 +94,8 @@ func TestClaudeSavedTargetLifecycleIsIndependentOfCurrentHints(t *testing.T) {
 					// A new generation cannot establish closure of the old saved target.
 					l, _, _ := h.st.GetClaudeLaunch("recv")
 					l.Generation = "new"
+
+					l.StartedAt = l.StartedAt.Add(time.Nanosecond)
 					h.st.PutClaudeLaunch(l)
 				case "persisted exited":
 					h.st.UpdateSessionActivity("recv", "exited", time.Now().Unix())

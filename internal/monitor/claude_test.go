@@ -246,6 +246,8 @@ func TestClaudeWaitMissesCannotCrossGenerationOrApplyStaleCapture(t *testing.T) 
 			l, id, _ := st.GetClaudeLaunch("s")
 			replace := func() {
 				l.Generation = "g2"
+
+				l.StartedAt = l.StartedAt.Add(time.Nanosecond)
 				if e := st.PutClaudeLaunch(l); e != nil {
 					t.Fatal(e)
 				}
@@ -302,5 +304,38 @@ func TestClaudeQualifiedStopCannotClearExactAPIErrorBlock(t *testing.T) {
 	got, _ := st.GetSession("s")
 	if got.Activity != "blocked" {
 		t.Fatalf("API-error Stop bypassed genuine blocked: %+v", got)
+	}
+}
+
+func TestClaudeBindingCaptureRacesNotification(t *testing.T) {
+	m, st, _, event := claudeMonitorFixture(t)
+	rt := &claudeCaptureCallback{quizFakeRuntime: &quizFakeRuntime{captureOut: plainComposerTail}}
+	m.rt = rt
+	event.HookEventName = "Notification"
+	m.PushClaudeUpdate(context.Background(), "s", activity.WaitingInput, event)
+	poll := func() {
+		sess, _ := st.GetSession("s")
+		m.pollSession(context.Background(), sess, map[string]bool{"s": true}, true)
+	}
+	poll() // first miss before the next notification
+	rt.capture = func() {
+		rt.capture = nil
+		event.At = time.Now().UnixNano()
+		m.PushClaudeUpdate(context.Background(), "s", activity.WaitingInput, event)
+	}
+	poll() // stale second capture must not clear the fresh notification
+	got, _ := st.GetSession("s")
+	if got.Activity != "waiting_input" {
+		t.Fatalf("stale capture cleared notification: %s", got.Activity)
+	}
+	poll() // first miss in fresh event token
+	got, _ = st.GetSession("s")
+	if got.Activity != "waiting_input" {
+		t.Fatal("old miss contributed to new token")
+	}
+	poll()
+	got, _ = st.GetSession("s")
+	if got.Activity == "waiting_input" {
+		t.Fatal("fresh consecutive misses never clear stale wait")
 	}
 }

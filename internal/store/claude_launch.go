@@ -26,10 +26,22 @@ func (s *Store) PutClaudeLaunch(l claudeinstance.Launch) error {
 	if _, e = tx.Exec(`UPDATE sessions SET updated_at=updated_at WHERE id=?`, l.RocketSessionID); e != nil {
 		return e
 	}
-	var old string
-	err := tx.QueryRow(`SELECT generation FROM claude_launches WHERE session_id=?`, l.RocketSessionID).Scan(&old)
+	var old, oldRaw string
+	err := tx.QueryRow(`SELECT generation,launch_json FROM claude_launches WHERE session_id=?`, l.RocketSessionID).Scan(&old, &oldRaw)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
+	}
+	if err == nil {
+		var prior claudeinstance.Launch
+		if json.Unmarshal([]byte(oldRaw), &prior) != nil {
+			return fmt.Errorf("invalid Claude launch")
+		}
+		if old != l.Generation && !l.StartedAt.After(prior.StartedAt) && l.PaneIdentity != "" {
+			return fmt.Errorf("stale Claude pane completion")
+		}
+		if old != l.Generation && l.StartedAt.Before(prior.StartedAt) {
+			return fmt.Errorf("stale Claude launch")
+		}
 	}
 	_, e = tx.Exec(`INSERT INTO claude_launches(session_id,generation,launch_json) VALUES(?,?,?)
  ON CONFLICT(session_id) DO UPDATE SET generation=excluded.generation,launch_json=excluded.launch_json,

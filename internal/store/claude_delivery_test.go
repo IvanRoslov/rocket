@@ -23,6 +23,7 @@ func claudeStoreFixture(t *testing.T, st *Store) (claudeinstance.Snapshot, int64
 	if ok, e := st.BindClaudeIdentity(target); !ok || e != nil {
 		t.Fatalf("bind %v %v", ok, e)
 	}
+	st.UpdateSessionActivity("s", "ready", now.Unix())
 	boundary, e := claudeinstance.PinJournal(target)
 	if e != nil {
 		t.Fatal(e)

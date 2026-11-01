@@ -18,6 +18,7 @@ type JournalBoundary struct {
 	Offset        int64
 }
 type Snapshot struct {
+	BindingRevision                    uint64
 	EnvelopeVersion                    uint8
 	MessageID                          int64
 	Transport                          string
