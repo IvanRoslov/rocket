@@ -92,13 +92,30 @@ func (s *ClaudeSocketSender) Resolve(ctx context.Context, sess store.Session) cl
 			if again.State != claudeinstance.Verified || !claudeinstance.SameIdentity(again.Identity, resolution.Identity) {
 				return rejected("binding_changed")
 			}
-			ok, e = s.st.AdvanceClaudeBinding(ctx, *pinned, resolution.Identity, l.BindingRevision, observed, time.Now().UnixNano())
+			at := time.Now().UnixNano()
+			ok, e = s.st.AdvanceClaudeBinding(ctx, *pinned, resolution.Identity, l.BindingRevision, observed, at)
+			if ok && e == nil {
+				l.BindingRevision++
+				observed = at
+			}
 		} else {
 			ok, e = s.st.BindClaudeIdentity(resolution.Identity)
 		}
 		if e != nil || !ok {
 			return rejected("binding_persistence")
 		}
+	}
+	current, target, event, err := s.st.GetClaudeBinding(ctx, sess.ID)
+	expected := pinned
+	if resolution.State == claudeinstance.Verified {
+		expected = &resolution.Identity
+	}
+	matches := expected == nil && target == nil
+	if expected != nil && target != nil {
+		matches = claudeinstance.SameIdentity(*expected, *target)
+	}
+	if err != nil || current.Generation != l.Generation || current.BindingRevision != l.BindingRevision || event != observed || !matches {
+		return rejected("binding_changed")
 	}
 	return resolution
 }

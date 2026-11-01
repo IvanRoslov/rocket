@@ -71,7 +71,12 @@ func (m *Monitor) resolveClaude(ctx context.Context, sess store.Session) claudeR
 			if again.State != claudeinstance.Verified || !claudeinstance.SameIdentity(again.Identity, r.Identity) {
 				return unknown("binding_changed")
 			}
-			ok, e = m.st.AdvanceClaudeBinding(probeCtx, *pinned, r.Identity, l.BindingRevision, event, time.Now().UnixNano())
+			at := time.Now().UnixNano()
+			ok, e = m.st.AdvanceClaudeBinding(probeCtx, *pinned, r.Identity, l.BindingRevision, event, at)
+			if ok && e == nil {
+				l.BindingRevision++
+				event = at
+			}
 		} else {
 			ok, e = m.st.BindClaudeIdentity(r.Identity)
 		}
@@ -83,7 +88,11 @@ func (m *Monitor) resolveClaude(ctx context.Context, sess store.Session) claudeR
 	if e != nil {
 		return unknown("unbound_launch")
 	}
-	if r.State == claudeinstance.Verified && !claudeinstance.SameIdentity(r.Identity, observation.target) {
+	expected := pinned
+	if r.State == claudeinstance.Verified {
+		expected = &r.Identity
+	}
+	if expected == nil || !observation.same(claudeObservation{*expected, l.BindingRevision, event}) {
 		return unknown("binding_changed")
 	}
 	return claudeResolution{r, observation}

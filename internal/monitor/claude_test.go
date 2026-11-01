@@ -339,3 +339,51 @@ func TestClaudeBindingCaptureRacesNotification(t *testing.T) {
 		t.Fatal("fresh consecutive misses never clear stale wait")
 	}
 }
+
+type claudeRestoreProbe struct {
+	*claudeMonProbe
+	before func(int)
+}
+
+func (p *claudeRestoreProbe) Process(ctx context.Context, pid int) (claudeinstance.Process, bool, error) {
+	if p.before != nil {
+		p.before(pid)
+	}
+	return p.claudeMonProbe.Process(ctx, pid)
+}
+
+func TestClaudeRestoreDuringProbeCannotExitReplacement(t *testing.T) {
+	m, st, p, _ := claudeMonitorFixture(t)
+	l, old, _ := st.GetClaudeLaunch("s")
+	probe := &claudeRestoreProbe{claudeMonProbe: p}
+	m.claudeProbe = probe
+	probe.before = func(pid int) {
+		if pid != old.PID {
+			return
+		}
+		probe.before = nil
+		next := l
+		next.Generation = "replacement"
+		next.StartedAt = next.StartedAt.Add(time.Nanosecond)
+		if e := st.PutClaudeLaunch(next); e != nil {
+			t.Fatal(e)
+		}
+		replacement := *old
+		replacement.LaunchGeneration = next.Generation
+		replacement.PID = 21
+		replacement.ProcessStart = replacement.ProcessStart.Add(time.Nanosecond)
+		if ok, e := st.BindClaudeIdentity(replacement); !ok || e != nil {
+			t.Fatal(ok, e)
+		}
+		p.processes[21] = claudeinstance.Process{PID: 21, PPID: 10, Name: "claude", Start: replacement.ProcessStart}
+		delete(p.processes, old.PID)
+		st.UpdateSessionActivity("s", "active", time.Now().Unix())
+	}
+	sess, _ := st.GetSession("s")
+	m.pollSession(context.Background(), sess, map[string]bool{"s": true}, true)
+	got, _ := st.GetSession("s")
+	_, bound, _ := st.GetClaudeLaunch("s")
+	if bound.PID != 21 || got.Activity != "active" {
+		t.Fatalf("old Dead probe applied to replacement: activity=%s binding=%+v", got.Activity, bound)
+	}
+}
