@@ -6,12 +6,17 @@ package queue
 //
 // Scenario: two different Rocket message IDs A and B, the same sender and
 // the same short injected envelope, delivered to one native Pi target. A's
-// send is accepted but appends no user record (the supported Pi API is
-// fire-and-forget; a deferred handler error produces exactly this). B's send
-// appends the sole matching record after both send boundaries. The safety
-// assertion is that B's record must never confirm A. If the fixture cannot
-// identify the record's owner unambiguously, the only acceptable outcome is
-// an honest unconfirmed state, never an arbitrary allocation.
+// send is accepted but appends no user record. This is the real supported-API
+// observation from the stock-Pi probe: the public input handler returns
+// {action:"handled"} for the first extension-sourced input, and Pi returns
+// before appending a user record. A thrown input-handler error is NOT such
+// evidence: installed Pi 1.4.0 runner.js emitInput catches handler exceptions,
+// emits the error and continues to the next handler (ultimately
+// continue/transform), so a thrown error alone still records the message.
+// B's send appends the sole matching record after both send boundaries. The
+// safety assertion is that B's record must never confirm A. If the fixture
+// cannot identify the record's owner unambiguously, the only acceptable
+// outcome is an honest unconfirmed state, never an arbitrary allocation.
 
 import (
 	"context"
@@ -200,7 +205,8 @@ func (r *corrRuntime) tmuxCalls() int {
 
 // corrSender is the deterministic native sender. It records every call and
 // appends a journal record only for the configured message ID; the other
-// message's send is accepted with no record, as the supported Pi API allows.
+// message's send is accepted with no record, matching the real public-API
+// observation where the first input is answered with {action:"handled"}.
 type corrSender struct {
 	mu        sync.Mutex
 	calls     []int64

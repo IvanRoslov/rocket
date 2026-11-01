@@ -125,6 +125,16 @@ Fixture теперь запускает Pi с `--session-id` равным ROCKET
 
 Остальные 10 сценариев сохранённой матрицы относятся к коду до этих исправлений; полная матрица против текущего моста не перезапускалась. Это остаётся явным gap, а не PASS. Сводка `/tmp/pi-live-all.out` (17:12) устарела и расходится с per-scenario JSON: три файла (`delayed-modal`, `modal-guard`, `reload`) были перезаписаны позднее отдельными прогонами. У `delayed-modal` в сохранённом файле `ui_prompt_starts = 0`, поэтому фактическое срабатывание задержанного slow listener этим артефактом не доказано; `modal-guard` и `delayed-modal` на текущем коде не перезапускались.
 
+## Q5 correlation witness (supported public API)
+
+Дата: 1 ноября 2026. Отдельная проверка equal-text correlation, не входит в preservation-матрицу.
+
+- Сценарий `handled-input` (stock Pi 1.4.0, локальный детерминированный provider, изолированные PTY/dirs/socket): два одинаковых extension-сообщения 1001/1002; публичный `input` handler вернул `{action:"handled"}` для первого `source:"extension"` вызова и `continue` для второго идентичного.
+- Результат PASS: оба bridge-ответа `accepted`; sources `["extension","extension"]`; одна `handled`, одна `continued`; в транскрипте ровно одна совпадающая user-запись; 1 вызов provider; наблюдаемая Pi-сессия равна ROCKET target. Sanitized: `scripts/probes/tmux-delivary/results/native-bridge/handled-input/result.json`.
+- Источник Pi 1.4.0: `agent-session.js` `prompt` → `_runInputHandlers`; `{action:"handled"}` возвращается до записи user record. `runner.js` `emitInput` перехватывает исключения handler'а, вызывает `emitError` и продолжает к следующему handler'у (итог — continue/transform). Поэтому брошенная ошибка input-handler'а сама по себе **не** доказывает отсутствие записи.
+- Корректная формулировка: реальный witness — `action:"handled"`. Node-фикстура `mockAcceptedCallMayLeaveNoRecord` — только модель accepted/no-record, не live-доказательство.
+- Counterexample из `internal/queue/pi_equal_text_correlation_test.go` сохранён как историческое RED-доказательство (Q5); полная матрица ждёт ruling.
+
 ## Ограничение текущего результата
 
 Preflight подтверждает только сохранение ввода и базовое поведение `sendUserMessage` в реальном Pi 1.4.0. Production integration, delivered-семантика моста, реальный DeepSeek, dialogs/compaction и lifecycle ещё не проверены и не запускаются без merged contract и явного release оркестратора.
