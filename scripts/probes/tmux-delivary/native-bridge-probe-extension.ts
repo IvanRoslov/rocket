@@ -7,6 +7,7 @@ import {
 	type AssistantMessage,
 	type Model,
 	type SimpleStreamOptions,
+	type ToolCall,
 	type TranscriptContext,
 } from "@earendil-works/pi-ai";
 
@@ -28,10 +29,22 @@ let uiPromptEnds = 0;
 let dialogOpen = false;
 let dialogKind: string | undefined;
 let customDone: ((result: unknown) => void) | undefined;
+const toolSteps = Number(process.env.PI_PROBE_TOOL_STEPS ?? "0");
+const toolMs = Number(process.env.PI_PROBE_TOOL_MS ?? "2500");
+let providerCall = 0;
 
 const log = (event: string, data: Record<string, unknown> = {}) => {
 	appendFileSync(logPath, `${JSON.stringify({ event, time: Date.now(), ...data })}\n`);
 };
+
+const userTexts = (context: TranscriptContext): string[] =>
+	context.messages.flatMap((message) => {
+		if (message.role !== "user") return [];
+		if (typeof message.content === "string") return [message.content];
+		return (message.content ?? [])
+			.filter((part): part is { type: "text"; text: string } => part.type === "text")
+			.map((part) => part.text);
+	});
 
 const originalHandleInput = CustomEditor.prototype.handleInput;
 CustomEditor.prototype.handleInput = function (data: string) {
@@ -151,8 +164,11 @@ const startServer = () => {
 	server.listen(socketPath);
 };
 
-const streamSimple = (model: Model<any>, _context: TranscriptContext, options?: SimpleStreamOptions) => {
+const streamSimple = (model: Model<any>, context: TranscriptContext, options?: SimpleStreamOptions) => {
 	const stream = createAssistantMessageEventStream();
+	providerCall += 1;
+	const call = providerCall;
+	log("provider_context", { call, users: userTexts(context) });
 	const output: AssistantMessage = {
 		role: "assistant",
 		content: [],
@@ -177,6 +193,19 @@ const streamSimple = (model: Model<any>, _context: TranscriptContext, options?: 
 	log("provider_scheduled", { delayMs });
 	setTimeout(() => {
 		log("provider_finish");
+		const toolCall: ToolCall | undefined = call <= toolSteps
+			? { type: "toolCall", id: `probe-step-${call}`, name: "probe_step", arguments: { ms: toolMs } }
+			: undefined;
+		if (toolCall) {
+			output.content = [toolCall];
+			stream.push({ type: "toolcall_start", contentIndex: 0, partial: output });
+			stream.push({ type: "toolcall_delta", contentIndex: 0, delta: JSON.stringify(toolCall.arguments), partial: output });
+			stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial: output });
+			output.stopReason = "toolUse";
+			stream.push({ type: "done", reason: "toolUse", message: output });
+			stream.end();
+			return;
+		}
 		const text = options?.signal?.aborted ? "" : "Deterministic local response";
 		output.content = [{ type: "text", text }];
 		stream.push({ type: "text_delta", contentIndex: 0, delta: text, partial: output });
@@ -209,6 +238,19 @@ export default function (api: ExtensionAPI) {
 			maxTokens: 1024,
 		}],
 		streamSimple,
+	});
+	pi.registerTool({
+		name: "probe_step",
+		label: "Probe step",
+		description: "Deterministic wait that creates a further Pi step for the between-steps probe.",
+		parameters: { type: "object", properties: { ms: { type: "number" } }, required: [] },
+		async execute(_toolCallId: string, params: { ms?: number }) {
+			const ms = Number(params?.ms ?? toolMs);
+			log("probe_tool_start", { ms });
+			await new Promise((resolve) => setTimeout(resolve, ms));
+			log("probe_tool_end", { ms });
+			return { content: [{ type: "text", text: "probe step done" }], details: { ms } };
+		},
 	});
 	pi.on("session_start", (_event, ctx) => {
 		context = ctx;

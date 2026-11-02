@@ -53,6 +53,41 @@ class FakeApi {
 	}
 }
 
+/**
+ * Deterministic model of the inspected Pi 1.4.0 agent loop: steering is
+ * drained before each subsequent step, follow-ups only when the run would
+ * stop. It records the user context of every model request.
+ */
+class StepModel {
+	busy = false;
+	steer: string[] = [];
+	followUp: string[] = [];
+	context: string[] = [];
+	requests: string[][] = [];
+	afterRun: string[] = [];
+
+	deliver(text: string, options: { deliverAs: "steer" | "followUp" }): void {
+		if (!this.busy) {
+			this.context.push(text);
+			this.requests.push([...this.context]);
+			return;
+		}
+		(options.deliverAs === "steer" ? this.steer : this.followUp).push(text);
+	}
+
+	run(steps: number): void {
+		this.busy = true;
+		for (let step = 0; step < steps; step++) {
+			if (step > 0) this.context.push(...this.steer.splice(0));
+			this.requests.push([...this.context]);
+		}
+		// Before Pi stops it checks steering once more, then follow-ups.
+		this.context.push(...this.steer.splice(0));
+		this.busy = false;
+		this.afterRun = [...this.context, ...this.followUp.splice(0)];
+	}
+}
+
 let socketCounter = 0;
 const cleanups: string[] = [];
 
@@ -203,7 +238,37 @@ test("decodesSplitUTF8", async (t) => {
 	assert.equal(response.outcome, "accepted");
 	assert.equal(api.calls.length, 1);
 	assert.equal(api.calls[0].text, "Привет, мир");
-	assert.deepEqual(api.calls[0].options, { deliverAs: "followUp", expandPromptTemplates: false });
+	assert.deepEqual(api.calls[0].options, { deliverAs: "steer", expandPromptTemplates: false });
+});
+
+test("steerReachesNextStepBeforeRunEnd", async (t) => {
+	const api = new FakeApi();
+	const model = new StepModel();
+	const send = api.sendUserMessage.bind(api);
+	api.sendUserMessage = (text: string, options: any): void => {
+		send(text, options);
+		model.deliver(text, options);
+	};
+	const { endpoint, sessionID, instanceID } = await makeBridge(t, api);
+	const text = "[rocket #501] между шагами";
+	model.busy = true;
+	assert.equal((await connectRequest(endpoint, {
+		v: 1, session_id: sessionID, instance_id: instanceID, message_id: 501, text,
+	})).outcome, "accepted");
+	model.run(3);
+
+	assert.deepEqual(model.requests, [[], [text], [text]], "steer must enter the next step's context");
+	assert.ok(model.requests.length > 2, "the message must be seen while further steps remain");
+	assert.equal(model.context.filter((entry) => entry === text).length, 1);
+	assert.deepEqual(api.calls[0].options, { deliverAs: "steer", expandPromptTemplates: false });
+
+	// Control: the same loop with followUp keeps the text out of every step.
+	const control = new StepModel();
+	control.busy = true;
+	control.deliver(text, { deliverAs: "followUp" });
+	control.run(3);
+	assert.ok(control.requests.every((users) => !users.includes(text)), "followUp waits for the stop");
+	assert.ok(control.afterRun.includes(text), "followUp is delivered only after the run would stop");
 });
 
 test("deduplicatesMessageID", async (t) => {
@@ -527,7 +592,7 @@ test("socketPermissionFailureFailsClosed", async (t) => {
 		instanceID: "instance-1",
 		endpoint,
 		protocol: 1,
-		sendUserMessage: (text) => api.sendUserMessage(text, { deliverAs: "followUp", expandPromptTemplates: false }),
+		sendUserMessage: (text) => api.sendUserMessage(text, { deliverAs: "steer", expandPromptTemplates: false }),
 		chmod: (path, mode) => {
 			if (path === endpoint) throw new Error("chmod denied");
 			chmodSync(path, mode);
@@ -694,6 +759,7 @@ test("sessionStartOpensPrivateEndpoint", async (t) => {
 	});
 	assert.equal(response.outcome, "accepted");
 	assert.equal(api.calls.length, 1);
+	assert.deepEqual(api.calls[0].options, { deliverAs: "steer", expandPromptTemplates: false });
 });
 
 test("startFailureIsContained", async (t) => {
