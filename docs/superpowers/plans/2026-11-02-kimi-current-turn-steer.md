@@ -59,7 +59,8 @@
   - foreign draft/foreign item/hidden scrolled item/`will send after current task`/truncated ownership/unknown pane → zero `C-s`;
   - queue already drained before the decision → zero `C-s`;
   - idle submit (composer empty, no queue) → zero `C-s`, one paste;
-  - `C-s` send failure → `Inject` returns nil and no second paste.
+  - `C-s` send failure → `Inject` returns nil and no second paste;
+  - queue compatibility pin: an accepted Kimi message still visible in Kimi's queue is not requeued after the grace period (`internal/queue/queue_kimi_test.go`).
 - [ ] **Step 2: Run `go test ./internal/runtime -run KimiInject -count=1`** and observe RED with the expected `C-s` count mismatch.
 - [ ] **Step 3: Implement** the probe: reuse the capture that proved `kimiSubmitted`, then poll `capture-pane` every `pollInterval` until `pollTimeout`; each capture is judged by `steerableQueue`; on the first true, send one `C-s` and return. Log a failed key; never return an error (the message is already Kimi's).
 - [ ] **Step 4: Re-run** the test command and observe PASS; run the whole `./internal/runtime` package.
