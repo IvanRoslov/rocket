@@ -6,7 +6,9 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 // Rocket's native Pi delivery bridge (pi-uds-v1). It is an isolated embedded
 // extension loaded with an explicit --extension flag only for supported Pi
 // 1.4+ launches. It never touches the editor: requests are submitted through
-// the public Extension API with followUp and without prompt expansion.
+// the public Extension API with steer and without prompt expansion. Steering
+// enters the running agent between steps; it never cancels an active tool or
+// model request and never touches the editor.
 
 export const PROTOCOL_VERSION = 1;
 export const MAX_FRAME_BYTES = 1 << 20; // including the newline
@@ -29,7 +31,7 @@ export interface ExtensionApiLike {
 	on(event: string, handler: (event: any, ctx?: any) => unknown): unknown;
 	sendUserMessage(
 		text: string,
-		options: { deliverAs: "followUp"; expandPromptTemplates: false },
+		options: { deliverAs: "steer"; expandPromptTemplates: false },
 	): unknown;
 }
 
@@ -412,7 +414,7 @@ export function createDeliveryExtension(
 	const bridge = new DeliveryBridge({
 		...config,
 		sendUserMessage: (text) =>
-			api.sendUserMessage(text, { deliverAs: "followUp", expandPromptTemplates: false }),
+			api.sendUserMessage(text, { deliverAs: "steer", expandPromptTemplates: false }),
 	});
 	api.on("session_start", (_event: any, ctx: any) => {
 		if (!bridge.bindContext(ctx)) {
