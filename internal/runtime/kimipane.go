@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -76,6 +77,13 @@ type kimiComposer struct {
 	state KimiComposer
 	rows  int      // composer content rows (≥ 1)
 	queue []string // Kimi's queued items, top to bottom, «❯ » stripped
+	// queueTotal is how many items the queue holds: the explicit count from
+	// the footer when the list scrolls («N queued · …»), else len(queue).
+	queueTotal int
+	// steerable is the footer's claim that Ctrl-S steers the queue into the
+	// running turn right now («ctrl-s to steer immediately»), as opposed to
+	// «will send after current task/compaction».
+	steerable bool
 }
 
 func parseKimiComposer(pane string) (kimiComposer, bool) {
@@ -139,7 +147,11 @@ func parseKimiComposer(pane string) (kimiComposer, bool) {
 	}
 
 	// Kimi's queue: «❯ …» rows directly above the box, under a ─── rule.
+	// Its footer sits between the rows and the box and states, in Kimi's own
+	// words, whether Ctrl-S would steer now and how many items there are
+	// (the body shows only a few rows once it scrolls).
 	var queue []string
+	foot := ""
 	for i := top - 1; i >= 0 && top-i <= kimiQueueScanRows; i-- {
 		r := rows[i]
 		if r == "" {
@@ -153,9 +165,52 @@ func parseKimiComposer(pane string) (kimiComposer, bool) {
 		}
 		if item, ok := strings.CutPrefix(r, "❯ "); ok {
 			queue = append([]string{item}, queue...)
+			continue
+		}
+		if strings.Contains(r, "↑ to edit · ") {
+			foot = r
 		}
 	}
+	k.queueTotal = len(queue)
+	if foot != "" {
+		if m := kimiQueueCount.FindStringSubmatch(foot); m != nil {
+			if n, err := strconv.Atoi(m[1]); err == nil {
+				k.queueTotal = n
+			}
+		}
+		k.steerable = strings.Contains(foot, "ctrl-s to steer immediately")
+	}
 	return k, true
+}
+
+// kimiQueueCount reads the total Kimi prints in the queue footer only when
+// the body scrolls («N queued · ↑ to edit · …»).
+var kimiQueueCount = regexp.MustCompile(`^(\d+) queued · `)
+
+// kimiQueuedMatches reports whether one rendered queue item is text. Kimi
+// draws an item on one row with all whitespace collapsed, cutting it at the
+// screen edge with «…», so a truncated item still matches when its visible
+// start is at least minQueuedPrefix non-space runes long.
+func kimiQueuedMatches(item, text string) bool {
+	want := stripWhitespace(text)
+	if want == "" {
+		return false
+	}
+	got := stripWhitespace(item)
+	if got == want {
+		return true
+	}
+	head, cut := strings.CutSuffix(got, "…")
+	return cut && utf8.RuneCountInString(head) >= minQueuedPrefix && strings.HasPrefix(want, head)
+}
+
+// steerableQueue reports whether k proves Kimi will move exactly this one
+// queued message into the running turn when Ctrl-S is pressed: the editor is
+// empty (KimiBusy, not a draft), the queue holds only this item (visible and
+// total), that item is text, and Kimi itself advertises immediate steering.
+func (k kimiComposer) steerableQueue(text string) bool {
+	return k.state == KimiBusy && k.queueTotal == 1 && len(k.queue) == 1 &&
+		k.steerable && kimiQueuedMatches(k.queue[0], text)
 }
 
 // LooksLikeKimiQueued reports whether pane shows text waiting in Kimi's own
@@ -163,21 +218,12 @@ func parseKimiComposer(pane string) (kimiComposer, bool) {
 // long item at the screen edge with «…», so an item also matches when it is
 // a visible start of text at least minQueuedPrefix non-space runes long.
 func LooksLikeKimiQueued(pane, text string) bool {
-	want := stripWhitespace(text)
-	if want == "" {
-		return false
-	}
 	k, ok := parseKimiComposer(pane)
 	if !ok {
 		return false
 	}
 	for _, item := range k.queue {
-		got := stripWhitespace(item)
-		if got == want {
-			return true
-		}
-		head, cut := strings.CutSuffix(got, "…")
-		if cut && utf8.RuneCountInString(head) >= minQueuedPrefix && strings.HasPrefix(want, head) {
+		if kimiQueuedMatches(item, text) {
 			return true
 		}
 	}

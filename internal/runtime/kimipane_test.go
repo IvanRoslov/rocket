@@ -143,3 +143,51 @@ func TestCodexStartScreenIgnoresKimiTrust(t *testing.T) {
 		t.Fatal("Codex parser matched Kimi trust screen")
 	}
 }
+
+// The queue footer is Kimi's own statement about the queue: the explicit total
+// once the body scrolls, and whether Ctrl-S steers now or after the task.
+func TestKimiComposerQueueFoot(t *testing.T) {
+	busy, ok := parseKimiComposer(readPane(t, "kimi-busy-queued.pane"))
+	if !ok {
+		t.Fatal("busy pane not parsed")
+	}
+	if busy.queueTotal != 1 || !busy.steerable || !busy.steerableQueue("reply QUEUED_OK") {
+		t.Fatalf("busy = total %d, steerable %v; want 1/true and ownership", busy.queueTotal, busy.steerable)
+	}
+	if busy.steerableQueue("another message") {
+		t.Error("foreign text recognized as the steerable queue item")
+	}
+
+	scrolled := strings.Replace(readPane(t, "kimi-busy-queued.pane"),
+		"↑ to edit · ctrl-s to steer immediately",
+		"2 queued · ↑ to edit · ctrl-s to steer immediately", 1)
+	k, ok := parseKimiComposer(scrolled)
+	if !ok || k.queueTotal != 2 || !k.steerable {
+		t.Fatalf("scrolled = %+v, %v; want total 2 and a steerable foot", k, ok)
+	}
+	if k.steerableQueue("reply QUEUED_OK") {
+		t.Error("one visible row with a hidden total of 2 treated as exclusive")
+	}
+
+	afterTask := strings.Replace(readPane(t, "kimi-busy-queued.pane"),
+		"ctrl-s to steer immediately", "will send after current task", 1)
+	if k, _ := parseKimiComposer(afterTask); k.steerable || k.steerableQueue("reply QUEUED_OK") {
+		t.Error("a queue that sends after the current task was treated as steerable")
+	}
+
+	clipped := strings.Replace(readPane(t, "kimi-busy-queued.pane"),
+		"ctrl-s to steer immediately", "ctrl-s to steer imme…", 1)
+	if k, _ := parseKimiComposer(clipped); k.steerable {
+		t.Error("a clipped footer was treated as advertising immediate steering")
+	}
+
+	noFoot := strings.Replace(readPane(t, "kimi-busy-queued.pane"),
+		"   ↑ to edit · ctrl-s to steer immediately\n", "", 1)
+	if k, ok := parseKimiComposer(noFoot); !ok || k.steerable || k.steerableQueue("reply QUEUED_OK") {
+		t.Fatalf("missing footer = %+v, %v; want no steer", k, ok)
+	}
+
+	if k, ok := parseKimiComposer(readPane(t, "kimi-draft.pane")); !ok || k.steerableQueue("draft not submitted") {
+		t.Fatal("a draft composer was treated as steerable")
+	}
+}
