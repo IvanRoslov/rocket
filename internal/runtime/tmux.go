@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -303,9 +304,14 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 			}
 			// Kimi: type only into its recognized composer — never into a
 			// question widget or dialog, where Enter picks an option, not
-			// even when forced (Force is for an abandoned draft).
+			// even when forced (Force is for an abandoned draft). A queue
+			// that already exists is Kimi's (or a human's) pending input:
+			// pasting would append to it — a duplicate when it is our own
+			// copy from an earlier attempt — and a later Ctrl-S would then
+			// decide over the whole queue. Defer before clearing or
+			// typing; the queue is not a draft, so Force does not apply.
 			k, ok := parseKimiComposer(out)
-			if !ok || (!opts.Force && k.state == KimiDraft) {
+			if !ok || k.hasQueue || (!opts.Force && k.state == KimiDraft) {
 				return fmt.Errorf("%w: session %q", ErrComposerBusy, h.Name)
 			}
 			clearKeys = kimiClearKeys(k.rows)
@@ -480,6 +486,7 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 				// Kimi: the composer no longer holds the text — the previous
 				// Enter submitted it (or queued it); another would be stray.
 				if kimiSubmitted(out, opts.Dialect) {
+					t.steerKimiQueued(ctx, h, text, out, pollInterval, pollTimeout)
 					return nil
 				}
 				// The previous Enter queued the text after all: another
@@ -523,6 +530,7 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 			// its composer emptying does (idle, or busy with Kimi's own
 			// queue — delivery is then confirmed from its journal).
 			if kimiSubmitted(full, opts.Dialect) {
+				t.steerKimiQueued(ctx, h, text, full, pollInterval, pollTimeout)
 				return nil
 			}
 			out := tailLines(trimTrailingBlank(full), confirmWindow)
@@ -1041,6 +1049,47 @@ func kimiSubmitted(pane, dialect string) bool {
 	}
 	c, ok := ParseKimiComposer(pane)
 	return !ok || c != KimiDraft
+}
+
+// steerKimiQueued presses Kimi's manual steer key (Ctrl-S) at most once, and
+// only when a fresh capture proves it is safe and useful: the editor is empty,
+// Kimi's queue holds exactly this one message (visible and total), the row is
+// our text, and Kimi's footer advertises immediate steering. Anything else —
+// a foreign draft or queue item, hidden scrolled rows, a «will send after
+// current task/compaction» footer, a clipped pane, an unknown screen — means
+// no key is pressed; the message is already Kimi's queued item and the journal
+// confirmer finishes it whenever Kimi hands it over.
+//
+// The probe polls up to timeout so a queue row rendered just after Enter is
+// still caught, and because the footer may switch to immediate steering once
+// a blocking foreground task returns. It deliberately sends nothing but C-s:
+// never C-u, paste, Enter or a recall, so a capture that goes stale between
+// the decision and the key cannot erase or re-submit anything (the accepted
+// 5920/Q4 window: input appearing after the capture may be steered early, and
+// that possibility is documented, not eliminated).
+func (t *tmuxRuntime) steerKimiQueued(ctx context.Context, h Handle, text, pane string, interval, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for {
+		if k, ok := parseKimiComposer(pane); ok && k.steerableQueue(text) {
+			if _, _, err := t.run(ctx, "send-keys", "-t", paneTarget(h.Name), "C-s"); err != nil {
+				// Best effort only: the message is already in Kimi's queue, so
+				// a failed key must not become a failed delivery or a retry
+				// (which would paste a duplicate).
+				slog.Warn("inject: Kimi steer key failed, message stays in Kimi's queue",
+					"session", h.Name, "error", err)
+			}
+			return
+		}
+		if !time.Now().Before(deadline) {
+			return
+		}
+		time.Sleep(interval)
+		out, _, err := t.run(ctx, "capture-pane", "-p", "-t", paneTarget(h.Name))
+		if err != nil {
+			return
+		}
+		pane = out
+	}
 }
 
 func (t *tmuxRuntime) acceptKimiCacheHint(ctx context.Context, h Handle, pane string) (bool, error) {

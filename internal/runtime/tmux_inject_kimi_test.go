@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -246,5 +248,259 @@ func TestTmux_Inject_KimiCacheHintCompactKeyFailureIsUnconfirmed(t *testing.T) {
 	}
 	if got := injectCallCount(s.calls, "paste-buffer", ""); got != 1 {
 		t.Fatalf("paste count = %d, want 1", got)
+	}
+}
+
+// kimiSteerPane builds a Kimi pane mid-turn: the queue rule, one row per
+// queued item, the queue footer, then the empty composer box and status bar.
+// The footers and row shape follow the official QueuePaneComponent renderer
+// (upstream-queue-pane.ts at the pinned 2.4.0 revision).
+func kimiSteerPane(items []string, foot string) string {
+	lines := []string{" " + strings.Repeat("─", 40)}
+	for _, it := range items {
+		lines = append(lines, "   ❯ "+it)
+	}
+	lines = append(lines,
+		"   "+foot,
+		" ╭──────────────────────────────╮",
+		" │ >                            │",
+		" ╰──────────────────────────────╯",
+		" Never Ask  K3.1 Pro thinking: high",
+		"                                  context: 0% (0/1M)",
+	)
+	return strings.Join(lines, "\n")
+}
+
+const kimiSteerFoot = "↑ to edit · ctrl-s to steer immediately"
+
+// kimiSteerScript feeds Inject a scripted Kimi pane: empty composer until the
+// paste, then (after Enter) the panes in post, one per successful capture.
+// The last pane repeats if the probe polls past the end.
+type kimiSteerScript struct {
+	fakeTmux
+	pasted, entered bool
+	post            []string
+	next            int
+	loaded          string // text of the last load-buffer file
+}
+
+func (s *kimiSteerScript) run(ctx context.Context, args ...string) (string, string, error) {
+	s.calls = append(s.calls, args)
+	switch {
+	case args[0] == "load-buffer":
+		if b, err := os.ReadFile(args[len(args)-1]); err == nil {
+			s.loaded = string(b)
+		}
+	case args[0] == "paste-buffer":
+		s.pasted = true
+	case args[0] == "send-keys" && args[len(args)-1] == "Enter":
+		s.entered = true
+	case args[0] == "capture-pane":
+		if !s.entered || len(s.post) == 0 {
+			return kimiFixture("kimi-idle.pane"), "", nil
+		}
+		p := s.post[s.next]
+		if s.next < len(s.post)-1 {
+			s.next++
+		}
+		return p, "", nil
+	}
+	return "", "", nil
+}
+
+func kimiFixture(name string) string {
+	b, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+func runKimiSteerInject(t *testing.T, s *kimiSteerScript, text string) error {
+	t.Helper()
+	rt := newFakeRuntime(&s.fakeTmux)
+	rt.runFn = s.run
+	return rt.Inject(context.Background(), Handle{Name: "sess"}, text, InjectOpts{Bracketed: true, Dialect: PaneDialectKimi})
+}
+
+// A message Enter parked in Kimi's queue is steered into the running turn by
+// exactly one Ctrl-S once the pane proves the editor is empty, the queue holds
+// only our item, and Kimi advertises immediate steering.
+func TestTmux_Inject_KimiSteersQueuedMessageIntoCurrentTurn(t *testing.T) {
+	s := &kimiSteerScript{post: []string{kimiSteerPane([]string{"[from orch] please re-check the gate"}, kimiSteerFoot)}}
+	if err := runKimiSteerInject(t, s, "[from orch] please re-check the gate"); err != nil {
+		t.Fatalf("Inject: %v", err)
+	}
+	if got := injectCallCount(s.calls, "send-keys", "C-s"); got != 1 {
+		t.Fatalf("C-s count = %d, want 1", got)
+	}
+	if got := injectCallCount(s.calls, "paste-buffer", ""); got != 1 {
+		t.Fatalf("paste count = %d, want 1", got)
+	}
+	if s.loaded != "[from orch] please re-check the gate" {
+		t.Fatalf("pasted text = %q", s.loaded)
+	}
+}
+
+// Kimi renders a multiline item as one whitespace-collapsed row; ownership is
+// still provable, so the full text is steered.
+func TestTmux_Inject_KimiSteersMultilineCollapsedQueueRow(t *testing.T) {
+	text := "[from orch] line one\nline two\n\tline three"
+	s := &kimiSteerScript{post: []string{kimiSteerPane([]string{"[from orch] line one line two line three"}, kimiSteerFoot)}}
+	if err := runKimiSteerInject(t, s, text); err != nil {
+		t.Fatalf("Inject: %v", err)
+	}
+	if got := injectCallCount(s.calls, "send-keys", "C-s"); got != 1 {
+		t.Fatalf("C-s count = %d, want 1", got)
+	}
+	if s.loaded != text {
+		t.Fatalf("pasted text = %q, want the complete multiline message", s.loaded)
+	}
+}
+
+// A visible foreign queue item means ownership is not exclusive: nothing is
+// pressed, and the already-queued message stays with Kimi.
+func TestTmux_Inject_KimiDoesNotSteerForeignQueueItem(t *testing.T) {
+	s := &kimiSteerScript{post: []string{kimiSteerPane(
+		[]string{"[from orch] ours", "someone else's queued message"}, kimiSteerFoot)}}
+	if err := runKimiSteerInject(t, s, "[from orch] ours"); err != nil {
+		t.Fatalf("Inject: %v", err)
+	}
+	if got := injectCallCount(s.calls, "send-keys", "C-s"); got != 0 {
+		t.Fatalf("C-s count = %d, want 0", got)
+	}
+	if got := injectCallCount(s.calls, "paste-buffer", ""); got != 1 {
+		t.Fatalf("paste count = %d, want 1", got)
+	}
+}
+
+// A scrolled queue shows one row plus the total in the footer. One visible row
+// is not proof that the queue holds only our message.
+func TestTmux_Inject_KimiDoesNotSteerHiddenScrolledQueueItem(t *testing.T) {
+	s := &kimiSteerScript{post: []string{kimiSteerPane(
+		[]string{"[from orch] ours"}, "2 queued · ↑ to edit · ctrl-s to steer immediately")}}
+	if err := runKimiSteerInject(t, s, "[from orch] ours"); err != nil {
+		t.Fatalf("Inject: %v", err)
+	}
+	if got := injectCallCount(s.calls, "send-keys", "C-s"); got != 0 {
+		t.Fatalf("C-s count = %d, want 0", got)
+	}
+}
+
+// Kimi itself says Ctrl-S will not steer now (it would wait for the current
+// task): pressing it would not deliver into this turn, so nothing is pressed.
+func TestTmux_Inject_KimiDoesNotSteerWhenFootSaysAfterTask(t *testing.T) {
+	s := &kimiSteerScript{post: []string{kimiSteerPane(
+		[]string{"[from orch] ours"}, "↑ to edit · will send after current task")}}
+	if err := runKimiSteerInject(t, s, "[from orch] ours"); err != nil {
+		t.Fatalf("Inject: %v", err)
+	}
+	if got := injectCallCount(s.calls, "send-keys", "C-s"); got != 0 {
+		t.Fatalf("C-s count = %d, want 0", got)
+	}
+}
+
+// A narrow pane truncates our row below the 20-rune proof threshold: ownership
+// is unprovable, so the message waits.
+func TestTmux_Inject_KimiDoesNotSteerTruncatedOwnership(t *testing.T) {
+	text := "[from orch] a message that does not fit the narrow pane"
+	s := &kimiSteerScript{post: []string{kimiSteerPane([]string{"[from orch] a mess…"}, kimiSteerFoot)}}
+	if err := runKimiSteerInject(t, s, text); err != nil {
+		t.Fatalf("Inject: %v", err)
+	}
+	if got := injectCallCount(s.calls, "send-keys", "C-s"); got != 0 {
+		t.Fatalf("C-s count = %d, want 0", got)
+	}
+}
+
+// The human starts typing while the steering probe polls: a visible draft
+// blocks the key even though the queue would have been steerable before.
+func TestTmux_Inject_KimiDoesNotSteerWhenDraftAppearsDuringProbe(t *testing.T) {
+	draft := strings.Replace(kimiFixture("kimi-draft.pane"), "draft not submitted", "human typing now", 1)
+	s := &kimiSteerScript{post: []string{
+		kimiSteerPane([]string{"[from orch] ours"}, "↑ to edit · will send after current task"),
+		draft,
+		kimiFixture("kimi-idle.pane"),
+	}}
+	if err := runKimiSteerInject(t, s, "[from orch] ours"); err != nil {
+		t.Fatalf("Inject: %v", err)
+	}
+	if got := injectCallCount(s.calls, "send-keys", "C-s"); got != 0 {
+		t.Fatalf("C-s count = %d, want 0", got)
+	}
+}
+
+// Kimi drained the queue itself (turn end, WaitFor pass-through): there is
+// nothing to steer, no extra key, and no second paste.
+func TestTmux_Inject_KimiDoesNotSteerDrainedOrIdle(t *testing.T) {
+	s := &kimiSteerScript{post: []string{kimiFixture("kimi-idle.pane")}}
+	if err := runKimiSteerInject(t, s, "[from orch] ours"); err != nil {
+		t.Fatalf("Inject: %v", err)
+	}
+	if got := injectCallCount(s.calls, "send-keys", "C-s"); got != 0 {
+		t.Fatalf("C-s count = %d, want 0", got)
+	}
+	if got := injectCallCount(s.calls, "paste-buffer", ""); got != 1 {
+		t.Fatalf("paste count = %d, want 1", got)
+	}
+}
+
+// A failed steer key is not a delivery failure: the message is already Kimi's
+// queued item, so Inject still returns nil and nothing is pasted again.
+func TestTmux_Inject_KimiSteerKeyFailureIsNotRedelivered(t *testing.T) {
+	s := &kimiSteerScript{post: []string{kimiSteerPane([]string{"[from orch] ours"}, kimiSteerFoot)}}
+	rt := newFakeRuntime(&s.fakeTmux)
+	rt.runFn = func(ctx context.Context, args ...string) (string, string, error) {
+		if args[0] == "send-keys" && args[len(args)-1] == "C-s" {
+			s.calls = append(s.calls, args)
+			return "", "", errors.New("send-keys failed")
+		}
+		return s.run(ctx, args...)
+	}
+	if err := rt.Inject(context.Background(), Handle{Name: "sess"}, "[from orch] ours", InjectOpts{Bracketed: true, Dialect: PaneDialectKimi}); err != nil {
+		t.Fatalf("Inject = %v, want nil (message stays Kimi's)", err)
+	}
+	if got := injectCallCount(s.calls, "paste-buffer", ""); got != 1 {
+		t.Fatalf("paste count = %d, want 1", got)
+	}
+}
+
+// A queue that already exists before Rocket types anything means Kimi owns
+// queued input already. Appending our text would either join someone else's
+// payload or duplicate a copy Kimi already has, so delivery defers before the
+// clear, the paste or any key — a later C-s is not the required deferral.
+func TestTmux_Inject_KimiPreExistingQueueDefersBeforePaste(t *testing.T) {
+	cases := map[string]string{
+		"foreign item":                kimiSteerPane([]string{"someone else's queued message"}, kimiSteerFoot),
+		"foreign item not steerable":  kimiSteerPane([]string{"someone else's queued message"}, "↑ to edit · will send after current task"),
+		"hidden scrolled rows":        kimiSteerPane([]string{"[from orch] ours"}, "2 queued · ↑ to edit · ctrl-s to steer immediately"),
+		"our own copy already queued": kimiSteerPane([]string{"[from orch] ours"}, kimiSteerFoot),
+	}
+	for name, pane := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := &fakeTmux{pane: pane}
+			err := newFakeRuntime(f).Inject(context.Background(), Handle{Name: "sess"}, "[from orch] ours",
+				InjectOpts{Bracketed: true, Dialect: PaneDialectKimi})
+			if !errors.Is(err, ErrComposerBusy) {
+				t.Fatalf("Inject = %v, want ErrComposerBusy deferral", err)
+			}
+			if f.sent("send-keys") || f.sent("paste-buffer") {
+				t.Fatalf("keys sent over a pre-existing queue: %q", f.calls)
+			}
+		})
+	}
+}
+
+// The pre-existing-queue deferral is not a draft-deadline escape hatch: Force
+// must never authorize typing into a queue Kimi already holds.
+func TestTmux_Inject_KimiPreExistingQueueDefersEvenForced(t *testing.T) {
+	f := &fakeTmux{pane: kimiSteerPane([]string{"someone else's queued message"}, kimiSteerFoot)}
+	err := newFakeRuntime(f).Inject(context.Background(), Handle{Name: "sess"}, "[from orch] ours",
+		InjectOpts{Force: true, Bracketed: true, Dialect: PaneDialectKimi})
+	if !errors.Is(err, ErrComposerBusy) {
+		t.Fatalf("Inject = %v, want ErrComposerBusy", err)
+	}
+	if f.sent("send-keys") || f.sent("paste-buffer") {
+		t.Fatalf("keys sent over a pre-existing queue despite Force: %q", f.calls)
 	}
 }

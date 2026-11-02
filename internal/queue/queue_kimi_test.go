@@ -344,3 +344,33 @@ func TestQueue_KimiDraftResumesWhenComposerFrees(t *testing.T) {
 		t.Fatal("Kimi delivery must never set Force")
 	}
 }
+
+// A message that stayed in Kimi's queue (the automatic steer was unsafe or
+// unprovable) must not be pasted again: the confirmer sees the queue row and
+// keeps waiting for the journal instead of requeueing after the grace period.
+// This pins the existing Kimi branch of the accepted-message policy that the
+// steering attempt relies on.
+func TestAcceptedKimiKeptWhilePaneShowsQueuedItem(t *testing.T) {
+	h := newTestQueue(t)
+	h.startConfirmer()
+	addKimiSession(t, h, "kimi", activity.Ready)
+	h.ag.setConfirm(func(text string, since time.Time) (bool, time.Time, error) {
+		return false, time.Time{}, nil
+	})
+	h.rt.setCaptureEscaped(func(_ runtime.Handle, _ int) (string, error) {
+		return kimiPane(t, "kimi-idle.pane"), nil
+	})
+	h.rt.setCapture(func(_ runtime.Handle, _ int) (string, error) {
+		return kimiPane(t, "kimi-busy-queued.pane"), nil
+	})
+	id := addMsg(t, h, "kimi", "reply QUEUED_OK")
+	h.q.Wake("kimi")
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "accepted" }, "accepted pending journal proof")
+
+	h.clock.advance(2 * time.Minute)
+	h.q.kickConfirmer()
+	time.Sleep(150 * time.Millisecond)
+	if got := messageStatus(t, h.st, id); got != "accepted" || h.rt.callCount() != 1 {
+		t.Fatalf("status=%q injects=%d, want accepted/1 while Kimi still queues the text", got, h.rt.callCount())
+	}
+}
