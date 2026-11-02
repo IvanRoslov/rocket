@@ -3,7 +3,7 @@
   "pi": "1.4.0",
   "session_id": "live-idle-single",
   "pi_session_id": "live-idle-single",
-  "instance_id": "114f07e3b0651069",
+  "instance_id": "f60ac795ac7ef815",
   "endpoint_kind": "short /tmp UDS",
   "extensions": [
     "native-bridge-probe-extension.ts",
@@ -29,7 +29,7 @@
   "response": {
     "v": 1,
     "session_id": "live-idle-single",
-    "instance_id": "114f07e3b0651069",
+    "instance_id": "f60ac795ac7ef815",
     "message_id": 101,
     "outcome": "accepted"
   },

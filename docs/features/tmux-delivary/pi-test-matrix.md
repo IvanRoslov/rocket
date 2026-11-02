@@ -62,7 +62,7 @@ python3 scripts/probes/tmux-delivary/pty_preservation_probe.py
 | Target validation | Неверная версия/session/instance отклоняется до API |
 | Frames | JSONL protocol 1; кадр больше 1 MiB и malformed input отклоняются |
 | IDs | Один ID дедуплицируется; два ID с равным текстом сохраняются |
-| API options | `followUp`, `expandPromptTemplates: false`; нет `setText`, editor submit, tmux paste/Enter |
+| API options | `steer`, `expandPromptTemplates: false`; нет `setText`, editor submit, tmux paste/Enter |
 | Unsafe state | Dialog/compaction возвращает refusal до вызова API |
 | Ack honesty | Возврат socket не означает delivered; Accepted/Unknown ждут journal confirmation |
 | Connection loss | До записи — NotSent; после возможной записи — Unknown, без слепого retry |
@@ -166,6 +166,23 @@ Fixture теперь запускает Pi с `--session-id` равным ROCKET
 | foreign-history | endpoint отсутствует, 0 injected, 0 provider, наблюдаемая история `live-foreign-history-b` |
 
 Сквозной queue→Pi (отдельно, opt-in): `ROCKET_PI_STOCK_E2E=1 go test -count=1 -timeout=90s ./internal/queue -run ^TestPiNativeQueueStockE2E$` — PASS (3.82 s): A `failed/native_delivery_unconfirmed` после timeout, B `delivered` своей записью; sender 1 вызов/ID, bridge API 1/ID, records A0/B1, tmux 0, Body не изменён. Evidence: `scripts/probes/tmux-delivary/results/native-bridge/pi-stock-e2e/result.json`.
+
+## Режим между шагами (#5939, 2 ноября 2026)
+
+Встроенный bridge переключён с `deliverAs: "followUp"` на `deliverAs: "steer"` в том же публичном `sendUserMessage`; `expandPromptTemplates: false`, endpoint/identity, accepted-ID dedupe, modal/compaction guards, strict journal proof и отсутствие tmux-фолбэка не менялись. Политика `queue_timeout`/Q6 не входит в эту поставку и остаётся открытой.
+
+Проверки на окончательном head:
+
+```bash
+node --experimental-strip-types --test internal/agent/pi/delivery-extension.test.ts  # 32/32 PASS, exit 0
+python3 scripts/probes/tmux-delivary/native_bridge_probe.py --scenario between-steps # PASS, exit 0
+```
+
+Сценарий `between-steps` запускает stock Pi 1.4.0 в изолированном PTY с owned temp `PI_CODING_AGENT_DIR`/session dir, локальным deterministic provider и extension-tool `probe_step`. Сообщение отправлено, пока выполняется первый инструмент. Результат: ответ `accepted`; полный подписанный текст впервые виден в provider-запросе 2 и остаётся в запросе 3, то есть **до** естественного завершения работы (further steps после первого появления = 1); ровно одна точная user-запись; многострочный draft и mid-line cursor сохранены. Контроль на старом `followUp` (RED) давал первое появление только в запросе 4 из 4 — после остановки.
+
+Scoped preservation после смены режима: `idle-single`, `busy-single`, `busy-multiline`, `selector`, `modal-guard` — все PASS, exit 0. Busy: injected 1, provider 2, draft/cursor сохранены; selector остаётся открытым, `model_selects` 0; modal-guard: все 5 видов `not_sent` при открытом окне и `accepted` после закрытия. Полный 14/14 прогон 1 ноября относится к предыдущей ревизии probe и здесь не переобъявляется.
+
+Остаточные ограничения раздела выше и исторические live-evidence не меняются; живая приёмка после пересборки/перезапуска человеком не заявляется.
 
 ## Compaction: deterministic public-event table (Node FakeApi)
 

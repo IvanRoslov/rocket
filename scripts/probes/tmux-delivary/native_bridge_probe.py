@@ -120,7 +120,8 @@ def native_request(endpoint, session_id, instance_id, message_id, text, version=
 
 class Session:
     def __init__(self, scenario, delay_ms=150, slow=False, extra_env=None,
-                 native_expected=True, pi_session_id=None, input_handled_text=None):
+                 native_expected=True, pi_session_id=None, input_handled_text=None,
+                 tools=None):
         self.scenario = scenario
         self.dir = Path(tempfile.mkdtemp(prefix="rpi-live-", dir="/tmp"))
         os.chmod(self.dir, 0o700)
@@ -172,7 +173,8 @@ class Session:
         self.env = env
         command = [
             "pi", "--offline", "--no-extensions", "--no-mcp", "--no-skills",
-            "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-tools",
+            "--no-prompt-templates", "--no-themes", "--no-context-files",
+            *(["--tools", ",".join(tools)] if tools else ["--no-tools"]),
             "--model", "probe/deterministic", "--session-dir", str(self.sessions_dir),
             "--session-id", self.pi_session_id,
         ]
@@ -462,6 +464,57 @@ def scenario_busy(name, text, multiline=False):
         result["provider_calls"] = s.provider_calls()
         result["user_role_order"] = [m["role"] for m in s.transcript_messages()]
         result["status"] = "PASS" if result["injected_count"] == 1 and result["draft_preserved"] and result["provider_calls"] == 2 else "FAIL"
+        return result
+    finally:
+        s.cleanup()
+
+
+def scenario_between_steps():
+    # The provider emits two tool-call steps through the extension-registered
+    # probe_step tool. One native message is sent while the first tool runs;
+    # steering must put it into request 2 while request 3 still remains.
+    s = Session("between-steps", delay_ms=50, tools=["probe_step"],
+                extra_env={"PI_PROBE_TOOL_STEPS": "2", "PI_PROBE_TOOL_MS": "2500"})
+    try:
+        result = s.base_result()
+        result["tools"] = ["probe_step"]
+        s.write("run")
+        s.write("\r")
+        s.wait_event_count("provider_start", 1)
+        s.wait_event_count("probe_tool_start", 1)
+        before = set_draft(s, "Первая строка\nВторая строка с курсором", multiline=True, cursor_left=3)
+        result["before"] = before
+        result["busy_idle"] = s.state()["idle"]
+        injected = "Полный текст между шагами"
+        signed_text = signed(601, injected)
+        result["response"] = s.native(601, injected)
+        s.wait_idle(True, timeout=30)
+        after = s.state()
+        result["after_settled"] = after
+        result["draft_preserved"] = (
+            after["text"] == before["text"]
+            and after["lines"] == before["lines"]
+            and after["cursorLine"] == before["cursorLine"]
+            and after["cursorCol"] == before["cursorCol"]
+        )
+        contexts = [event for event in s.events_list() if event["event"] == "provider_context"]
+        result["provider_contexts"] = contexts
+        seen = [event["call"] for event in contexts if signed_text in event["users"]]
+        result["first_seen_call"] = seen[0] if seen else None
+        result["provider_calls"] = s.provider_calls()
+        users = s.user_texts()
+        result["injected_count"] = users.count(signed_text)
+        result["user_texts"] = users
+        result["further_steps_after_first_seen"] = (
+            result["provider_calls"] - result["first_seen_call"] if seen else None
+        )
+        result["status"] = "PASS" if (
+            result["response"]["outcome"] == "accepted"
+            and result["first_seen_call"] == 2
+            and result["further_steps_after_first_seen"] > 0
+            and result["injected_count"] == 1
+            and result["draft_preserved"]
+        ) else "FAIL"
         return result
     finally:
         s.cleanup()
@@ -828,6 +881,7 @@ SCENARIOS = {
     ),
     "busy-single": lambda: scenario_busy("busy-single", "Русский черновик во время хода", multiline=False),
     "busy-multiline": lambda: scenario_busy("busy-multiline", "Первая строка\nВторая строка во время хода", multiline=True),
+    "between-steps": scenario_between_steps,
     "selector": scenario_selector,
     "modal-guard": scenario_modal_guard,
     "delayed-modal": scenario_delayed_modal,

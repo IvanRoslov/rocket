@@ -3,7 +3,7 @@
   "pi": "1.4.0",
   "session_id": "live-busy-multiline",
   "pi_session_id": "live-busy-multiline",
-  "instance_id": "bdbb418ebec39eaa",
+  "instance_id": "90a6491d1ed199ba",
   "endpoint_kind": "short /tmp UDS",
   "extensions": [
     "native-bridge-probe-extension.ts",
@@ -31,7 +31,7 @@
   "response": {
     "v": 1,
     "session_id": "live-busy-multiline",
-    "instance_id": "bdbb418ebec39eaa",
+    "instance_id": "90a6491d1ed199ba",
     "message_id": 201,
     "outcome": "accepted"
   },
