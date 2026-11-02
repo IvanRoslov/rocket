@@ -565,6 +565,12 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 		// (force) — an abandoned draft, or a false positive of the
 		// heuristic, must not block a recipient's queue forever.
 		//
+		// Kimi and Pi are exempt from the force-through: their composer text
+		// cannot be told apart from what a human is typing, and Kimi may be
+		// waiting on that human, so a deadline must never authorize erasing
+		// it (Kimi: Spec v2 acceptance 3). The global queue_timeout fails
+		// such a message truthfully instead of destroying foreign input.
+		//
 		// Socket delivery is exempt from all of this: it never sends C-u and
 		// never touches the composer, so there is no draft to protect and
 		// nothing to defer for — that is the whole reason the transport
@@ -641,7 +647,8 @@ func (q *Queue) deliver(ctx context.Context, msg store.Message) {
 				if busySince.IsZero() {
 					busySince = time.Now()
 				}
-				if dialect == runtime.PaneDialectPi || time.Since(busySince) < q.composerBusyDeadline() {
+				neverForce := dialect == runtime.PaneDialectPi || dialect == runtime.PaneDialectKimi
+				if neverForce || time.Since(busySince) < q.composerBusyDeadline() {
 					slog.Info("queue: recipient composer holds a user draft, deferring delivery",
 						"id", msg.ID, "to", msg.ToSession, "busy_for", time.Since(busySince).Round(time.Second))
 					if !q.waitForReady(ctx, msg.ToSession) {
