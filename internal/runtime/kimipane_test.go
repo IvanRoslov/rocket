@@ -191,3 +191,29 @@ func TestKimiComposerQueueFoot(t *testing.T) {
 		t.Fatal("a draft composer was treated as steerable")
 	}
 }
+
+// hasQueue is the pre-injection evidence: visible rows, a queue footer, or a
+// committed busy state all mean Kimi already holds pending input. It is
+// broader than KimiBusy on purpose (a scrolled/clipped queue may not parse as
+// busy, but delivery still must not type into it).
+func TestKimiComposerHasQueueEvidence(t *testing.T) {
+	busy, _ := parseKimiComposer(readPane(t, "kimi-busy-queued.pane"))
+	if !busy.hasQueue {
+		t.Error("busy queue pane has no queue evidence")
+	}
+	for _, name := range []string{"kimi-idle.pane", "kimi-finished.pane", "kimi-draft.pane"} {
+		if k, _ := parseKimiComposer(readPane(t, name)); k.hasQueue {
+			t.Errorf("%s: queue evidence on a pane without a queue", name)
+		}
+	}
+	noFoot := strings.Replace(readPane(t, "kimi-busy-queued.pane"),
+		"   ↑ to edit · ctrl-s to steer immediately\n", "", 1)
+	if k, _ := parseKimiComposer(noFoot); !k.hasQueue {
+		t.Error("visible queue rows without a footer are not queue evidence")
+	}
+	onlyFoot := strings.Replace(readPane(t, "kimi-busy-queued.pane"),
+		"   ❯ reply QUEUED_OK\n", "", 1)
+	if k, _ := parseKimiComposer(onlyFoot); !k.hasQueue || k.state != KimiEmpty {
+		t.Errorf("footer-only queue = %+v, want queue evidence without a committed busy state", k)
+	}
+}

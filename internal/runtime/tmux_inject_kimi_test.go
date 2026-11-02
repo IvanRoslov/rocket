@@ -464,3 +464,43 @@ func TestTmux_Inject_KimiSteerKeyFailureIsNotRedelivered(t *testing.T) {
 		t.Fatalf("paste count = %d, want 1", got)
 	}
 }
+
+// A queue that already exists before Rocket types anything means Kimi owns
+// queued input already. Appending our text would either join someone else's
+// payload or duplicate a copy Kimi already has, so delivery defers before the
+// clear, the paste or any key — a later C-s is not the required deferral.
+func TestTmux_Inject_KimiPreExistingQueueDefersBeforePaste(t *testing.T) {
+	cases := map[string]string{
+		"foreign item":                kimiSteerPane([]string{"someone else's queued message"}, kimiSteerFoot),
+		"foreign item not steerable":  kimiSteerPane([]string{"someone else's queued message"}, "↑ to edit · will send after current task"),
+		"hidden scrolled rows":        kimiSteerPane([]string{"[from orch] ours"}, "2 queued · ↑ to edit · ctrl-s to steer immediately"),
+		"our own copy already queued": kimiSteerPane([]string{"[from orch] ours"}, kimiSteerFoot),
+	}
+	for name, pane := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := &fakeTmux{pane: pane}
+			err := newFakeRuntime(f).Inject(context.Background(), Handle{Name: "sess"}, "[from orch] ours",
+				InjectOpts{Bracketed: true, Dialect: PaneDialectKimi})
+			if !errors.Is(err, ErrComposerBusy) {
+				t.Fatalf("Inject = %v, want ErrComposerBusy deferral", err)
+			}
+			if f.sent("send-keys") || f.sent("paste-buffer") {
+				t.Fatalf("keys sent over a pre-existing queue: %q", f.calls)
+			}
+		})
+	}
+}
+
+// The pre-existing-queue deferral is not a draft-deadline escape hatch: Force
+// must never authorize typing into a queue Kimi already holds.
+func TestTmux_Inject_KimiPreExistingQueueDefersEvenForced(t *testing.T) {
+	f := &fakeTmux{pane: kimiSteerPane([]string{"someone else's queued message"}, kimiSteerFoot)}
+	err := newFakeRuntime(f).Inject(context.Background(), Handle{Name: "sess"}, "[from orch] ours",
+		InjectOpts{Force: true, Bracketed: true, Dialect: PaneDialectKimi})
+	if !errors.Is(err, ErrComposerBusy) {
+		t.Fatalf("Inject = %v, want ErrComposerBusy", err)
+	}
+	if f.sent("send-keys") || f.sent("paste-buffer") {
+		t.Fatalf("keys sent over a pre-existing queue despite Force: %q", f.calls)
+	}
+}

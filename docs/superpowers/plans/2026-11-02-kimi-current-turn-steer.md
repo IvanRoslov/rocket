@@ -54,6 +54,7 @@
 - Consumes: `parseKimiComposer`, `kimiComposer.steerableQueue`.
 - Produces: `func (t *tmuxRuntime) steerKimiQueued(ctx context.Context, h Handle, text, pane string, interval, timeout time.Duration)`; called where `kimiSubmitted` currently returns nil.
 
+- [ ] **Step 0: Defer before injection when a Kimi queue already exists:** parse the first capture's queue evidence (`kimiComposer.hasQueue`: visible rows, footer, or busy state) and return `ErrComposerBusy` before any clear, paste or key; `Force` does not bypass it. Tests: visible foreign item, footer `will send after current task`, hidden scrolled rows, our own copy already queued, and `Force: true` → `ErrComposerBusy`, zero `send-keys`, zero `paste-buffer`.
 - [ ] **Step 1: Write failing behavioral tests** (fake tmux, asserting only public effects):
   - single-line and multiline message queued with foot `ctrl-s to steer immediately` → exactly one `C-s`, exactly one paste, one Enter, no post-paste clear;
   - foreign draft/foreign item/hidden scrolled item/`will send after current task`/truncated ownership/unknown pane → zero `C-s`;

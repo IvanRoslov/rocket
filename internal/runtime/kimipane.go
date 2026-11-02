@@ -84,6 +84,11 @@ type kimiComposer struct {
 	// running turn right now («ctrl-s to steer immediately»), as opposed to
 	// «will send after current task/compaction».
 	steerable bool
+	// hasQueue reports any evidence of Kimi's queue pane: visible item rows,
+	// its footer, or a committed busy state. It is deliberately broader than
+	// KimiBusy so a queue that is scrolled, clipped or otherwise not fully
+	// provable still stops delivery from typing into it.
+	hasQueue bool
 }
 
 func parseKimiComposer(pane string) (kimiComposer, bool) {
@@ -172,6 +177,7 @@ func parseKimiComposer(pane string) (kimiComposer, bool) {
 		}
 	}
 	k.queueTotal = len(queue)
+	k.hasQueue = len(queue) > 0 || foot != ""
 	if foot != "" {
 		if m := kimiQueueCount.FindStringSubmatch(foot); m != nil {
 			if n, err := strconv.Atoi(m[1]); err == nil {

@@ -304,9 +304,14 @@ func (t *tmuxRuntime) Inject(ctx context.Context, h Handle, text string, opts In
 			}
 			// Kimi: type only into its recognized composer — never into a
 			// question widget or dialog, where Enter picks an option, not
-			// even when forced (Force is for an abandoned draft).
+			// even when forced (Force is for an abandoned draft). A queue
+			// that already exists is Kimi's (or a human's) pending input:
+			// pasting would append to it — a duplicate when it is our own
+			// copy from an earlier attempt — and a later Ctrl-S would then
+			// decide over the whole queue. Defer before clearing or
+			// typing; the queue is not a draft, so Force does not apply.
 			k, ok := parseKimiComposer(out)
-			if !ok || (!opts.Force && k.state == KimiDraft) {
+			if !ok || k.hasQueue || (!opts.Force && k.state == KimiDraft) {
 				return fmt.Errorf("%w: session %q", ErrComposerBusy, h.Name)
 			}
 			clearKeys = kimiClearKeys(k.rows)
