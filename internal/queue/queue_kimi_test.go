@@ -272,3 +272,75 @@ func TestQueue_KimiAcceptedKeptWhileCacheHintOwnsStash(t *testing.T) {
 		t.Fatalf("Inject called %d times, want 1", n)
 	}
 }
+
+// The composer_busy_deadline force-through exists so an abandoned draft
+// cannot block a recipient's queue forever. Kimi's composer text is exactly
+// where a human types, and the approved guarantee forbids erasing foreign
+// input when a busy deadline expires, so Kimi is exempt: the message stays
+// queued, burns no attempt, and the global queue_timeout is the truthful
+// backstop. Spec v2, acceptance 3.
+func TestQueue_KimiDraftNeverForcedByDeadline(t *testing.T) {
+	h := newTestQueue(t)
+	h.q.cfg.ComposerBusyDeadline = 10 * time.Millisecond
+	addKimiSession(t, h, "kimi", activity.Ready)
+	h.rt.setCaptureEscaped(func(_ runtime.Handle, _ int) (string, error) {
+		return kimiPane(t, "kimi-draft.pane"), nil
+	})
+	id := addMsg(t, h, "kimi", "hello")
+	h.q.Wake("kimi")
+
+	// The first probe defers; waking past the deadline is what used to force
+	// Inject through the human's draft.
+	time.Sleep(50 * time.Millisecond)
+	h.activityTo("kimi", activity.Ready)
+	time.Sleep(200 * time.Millisecond)
+
+	if got := messageStatus(t, h.st, id); got != "queued" {
+		t.Fatalf("status = %q, want queued while a human draft is on screen", got)
+	}
+	if n := h.rt.callCount(); n != 0 {
+		t.Fatalf("Inject called %d times, want 0: a busy deadline must not clear a Kimi draft", n)
+	}
+	m, err := h.st.GetMessage(id)
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if m.Attempts != 0 {
+		t.Errorf("attempts = %d, want 0 (a deferral is not a failed attempt)", m.Attempts)
+	}
+}
+
+// The same protection must not wedge the queue: once the human's draft is
+// gone, the ordinary delivery resumes, without Force ever being set.
+func TestQueue_KimiDraftResumesWhenComposerFrees(t *testing.T) {
+	h := newTestQueue(t)
+	h.q.cfg.ComposerBusyDeadline = 10 * time.Millisecond
+	addKimiSession(t, h, "kimi", activity.Ready)
+	var pane atomic.Value
+	pane.Store(kimiPane(t, "kimi-draft.pane"))
+	h.rt.setCaptureEscaped(func(_ runtime.Handle, _ int) (string, error) {
+		return pane.Load().(string), nil
+	})
+	id := addMsg(t, h, "kimi", "hello")
+	h.q.Wake("kimi")
+
+	// Wake a re-check past the deadline: the draft is still there and must
+	// keep deferring instead of being force-cleared.
+	time.Sleep(50 * time.Millisecond)
+	h.activityTo("kimi", activity.Ready)
+	time.Sleep(100 * time.Millisecond)
+	if n := h.rt.callCount(); n != 0 {
+		t.Fatalf("Inject called %d times past the busy deadline, want 0", n)
+	}
+
+	pane.Store(kimiPane(t, "kimi-idle.pane"))
+	h.activityTo("kimi", activity.Ready)
+	waitUntil(t, func() bool { return messageStatus(t, h.st, id) == "accepted" },
+		"delivery resumes once the composer is free")
+	if n := h.rt.callCount(); n != 1 {
+		t.Fatalf("Inject called %d times, want 1", n)
+	}
+	if opts := h.rt.optsAt(0); opts.Force {
+		t.Fatal("Kimi delivery must never set Force")
+	}
+}
