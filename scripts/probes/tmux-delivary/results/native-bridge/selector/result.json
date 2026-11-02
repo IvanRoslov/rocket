@@ -3,7 +3,7 @@
   "pi": "1.4.0",
   "session_id": "live-selector",
   "pi_session_id": "live-selector",
-  "instance_id": "a885afb673e40999",
+  "instance_id": "ff0dfba32722d956",
   "endpoint_kind": "short /tmp UDS",
   "extensions": [
     "native-bridge-probe-extension.ts",
@@ -30,7 +30,7 @@
   "response": {
     "v": 1,
     "session_id": "live-selector",
-    "instance_id": "a885afb673e40999",
+    "instance_id": "ff0dfba32722d956",
     "message_id": 301,
     "outcome": "accepted"
   },

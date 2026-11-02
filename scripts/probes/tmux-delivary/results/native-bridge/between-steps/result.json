@@ -1,0 +1,97 @@
+{
+  "scenario": "between-steps",
+  "pi": "1.4.0",
+  "session_id": "live-between-steps",
+  "pi_session_id": "live-between-steps",
+  "instance_id": "d42a3c9578504877",
+  "endpoint_kind": "short /tmp UDS",
+  "extensions": [
+    "native-bridge-probe-extension.ts",
+    "delivery-extension.ts"
+  ],
+  "tools": [
+    "probe_step"
+  ],
+  "before": {
+    "ok": true,
+    "text": "Первая строка\nВторая строка с курсором",
+    "lines": [
+      "Первая строка",
+      "Вторая строка с курсором"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 21,
+    "idle": false,
+    "model": "probe/deterministic",
+    "editorInputCount": 47,
+    "editorLastInput": "\u001b[D",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false,
+    "sessionId": "live-between-steps"
+  },
+  "busy_idle": false,
+  "response": {
+    "v": 1,
+    "session_id": "live-between-steps",
+    "instance_id": "d42a3c9578504877",
+    "message_id": 601,
+    "outcome": "accepted"
+  },
+  "after_settled": {
+    "ok": true,
+    "text": "Первая строка\nВторая строка с курсором",
+    "lines": [
+      "Первая строка",
+      "Вторая строка с курсором"
+    ],
+    "cursorLine": 1,
+    "cursorCol": 21,
+    "idle": true,
+    "model": "probe/deterministic",
+    "editorInputCount": 47,
+    "editorLastInput": "\u001b[D",
+    "uiPromptStarts": 0,
+    "uiPromptEnds": 0,
+    "dialogOpen": false,
+    "sessionId": "live-between-steps"
+  },
+  "draft_preserved": true,
+  "provider_contexts": [
+    {
+      "event": "provider_context",
+      "time": 1793610820605,
+      "call": 1,
+      "users": [
+        "run"
+      ]
+    },
+    {
+      "event": "provider_context",
+      "time": 1793610823168,
+      "call": 2,
+      "users": [
+        "run",
+        "[rocket #601] Полный текст между шагами"
+      ]
+    },
+    {
+      "event": "provider_context",
+      "time": 1793610825724,
+      "call": 3,
+      "users": [
+        "run",
+        "[rocket #601] Полный текст между шагами"
+      ]
+    }
+  ],
+  "first_seen_call": 2,
+  "provider_calls": 3,
+  "injected_count": 1,
+  "user_texts": [
+    "run",
+    "[rocket #601] Полный текст между шагами"
+  ],
+  "further_steps_after_first_seen": 1,
+  "status": "PASS"
+}

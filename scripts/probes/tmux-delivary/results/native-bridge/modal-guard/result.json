@@ -3,7 +3,7 @@
   "pi": "1.4.0",
   "session_id": "live-modal-guard",
   "pi_session_id": "live-modal-guard",
-  "instance_id": "f2a69e2f50e1095b",
+  "instance_id": "e713011120a0aa08",
   "endpoint_kind": "short /tmp UDS",
   "extensions": [
     "native-bridge-probe-extension.ts",
@@ -14,7 +14,7 @@
       "refused": {
         "v": 1,
         "session_id": "live-modal-guard",
-        "instance_id": "f2a69e2f50e1095b",
+        "instance_id": "e713011120a0aa08",
         "message_id": 401,
         "outcome": "not_sent"
       },
@@ -22,7 +22,7 @@
       "accepted": {
         "v": 1,
         "session_id": "live-modal-guard",
-        "instance_id": "f2a69e2f50e1095b",
+        "instance_id": "e713011120a0aa08",
         "message_id": 411,
         "outcome": "accepted"
       },
@@ -32,7 +32,7 @@
       "refused": {
         "v": 1,
         "session_id": "live-modal-guard",
-        "instance_id": "f2a69e2f50e1095b",
+        "instance_id": "e713011120a0aa08",
         "message_id": 402,
         "outcome": "not_sent"
       },
@@ -40,7 +40,7 @@
       "accepted": {
         "v": 1,
         "session_id": "live-modal-guard",
-        "instance_id": "f2a69e2f50e1095b",
+        "instance_id": "e713011120a0aa08",
         "message_id": 412,
         "outcome": "accepted"
       },
@@ -50,7 +50,7 @@
       "refused": {
         "v": 1,
         "session_id": "live-modal-guard",
-        "instance_id": "f2a69e2f50e1095b",
+        "instance_id": "e713011120a0aa08",
         "message_id": 403,
         "outcome": "not_sent"
       },
@@ -58,7 +58,7 @@
       "accepted": {
         "v": 1,
         "session_id": "live-modal-guard",
-        "instance_id": "f2a69e2f50e1095b",
+        "instance_id": "e713011120a0aa08",
         "message_id": 413,
         "outcome": "accepted"
       },
@@ -68,7 +68,7 @@
       "refused": {
         "v": 1,
         "session_id": "live-modal-guard",
-        "instance_id": "f2a69e2f50e1095b",
+        "instance_id": "e713011120a0aa08",
         "message_id": 404,
         "outcome": "not_sent"
       },
@@ -76,7 +76,7 @@
       "accepted": {
         "v": 1,
         "session_id": "live-modal-guard",
-        "instance_id": "f2a69e2f50e1095b",
+        "instance_id": "e713011120a0aa08",
         "message_id": 414,
         "outcome": "accepted"
       },
@@ -86,7 +86,7 @@
       "refused": {
         "v": 1,
         "session_id": "live-modal-guard",
-        "instance_id": "f2a69e2f50e1095b",
+        "instance_id": "e713011120a0aa08",
         "message_id": 405,
         "outcome": "not_sent"
       },
@@ -94,7 +94,7 @@
       "accepted": {
         "v": 1,
         "session_id": "live-modal-guard",
-        "instance_id": "f2a69e2f50e1095b",
+        "instance_id": "e713011120a0aa08",
         "message_id": 415,
         "outcome": "accepted"
       },
