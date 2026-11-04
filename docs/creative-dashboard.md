@@ -4,7 +4,7 @@ Open `/creative/` on the same Rocket origin as the development dashboard. This i
 
 Select an existing project, define a pipeline, and create creative work with a name and brief. Each run snapshots the selected process. Pipeline edits affect new runs only. The saved process rail selects the run, stage or concrete item; results and discussion follow that selection. Pending repeated items can be added, edited or removed in the selected stage.
 
-The artifact viewer retains published versions and labels the current version. Stage views aggregate results from their concrete items while keeping each item's identity. During review, the viewer starts with the submitted immutable versions. Browsing another version requires returning to the submitted set before approval. Reopening a stage or item keeps later results and requires another normal submission/approval according to the saved process.
+The artifact viewer retains published versions and labels the current version. Stage views aggregate results from their concrete items while keeping each item's identity. During review, the viewer starts with the submitted immutable versions. If a submission includes multiple versions of one artifact, each submitted version has its own immutable card. Browsing another version requires returning to the submitted set before approval. Reopening a stage or item keeps later results and requires another normal submission/approval according to the saved process.
 
 Upload sources in their intended run/stage/item context. Text up to 1 MiB is displayed inline; raster images and supported audio/video use browser media support. All files have download links; unsupported formats/codecs remain downloadable. Uploads are limited by the artifact service to 2 GiB each.
 

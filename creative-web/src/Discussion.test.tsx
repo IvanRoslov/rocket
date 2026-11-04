@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, expect, it } from "vitest";
 import { Discussion } from "./Discussion";
 const posted: unknown[] = [];
 const server = setupServer(
@@ -20,6 +20,7 @@ const server = setupServer(
 );
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
+afterEach(() => server.resetHandlers());
 it("keeps a draft bound to the stage and artifact version originally shown when selection changes", async () => {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },

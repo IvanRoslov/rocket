@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { beforeAll, afterAll, expect, it } from "vitest";
+import { beforeAll, afterAll, afterEach, expect, it } from "vitest";
 import { Artifacts, Media } from "./Artifacts";
 const artifact = {
   id: 2,
@@ -34,6 +34,7 @@ const server = setupServer(
 );
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
+afterEach(() => server.resetHandlers());
 it("opens the submitted immutable version and permits inspecting retained history", async () => {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -162,4 +163,38 @@ it("uploads source bytes with the selected item context and retains the chosen f
       },
     ]),
   );
+});
+
+it("displays every submitted version when a review includes two versions of one artifact", async () => {
+  const displayed: number[][] = [];
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <Artifacts
+        scope={{ run_id: 7, stage_id: 4 }}
+        reviewIDs={[11, 12]}
+        reviewing
+        onShown={(shown, ready) => {
+          if (ready) displayed.push(shown.map((s) => s.version.id));
+        }}
+      />
+    </QueryClientProvider>,
+  );
+  await waitFor(() =>
+    expect(
+      screen.getAllByRole("link", { name: "Download clip.mp4" }),
+    ).toHaveLength(2),
+  );
+  expect(
+    screen
+      .getAllByRole("link", { name: "Download clip.mp4" })
+      .map((a) => a.getAttribute("href")),
+  ).toEqual([
+    "/v1/creative/artifact-versions/11/content?download=1",
+    "/v1/creative/artifact-versions/12/content?download=1",
+  ]);
+  expect(displayed).toContainEqual([11, 12]);
 });

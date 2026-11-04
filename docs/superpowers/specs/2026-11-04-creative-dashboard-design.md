@@ -20,3 +20,7 @@ Use a three-column creative workspace: a narrow process rail, a large result vie
 Reuse the existing web toolchain/dependencies through separate Vite/TypeScript entry and output. Add a distinct embedded Go package and `/creative/` static registration, plus build/test targets. Reuse small API/auth primitives; never import the old app shell/router. Use sibling-owned `/v1/creative` snake_case contracts rather than parallel state. Poll queries for authoritative state; mutations surface errors and refresh dependent data. Keep drafts stable, disable in-flight duplicate actions, and show loading, empty, unavailable and failed states explicitly. Browser cookies authenticate media and API requests.
 
 Verify focused component/API tests for pipeline snapshot editing, context/version-bound actions/messages, artifact history/media, preview states and auth return; Go static-route tests for distinct apps/deep links/assets and old dashboard preservation. Run both builds and existing relevant tests without launching the live daemon.
+
+## Accepted integration correction
+
+Whole-stage review and discussion include explicitly shown immutable versions from the same stage’s concrete items, retaining item identity. Item and run scopes remain exact. The viewer aggregates exact item lists; it never republishes copies or substitutes current pointers. A submitted set can include more than one version of a named artifact; all such versions display as separate immutable cards.

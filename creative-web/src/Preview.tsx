@@ -22,6 +22,9 @@ export function Preview({ scope }: { scope: Scope }) {
   return (
     <section className="preview">
       <h2>Interactive landing preview</h2>
+      <p className="muted">
+        Live preview · approvals refer to the submitted artifact versions.
+      </p>
       <ErrorNotice error={list.error ?? setup.error} />
       {list.isPending && <p>Checking preview availability…</p>}
       {list.data?.length === 0 && (

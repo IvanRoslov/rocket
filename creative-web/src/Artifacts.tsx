@@ -119,27 +119,28 @@ export function Artifacts({
   const shown: ShownVersion[] = visible.flatMap((q) => {
     if (!q.data) return [];
     const { artifact, versions } = q.data;
+    const submitted = versions.filter((v) => reviewIDs.includes(v.id));
+    const multipleSubmitted = reviewing && !browseAll && submitted.length > 1;
     const id =
-      selected[artifact.id] ??
-      versions.find((v) => reviewIDs.includes(v.id))?.id ??
-      artifact.current_version_id;
-    const version = versions.find((v) => v.id === id);
-    return version
-      ? [
-          {
-            artifact,
-            version,
-            item_name: itemContexts.find((i) => i.id === artifact.item_id)
-              ?.name,
-          },
-        ]
-      : [];
+      selected[artifact.id] ?? submitted[0]?.id ?? artifact.current_version_id;
+    const displayed = multipleSubmitted
+      ? submitted
+      : versions.filter((v) => v.id === id);
+    return displayed.map((version) => ({
+      artifact,
+      version,
+      item_name: itemContexts.find((i) => i.id === artifact.item_id)?.name,
+    }));
   });
   const ready =
     list.isSuccess &&
     descendants.every((q) => q.isSuccess) &&
     details.every((q) => q.isSuccess) &&
-    shown.length === visible.length;
+    visible.every(
+      (q) =>
+        q.data &&
+        shown.some((entry) => entry.artifact.id === q.data.artifact.id),
+    );
   const signature = JSON.stringify({ shown, ready });
   useLayoutEffect(() => {
     onShown(shown, ready);
@@ -160,7 +161,12 @@ export function Artifacts({
               ? "Browsing all published artifacts. Approval requires the submitted set."
               : "Showing submitted results and sources."}
           </p>
-          <button onClick={() => setBrowseAll(!browseAll)}>
+          <button
+            onClick={() => {
+              setBrowseAll(!browseAll);
+              if (browseAll) setSelected({});
+            }}
+          >
             {browseAll ? "Return to submitted results" : "Browse all artifacts"}
           </button>
         </div>
@@ -175,70 +181,83 @@ export function Artifacts({
       {visible.map((q, index) => {
         if (q.error) return <ErrorNotice key={index} error={q.error} />;
         if (!q.data) return <p key={index}>Loading artifact history…</p>;
-        const { artifact, versions } = q.data,
-          entry = shown.find((s) => s.artifact.id === artifact.id);
-        if (!entry)
+        const { artifact, versions } = q.data;
+        const entries = shown.filter((s) => s.artifact.id === artifact.id);
+        if (!entries.length)
           return <p key={artifact.id}>Artifact version is unavailable.</p>;
-        const version = entry.version,
-          current = artifact.current_version_id === version.id;
-        return (
-          <article className="artifact-card" key={artifact.id}>
-            <div className="heading">
-              <div>
-                <h3>{artifact.name}</h3>
-                {entry.item_name && <small>Item: {entry.item_name}</small>}
+        return entries.map((entry) => {
+          const version = entry.version,
+            current = artifact.current_version_id === version.id;
+          return (
+            <article
+              className="artifact-card"
+              key={`${artifact.id}:${version.id}`}
+            >
+              <div className="heading">
+                <div>
+                  <h3>{artifact.name}</h3>
+                  {entry.item_name && <small>Item: {entry.item_name}</small>}
+                </div>
+                <span className="chip">
+                  {artifact.kind === "source" ? "Source" : "Result"}
+                </span>
               </div>
-              <span className="chip">
-                {artifact.kind === "source" ? "Source" : "Result"}
-              </span>
-            </div>
-            <label>
-              {artifact.name} version
-              <select
-                value={version.id}
-                onChange={(e) =>
-                  setSelected({
-                    ...selected,
-                    [artifact.id]: Number(e.target.value),
-                  })
-                }
-              >
-                {[...versions].reverse().map((v) => (
-                  <option value={v.id} key={v.id}>
-                    Version {v.version_number}
-                    {v.id === artifact.current_version_id ? " · current" : ""}
-                    {reviewIDs.includes(v.id) ? " · submitted for review" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="row">
-              <span className="muted">
-                {current ? "Current version" : "Retained version"} ·{" "}
-                {new Intl.NumberFormat("en", {
-                  style: "unit",
-                  unit: "megabyte",
-                  maximumFractionDigits: 2,
-                }).format(version.size / 1e6)}
-              </span>
-              {!current && (
-                <button
-                  disabled={command.isPending}
-                  onClick={() =>
-                    command.mutate(() =>
-                      api.put(`${base}/artifacts/${artifact.id}/current`, {
-                        version_id: version.id,
-                      }),
-                    )
-                  }
-                >
-                  Make current
-                </button>
+              {entries.length > 1 ? (
+                <p>Submitted version {version.version_number}</p>
+              ) : (
+                <label>
+                  {artifact.name} version
+                  <select
+                    value={version.id}
+                    onChange={(e) =>
+                      setSelected({
+                        ...selected,
+                        [artifact.id]: Number(e.target.value),
+                      })
+                    }
+                  >
+                    {[...versions].reverse().map((v) => (
+                      <option value={v.id} key={v.id}>
+                        Version {v.version_number}
+                        {v.id === artifact.current_version_id
+                          ? " · current"
+                          : ""}
+                        {reviewIDs.includes(v.id)
+                          ? " · submitted for review"
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               )}
-            </div>
-            <Media key={version.id} version={version} />
-          </article>
-        );
+              <div className="row">
+                <span className="muted">
+                  {current ? "Current version" : "Retained version"} ·{" "}
+                  {new Intl.NumberFormat("en", {
+                    style: "unit",
+                    unit: "megabyte",
+                    maximumFractionDigits: 2,
+                  }).format(version.size / 1e6)}
+                </span>
+                {!current && (
+                  <button
+                    disabled={command.isPending}
+                    onClick={() =>
+                      command.mutate(() =>
+                        api.put(`${base}/artifacts/${artifact.id}/current`, {
+                          version_id: version.id,
+                        }),
+                      )
+                    }
+                  >
+                    Make current
+                  </button>
+                )}
+              </div>
+              <Media key={version.id} version={version} />
+            </article>
+          );
+        });
       })}
       <form
         className="upload"
