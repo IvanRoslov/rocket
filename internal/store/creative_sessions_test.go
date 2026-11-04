@@ -62,13 +62,7 @@ func TestCreativeDiscussionPinsVersionsAndStageIncludesItems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Minimal asset fixture until the assets dependency is merged. These are
-	// immutable metadata rows only; no generated media or provider calls.
-	_, err = s.db.Exec(`CREATE TABLE IF NOT EXISTS creative_artifacts(id INTEGER PRIMARY KEY,run_id INTEGER,stage_id INTEGER,item_id INTEGER,name TEXT,kind TEXT,current_version_id INTEGER,created_at INTEGER);
- CREATE TABLE IF NOT EXISTS creative_artifact_versions(id INTEGER PRIMARY KEY,artifact_id INTEGER,version_number INTEGER,filename TEXT,mime TEXT,size INTEGER,sha256 TEXT,storage_key TEXT,author_session_id TEXT,created_at INTEGER);`)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Immutable asset metadata fixtures; no generated media or provider calls.
 	_, err = s.db.Exec(`INSERT INTO creative_artifacts(id,run_id,stage_id,item_id,name,kind,created_at) VALUES(100,?,?,?,'scene','result',1)`, run.ID, run.Stages[0].ID, item.ID)
 	if err != nil {
 		t.Fatal(err)

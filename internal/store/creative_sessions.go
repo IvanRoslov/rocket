@@ -22,12 +22,8 @@ func (s *Store) ValidateCreativeBinding(b CreativeBinding) (CreativeContext, err
 	if err != nil {
 		return c, err
 	}
-	for _, id := range b.ArtifactVersionIDs {
-		var found int
-		err := s.db.QueryRow(`SELECT 1 FROM creative_artifact_versions v JOIN creative_artifacts a ON a.id=v.artifact_id WHERE v.id=? AND a.run_id=? AND COALESCE(a.stage_id,0)=? AND (? OR COALESCE(a.item_id,0)=?)`, id, b.RunID, b.StageID, b.StageID > 0 && b.ItemID == 0, b.ItemID).Scan(&found)
-		if err != nil {
-			return c, fmt.Errorf("%w: artifact version %d is unavailable in this context", ErrCreativeInvalid, id)
-		}
+	if err := s.ValidateCreativeArtifactVersions(b.RunID, b.StageID, b.ItemID, b.ArtifactVersionIDs); err != nil {
+		return c, err
 	}
 	return c, nil
 }

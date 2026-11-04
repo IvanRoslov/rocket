@@ -82,7 +82,7 @@ func TestCreativeAgentLaunchAndContextualDiscussion(t *testing.T) {
 	// Fabricated shown versions fail before any discussion is recorded.
 	resp = postJSONWithHeader(t, base+"/messages", "", map[string]any{"stage_id": run.Stages[0].ID, "artifact_version_ids": []int64{999}, "body": "bad version"})
 	resp.Body.Close()
-	if resp.StatusCode != 400 {
+	if resp.StatusCode != 404 {
 		t.Fatalf("invalid version: %d", resp.StatusCode)
 	}
 }
