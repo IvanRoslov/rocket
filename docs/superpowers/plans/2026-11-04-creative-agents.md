@@ -2,9 +2,9 @@
 
 > Use superpowers:executing-plans and test-driven-development task by task.
 
-**Goal:** Launch contextual creative sessions and distribute discoverable shared CLI tools.
-**Architecture:** Existing runtime, queue and questions with separate creative associations. Independent YAML tools registry and explicit bundled installation.
-**Tech Stack:** Go, SQLite, Cobra, YAML; vendored upstream TypeScript clients.
+**Goal:** Launch contextual creative sessions and discover user-owned shared CLI tools.
+**Architecture:** Existing runtime, queue and questions with separate creative associations. Independent user-owned YAML tools registry, initially empty on a fresh installation. Tools scope corrected by task 5992 (spec v3 / plan v2, gate 292).
+**Tech Stack:** Go, SQLite, Cobra, YAML.
 **Spec:** docs/superpowers/specs/2026-11-04-creative-agents-design.md
 
 ## Constraints and review focus
@@ -13,12 +13,11 @@ No development lifecycle changes; no paid calls, demos, live tools writes or res
 
 ## 1. Shared tools
 
-Files: internal/toolcatalog/{catalog.go,catalog_test.go,bundle/**}, internal/cli/tools.go, internal/cli/root.go, docs/creative-tools.md.
-Interfaces: Entry{Name,Description,Command,Usage,Environment}; Load(home) ([]Entry,error), Register(home,entry,replace) error, Install(home,update) error.
+Files: internal/toolcatalog/{catalog.go,catalog_test.go}, internal/cli/tools.go, internal/cli/root.go, docs/creative-tools.md.
+Interfaces: Entry{Name,Description,Command,Usage,Environment}; Load(home) ([]Entry,error), Register(home,entry,replace) error.
 - [x] Write tests for missing registry, valid YAML registration, invalid entries and explicit replacement; run to observe failure.
-- [x] Implement strict YAML metadata and explicit atomic registration, bundled install without silent overwrite; verify temporary-home tests.
-- [x] Copy only pinned upstream generation sources/tests/manifests, record provenance, adapt distribution paths only where necessary.
-- [x] Expose list/show/register/install commands and document independent human auth/MCP setup. Commit.
+- [x] Implement strict YAML metadata and explicit atomic registration without silent overwrite; verify temporary-home tests.
+- [x] Expose list/show/register commands and document independent human auth/MCP setup. Commit.
 
 ## 2. Context and communication
 
@@ -38,5 +37,5 @@ Consumes existing model resolution, workspace/runtime/session infrastructure and
 
 ## 4. Verify and deliver
 
-- [x] Run Go tests/vet, relevant pure bundled-client tests, inspect diff and documentation/CLI contracts.
+- [x] Run focused Go tests/vet, inspect diff and documentation/CLI contracts.
 - [ ] Publish one feature/creative-work PR, report URL to orchestrator and address review.
