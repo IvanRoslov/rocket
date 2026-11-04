@@ -4,11 +4,10 @@ Creative work is independent of development tasks. Templates, runs, stages and i
 
 ## Templates and runs
 
-Create a template with `POST /v1/creative/pipelines`, or replace its name and ordered stage array with `PUT /v1/creative/pipelines/{id}`:
+Templates are global and reusable across projects. Create a template with `POST /v1/creative/pipelines`, or replace its name and ordered stage array with `PUT /v1/creative/pipelines/{id}`:
 
 ```json
 {
-  "project_id": "my-project",
   "name": "Video",
   "stages": [
     {"name":"Script","description":"Write a script from the brief","expected_artifacts":"Script document","repeated":false,"approval":"stage"},
@@ -19,7 +18,9 @@ Create a template with `POST /v1/creative/pipelines`, or replace its name and or
 
 `approval` is required: `auto` completes on submission, `stage` waits for human approval of the whole stage, and `item` waits for human approval of each repeated item before later items progress. `item` requires `repeated:true`. Reordering the array reorders the template. Existing run definitions never change.
 
-`GET /v1/creative/pipelines[?project_id=...]` returns an array. `GET /v1/creative/pipelines/{id}` returns one template.
+`GET /v1/creative/pipelines` returns the global catalog, available without selecting a project. Template responses have no `project_id`. Deprecated `project_id` body/query hints are accepted and ignored, including on updates; they never filter or assign ownership. Templates use the existing transport trust and caller validation for shared administration. Run and agent operations retain their project checks. `GET /v1/creative/pipelines/{id}` returns one template.
+
+Normal upgrades preserve every existing template ID, name, ordered stage definition and timestamp; equal names remain distinct. Run references, snapshots, progress, reviews, artifacts and discussion remain intact. `rocket creative pipeline ls --project ...` is deprecated and ignores its project hint; run listing still supports project filtering.
 
 Create a run with `POST /v1/creative/runs`:
 
@@ -68,7 +69,7 @@ All commands print JSON. JSON definition files use the same bodies as the API:
 ```sh
 rocket creative pipeline create --file pipeline.json
 rocket creative pipeline update 1 --file pipeline.json
-rocket creative pipeline ls --project my-project
+rocket creative pipeline ls
 rocket creative pipeline show 1
 rocket creative run create --file run.json
 rocket creative run ls --project my-project

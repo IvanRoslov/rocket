@@ -23,7 +23,7 @@ func previewAPIFixture(t *testing.T) (Deps, http.Handler, store.CreativeRun) {
 			t.Fatal(err)
 		}
 	}
-	p, err := d.Store.CreateCreativePipeline(store.CreativePipelineInput{ProjectID: "previewproject", Name: "landing", Stages: []store.CreativeStageDefinition{{Name: "draft", Approval: "auto", Repeated: true}}})
+	p, err := d.Store.CreateCreativePipeline(store.CreativePipelineInput{Name: "landing", Stages: []store.CreativeStageDefinition{{Name: "draft", Approval: "auto", Repeated: true}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestCreativePreviewCannotClaimAnotherProjectsPort(t *testing.T) {
 	}
 	var original preview.Access
 	json.Unmarshal(first.Body.Bytes(), &original)
-	p, err := d.Store.CreateCreativePipeline(store.CreativePipelineInput{ProjectID: "otherproject", Name: "other", Stages: []store.CreativeStageDefinition{{Name: "landing", Approval: "auto"}}})
+	p, err := d.Store.CreateCreativePipeline(store.CreativePipelineInput{Name: "other", Stages: []store.CreativeStageDefinition{{Name: "landing", Approval: "auto"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

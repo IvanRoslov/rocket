@@ -23,7 +23,7 @@ func newCreativeCmd() *cobra.Command {
 }
 func creativeCommands(open creativeConnection) *cobra.Command {
 	root := &cobra.Command{Use: "creative", Short: "Creative pipelines, runs and approvals (JSON output)"}
-	pipelines := &cobra.Command{Use: "pipeline", Short: "Edit ordered pipeline templates"}
+	pipelines := &cobra.Command{Use: "pipeline", Short: "Edit global ordered pipeline templates"}
 	pipelines.AddCommand(creativeListCommand(open, "pipelines"), creativeShowCommand(open, "pipelines"))
 	pipelines.AddCommand(creativeFileCommand(open, "create", 0, "POST", func(_ []string) string { return "/v1/creative/pipelines" }))
 	pipelines.AddCommand(creativeFileCommand(open, "update <pipeline>", 1, "PUT", func(a []string) string { return apiPath("v1", "creative", "pipelines", a[0]) }))
@@ -114,12 +114,15 @@ func creativeListCommand(open creativeConnection, resource string) *cobra.Comman
 	var project string
 	cmd := &cobra.Command{Use: "ls", Short: "List " + resource, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		path := apiPath("v1", "creative", resource)
-		if project != "" {
+		if resource == "runs" && project != "" {
 			path += "?" + url.Values{"project_id": []string{project}}.Encode()
 		}
 		return creativeCall(cmd, open, "GET", path, nil)
 	}}
 	cmd.Flags().StringVar(&project, "project", "", "Filter by project ID")
+	if resource == "pipelines" {
+		_ = cmd.Flags().MarkDeprecated("project", "pipelines are global; this flag is ignored")
+	}
 	return cmd
 }
 func creativeShowCommand(open creativeConnection, resource string) *cobra.Command {

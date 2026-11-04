@@ -81,3 +81,56 @@ func TestCreativeAPIContextItemsAndStrictBodies(t *testing.T) {
 	creativeRequest(t, d, "GET", "/v1/creative/runs?project_id=p", "", "", 200)
 	creativeRequest(t, d, "GET", "/v1/creative/pipelines?project_id=p", "", "", 200)
 }
+
+func TestCreativeGlobalPipelineAPI(t *testing.T) {
+	d := tasksTestDeps(t)
+	// The catalog works even before there are any projects.
+	body := `{"name":"Shared","stages":[{"name":"Original","approval":"auto"}]}`
+	b := creativeRequest(t, d, "POST", "/v1/creative/pipelines", body, "", 201)
+	var p store.CreativePipeline
+	if err := json.Unmarshal(b, &p); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(b, []byte(`"project_id"`)) {
+		t.Fatalf("template exposes ownership: %s", b)
+	}
+	addTestProject(t, d, "p")
+	addTestProject(t, d, "other")
+	addTestSession(t, d, "global-editor", "orchestrator", "other")
+	// Legacy project hints do not require a project or restrict global editing.
+	legacy := `{"project_id":"nonexistent","name":"Same","stages":[{"name":"Future","approval":"auto"}]}`
+	creativeRequest(t, d, "POST", "/v1/creative/pipelines", legacy, "global-editor", 201)
+	path := fmt.Sprintf("/v1/creative/pipelines/%d", p.ID)
+	creativeRequest(t, d, "PUT", path, legacy, "global-editor", 200)
+	for _, query := range []string{"", "?project_id=p", "?project_id=other", "?project_id=nonexistent"} {
+		b := creativeRequest(t, d, "GET", "/v1/creative/pipelines"+query, "", "", 200)
+		var catalog []store.CreativePipeline
+		if err := json.Unmarshal(b, &catalog); err != nil {
+			t.Fatal(err)
+		}
+		if len(catalog) != 2 || catalog[0].ID != p.ID || catalog[0].Name != "Same" || catalog[1].Name != "Same" {
+			t.Fatalf("filtered/merged catalog: %s", b)
+		}
+		if bytes.Contains(b, []byte(`"project_id"`)) {
+			t.Fatalf("template exposes ownership: %s", b)
+		}
+	}
+	for _, project := range []string{"p", "other"} {
+		create := fmt.Sprintf(`{"project_id":%q,"pipeline_id":%d,"name":"Run","brief":"Brief"}`, project, p.ID)
+		b := creativeRequest(t, d, "POST", "/v1/creative/runs", create, "", 201)
+		var run store.CreativeRun
+		if err := json.Unmarshal(b, &run); err != nil {
+			t.Fatal(err)
+		}
+		if run.ProjectID != project || run.PipelineID != p.ID {
+			t.Fatalf("run: %+v", run)
+		}
+		if project == "p" {
+			stage := fmt.Sprintf("/v1/creative/runs/%d/stages/%d/actions", run.ID, run.Stages[0].ID)
+			creativeRequest(t, d, "POST", stage, `{"action":"start"}`, "global-editor", 403)
+			creativeRequest(t, d, "POST", "/v1/creative/runs", create, "global-editor", 403)
+		}
+	}
+	creativeRequest(t, d, "POST", "/v1/creative/pipelines", body, "unknown", 401)
+	creativeRequest(t, d, "PUT", path, body, "unknown", 401)
+}

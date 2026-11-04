@@ -657,7 +657,7 @@ func (*reactFakeRuntime) ExitHistory(context.Context, runtime.Handle) error     
 
 func TestCreativeWorkerIsNotCompletedByMergeGrace(t *testing.T) {
 	e := setupReactEnv(t, time.Hour, true)
-	p, err := e.st.CreateCreativePipeline(store.CreativePipelineInput{ProjectID: "billing", Name: "Film", Stages: []store.CreativeStageDefinition{{Name: "Scene", Approval: "auto"}}})
+	p, err := e.st.CreateCreativePipeline(store.CreativePipelineInput{Name: "Film", Stages: []store.CreativeStageDefinition{{Name: "Scene", Approval: "auto"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

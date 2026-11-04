@@ -9,7 +9,7 @@ func TestCreativeSessionContextAndPRIsolation(t *testing.T) {
 	s := openTestStore(t)
 	mustSetup(t, s)
 	// Core's pipeline/run creation supplies real ancestry; no runtime or generation.
-	pipeline, err := s.CreateCreativePipeline(CreativePipelineInput{ProjectID: "billing", Name: "Film", Stages: []CreativeStageDefinition{{Name: "Scenes", Repeated: true, Approval: "item"}}})
+	pipeline, err := s.CreateCreativePipeline(CreativePipelineInput{Name: "Film", Stages: []CreativeStageDefinition{{Name: "Scenes", Repeated: true, Approval: "item"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestCreativeSessionContextAndPRIsolation(t *testing.T) {
 func TestCreativeDiscussionPinsVersionsAndStageIncludesItems(t *testing.T) {
 	s := openTestStore(t)
 	mustSetup(t, s)
-	p, err := s.CreateCreativePipeline(CreativePipelineInput{ProjectID: "billing", Name: "Film", Stages: []CreativeStageDefinition{{Name: "Scenes", Repeated: true, Approval: "stage"}, {Name: "Other", Approval: "auto"}}})
+	p, err := s.CreateCreativePipeline(CreativePipelineInput{Name: "Film", Stages: []CreativeStageDefinition{{Name: "Scenes", Repeated: true, Approval: "stage"}, {Name: "Other", Approval: "auto"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

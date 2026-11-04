@@ -67,21 +67,29 @@ func creativeRoute(d Deps, fn func(http.ResponseWriter, *http.Request, *store.Se
 		fn(w, r, caller)
 	}
 }
+
+// creativePipelineRequest accepts the obsolete project hint from old clients.
+// It is intentionally absent from stored and returned global definitions.
+type creativePipelineRequest struct {
+	store.CreativePipelineInput
+	ProjectID string `json:"project_id,omitempty"`
+}
+
 func registerCreativeRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("GET /v1/creative/pipelines", creativeRoute(d, func(w http.ResponseWriter, r *http.Request, _ *store.Session) {
-		out, err := d.Store.ListCreativePipelines(r.URL.Query().Get("project_id"))
+		out, err := d.Store.ListCreativePipelines()
 		if err != nil {
 			creativeError(w, err)
 			return
 		}
 		writeJSON(w, 200, out)
 	}))
-	mux.HandleFunc("POST /v1/creative/pipelines", creativeRoute(d, func(w http.ResponseWriter, r *http.Request, caller *store.Session) {
-		var in store.CreativePipelineInput
-		if !creativeBody(w, r, &in) || !creativeProjectWrite(w, caller, in.ProjectID) {
+	mux.HandleFunc("POST /v1/creative/pipelines", creativeRoute(d, func(w http.ResponseWriter, r *http.Request, _ *store.Session) {
+		var in creativePipelineRequest
+		if !creativeBody(w, r, &in) {
 			return
 		}
-		out, err := d.Store.CreateCreativePipeline(in)
+		out, err := d.Store.CreateCreativePipeline(in.CreativePipelineInput)
 		if err != nil {
 			creativeError(w, err)
 			return
@@ -100,24 +108,16 @@ func registerCreativeRoutes(mux *http.ServeMux, d Deps) {
 		}
 		writeJSON(w, 200, out)
 	}))
-	mux.HandleFunc("PUT /v1/creative/pipelines/{id}", creativeRoute(d, func(w http.ResponseWriter, r *http.Request, caller *store.Session) {
+	mux.HandleFunc("PUT /v1/creative/pipelines/{id}", creativeRoute(d, func(w http.ResponseWriter, r *http.Request, _ *store.Session) {
 		id, ok := creativeID(w, r.PathValue("id"), false)
 		if !ok {
 			return
 		}
-		existing, err := d.Store.GetCreativePipeline(id)
-		if err != nil {
-			creativeError(w, err)
-			return
-		}
-		if !creativeProjectWrite(w, caller, existing.ProjectID) {
-			return
-		}
-		var in store.CreativePipelineInput
+		var in creativePipelineRequest
 		if !creativeBody(w, r, &in) {
 			return
 		}
-		out, err := d.Store.UpdateCreativePipeline(id, in)
+		out, err := d.Store.UpdateCreativePipeline(id, in.CreativePipelineInput)
 		if err != nil {
 			creativeError(w, err)
 			return
