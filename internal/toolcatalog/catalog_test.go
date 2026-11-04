@@ -93,3 +93,19 @@ func TestInstallPreservesCustomRegistrationAndRequiresUpdate(t *testing.T) {
 		t.Fatal("touched auth")
 	}
 }
+
+func TestInstallRelativeHomeProducesPortableCommands(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := Install("staging", false); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := Load("staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if !filepath.IsAbs(e.Command[1]) {
+			t.Fatalf("workspace-dependent command: %v", e.Command)
+		}
+	}
+}

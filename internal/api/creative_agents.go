@@ -358,6 +358,16 @@ func handleCreativeDiscussionPost(w http.ResponseWriter, r *http.Request, d Deps
 	writeJSON(w, 201, resp)
 }
 func creativeQuestionFanOut(d Deps, id int64, b store.CreativeBinding, author, body string) error {
+
+	context, err := d.Store.ResolveCreativeContext(b.RunID, b.StageID, b.ItemID)
+	if err != nil {
+		return err
+	}
+	if context.OrchestratorSessionID != "" {
+		if err := d.Store.AddParticipants(id, context.OrchestratorSessionID); err != nil {
+			return err
+		}
+	}
 	people, err := d.Store.ListParticipants(id)
 	if err != nil {
 		return err

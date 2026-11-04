@@ -16,6 +16,11 @@ const BundleRevision = "739a0f3da0d4d7d86855426483a1e4bc0b500f0b"
 // Install copies a versioned distribution and switches its catalog entries only
 // on explicit request. It never executes clients or reads/copies authorization.
 func Install(home string, update bool) error {
+	var err error
+	home, err = filepath.Abs(home)
+	if err != nil {
+		return err
+	}
 	entries, err := Load(home)
 	if err != nil {
 		return err

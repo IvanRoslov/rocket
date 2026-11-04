@@ -111,6 +111,7 @@ func (m *Manager) fillCreativePrompt(spec *agent.LaunchSpec, sess store.Session,
 		return err
 	}
 	spec.BrainstormSkill = ""
+	spec.Creative = true
 	spec.FirstMessage = fmt.Sprintf("Creative run #%d. Refresh the run, artifacts and contextual messages/questions before continuing. Preserve existing results and agree rework.\n\n%s\n\nRun snapshot:\n%s", run.ID, brief, snapshot)
 	return nil
 }

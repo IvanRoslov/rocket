@@ -23,6 +23,9 @@ func TestCreativeLaunchAndRestoreKeepCreativeLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !testFakeAgent.setupCalls[0].Creative || testFakeAgent.setupCalls[0].DevelopmentOrchestrator() {
+		t.Fatal("creative orchestrator receives development skills")
+	}
 	if orch.Kind != "orchestrator" || orch.TaskID != 0 {
 		t.Fatalf("wrong lifecycle: %+v", orch)
 	}

@@ -90,7 +90,7 @@ const orchestratorSkillsRelDir = ".claude/skills"
 // syncOrchestratorSkill lays rocket's orchestrator skills into the worktree
 // (see prompts.SyncOrchestratorSkills for which ones and why).
 func syncOrchestratorSkill(spec agent.LaunchSpec) error {
-	return prompts.SyncOrchestratorSkills(filepath.Join(spec.WorktreePath, filepath.FromSlash(orchestratorSkillsRelDir)), spec.BrainstormSkill, true)
+	return prompts.SyncOrchestratorSkills(filepath.Join(spec.WorktreePath, filepath.FromSlash(orchestratorSkillsRelDir)), spec.BrainstormSkill, spec.DevelopmentOrchestrator())
 }
 
 func orchestratorSkillExcludes() []string {

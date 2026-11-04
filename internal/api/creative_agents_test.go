@@ -86,3 +86,51 @@ func TestCreativeAgentLaunchAndContextualDiscussion(t *testing.T) {
 		t.Fatalf("invalid version: %d", resp.StatusCode)
 	}
 }
+
+func TestCreativeQuestionSurvivesOrchestratorReplacement(t *testing.T) {
+	d := sessionsTestDeps(t)
+	addTestProject(t, d, "film")
+	p, err := d.Store.CreateCreativePipeline(store.CreativePipelineInput{ProjectID: "film", Name: "Film", Stages: []store.CreativeStageDefinition{{Name: "Scene", Approval: "auto"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := d.Store.CreateCreativeRun(store.CreativeRunInput{ProjectID: "film", PipelineID: p.ID, Name: "Film", Brief: "Create film"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+	base := fmt.Sprintf("%s/v1/creative/runs/%d", srv.URL, run.ID)
+	// Human can record a decision before the run has a live session.
+	resp := postJSONWithHeader(t, base+"/questions", "", map[string]any{"body": "Which scene?"})
+	if resp.StatusCode != 201 {
+		t.Fatalf("ask %d", resp.StatusCode)
+	}
+	var q creativeQuestionResponse
+	json.NewDecoder(resp.Body).Decode(&q)
+	resp.Body.Close()
+	resp = postJSONWithHeader(t, base+"/sessions", "", map[string]any{"agent": "fake"})
+	if resp.StatusCode != 201 {
+		t.Fatalf("launch %d", resp.StatusCode)
+	}
+	var orch sessionResponse
+	json.NewDecoder(resp.Body).Decode(&orch)
+	resp.Body.Close()
+	resp = postJSONWithHeader(t, fmt.Sprintf("%s/v1/questions/%d/reply", srv.URL, q.ID), orch.ID, map[string]any{"body": "I suggest scene one"})
+	resp.Body.Close()
+	if resp.StatusCode != 201 {
+		t.Fatalf("new orchestrator cannot continue retained question: %d", resp.StatusCode)
+	}
+	resp = postJSONWithHeader(t, fmt.Sprintf("%s/v1/questions/%d/answer", srv.URL, q.ID), "", map[string]any{"body": "Use scene one"})
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("answer %d", resp.StatusCode)
+	}
+	messages, err := d.Store.ListMessages(orch.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) == 0 || !strings.Contains(messages[len(messages)-1].Body, "Use scene one") {
+		t.Fatal("current orchestrator missed decision")
+	}
+}

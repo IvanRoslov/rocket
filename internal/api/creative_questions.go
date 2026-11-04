@@ -23,7 +23,8 @@ func handleCreativeQuestionEntry(w http.ResponseWriter, r *http.Request, d Deps,
 	if writeCallerErr(w, err) {
 		return true
 	}
-	if _, ok := creativeAgentAccess(w, d, caller, b, true); !ok {
+	c, ok := creativeAgentAccess(w, d, caller, b, true)
+	if !ok {
 		return true
 	}
 	if answer && caller != nil {
@@ -36,6 +37,10 @@ func handleCreativeQuestionEntry(w http.ResponseWriter, r *http.Request, d Deps,
 		return true
 	}
 	author := callerParticipant(caller)
+	if caller != nil && caller.ID == c.OrchestratorSessionID && !contains(participants, author) {
+		// Membership is persisted during successful fanout, not on a dry run.
+		participants = append(participants, author)
+	}
 	if caller != nil && !contains(participants, author) {
 		writeErr(w, 403, "creative_forbidden", "caller is not a question participant")
 		return true
