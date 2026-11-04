@@ -3,7 +3,7 @@ import './uikit.css'
 
 export interface EmptyStateProps {
   icon: ReactNode
-  title: string
+  title: ReactNode
   action?: ReactNode
 }
 

@@ -1,3 +1,7 @@
+import { Badge } from "../../web/src/components/Badge";
+import { RocketBrand } from "../../web/src/components/RocketBrand";
+import { Tabs } from "../../web/src/components/Tabs";
+import { Button } from "../../web/src/components/Button";
 import { useCallback, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, base, useCommand } from "./api";
@@ -79,8 +83,9 @@ export function App() {
     <div className="creative-app">
       <header className="topbar">
         <a className="brand" href="/creative/">
-          rocket<span>Creative</span>
+          <RocketBrand />
         </a>
+        <Badge tone="indigo">Creative</Badge>
         <label className="top-select">
           Project
           <select
@@ -118,16 +123,23 @@ export function App() {
           </select>
         </label>
         <div className="top-actions">
-          <button disabled={!project} onClick={() => setView("new")}>
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={!project}
+            onClick={() => setView("new")}
+          >
             New work
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
             disabled={!project}
             aria-pressed={view === "pipelines"}
             onClick={() => setView("pipelines")}
           >
             Pipelines
-          </button>
+          </Button>
           <a href="/" target="_blank" rel="noopener noreferrer">
             Development ↗
           </a>
@@ -180,7 +192,9 @@ export function App() {
           ) : (
             <div className="run-grid">
               {runs.data?.map((r) => (
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   className="run-card"
                   key={r.id}
                   onClick={() => select({ project, run: r.id })}
@@ -188,7 +202,7 @@ export function App() {
                   <strong>{r.name}</strong>
                   <span>{r.pipeline_name}</span>
                   <small>{r.status.replaceAll("_", " ")}</small>
-                </button>
+                </Button>
               ))}
             </div>
           )}
@@ -278,17 +292,32 @@ function NewWork({
           apply to new work.
         </p>
         {pipelines.length === 0 && (
-          <button type="button" onClick={onPipelines}>
+          <Button
+            variant="secondary"
+            size="sm"
+            type="button"
+            onClick={onPipelines}
+          >
             Create a pipeline
-          </button>
+          </Button>
         )}
         <div className="row">
-          <button className="primary" disabled={!pipeline || command.isPending}>
+          <Button
+            variant="primary"
+            size="sm"
+            type="submit"
+            disabled={!pipeline || command.isPending}
+          >
             Create work
-          </button>
-          <button type="button" onClick={onCancel}>
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            type="button"
+            onClick={onCancel}
+          >
             Cancel
-          </button>
+          </Button>
         </div>
         <ErrorNotice error={command.error} />
       </form>
@@ -346,7 +375,11 @@ function Workspace({
         {invalid ? (
           <>
             <ErrorNotice error="This stage or item is not part of the selected work." />
-            <button onClick={() => onSelect()}>Back to work</button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => onSelect()}>Back to work</Button
+            >
           </>
         ) : (
           <>
@@ -368,21 +401,16 @@ function Workspace({
                 onShowReview={() => setReset((n) => n + 1)}
               />
             )}
-            <div className="view-tabs" role="tablist" aria-label="Result view">
-              <button
-                role="tab"
-                aria-selected={tab === "results"}
-                onClick={() => setTab("results")}
-              >
-                Artifacts
-              </button>
-              <button
-                role="tab"
-                aria-selected={tab === "preview"}
-                onClick={() => setTab("preview")}
-              >
-                Landing preview
-              </button>
+            <div className="view-tabs">
+              <Tabs
+                label="Result view"
+                items={[
+                  { id: "results", label: "Artifacts" },
+                  { id: "preview", label: "Landing preview" },
+                ]}
+                activeId={tab}
+                onChange={(id) => setTab(id as "results" | "preview")}
+              />
             </div>
             <div hidden={tab !== "results"}>
               <Artifacts

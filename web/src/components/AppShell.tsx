@@ -1,3 +1,4 @@
+import { RocketBrand } from './RocketBrand'
 import { useEffect, type CSSProperties } from 'react'
 import { Link, NavLink, Outlet, useParams, useLocation } from 'react-router-dom'
 import { fetchAuthStatus, onUnauthorized } from '../lib/auth'
@@ -64,24 +65,7 @@ export function AppShell() {
         }}
       >
         <NavLink to="/" style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <div
-            style={{
-              width: 22,
-              height: 22,
-              borderRadius: 6,
-              background: 'var(--text)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'var(--surface)',
-              font: '700 12px var(--font-mono)',
-            }}
-          >
-            R
-          </div>
-          <span style={{ font: '600 14px var(--font-mono)', color: 'var(--text)', letterSpacing: '-.02em' }}>
-            rocket
-          </span>
+          <RocketBrand />
         </NavLink>
         <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
         <ProjectSwitcher currentProjectId={projectId} />

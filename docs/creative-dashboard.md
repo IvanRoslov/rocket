@@ -12,6 +12,10 @@ Discussion automatically includes the selected context and displayed artifact ve
 
 Launch the creative orchestrator using an existing enabled model profile, or restore its existing session. Landing preview uses the preview service's availability and access URL for both its sandboxed iframe and separate-tab link. When preview setup or its local server is missing, the service's actionable message is shown. See [creative-previews.md](creative-previews.md) for the required separate, browser-reachable private preview hostname and operator setup. Preview registrations expire on daemon restart; an orchestrator must register and start a new preview to restore access.
 
+## Shared presentation
+
+Creative imports the development dashboard’s tokens, base styles and actual Button, Badge, Card, Dot, Tabs and EmptyState components directly from `web/src`. Both headers use the same presentation-only RocketBrand; Creative adds a small label and restrained indigo accent. Creative keeps its own workspace layout and native form fields styled with Rocket tokens. Vite deduplicates React for sibling imports; no UI package or development navigation is included.
+
 ## Development and build
 
 - `cd creative-web && npm ci && npm run dev`: independent Vite application at `/creative/`, with the same `/v1` daemon API proxy as the development app.

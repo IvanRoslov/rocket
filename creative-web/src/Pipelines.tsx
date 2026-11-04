@@ -1,3 +1,4 @@
+import { Button } from "../../web/src/components/Button";
 import { useState } from "react";
 import { api, base, useCommand } from "./api";
 import type { Approval, Pipeline, StageDefinition } from "./types";
@@ -39,7 +40,11 @@ export function Pipelines({
           <span className="eyebrow">Process library</span>
           <h1>Pipelines</h1>
         </div>
-        <button onClick={onClose}>Back to workspace</button>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onClose}>Back to workspace</Button
+        >
       </div>
       <p>
         Templates define new work. Runs already underway keep their saved
@@ -47,15 +52,21 @@ export function Pipelines({
       </p>
       <div className="pipeline-layout">
         <nav aria-label="Pipeline templates">
-          <button onClick={() => choose()}>+ New pipeline</button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => choose()}>+ New pipeline</Button
+          >
           {pipelines.map((p) => (
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               key={p.id}
               aria-pressed={id === p.id}
               onClick={() => choose(p)}
             >
               {p.name}
-            </button>
+            </Button>
           ))}
         </nav>
         <form
@@ -83,29 +94,35 @@ export function Pipelines({
             <fieldset key={i}>
               <legend>Stage {i + 1}</legend>
               <div className="row">
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   type="button"
                   aria-label={`Move stage ${i + 1} up`}
                   disabled={i === 0}
                   onClick={() => setStages(moveStage(stages, i, -1))}
                 >
                   ↑
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   type="button"
                   aria-label={`Move stage ${i + 1} down`}
                   disabled={i === stages.length - 1}
                   onClick={() => setStages(moveStage(stages, i, 1))}
                 >
                   ↓
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   type="button"
                   disabled={stages.length === 1}
                   onClick={() => setStages(stages.filter((_, n) => n !== i))}
                 >
                   Remove stage
-                </button>
+                </Button>
               </div>
               <label>
                 Stage {i + 1} name
@@ -164,15 +181,22 @@ export function Pipelines({
             </fieldset>
           ))}
           <div className="row">
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               type="button"
               onClick={() => setStages([...stages, blank()])}
             >
               Add stage
-            </button>
-            <button className="primary" disabled={save.isPending} type="submit">
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={save.isPending}
+              type="submit"
+            >
               {save.isPending ? "Saving…" : "Save pipeline"}
-            </button>
+            </Button>
           </div>
           <ErrorNotice error={save.error} />
         </form>

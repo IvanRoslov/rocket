@@ -1,3 +1,4 @@
+import { Button } from "../../web/src/components/Button";
 import { api, actionPath, useCommand } from "./api";
 import type { Scope, ShownVersion, Work } from "./types";
 import { actionsFor } from "./workflow";
@@ -63,7 +64,11 @@ export function ReviewActions({
                 Return to the submitted versions before approving or requesting
                 changes.
               </p>
-              <button onClick={onShowReview}>Show submitted versions</button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={onShowReview}>Show submitted versions</Button
+              >
             </>
           )}
         </>
@@ -77,9 +82,10 @@ export function ReviewActions({
       )}
       <div className="row">
         {actionsFor(work.status, canProgress).map((action) => (
-          <button
+          <Button
+            variant={action === "approve" ? "primary" : "secondary"}
+            size="sm"
             key={action}
-            className={action === "approve" ? "primary" : ""}
             disabled={
               command.isPending ||
               (["approve", "reject"].includes(action) && !bound) ||
@@ -96,7 +102,7 @@ export function ReviewActions({
             }}
           >
             {labels[action]}
-          </button>
+          </Button>
         ))}
       </div>
       <ErrorNotice error={command.error} />

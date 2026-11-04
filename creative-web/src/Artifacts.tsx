@@ -1,3 +1,6 @@
+import { Card } from "../../web/src/components/Card";
+import { Badge } from "../../web/src/components/Badge";
+import { Button } from "../../web/src/components/Button";
 import { useLayoutEffect, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { api, base, contextPath, uploadSource, useCommand } from "./api";
@@ -161,14 +164,16 @@ export function Artifacts({
               ? "Browsing all published artifacts. Approval requires the submitted set."
               : "Showing submitted results and sources."}
           </p>
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => {
               setBrowseAll(!browseAll);
               if (browseAll) setSelected({});
             }}
           >
             {browseAll ? "Return to submitted results" : "Browse all artifacts"}
-          </button>
+          </Button>
         </div>
       )}
       {list.isPending && <p>Loading artifacts…</p>}
@@ -189,7 +194,8 @@ export function Artifacts({
           const version = entry.version,
             current = artifact.current_version_id === version.id;
           return (
-            <article
+            <Card
+              role="article"
               className="artifact-card"
               key={`${artifact.id}:${version.id}`}
             >
@@ -198,9 +204,9 @@ export function Artifacts({
                   <h3>{artifact.name}</h3>
                   {entry.item_name && <small>Item: {entry.item_name}</small>}
                 </div>
-                <span className="chip">
+                <Badge tone="neutral">
                   {artifact.kind === "source" ? "Source" : "Result"}
-                </span>
+                </Badge>
               </div>
               {entries.length > 1 ? (
                 <p>Submitted version {version.version_number}</p>
@@ -240,7 +246,9 @@ export function Artifacts({
                   }).format(version.size / 1e6)}
                 </span>
                 {!current && (
-                  <button
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     disabled={command.isPending}
                     onClick={() =>
                       command.mutate(() =>
@@ -251,11 +259,11 @@ export function Artifacts({
                     }
                   >
                     Make current
-                  </button>
+                  </Button>
                 )}
               </div>
               <Media key={version.id} version={version} />
-            </article>
+            </Card>
           );
         });
       })}
@@ -293,9 +301,14 @@ export function Artifacts({
         <p className="muted">
           Files up to 2 GiB. Uploads belong to the selected work.
         </p>
-        <button disabled={!file || command.isPending}>
+        <Button
+          variant="secondary"
+          size="sm"
+          type="submit"
+          disabled={!file || command.isPending}
+        >
           {command.isPending ? "Uploading…" : "Upload source"}
-        </button>
+        </Button>
       </form>
       <ErrorNotice error={command.error} />
     </section>

@@ -4,7 +4,9 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   base: "/creative/",
   plugins: [react()],
+  resolve: { dedupe: ["react", "react-dom"] },
   server: {
+    fs: { allow: [".."] },
     proxy: {
       "/v1": "http://127.0.0.1:4477",
       "/login": "http://127.0.0.1:4477",

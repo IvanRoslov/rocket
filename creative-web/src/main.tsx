@@ -2,6 +2,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
+import "../../web/src/styles/tokens.css";
+import "../../web/src/styles/base.css";
 import "./style.css";
 const client = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchInterval: 5000 } },
