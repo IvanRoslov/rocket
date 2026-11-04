@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/json"
+	"github.com/IvanRoslov/rocket/internal/preview"
 	"io"
 	"net"
 	"net/http"
@@ -45,5 +47,45 @@ func TestMissingPreviewSetup(t *testing.T) {
 	initializePreviews(&d)
 	if d.Previews.Setup().Configured {
 		t.Fatal("missing setup advertised usable")
+	}
+}
+
+func TestConfiguredPreviewListenerSharesManagementRegistry(t *testing.T) {
+	d, h, run := previewAPIFixture(t)
+	d.Cfg.PreviewHost = "127.0.0.1"
+	d.Cfg.PreviewPort = freePort(t)
+	srv, ln := listenPreview(d)
+	if srv == nil {
+		t.Fatal("listener missing")
+	}
+	defer srv.Close()
+	go srv.Serve(ln)
+	rec := previewCall(t, h, "POST", "/v1/creative/previews", "", map[string]any{"run_id": run.ID, "port": 5100})
+	if rec.Code != 201 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	var a preview.Access
+	if err := json.Unmarshal(rec.Body.Bytes(), &a); err != nil {
+		t.Fatal(err)
+	}
+	res, err := http.Get("http://" + ln.Addr().String() + a.BasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 502 {
+		t.Fatalf("registered stopped upstream: %d", res.StatusCode)
+	}
+	rec = previewCall(t, h, "DELETE", "/v1/creative/previews/"+a.ID, "", nil)
+	if rec.Code != 204 {
+		t.Fatal(rec.Body)
+	}
+	res, err = http.Get("http://" + ln.Addr().String() + a.BasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 404 {
+		t.Fatalf("revoked capability: %d", res.StatusCode)
 	}
 }
