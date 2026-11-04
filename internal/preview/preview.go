@@ -114,15 +114,21 @@ func (r *Registry) Register(ctx Context, port int) (Access, error) {
 	id := hex.EncodeToString(token)
 	a := Access{ID: id, Context: ctx, Port: port, BasePath: "/p/" + id + "/"}
 	r.mu.Lock()
+	// A port has one context owner. Never let another project or result relabel
+	// an already running server. Same-context retries retain its configured base.
+	for _, old := range r.entries {
+		if old.Port != port {
+			continue
+		}
+		r.mu.Unlock()
+		if old.Context != ctx {
+			return Access{}, fmt.Errorf("%w: port is already registered to another context; choose another allowed port or revoke the original preview", ErrInvalid)
+		}
+		return r.inspect(context.Background(), old), nil
+	}
 	if len(r.entries) >= 128 {
 		r.mu.Unlock()
 		return Access{}, fmt.Errorf("%w: revoke an existing preview before registering more (limit 128)", ErrInvalid)
-	}
-	// A port has one live owner. Do not let old contexts resolve a newly launched site.
-	for key, old := range r.entries {
-		if old.Port == port {
-			delete(r.entries, key)
-		}
 	}
 	r.entries[id] = a
 	r.mu.Unlock()

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -369,7 +370,7 @@ func (c *Config) ValidatePreview() error {
 		return fmt.Errorf("config: preview_public_url must be an http(s) origin without credentials, path, query or fragment")
 	}
 	host := strings.ToLower(u.Hostname())
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" || strings.EqualFold(host, c.Host) {
+	if net.ParseIP(host) != nil || host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.EqualFold(host, c.Host) {
 		return fmt.Errorf("config: preview_public_url requires a separate reachable hostname from Rocket")
 	}
 	if main, err := url.Parse(c.PublicURL); err == nil && main.Host != "" {

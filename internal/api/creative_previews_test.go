@@ -147,3 +147,31 @@ func TestCreativePreviewCallerAuthorization(t *testing.T) {
 		t.Fatalf("authenticated setup %d %s", rec.Code, rec.Body)
 	}
 }
+
+func TestCreativePreviewCannotClaimAnotherProjectsPort(t *testing.T) {
+	d, h, run := previewAPIFixture(t)
+	first := previewCall(t, h, "POST", "/v1/creative/previews", "", map[string]any{"run_id": run.ID, "port": 5100})
+	if first.Code != 201 {
+		t.Fatal(first.Body)
+	}
+	var original preview.Access
+	json.Unmarshal(first.Body.Bytes(), &original)
+	p, err := d.Store.CreateCreativePipeline(store.CreativePipelineInput{ProjectID: "otherproject", Name: "other", Stages: []store.CreativeStageDefinition{{Name: "landing", Approval: "auto"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := d.Store.CreateCreativeRun(store.CreativeRunInput{ProjectID: "otherproject", PipelineID: p.ID, Name: "other", Brief: "another project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = d.Store.AddSession(store.Session{ID: "other", Kind: "agent", ProjectID: "otherproject"}); err != nil {
+		t.Fatal(err)
+	}
+	rec := previewCall(t, h, "POST", "/v1/creative/previews", "other", map[string]any{"run_id": other.ID, "port": 5100})
+	if rec.Code != 400 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if _, err = d.Previews.Lookup(original.ID); err != nil {
+		t.Fatal("original preview was revoked")
+	}
+}

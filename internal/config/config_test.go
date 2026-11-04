@@ -505,6 +505,7 @@ func TestPreviewConfiguration(t *testing.T) {
 	}{
 		{"disabled", "", true},
 		{"configured", "public_url: https://rocket.example.com\npreview_port: 4480\npreview_public_url: https://landing.example.net\npreview_ports: [5100,5101]\n", true},
+		{"literal-ip", "preview_port: 4480\npreview_public_url: http://192.0.2.10:4480\n", false},
 		{"same-host", "public_url: https://rocket.example.com\npreview_port: 4480\npreview_public_url: https://rocket.example.com:4480\n", false},
 		{"loopback-alias", "preview_port: 4480\npreview_public_url: http://localhost:4480\n", false},
 		{"missing-port", "preview_public_url: https://preview.example.net\n", false},

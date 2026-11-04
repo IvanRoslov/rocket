@@ -80,8 +80,9 @@ wrong-ancestry and cross-project agent contexts are rejected.
 
 Registrations and their secret capability URLs live only for this daemon's
 lifetime. Restarting Rocket revokes them: register again and relaunch with the
-new base path. Re-registering a port replaces its previous registration; revoke
-before changing projects/contexts. Revocation blocks new requests; it does not
+new base path. Registering the same port/context again returns its existing capability. A port
+already registered to another context is rejected; revoke before changing
+projects/contexts. Revocation blocks new requests; it does not
 stop the dev-server process or forcibly close existing WebSocket connections.
 Stop the server in its owning session when finished. Keep capability URLs private.
 

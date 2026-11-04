@@ -186,3 +186,26 @@ func TestFixedLoopbackTarget(t *testing.T) { // No user-controlled host, DNS, pr
 		t.Fatal("missing run accepted")
 	}
 }
+
+func TestPortCannotBeReassignedToAnotherContext(t *testing.T) {
+	r := New(Config{AllowedPorts: []int{49123}})
+	original, err := r.Register(Context{RunID: 1}, 49123)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = r.Register(Context{RunID: 2}, 49123); err == nil {
+		t.Fatal("different run stole existing preview port")
+	}
+	if _, err = r.Lookup(original.ID); err != nil {
+		t.Fatal("original registration revoked")
+	}
+}
+
+func TestRegistrationRetryPreservesBasePath(t *testing.T) {
+	r := New(Config{AllowedPorts: []int{49123}})
+	a, _ := r.Register(Context{RunID: 1}, 49123)
+	again, err := r.Register(Context{RunID: 1}, 49123)
+	if err != nil || again.ID != a.ID || again.BasePath != a.BasePath {
+		t.Fatalf("first=%+v retry=%+v err=%v", a, again, err)
+	}
+}
