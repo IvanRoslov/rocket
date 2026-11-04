@@ -250,3 +250,87 @@ func TestCreativeArtifactIdentityAndInvalidContext(t *testing.T) {
 		}
 	}
 }
+
+func TestCreativeArtifactReadsRejectUnknownSession(t *testing.T) {
+	d, run, stage := creativeArtifactDeps(t)
+	h := NewHandler(d)
+	p := decodePublication(t, artifactRequest(h, "POST", creativePublishPath(run, stage, "Read", "source", "source.txt"), "text/plain", "", strings.NewReader("source")))
+	for _, path := range []string{p.Version.ContentURL, "/v1/creative/artifact-versions/" + itoa(p.Version.ID), "/v1/creative/artifacts/" + itoa(p.Artifact.ID), "/v1/creative/runs/" + itoa(run) + "/artifacts"} {
+		w := artifactRequest(h, "GET", path, "", "missing", nil)
+		if w.Code != 401 {
+			t.Errorf("unknown reader %s: %d", path, w.Code)
+		}
+	}
+}
+
+func TestCreativeArtifactBrowserContentRequiresDeviceAuthentication(t *testing.T) {
+	d, run, stage := creativeArtifactDeps(t)
+	d.Auth = NewAuthRuntime()
+	d.Cfg.PublicURL = "https://mac.tail1.ts.net"
+	raw := NewHandler(d)
+	p := decodePublication(t, artifactRequest(raw, "POST", creativePublishPath(run, stage, "Film", "result", "film.mp4"), "video/mp4", "", strings.NewReader("video-content")))
+	tok, _ := pairedToken(t, raw)
+	h := requireAuth(d, raw)
+	request := func(token string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "http://127.0.0.1:4477"+p.Version.ContentURL, nil)
+		if token != "" {
+			r.AddCookie(&http.Cookie{Name: authCookie, Value: token})
+		}
+		r.Header.Set("Range", "bytes=0-4")
+		return serve(h, r)
+	}
+	if w := request(""); w.Code != 401 {
+		t.Fatalf("unauthenticated content %d", w.Code)
+	}
+	if w := request(tok); w.Code != 206 || w.Body.String() != "video" {
+		t.Fatalf("browser playback %d %s", w.Code, w.Body.String())
+	}
+}
+
+// A metadata failure after the bytes arrive must remove that new blob, preserve
+// the previous current version, and return a visible publication error.
+func TestCreativeArtifactMetadataFailureRemovesNewBlob(t *testing.T) {
+	d, run, stage := creativeArtifactDeps(t)
+	h := NewHandler(d)
+	path := creativePublishPath(run, stage, "Film", "result", "film.mp4")
+	p := decodePublication(t, artifactRequest(h, "POST", path, "video/mp4", "", strings.NewReader("first")))
+	body := &creativeArtifactReadHook{Reader: strings.NewReader("second"), hook: func() {
+		if err := d.Store.Close(); err != nil {
+			t.Error(err)
+		}
+	}}
+	w := artifactRequest(h, "POST", path, "video/mp4", "", body)
+	if w.Code != 500 || !strings.Contains(w.Body.String(), "creative_artifact_failed") {
+		t.Fatalf("metadata failure %d %s", w.Code, w.Body.String())
+	}
+	files, err := os.ReadDir(filepath.Join(d.Cfg.Home, "creative-artifacts"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("orphaned blob %v %v", files, err)
+	}
+	reopened, err := store.Open(filepath.Join(d.Cfg.Home, "rocket.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	a, err := reopened.GetCreativeArtifact(p.Artifact.ID)
+	if err != nil || a.CurrentVersionID != p.Version.ID {
+		t.Fatalf("changed current %+v %v", a, err)
+	}
+	versions, err := reopened.ListCreativeArtifactVersions(p.Artifact.ID)
+	if err != nil || len(versions) != 1 {
+		t.Fatalf("published failed version %+v %v", versions, err)
+	}
+}
+
+type creativeArtifactReadHook struct {
+	io.Reader
+	hook func()
+}
+
+func (r *creativeArtifactReadHook) Read(p []byte) (int, error) {
+	if r.hook != nil {
+		r.hook()
+		r.hook = nil
+	}
+	return r.Reader.Read(p)
+}

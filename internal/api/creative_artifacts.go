@@ -36,7 +36,10 @@ func creativeVersionJSON(v store.CreativeArtifactVersion) creativeArtifactVersio
 }
 
 func registerCreativeArtifactRoutes(mux *http.ServeMux, d Deps) {
-	mux.HandleFunc("GET /v1/creative/runs/{run}/artifacts", func(w http.ResponseWriter, r *http.Request) {
+	register := func(pattern string, fn http.HandlerFunc) {
+		mux.HandleFunc(pattern, creativeRoute(d, func(w http.ResponseWriter, r *http.Request, _ *store.Session) { fn(w, r) }))
+	}
+	register("GET /v1/creative/runs/{run}/artifacts", func(w http.ResponseWriter, r *http.Request) {
 		ctx, err := creativeArtifactRequestContext(r, d)
 		if creativeArtifactError(w, err) {
 			return
@@ -47,7 +50,7 @@ func registerCreativeArtifactRoutes(mux *http.ServeMux, d Deps) {
 		}
 		writeJSON(w, 200, list)
 	})
-	mux.HandleFunc("POST /v1/creative/runs/{run}/artifacts", func(w http.ResponseWriter, r *http.Request) {
+	register("POST /v1/creative/runs/{run}/artifacts", func(w http.ResponseWriter, r *http.Request) {
 		ctx, err := creativeArtifactRequestContext(r, d)
 		if creativeArtifactError(w, err) {
 			return
@@ -59,7 +62,7 @@ func registerCreativeArtifactRoutes(mux *http.ServeMux, d Deps) {
 		}
 		handleCreativeArtifactUpload(w, r, d, ctx, p)
 	})
-	mux.HandleFunc("GET /v1/creative/artifacts/{artifact}", func(w http.ResponseWriter, r *http.Request) {
+	register("GET /v1/creative/artifacts/{artifact}", func(w http.ResponseWriter, r *http.Request) {
 		a, err := creativeArtifactFromRequest(r, d)
 		if creativeArtifactError(w, err) {
 			return
@@ -74,7 +77,7 @@ func registerCreativeArtifactRoutes(mux *http.ServeMux, d Deps) {
 		}
 		writeJSON(w, 200, map[string]any{"artifact": a, "versions": out})
 	})
-	mux.HandleFunc("POST /v1/creative/artifacts/{artifact}/versions", func(w http.ResponseWriter, r *http.Request) {
+	register("POST /v1/creative/artifacts/{artifact}/versions", func(w http.ResponseWriter, r *http.Request) {
 		a, err := creativeArtifactFromRequest(r, d)
 		if creativeArtifactError(w, err) {
 			return
@@ -85,7 +88,7 @@ func registerCreativeArtifactRoutes(mux *http.ServeMux, d Deps) {
 		}
 		handleCreativeArtifactUpload(w, r, d, ctx, store.CreativeArtifactPublication{ArtifactID: a.ID, RunID: a.RunID, StageID: a.StageID, ItemID: a.ItemID})
 	})
-	mux.HandleFunc("PUT /v1/creative/artifacts/{artifact}/current", func(w http.ResponseWriter, r *http.Request) {
+	register("PUT /v1/creative/artifacts/{artifact}/current", func(w http.ResponseWriter, r *http.Request) {
 		a, err := creativeArtifactFromRequest(r, d)
 		if creativeArtifactError(w, err) {
 			return
@@ -119,7 +122,7 @@ func registerCreativeArtifactRoutes(mux *http.ServeMux, d Deps) {
 		}
 		writeJSON(w, 200, a)
 	})
-	mux.HandleFunc("GET /v1/creative/artifact-versions/{version}", func(w http.ResponseWriter, r *http.Request) {
+	register("GET /v1/creative/artifact-versions/{version}", func(w http.ResponseWriter, r *http.Request) {
 		v, err := creativeArtifactVersionFromRequest(r, d)
 		if creativeArtifactError(w, err) {
 			return
@@ -127,7 +130,7 @@ func registerCreativeArtifactRoutes(mux *http.ServeMux, d Deps) {
 		writeJSON(w, 200, creativeVersionJSON(v))
 	})
 	// A GET pattern also handles HEAD; ServeContent implements range/conditional access.
-	mux.HandleFunc("GET /v1/creative/artifact-versions/{version}/content", func(w http.ResponseWriter, r *http.Request) { handleCreativeArtifactContent(w, r, d) })
+	register("GET /v1/creative/artifact-versions/{version}/content", func(w http.ResponseWriter, r *http.Request) { handleCreativeArtifactContent(w, r, d) })
 }
 
 func creativeArtifactPositiveID(raw string) (int64, error) {

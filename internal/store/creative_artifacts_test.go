@@ -156,3 +156,96 @@ func TestCreativeArtifactConcurrentPublication(t *testing.T) {
 		t.Fatal("current is not last committed publication")
 	}
 }
+
+func TestCreativeArtifactReviewBindsShownVersion(t *testing.T) {
+	s := openTestStore(t)
+	mustSetup(t, s)
+	p, err := s.CreateCreativePipeline(CreativePipelineInput{ProjectID: "billing", Name: "Review", Stages: []CreativeStageDefinition{{Name: "Film", Approval: "stage"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.CreateCreativeRun(CreativeRunInput{ProjectID: "billing", PipelineID: p.ID, Name: "Film", Brief: "Produce film"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stage := run.Stages[0].ID
+	a, v1, err := s.PublishCreativeArtifact(artifactPublication(run.ID, stage, 0, "review-one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, wrong, err := s.PublishCreativeArtifact(artifactPublication(run.ID, 0, 0, "wrong-context"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ApplyCreativeAction(run.ID, stage, 0, CreativeAction{Action: "start"}, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []int64{wrong.ID, 999999} {
+		if _, err = s.ApplyCreativeAction(run.ID, stage, 0, CreativeAction{Action: "submit", ArtifactVersionIDs: []int64{id}}, false); err == nil {
+			t.Fatalf("accepted invalid review version %d", id)
+		}
+	}
+	review, err := s.ApplyCreativeAction(run.ID, stage, 0, CreativeAction{Action: "submit", ArtifactVersionIDs: []int64{v1.ID}}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, v2, err := s.PublishCreativeArtifact(artifactPublication(run.ID, stage, 0, "review-two"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.GetCreativeArtifact(a.ID)
+	if err != nil || current.CurrentVersionID != v2.ID {
+		t.Fatalf("current %+v %v", current, err)
+	}
+	rev := review.Stages[0].ReviewRevision
+	if _, err = s.ApplyCreativeAction(run.ID, stage, 0, CreativeAction{Action: "approve", ReviewRevision: rev + 1}, true); !errors.Is(err, ErrCreativeConflict) {
+		t.Fatalf("stale review: %v", err)
+	}
+	approved, err := s.ApplyCreativeAction(run.ID, stage, 0, CreativeAction{Action: "approve", ReviewRevision: rev}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approved.Stages[0].Status != "completed" || len(approved.Stages[0].ArtifactVersionIDs) != 1 || approved.Stages[0].ArtifactVersionIDs[0] != v1.ID {
+		t.Fatalf("approval changed shown version %+v", approved.Stages[0])
+	}
+	if err := s.ValidateCreativeArtifactVersions(run.ID, stage, 0, approved.Stages[0].ArtifactVersionIDs); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCreativeArtifactStageContextIncludesOnlySameStageItems(t *testing.T) {
+	s := openTestStore(t)
+	mustSetup(t, s)
+	p, err := s.CreateCreativePipeline(CreativePipelineInput{ProjectID: "billing", Name: "Shots", Stages: []CreativeStageDefinition{{Name: "Scenes", Repeated: true, Approval: "stage"}, {Name: "Final", Approval: "stage"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.CreateCreativeRun(CreativeRunInput{ProjectID: "billing", PipelineID: p.ID, Name: "Run", Brief: "Film"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stage := run.Stages[0].ID
+	item, err := s.CreateCreativeItem(run.ID, stage, CreativeItemInput{Name: "Scene"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, scene, err := s.PublishCreativeArtifact(artifactPublication(run.ID, stage, item.ID, "scene"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, other, err := s.PublishCreativeArtifact(artifactPublication(run.ID, run.Stages[1].ID, 0, "other-stage"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ValidateCreativeArtifactVersions(run.ID, stage, 0, []int64{scene.ID}); err != nil {
+		t.Fatalf("whole-stage review excludes its item: %v", err)
+	}
+	for _, tc := range []struct {
+		stage, item int64
+		ids         []int64
+	}{{stage, 0, []int64{other.ID}}, {stage, item.ID, []int64{other.ID}}, {0, 0, []int64{scene.ID}}} {
+		if err := s.ValidateCreativeArtifactVersions(run.ID, tc.stage, tc.item, tc.ids); err == nil {
+			t.Fatalf("context widening accepted %+v", tc)
+		}
+	}
+}

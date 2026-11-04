@@ -122,7 +122,8 @@ func (s *Store) ListCreativeArtifactVersions(artifactID int64) ([]CreativeArtifa
 }
 
 // ValidateCreativeArtifactVersions checks ancestry even for an empty reference list.
-// Contexts match exactly: a run-level source cannot silently become an item result.
+// Stage contexts include their item descendants for whole-stage reviews.
+// Item and run contexts match exactly; no latest/current lookup is performed.
 func (s *Store) ValidateCreativeArtifactVersions(runID, stageID, itemID int64, ids []int64) error {
 	if _, err := s.ResolveCreativeContext(runID, stageID, itemID); err != nil {
 		return err
@@ -132,7 +133,8 @@ func (s *Store) ValidateCreativeArtifactVersions(runID, stageID, itemID int64, i
 		if err != nil {
 			return fmt.Errorf("artifact version %d: %w", id, err)
 		}
-		if v.RunID != runID || v.StageID != stageID || v.ItemID != itemID {
+		itemMatches := v.ItemID == itemID || (stageID > 0 && itemID == 0)
+		if v.RunID != runID || v.StageID != stageID || !itemMatches {
 			return fmt.Errorf("%w: artifact version %d belongs to another context", ErrCreativeInvalid, id)
 		}
 	}
