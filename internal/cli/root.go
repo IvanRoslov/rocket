@@ -68,6 +68,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newPairCmd())
 	root.AddCommand(newDevicesCmd())
 	root.AddCommand(newStatsCmd())
+	root.AddCommand(newCreativePreviewCmd(dialCreativePreview))
 	return root
 }
 
