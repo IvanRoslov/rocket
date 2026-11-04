@@ -125,6 +125,17 @@ func activeCreativeStage(run CreativeRun, stageID int64) error {
 	}
 	return creativeConflict("only the first unfinished stage can progress")
 }
+func activeCreativeItem(stage CreativeStage, item CreativeItem) error {
+	if stage.Approval == "item" {
+		for _, prior := range stage.Items {
+			if prior.Position < item.Position && prior.Status != "completed" {
+				return creativeConflict("previous item requires completion/approval")
+			}
+		}
+	}
+	return nil
+}
+
 func (s *Store) UpdateCreativeProgress(runID, stageID, itemID int64, in CreativeProgress) (CreativeRun, error) {
 	if in.Progress < 0 || in.Progress > 100 {
 		return CreativeRun{}, creativeInvalid("progress must be 0..100")
@@ -157,6 +168,9 @@ func (s *Store) UpdateCreativeProgress(runID, stageID, itemID int64, in Creative
 		if e != nil {
 			return run, e
 		}
+		if err = activeCreativeItem(stage, item); err != nil {
+			return run, err
+		}
 		table, id, status = "creative_items", itemID, item.Status
 	}
 	if status != "in_progress" {
@@ -175,6 +189,8 @@ func (s *Store) UpdateCreativeProgress(runID, stageID, itemID int64, in Creative
 // validateCreativeReviewVersions deliberately fails closed when the assets
 // migration is not installed. This SQL contract is owned with deliverable 5988;
 // immutable version rows make stored review snapshots independent of current.
+// A stage review may include its item versions; item reviews remain exact.
+// This helper is only called with a positive stageID (run-level review is absent).
 func validateCreativeReviewVersions(tx *sql.Tx, runID, stageID, itemID int64, ids []int64) error {
 	seen := map[int64]bool{}
 	for _, id := range ids {
@@ -183,7 +199,7 @@ func validateCreativeReviewVersions(tx *sql.Tx, runID, stageID, itemID int64, id
 		}
 		seen[id] = true
 		var exists int
-		err := tx.QueryRow(`SELECT 1 FROM creative_artifact_versions v JOIN creative_artifacts a ON a.id=v.artifact_id WHERE v.id=? AND a.run_id=? AND COALESCE(a.stage_id,0)=? AND COALESCE(a.item_id,0)=?`, id, runID, stageID, itemID).Scan(&exists)
+		err := tx.QueryRow(`SELECT 1 FROM creative_artifact_versions v JOIN creative_artifacts a ON a.id=v.artifact_id WHERE v.id=? AND a.run_id=? AND COALESCE(a.stage_id,0)=? AND (?=0 OR COALESCE(a.item_id,0)=?)`, id, runID, stageID, itemID, itemID).Scan(&exists)
 		if err != nil {
 			return fmt.Errorf("%w: artifact version %d is unavailable in this context: %v", ErrCreativeInvalid, id, err)
 		}
@@ -229,6 +245,11 @@ func (s *Store) ApplyCreativeAction(runID, stageID, itemID int64, action Creativ
 		if err = activeCreativeStage(run, stageID); err != nil {
 			return run, err
 		}
+		if itemID != 0 {
+			if err = activeCreativeItem(stage, item); err != nil {
+				return run, err
+			}
+		}
 		if itemID != 0 && stage.Status != "in_progress" {
 			return run, creativeConflict("stage must be in progress for item actions")
 		}
@@ -241,13 +262,7 @@ func (s *Store) ApplyCreativeAction(runID, stageID, itemID int64, action Creativ
 		if status != "pending" {
 			return run, creativeConflict("only pending work can start")
 		}
-		if itemID != 0 && stage.Approval == "item" {
-			for _, prior := range stage.Items {
-				if prior.Position < item.Position && prior.Status != "completed" {
-					return run, creativeConflict("previous item requires completion/approval")
-				}
-			}
-		}
+
 		status = "in_progress"
 	case "submit":
 		if status != "in_progress" {

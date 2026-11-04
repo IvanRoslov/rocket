@@ -182,6 +182,14 @@ func getCreativeRun(q creativeReader, id int64) (CreativeRun, error) {
 			r.Status = stage.Status
 		}
 	}
+	if r.Status == "pending" {
+		for _, stage := range r.Stages {
+			if stage.Status != "pending" {
+				r.Status = "in_progress"
+				break
+			}
+		}
+	}
 	return r, nil
 }
 func (s *Store) GetCreativeRun(id int64) (CreativeRun, error) {

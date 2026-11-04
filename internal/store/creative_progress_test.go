@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 )
@@ -179,5 +180,137 @@ func TestCreativeReviewVersionsFailClosed(t *testing.T) {
 	}
 	if got.Stages[0].Status != "in_progress" {
 		t.Fatal("failed submit changed state")
+	}
+}
+
+func TestCreativeReopenedItemBlocksLaterWork(t *testing.T) {
+	s, r := creativeFixture(t, "item", true)
+	stage := r.Stages[0].ID
+	first, err := s.CreateCreativeItem(r.ID, stage, CreativeItemInput{Name: "First"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.CreateCreativeItem(r.ID, stage, CreativeItemInput{Name: "Second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r = creativeAct(t, s, r, stage, 0, "start", 0)
+	r = creativeAct(t, s, r, stage, first.ID, "start", 0)
+	r = creativeAct(t, s, r, stage, first.ID, "submit", 0)
+	r = creativeAct(t, s, r, stage, first.ID, "approve", 1)
+	r = creativeAct(t, s, r, stage, second.ID, "start", 0)
+	r = creativeAct(t, s, r, stage, first.ID, "reopen", 0)
+	if _, err = s.ApplyCreativeAction(r.ID, stage, second.ID, CreativeAction{Action: "submit"}, false); !errors.Is(err, ErrCreativeConflict) {
+		t.Fatalf("later work bypassed reopened item approval: %v", err)
+	}
+	if _, err = s.UpdateCreativeProgress(r.ID, stage, second.ID, CreativeProgress{Progress: 50}); !errors.Is(err, ErrCreativeConflict) {
+		t.Fatalf("later progress bypassed reopened item approval: %v", err)
+	}
+}
+func TestCreativeRunRemainsActiveBetweenStages(t *testing.T) {
+	s, r := creativeFixture(t, "auto", false)
+	stage := r.Stages[0].ID
+	r = creativeAct(t, s, r, stage, 0, "start", 0)
+	r = creativeAct(t, s, r, stage, 0, "submit", 0)
+	if r.Status != "in_progress" {
+		t.Fatalf("partially completed run status=%s", r.Status)
+	}
+}
+
+// This exercises the agreed SQL boundary with the sibling assets migration,
+// without creating files or simulating any media generation.
+func TestCreativeReviewBindsExactImmutableVersion(t *testing.T) {
+	s, r := creativeFixture(t, "stage", false)
+	stage := r.Stages[0].ID
+	creativeVersionFixture(t, s, 1, 10, r.ID, stage, 0)
+	creativeVersionFixture(t, s, 1, 11, r.ID, stage, 0)
+	creativeVersionFixture(t, s, 2, 20, r.ID, 0, 0)
+	var err error
+
+	r = creativeAct(t, s, r, stage, 0, "start", 0)
+	for _, ids := range [][]int64{{20}, {999}, {10, 10}, {0}} {
+		if _, err = s.ApplyCreativeAction(r.ID, stage, 0, CreativeAction{Action: "submit", ArtifactVersionIDs: ids}, false); !errors.Is(err, ErrCreativeInvalid) {
+			t.Fatalf("accepted wrong-context/missing/duplicate version %v: %v", ids, err)
+		}
+	}
+	r, err = s.ApplyCreativeAction(r.ID, stage, 0, CreativeAction{Action: "submit", ArtifactVersionIDs: []int64{10}}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.Exec(`UPDATE creative_artifacts SET current_version_id=11 WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	r = creativeAct(t, s, r, stage, 0, "approve", 1)
+	if len(r.Stages[0].ArtifactVersionIDs) != 1 || r.Stages[0].ArtifactVersionIDs[0] != 10 {
+		t.Fatalf("review followed mutable current version: %+v", r.Stages[0])
+	}
+}
+
+func TestCreativeWholeStageReviewIncludesItsItemVersions(t *testing.T) {
+	s, r := creativeFixture(t, "stage", true)
+	stage := r.Stages[0].ID
+	item, err := s.CreateCreativeItem(r.ID, stage, CreativeItemInput{Name: "Scene"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r = creativeAct(t, s, r, stage, 0, "start", 0)
+	r = creativeAct(t, s, r, stage, item.ID, "start", 0)
+	r = creativeAct(t, s, r, stage, item.ID, "submit", 0)
+	creativeVersionFixture(t, s, 1, 10, r.ID, stage, item.ID)
+	creativeVersionFixture(t, s, 2, 20, r.ID, r.Stages[1].ID, 0)
+
+	if _, err = s.ApplyCreativeAction(r.ID, stage, 0, CreativeAction{Action: "submit", ArtifactVersionIDs: []int64{20}}, false); !errors.Is(err, ErrCreativeInvalid) {
+		t.Fatalf("accepted another stage version: %v", err)
+	}
+	r, err = s.ApplyCreativeAction(r.ID, stage, 0, CreativeAction{Action: "submit", ArtifactVersionIDs: []int64{10}}, false)
+	if err != nil {
+		t.Fatalf("same-stage item version rejected: %v", err)
+	}
+	r = creativeAct(t, s, r, stage, 0, "approve", 1)
+	if r.Stages[0].ArtifactVersionIDs[0] != 10 {
+		t.Fatal("stage review lost item version identity")
+	}
+}
+
+func TestCreativeItemReviewExcludesSiblingVersions(t *testing.T) {
+	s, r := creativeFixture(t, "item", true)
+	stage := r.Stages[0].ID
+	first, err := s.CreateCreativeItem(r.ID, stage, CreativeItemInput{Name: "First"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.CreateCreativeItem(r.ID, stage, CreativeItemInput{Name: "Second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r = creativeAct(t, s, r, stage, 0, "start", 0)
+	r = creativeAct(t, s, r, stage, first.ID, "start", 0)
+	creativeVersionFixture(t, s, 1, 10, r.ID, stage, first.ID)
+	creativeVersionFixture(t, s, 2, 20, r.ID, stage, second.ID)
+
+	if _, err = s.ApplyCreativeAction(r.ID, stage, first.ID, CreativeAction{Action: "submit", ArtifactVersionIDs: []int64{20}}, false); !errors.Is(err, ErrCreativeInvalid) {
+		t.Fatalf("accepted sibling version: %v", err)
+	}
+	if _, err = s.ApplyCreativeAction(r.ID, stage, first.ID, CreativeAction{Action: "submit", ArtifactVersionIDs: []int64{10}}, false); err != nil {
+		t.Fatalf("own version rejected: %v", err)
+	}
+}
+
+// Before assets lands, install only its agreed metadata contract in this test
+// database. Once migration 0029 exists, exercise its real tables unchanged.
+func creativeVersionFixture(t *testing.T, s *Store, artifactID, versionID, runID, stageID, itemID int64) {
+	t.Helper()
+	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS creative_artifacts(id INTEGER PRIMARY KEY,run_id INTEGER,stage_id INTEGER,item_id INTEGER,name TEXT,kind TEXT,current_version_id INTEGER,created_at INTEGER);
+ CREATE TABLE IF NOT EXISTS creative_artifact_versions(id INTEGER PRIMARY KEY,artifact_id INTEGER,version_number INTEGER,filename TEXT,mime TEXT,size INTEGER,sha256 TEXT,storage_key TEXT,author_session_id TEXT,created_at INTEGER);`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.db.Exec(`INSERT INTO creative_artifacts(id,run_id,stage_id,item_id,name,kind,created_at) VALUES(?,?,?,?,?,'result',1) ON CONFLICT(id) DO NOTHING`, artifactID, runID, nullIfZero(stageID), nullIfZero(itemID), fmt.Sprintf("artifact-%d", artifactID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.db.Exec(`INSERT INTO creative_artifact_versions(id,artifact_id,version_number,filename,mime,size,sha256,storage_key,author_session_id,created_at) VALUES(?,?,?,'result.txt','text/plain',1,? ,?,'',1)`, versionID, artifactID, versionID, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", fmt.Sprintf("version-%d", versionID))
+	if err != nil {
+		t.Fatal(err)
 	}
 }
