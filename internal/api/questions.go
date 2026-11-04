@@ -563,6 +563,10 @@ func handlePostQuestionReply(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
+	if q.TaskID == 0 && q.RoleID == "" && handleCreativeQuestionEntry(w, r, d, q, false) {
+		return
+	}
+
 	task, ok := getTaskOr404(w, d, q.TaskID)
 	if !ok {
 		return
@@ -709,6 +713,10 @@ func handlePostQuestionAnswer(w http.ResponseWriter, r *http.Request, d Deps) {
 	}
 	q, ok := getQuestionOr404(w, d, id)
 	if !ok {
+		return
+	}
+
+	if q.TaskID == 0 && q.RoleID == "" && handleCreativeQuestionEntry(w, r, d, q, true) {
 		return
 	}
 

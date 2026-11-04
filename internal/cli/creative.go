@@ -18,6 +18,7 @@ type creativeConnection func() (*client.Client, error)
 func newCreativeCmd() *cobra.Command {
 	root := creativeCommands(func() (*client.Client, error) { c, _, err := connect(true); return c, err })
 	root.AddCommand(newCreativeArtifactCmd())
+	root.AddCommand(newCreativeAgentCmd())
 	return root
 }
 func creativeCommands(open creativeConnection) *cobra.Command {

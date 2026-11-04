@@ -654,3 +654,28 @@ func (f *reactFakeRuntime) CaptureEscaped(ctx context.Context, h runtime.Handle,
 
 func (*reactFakeRuntime) ScrollHistory(context.Context, runtime.Handle, int) error { return nil }
 func (*reactFakeRuntime) ExitHistory(context.Context, runtime.Handle) error        { return nil }
+
+func TestCreativeWorkerIsNotCompletedByMergeGrace(t *testing.T) {
+	e := setupReactEnv(t, time.Hour, true)
+	p, err := e.st.CreateCreativePipeline(store.CreativePipelineInput{ProjectID: "billing", Name: "Film", Stages: []store.CreativeStageDefinition{{Name: "Scene", Approval: "auto"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := e.st.CreateCreativeRun(store.CreativeRunInput{ProjectID: "billing", PipelineID: p.ID, Name: "Film", Brief: "Create film"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := e.addWorker(t, "creative-worker")
+	if err := e.st.BindCreativeSession(worker.ID, store.CreativeBinding{RunID: run.ID, StageID: run.Stages[0].ID}); err != nil {
+		t.Fatal(err)
+	}
+	r := newTestReactions(e, nil, idleActivity)
+	r.onGraceExpired(worker.ID, 0)
+	current, err := e.st.GetSession(worker.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.State != "running" || e.ws.destroyedCount() != 0 {
+		t.Fatalf("creative session completed/cleaned: %+v", current)
+	}
+}

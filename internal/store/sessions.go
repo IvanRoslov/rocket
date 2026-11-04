@@ -267,6 +267,7 @@ func (s *Store) ListSessionsForPRPoll() ([]Session, error) {
 		        task_id, subtask_id, delivery_transport, delivery_instance, delivery_endpoint
 		 FROM sessions
 		 WHERE kind = 'worker'
+		   AND NOT EXISTS (SELECT 1 FROM creative_session_contexts c WHERE c.session_id=sessions.id)
 		   AND (state IN ('spawning', 'running')
 		        OR (COALESCE(pr_number, 0) != 0
 		            AND COALESCE(pr_state, '') NOT IN ` + terminalPRStates + `))
