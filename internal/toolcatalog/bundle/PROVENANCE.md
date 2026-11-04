@@ -10,7 +10,9 @@ or COPYING file; this internal Rocket distribution does not grant a new license
 or imply that the clients are open source. Included under the project owner's
 explicit instruction to bring these clients into Rocket.
 
-Sources are unchanged. README model/price notes are historical upstream notes,
+Provider sources are unchanged. Test-only adaptations isolate the credential
+client PATH and include the upstream docs/brand/imagery.md fixture from the same
+commit, with its relative path adjusted. README model/price notes are historical upstream notes,
 not a current pricing promise or Rocket's registry. Consult provider information
 before proposing paid calls. Authentication remains human configured; no secrets
 or environment files are distributed. Native TypeScript requires Node >=26;

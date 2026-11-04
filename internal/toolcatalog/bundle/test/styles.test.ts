@@ -32,7 +32,7 @@ test('every sky mood from the brand page is present', () => {
 
 test('the House spot frame matches canonical guidance without changing universal spot', async () => {
   const { readFile } = await import('node:fs/promises')
-  const doc = await readFile(new URL('../../docs/brand/imagery.md', import.meta.url), 'utf8')
+  const doc = await readFile(new URL('./fixtures/imagery.md', import.meta.url), 'utf8')
   const section = doc.split('## 2b. House spot — transparent marketing illustration')[1]!.split('\n## ')[0]!
   const frame = section.split('\n').find(line => line.startsWith('> Subject:'))!
   const subject = 'a cobalt box of folders for a dark navy surface'

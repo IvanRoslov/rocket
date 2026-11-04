@@ -86,6 +86,8 @@ test('rejects a non-positive --timeout', () => {
 
 test('a prediction with no downloadable output fails loudly, naming the prediction id', async () => {
   const originalFetch = globalThis.fetch
+  const originalPath = process.env.PATH
+  process.env.PATH = '/nonexistent-rocket-test-bin' // Never invoke installed credential clients.
   const originalToken = process.env.REPLICATE_API_TOKEN
   const originalErrorLog = console.error
   process.env.REPLICATE_API_TOKEN = 'test-token'
@@ -104,6 +106,8 @@ test('a prediction with no downloadable output fails loudly, naming the predicti
     assert.ok(errors.some((line) => line.includes('pred-zero-output')))
     assert.ok(errors.some((line) => line.includes('no downloadable output')))
   } finally {
+    if (originalPath === undefined) delete process.env.PATH
+    else process.env.PATH = originalPath
     globalThis.fetch = originalFetch
     console.error = originalErrorLog
     if (originalToken === undefined) delete process.env.REPLICATE_API_TOKEN
