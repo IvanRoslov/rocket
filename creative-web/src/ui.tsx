@@ -1,3 +1,4 @@
+import { EmptyState } from "../../web/src/components/EmptyState";
 import type { ReactNode } from "react";
 export function ErrorNotice({ error }: { error: unknown }) {
   return error ? (
@@ -7,5 +8,5 @@ export function ErrorNotice({ error }: { error: unknown }) {
   ) : null;
 }
 export function Empty({ children }: { children: ReactNode }) {
-  return <p className="empty">{children}</p>;
+  return <EmptyState icon="—" title={children} />;
 }

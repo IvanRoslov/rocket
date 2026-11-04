@@ -1,3 +1,5 @@
+import { Badge } from "../../web/src/components/Badge";
+import { Button } from "../../web/src/components/Button";
 import { useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { api, base, contextPath, useCommand } from "./api";
@@ -112,9 +114,9 @@ export function Discussion({
           <span className="eyebrow">Creative orchestrator</span>
           <h2>Discussion</h2>
         </div>
-        <span className="chip">
+        <Badge tone={active ? "ok" : "neutral"}>
           {active ? "Connected" : orchestrator ? "Offline" : "Not started"}
-        </span>
+        </Badge>
       </div>
       <p className="context-label">{context.label}</p>
       {!orchestrator ? (
@@ -135,7 +137,9 @@ export function Discussion({
                 ))}
             </select>
           </label>
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             disabled={command.isPending}
             onClick={() =>
               command.mutate(() =>
@@ -147,10 +151,12 @@ export function Discussion({
             }
           >
             Start creative orchestrator
-          </button>
+          </Button>
         </div>
       ) : !active && !sessions.isPending ? (
-        <button
+        <Button
+          variant="secondary"
+          size="sm"
           disabled={command.isPending}
           onClick={() =>
             command.mutate(() =>
@@ -161,7 +167,7 @@ export function Discussion({
           }
         >
           Restore creative orchestrator
-        </button>
+        </Button>
       ) : null}
       <ErrorNotice
         error={
@@ -251,8 +257,10 @@ export function Discussion({
           />
         </label>
         <div className="row">
-          <button
-            className="primary"
+          <Button
+            variant="primary"
+            size="sm"
+            type="submit"
             disabled={
               !body.trim() ||
               command.isPending ||
@@ -260,11 +268,16 @@ export function Discussion({
             }
           >
             {mode === "question" ? "Open question" : "Send message"}
-          </button>
+          </Button>
           {body && (
-            <button type="button" onClick={reset}>
+            <Button
+              variant="secondary"
+              size="sm"
+              type="button"
+              onClick={reset}
+            >
               Discard draft
-            </button>
+            </Button>
           )}
         </div>
         <ErrorNotice error={command.error} />
@@ -285,9 +298,9 @@ function Question({ question: q }: { question: CreativeQuestion }) {
     <article className={`question ${q.your_turn ? "your-turn" : ""}`}>
       <div className="heading">
         <strong>{q.title || "Question"}</strong>
-        <span className="chip">
+        <Badge tone={open ? (q.your_turn ? "warn" : "neutral") : "ok"}>
           {open ? (q.your_turn ? "Your reply needed" : "Open") : "Resolved"}
-        </span>
+        </Badge>
       </div>
       <p className="prose">{q.body}</p>
       <BoundVersions ids={q.artifact_version_ids ?? []} />
@@ -304,13 +317,15 @@ function Question({ question: q }: { question: CreativeQuestion }) {
         <>
           <div className="row">
             {q.options?.map((option, i) => (
-              <button
+              <Button
+                variant="secondary"
+                size="sm"
                 key={i}
                 disabled={command.isPending}
                 onClick={() => send("answer", { choose: i + 1 })}
               >
                 {option}
-              </button>
+              </Button>
             ))}
           </div>
           <label>
@@ -321,18 +336,22 @@ function Question({ question: q }: { question: CreativeQuestion }) {
             />
           </label>
           <div className="row">
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               disabled={!reply.trim() || command.isPending}
               onClick={() => send("reply", { body: reply })}
             >
               Reply
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               disabled={!reply.trim() || command.isPending}
               onClick={() => send("answer", { body: reply })}
             >
               Answer & close
-            </button>
+            </Button>
           </div>
         </>
       )}

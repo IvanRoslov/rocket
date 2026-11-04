@@ -8,14 +8,15 @@ export interface TabItem {
 }
 
 export interface TabsProps {
+  label?: string
   items: TabItem[]
   activeId: string
   onChange: (id: string) => void
 }
 
-export function Tabs({ items, activeId, onChange }: TabsProps) {
+export function Tabs({ label, items, activeId, onChange }: TabsProps) {
   return (
-    <div className="tabs" role="tablist">
+    <div className="tabs" role="tablist" aria-label={label}>
       {items.map((item) => {
         const active = item.id === activeId
         return (

@@ -1,3 +1,4 @@
+import { Badge } from "../../web/src/components/Badge";
 import { useQuery } from "@tanstack/react-query";
 import { api, base } from "./api";
 import type { PreviewAccess, Scope } from "./types";
@@ -38,7 +39,7 @@ export function Preview({ scope }: { scope: Scope }) {
           {access.status === "ready" && access.url ? (
             <>
               <div className="row">
-                <span className="chip">Live preview</span>
+                <Badge tone="ok">Live preview</Badge>
                 <a href={access.url} target="_blank" rel="noopener noreferrer">
                   Open preview in new tab
                 </a>

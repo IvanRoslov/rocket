@@ -1,8 +1,16 @@
+import { Dot, type DotState } from "../../web/src/components/Dot";
+import { Button } from "../../web/src/components/Button";
 import { useState } from "react";
 import { api, base, useCommand } from "./api";
-import type { Item, Run, Scope, Stage } from "./types";
+import type { Item, Run, Scope, Stage, Status } from "./types";
 import { statusLabel } from "./workflow";
 import { ErrorNotice } from "./ui";
+const dotState: Record<Status, DotState> = {
+  pending: "idle",
+  in_progress: "spawning",
+  awaiting_approval: "waiting_input",
+  completed: "ready",
+};
 export function ProcessRail({
   run,
   scope,
@@ -15,14 +23,16 @@ export function ProcessRail({
   return (
     <aside className="process">
       <span className="eyebrow">Saved process · {run.pipeline_name}</span>
-      <button
+      <Button
+        variant="secondary"
+        size="sm"
         className="run-heading"
         aria-pressed={!scope.stage_id}
         onClick={() => onSelect()}
       >
         <strong>{run.name}</strong>
         <span>{statusLabel[run.status]}</span>
-      </button>
+      </Button>
       <details>
         <summary>Creative brief</summary>
         <p className="prose">{run.brief}</p>
@@ -30,32 +40,36 @@ export function ProcessRail({
       <ol className="stages">
         {run.stages.map((stage, i) => (
           <li key={stage.id}>
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               aria-pressed={scope.stage_id === stage.id && !scope.item_id}
               onClick={() => onSelect(stage.id)}
             >
-              <span className={`status-dot ${stage.status}`} />
+              <Dot state={dotState[stage.status]} />
               <span>
                 <strong>
                   {i + 1}. {stage.name}
                 </strong>
                 <small>{statusLabel[stage.status]}</small>
               </span>
-            </button>
+            </Button>
             {scope.stage_id === stage.id &&
               stage.items.map((item) => (
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   className="item-link"
                   key={item.id}
                   aria-pressed={scope.item_id === item.id}
                   onClick={() => onSelect(stage.id, item.id)}
                 >
-                  <span className={`status-dot ${item.status}`} />
+                  <Dot state={dotState[item.status]} />
                   <span>
                     {item.name}
                     <small>{statusLabel[item.status]}</small>
                   </span>
-                </button>
+                </Button>
               ))}
           </li>
         ))}
@@ -124,7 +138,9 @@ export function ItemEditor({ scope, stage }: { scope: Scope; stage: Stage }) {
           .map((i) => (
             <li key={i.id}>
               {i.name}
-              <button
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() => {
                   setEditing(i);
                   setName(i.name);
@@ -133,13 +149,15 @@ export function ItemEditor({ scope, stage }: { scope: Scope; stage: Stage }) {
                 }}
               >
                 Edit {i.name}
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
                 disabled={save.isPending}
                 onClick={() => save.mutate(() => api.del(`${path}/${i.id}`))}
               >
                 Remove {i.name}
-              </button>
+              </Button>
             </li>
           ))}
       </ul>
@@ -180,13 +198,23 @@ export function ItemEditor({ scope, stage }: { scope: Scope; stage: Stage }) {
           />
         </label>
         <div className="row">
-          <button type="submit" disabled={save.isPending}>
+          <Button
+            variant="secondary"
+            size="sm"
+            type="submit"
+            disabled={save.isPending}
+          >
             {editing ? "Save item" : "Add item"}
-          </button>
+          </Button>
           {editing && (
-            <button type="button" onClick={reset}>
+            <Button
+              variant="secondary"
+              size="sm"
+              type="button"
+              onClick={reset}
+            >
               Cancel edit
-            </button>
+            </Button>
           )}
         </div>
         <ErrorNotice error={save.error} />
