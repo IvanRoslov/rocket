@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	creativeweb "github.com/IvanRoslov/rocket/creative-web"
 	"github.com/IvanRoslov/rocket/web"
 )
 
@@ -15,12 +16,21 @@ import (
 // It does not touch /v1 routes; those are registered separately in
 // NewHandler and take precedence because they're more specific patterns.
 func registerStaticRoutes(mux *http.ServeMux) {
+	creativeDist, err := fs.Sub(creativeweb.Dist, "dist")
+	if err != nil {
+		panic(err)
+	}
+	mux.Handle("/creative/", http.StripPrefix("/creative", spaHandler(creativeDist)))
 	dist, err := fs.Sub(web.Dist, "dist")
 	if err != nil {
 		panic(err)
 	}
+	mux.Handle("/", spaHandler(dist))
+}
+
+func spaHandler(dist fs.FS) http.Handler {
 	fileServer := http.FileServer(http.FS(dist))
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			if strings.HasPrefix(r.URL.Path, "/v1") {
 				writeErr(w, http.StatusNotFound, "not_found", "unknown route")

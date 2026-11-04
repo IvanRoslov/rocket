@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ApiError } from '../../lib/api'
+import { returnAfterLogin } from '../../lib/loginReturn'
 import { pairWeb, safeNext } from '../../lib/auth'
 import './login.css'
 
@@ -18,7 +19,7 @@ export function LoginScreen() {
     setError(null)
     try {
       await pairWeb(value.trim())
-      navigate(next, { replace: true })
+      returnAfterLogin(next, path => navigate(path, { replace: true }))
     } catch (e) {
       if (e instanceof ApiError && e.code === 'rate_limited') setError('Слишком много попыток. Подожди минуту.')
       else if (e instanceof ApiError && e.code === 'invalid_code') setError('Код неверный, истёк или уже использован. Получи новый: rocket pair --web')
