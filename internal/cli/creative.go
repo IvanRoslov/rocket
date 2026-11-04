@@ -16,7 +16,9 @@ import (
 type creativeConnection func() (*client.Client, error)
 
 func newCreativeCmd() *cobra.Command {
-	return creativeCommands(func() (*client.Client, error) { c, _, err := connect(true); return c, err })
+	root := creativeCommands(func() (*client.Client, error) { c, _, err := connect(true); return c, err })
+	root.AddCommand(newCreativeArtifactCmd())
+	return root
 }
 func creativeCommands(open creativeConnection) *cobra.Command {
 	root := &cobra.Command{Use: "creative", Short: "Creative pipelines, runs and approvals (JSON output)"}
