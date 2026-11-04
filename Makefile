@@ -12,12 +12,15 @@ JAVA_HOME_ANDROID ?= /opt/homebrew/opt/openjdk@17
 ANDROID_HOME ?= $(HOME)/Library/Android/sdk
 APK := mobile/android/app/build/outputs/apk/release/app-release.apk
 
-.PHONY: build web-build go-build install start stop restart status test clean apk
+.PHONY: build web-build creative-web-build go-build install start stop restart status test clean apk
 
-build: web-build go-build
+build: web-build creative-web-build go-build
 
 web-build:
 	cd web && npm install --no-audit --no-fund && npm run build
+
+creative-web-build:
+	cd creative-web && npm ci --no-audit --no-fund && npm run build
 
 # embed читает web/dist с диска в момент go build, поэтому порядок строгий:
 # сначала настоящий билд SPA, потом go build, потом возвращаем tracked-плейсхолдер
@@ -33,7 +36,7 @@ web-build:
 go-build:
 	go build -o $(BIN) ./cmd/rocket
 	@if [ "$$(uname -s)" = Darwin ] && command -v codesign >/dev/null 2>&1; then codesign --force --sign - $(BIN); fi
-	git checkout --quiet web/dist/index.html 2>/dev/null || true
+	git checkout --quiet web/dist/index.html creative-web/dist/index.html 2>/dev/null || true
 
 # Глобальная команда `rocket`: симлинк на bin/rocket — каждый make build обновляет её автоматически.
 # ВАЖНО: именно симлинк, а не копия. Замена установленного бинаря через `cp` пишет
@@ -69,6 +72,7 @@ status:
 test:
 	go test ./...
 	cd web && npm test -- --run
+	cd creative-web && npm test
 
 clean:
 	rm -rf bin

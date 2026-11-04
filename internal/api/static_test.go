@@ -185,3 +185,33 @@ func TestRealV1RoutesStillWork(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 }
+
+// A creative deep link must load its own application, while development stays intact.
+func TestCreativeStaticEntry(t *testing.T) {
+	mux := http.NewServeMux()
+	registerStaticRoutes(mux)
+	for _, path := range []string{"/creative/", "/creative/runs/17"} {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != 200 || !strings.Contains(w.Body.String(), "Rocket Creative") {
+			t.Errorf("%s: status %d, body %s", path, w.Code, w.Body.String())
+		}
+	}
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+	if w.Code != 200 || strings.Contains(w.Body.String(), "Rocket Creative") {
+		t.Errorf("development app replaced: %d %s", w.Code, w.Body.String())
+	}
+	for _, path := range []string{"/creative/assets/missing.js", "/creative/missing.css"} {
+		w = httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != 404 {
+			t.Errorf("%s: status %d", path, w.Code)
+		}
+	}
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/creative/runs/17", nil))
+	if w.Code != 405 {
+		t.Errorf("POST status %d", w.Code)
+	}
+}
