@@ -6,16 +6,16 @@ NAME` to read the same commands and instructions. Commands are argv arrays;
 invoke them directly, preserving argument boundaries. No execution proxy, model
 catalog, price database or spending gate is introduced.
 
-Install the bundled generation clients explicitly with `rocket tools install`.
-Use `--home PATH` to stage an installation elsewhere. If any bundled registration
-already exists, installation refuses it unless `--update` is supplied. Update
-selects this binary's versioned distribution and preserves older directories and
-unrelated registrations. It never copies or modifies authorization, installs
-MCP, runs generation or installs packages. Node >=26 is required. Provider
-clients are the pinned upstream code; see installed PROVENANCE.md and README.md.
+A fresh Rocket installation has an empty catalog. Rocket ships no provider
+clients and does not install tools. Install or maintain any CLI you choose
+outside Rocket, then register its command and usage in this user-owned catalog.
+Local tools can live under `<ROCKET_HOME>/tools/` or at another stable path;
+they do not depend on a particular source repository or Rocket binary.
+Existing local files and registrations remain yours to maintain.
 
-Register another CLI with `rocket tools register renderer.yaml`; replacement
-requires `--update`. For example:
+Register a CLI with `rocket tools register renderer.yaml`; replacement requires
+`--update`. Use `--home PATH` to select a different Rocket home for catalog
+commands. For example:
 
 ```yaml
 name: renderer
@@ -28,10 +28,9 @@ environment: []
 ```
 
 Human operators configure environment/local authorization themselves. Catalog
-`environment` lists names only, never values. Some upstream clients optionally
-read a `.env` beside their installed package or a configured 1Password reference;
-prefer explicit process environment for shared installation. No secrets are
-included. Read the client's help before using uploads: a provider may use another
+`environment` lists names only, never values. Follow each tool's own
+authorization instructions; never put credentials in registry metadata.
+Read the client's help before using uploads: a provider may use another
 storage service for local references. Include all transmitted inputs and storage
 services in the proposal to the human. Missing tools or authorization is a
 reported failure, never successful generation.
@@ -40,5 +39,5 @@ Before any paid CLI or MCP generation, the agent must show what will be
 produced, inputs to be sent, provider/model, exact call or list of calls, and cost
 basis. Wait for explicit human Go for that set. Additional variants, paid
 retries or an increase to approved cost require a new Go. Stage approval is
-separate. State unknown cost as unknown; historical upstream pricing notes are
+separate. State unknown cost as unknown; historical tool pricing notes are
 not a current quote. This is an agent rule, not a technical enforcement boundary.
