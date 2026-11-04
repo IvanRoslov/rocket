@@ -12,7 +12,11 @@ import (
 
 func newToolsCmd() *cobra.Command {
 	var home string
-	root := &cobra.Command{Use: "tools", Short: "Shared CLI catalog and explicit installation (no execution or auth management)"}
+	root := &cobra.Command{
+		Use: "tools", Short: "User-owned CLI catalog (no execution or auth management)",
+		Args: cobra.NoArgs,
+		RunE: func(c *cobra.Command, _ []string) error { return c.Help() },
+	}
 	root.PersistentFlags().StringVar(&home, "home", "", "Rocket home (default ROCKET_HOME or ~/.rocket)")
 	resolve := func() (string, error) {
 		if home != "" {
@@ -73,18 +77,5 @@ func newToolsCmd() *cobra.Command {
 	}}
 	reg.Flags().BoolVar(&replace, "update", false, "Explicitly replace this named registration")
 	root.AddCommand(reg)
-	var update bool
-	install := &cobra.Command{Use: "install", Short: "Install bundled generation CLIs without executing them", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
-		h, err := resolve()
-		if err != nil {
-			return err
-		}
-		if err := toolcatalog.Install(h, update); err != nil {
-			return err
-		}
-		return emit(c, map[string]string{"revision": toolcatalog.BundleRevision, "home": h})
-	}}
-	install.Flags().BoolVar(&update, "update", false, "Explicitly replace bundled tool registrations; preserve old distributions and local configuration")
-	root.AddCommand(install)
 	return root
 }
