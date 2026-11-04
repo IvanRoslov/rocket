@@ -47,6 +47,8 @@
 ### Task 4: Integration and final verification
 **Files:** Update design/plan status and any integration tests required by core review contract.
 - [x] Verify core review snapshot validation against real published versions, wrong/missing versions and current pointer changes.
-- [ ] Run go test ./..., go vet ./..., go build ./cmd/rocket and web npm test -- --run; inspect failures and record any baseline issues.
-- [ ] Obtain independent whole-branch review and address acceptance-breaking findings with regression tests.
-- [ ] Open focused PR referencing creative-work/5986 and 5988; send URL to orchestrator and react to CI/review.
+- [x] Run go test ./..., go vet ./..., go build ./cmd/rocket and web npm test -- --run; inspect failures and record any baseline issues.
+- [x] Obtain independent whole-branch review and address acceptance-breaking findings with regression tests.
+- [x] Open focused PR referencing creative-work/5986 and 5988: https://github.com/IvanRoslov/rocket/pull/183. Continue reacting to CI/review until merge.
+
+Verification: full Go suite (`go test -p 2 ./...`), vet and standalone build pass on current main after dependency-only rebase. Web tests pass (61 files / 718 tests). Independent review has no remaining acceptance-breaking findings. Initial unconstrained Go run hit existing Claude hook 3-second process deadline; isolated uncached rerun and full lower-concurrency suite pass. No live daemon restart, generation calls or demo projects.
