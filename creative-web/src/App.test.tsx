@@ -13,12 +13,10 @@ const server = setupServer(
       { id: "other", name: "Other" },
     ]),
   ),
-  http.get("/v1/creative/pipelines", ({ request }) =>
-    HttpResponse.json(
-      new URL(request.url).searchParams.get("project_id") === "film"
-        ? [{ id: 3, project_id: "film", name: "Film process", stages: [] }]
-        : [],
-    ),
+  http.get("/v1/creative/pipelines", () =>
+    HttpResponse.json([{ id: 3, name: "Film process", stages: [
+      { name: "Draft", description: "", expected_artifacts: "", repeated: false, approval: "stage" },
+    ] }]),
   ),
   http.get("/v1/creative/runs", () => HttpResponse.json([])),
   http.post("/v1/creative/runs", async ({ request }) => {
@@ -100,4 +98,68 @@ it("creates work with the chosen pipeline and brief, then clears run scope on pr
     screen.queryByRole("heading", { name: "Opening" }),
   ).not.toBeInTheDocument();
   expect(window.location.search).toBe("?project=other");
+});
+
+it("opens and edits the shared catalog without any projects", async () => {
+  server.use(http.get("/v1/projects", () => HttpResponse.json([])));
+  let saved: unknown;
+  server.use(http.put("/v1/creative/pipelines/3", async ({ request }) => {
+    saved = await request.json();
+    return HttpResponse.json({ id: 3, ...(saved as object) });
+  }));
+  open();
+  const user = userEvent.setup();
+  await screen.findByText("Create a Rocket project to begin.");
+  await user.click(screen.getByRole("button", { name: "Pipelines" }));
+  await user.click(await screen.findByRole("button", { name: "Film process" }));
+  await user.clear(screen.getByLabelText("Pipeline name"));
+  await user.type(screen.getByLabelText("Pipeline name"), "Shared process");
+  await user.click(screen.getByRole("button", { name: "Save pipeline" }));
+  await waitFor(() => expect(saved).toEqual({
+    name: "Shared process",
+    stages: [{ name: "Draft", description: "", expected_artifacts: "", repeated: false, approval: "stage" }],
+  }));
+});
+
+it("creates a template without any projects", async () => {
+  server.use(http.get("/v1/projects", () => HttpResponse.json([])));
+  let saved: unknown;
+  server.use(http.post("/v1/creative/pipelines", async ({ request }) => {
+    saved = await request.json();
+    return HttpResponse.json({ id: 4, ...(saved as object) });
+  }));
+  open();
+  const user = userEvent.setup();
+  await screen.findByText("Create a Rocket project to begin.");
+  await user.click(screen.getByRole("button", { name: "Pipelines" }));
+  await user.type(screen.getByLabelText("Pipeline name"), "New shared process");
+  await user.type(screen.getByLabelText("Stage 1 name"), "Draft");
+  await user.click(screen.getByRole("button", { name: "Save pipeline" }));
+  await waitFor(() => expect(saved).toEqual({
+    name: "New shared process",
+    stages: [{ name: "Draft", description: "", expected_artifacts: "", repeated: false, approval: "stage" }],
+  }));
+});
+
+it("keeps the catalog and unsaved editor draft when switching projects", async () => {
+  const hints: (string | null)[] = [];
+  server.use(http.get("/v1/creative/pipelines", ({ request }) => {
+    hints.push(new URL(request.url).searchParams.get("project_id"));
+    return HttpResponse.json([{ id: 3, name: "Film process", stages: [] }]);
+  }));
+  open();
+  const user = userEvent.setup();
+  await screen.findByRole("option", { name: "Film" });
+  await user.click(screen.getByRole("button", { name: "Pipelines" }));
+  await user.click(await screen.findByRole("button", { name: "Film process" }));
+  await user.type(screen.getByLabelText("Pipeline name"), " draft");
+  await user.selectOptions(screen.getByLabelText("Project"), "other");
+  expect(screen.getByLabelText("Pipeline name")).toHaveValue("Film process draft");
+  expect(screen.getByRole("button", { name: "Film process" })).toBeInTheDocument();
+  expect(hints.length).toBeGreaterThan(0);
+  expect(hints.every((hint) => hint === null)).toBe(true);
+  await user.click(screen.getByRole("button", { name: "Back to workspace" }));
+  await user.click(screen.getByRole("button", { name: "New work" }));
+  await user.selectOptions(screen.getByLabelText("Pipeline"), "3");
+  expect(screen.getByLabelText("Pipeline")).toHaveValue("3");
 });

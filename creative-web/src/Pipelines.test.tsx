@@ -21,7 +21,7 @@ it("saves ordered repeated stages and approval settings as a template", async ()
   });
   render(
     <QueryClientProvider client={client}>
-      <Pipelines project="film" pipelines={[]} onClose={() => {}} />
+      <Pipelines pipelines={[]} onClose={() => {}} />
     </QueryClientProvider>,
   );
   const user = userEvent.setup();
@@ -41,7 +41,6 @@ it("saves ordered repeated stages and approval settings as a template", async ()
   await waitFor(() =>
     expect(saved).toEqual([
       {
-        project_id: "film",
         name: "Film process",
         stages: [
           {

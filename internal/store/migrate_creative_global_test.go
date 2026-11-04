@@ -56,7 +56,10 @@ func TestMigrateCreativeGlobalCatalog(t *testing.T) {
 	exec(`INSERT INTO questions(id,body,title,asked_at) VALUES(57,'Review clip','Review clip',60)`)
 	exec(`INSERT INTO creative_discussion_contexts VALUES(NULL,57,17,27,37,'[47]')`)
 	exec(`INSERT INTO question_messages(question_id,author,kind,body,created_at) VALUES(57,'human','reply','Keep the opening',61)`)
-	tables := []string{"creative_runs", "creative_stages", "creative_items", "creative_artifacts", "creative_artifact_versions", "creative_session_contexts", "creative_discussion_contexts", "sessions", "questions", "question_messages"}
+	if _, err := old.AddCreativeMessage(Message{ToSession: "creative-upgrade", Body: "Review this exact version"}, CreativeBinding{RunID: 17, StageID: 27, ItemID: 37, ArtifactVersionIDs: []int64{47}}); err != nil {
+		t.Fatal(err)
+	}
+	tables := []string{"messages", "creative_runs", "creative_stages", "creative_items", "creative_artifacts", "creative_artifact_versions", "creative_session_contexts", "creative_discussion_contexts", "sessions", "questions", "question_messages"}
 	dump := func(db *sql.DB, table string) string {
 		t.Helper()
 		rows, err := db.Query(`SELECT * FROM ` + table + ` ORDER BY rowid`)
