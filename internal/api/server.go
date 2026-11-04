@@ -95,6 +95,7 @@ func NewHandler(d Deps) http.Handler {
 	registerChatRoutes(mux, d)
 	registerTermRoutes(mux, d)
 	registerTaskRoutes(mux, d)
+	registerCreativeRoutes(mux, d)
 	registerGateRoutes(mux, d)
 	registerBrainstormRoutes(mux, d)
 	registerStatsRoutes(mux, d)
