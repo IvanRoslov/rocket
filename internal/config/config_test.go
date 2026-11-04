@@ -497,3 +497,36 @@ func TestPublicURL(t *testing.T) {
 		t.Fatal("scheme-less public_url must be rejected")
 	}
 }
+
+func TestPreviewConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		name, yaml string
+		ok         bool
+	}{
+		{"disabled", "", true},
+		{"configured", "public_url: https://rocket.example.com\npreview_port: 4480\npreview_public_url: https://landing.example.net\npreview_ports: [5100,5101]\n", true},
+		{"same-host", "public_url: https://rocket.example.com\npreview_port: 4480\npreview_public_url: https://rocket.example.com:4480\n", false},
+		{"loopback-alias", "preview_port: 4480\npreview_public_url: http://localhost:4480\n", false},
+		{"missing-port", "preview_public_url: https://preview.example.net\n", false},
+		{"missing-url", "preview_port: 4480\n", false},
+		{"same-port", "preview_port: 4477\npreview_public_url: https://preview.example.net\n", false},
+		{"base-url-path", "preview_port: 4480\npreview_public_url: https://preview.example.net/foo\n", false},
+		{"http-mixed-content", "public_url: https://rocket.example.com\npreview_port: 4480\npreview_public_url: http://preview.example.net\n", false},
+		{"credentials", "preview_port: 4480\npreview_public_url: https://user:pass@preview.example.net\n", false},
+		{"bad-dev-port", "preview_port: 4480\npreview_public_url: https://preview.example.net\npreview_ports: [22]\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tc.yaml), 0600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(home)
+			if (err == nil) != tc.ok {
+				t.Fatalf("cfg=%+v err=%v", cfg, err)
+			}
+			if tc.ok && cfg.PreviewHost != "127.0.0.1" {
+				t.Fatalf("unsafe default host %q", cfg.PreviewHost)
+			}
+		})
+	}
+}
