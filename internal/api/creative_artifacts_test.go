@@ -334,3 +334,22 @@ func (r *creativeArtifactReadHook) Read(p []byte) (int, error) {
 	}
 	return r.Reader.Read(p)
 }
+
+func TestCreativeArtifactBlobCommitNeverReplacesPublishedBytes(t *testing.T) {
+	dir := t.TempDir()
+	final := filepath.Join(dir, "blob-collision")
+	if err := os.WriteFile(final, []byte("retained-version"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	staged := filepath.Join(dir, ".upload-collision")
+	if err := os.WriteFile(staged, []byte("new-version"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := commitCreativeArtifactBlob(staged, final); err == nil {
+		t.Fatal("storage-key collision replaced existing published content")
+	}
+	bytes, err := os.ReadFile(final)
+	if err != nil || string(bytes) != "retained-version" {
+		t.Fatalf("retained content changed: %q %v", bytes, err)
+	}
+}

@@ -305,11 +305,11 @@ func writeCreativeArtifactBlob(dir string, body io.Reader, limit int64) (key str
 	}
 	key = "blob-" + strings.TrimPrefix(filepath.Base(path), ".upload-")
 	final := filepath.Join(dir, key)
-	if err = os.Rename(path, final); err != nil {
+	if err = commitCreativeArtifactBlob(path, final); err != nil {
 		return
 	}
 	path = final
-	// Make the rename durable before any database row can refer to these bytes.
+	// Make the directory entry durable before any database row refers to these bytes.
 	directory, e := os.Open(dir)
 	if e != nil {
 		err = e
@@ -370,4 +370,18 @@ func creativeArtifactInlineMIME(typ string) bool {
 		return true
 	}
 	return strings.HasPrefix(typ, "audio/") || strings.HasPrefix(typ, "video/")
+}
+
+// commitCreativeArtifactBlob makes a fully written blob available for metadata.
+func commitCreativeArtifactBlob(staged, final string) error {
+	// Link creates a new directory entry exclusively: unlike Rename it can never
+	// replace a retained blob if a temporary-name suffix is reused after upload.
+	if err := os.Link(staged, final); err != nil {
+		return err
+	}
+	if err := os.Remove(staged); err != nil {
+		_ = os.Remove(final)
+		return err
+	}
+	return nil
 }

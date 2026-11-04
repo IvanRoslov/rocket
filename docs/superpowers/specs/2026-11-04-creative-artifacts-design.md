@@ -6,7 +6,7 @@ Durable human source uploads and agent results belong to a creative run and opti
 
 Use Rocket SQLite metadata and streamed files beneath `<cfg.Home>/creative-artifacts`, independent of worker worktrees. SQLite BLOBs would enlarge the shared operational database; external object storage would add an unnecessary provider platform. Local durable files match existing Rocket attachment infrastructure while streaming avoids its screenshot-only memory/size limits. This is an implementation choice within the brief.
 
-Each upload is limited to **2 GiB** of file content, an operational limit for current short video outputs, including the existing roughly 620 MB 1080p master, not a media-format limit. Stream to a private temporary file, hash, sync, close and rename it before publishing metadata transactionally. On transfer failure, publish nothing; on metadata failure, remove the new blob. A process crash between file and metadata publication may leave an unreferenced blob, never a readable partial version. No automatic history deletion or garbage collection is included.
+Each upload is limited to **2 GiB** of file content, an operational limit for current short video outputs, including the existing roughly 620 MB 1080p master, not a media-format limit. Stream to a private temporary file, hash, sync, close and commit it using a non-overwriting hard link before publishing metadata transactionally. On transfer failure, publish nothing; on metadata failure, remove the new blob. A process crash between file and metadata publication may leave an unreferenced blob, never a readable partial version. No automatic history deletion or garbage collection is included.
 
 ## Metadata and identity
 
