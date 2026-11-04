@@ -51,6 +51,8 @@ func validationErr(code, msg string) *ValidationError {
 // renders the worker system prompt (internal/prompts, template "worker")
 // instead of leaving it empty, and stores ParentID on the new session.
 type SpawnReq struct {
+	creative *store.CreativeBinding // set only by SpawnCreative; never a development task
+
 	Project   string
 	Repo      string
 	Task      string
@@ -353,8 +355,14 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 	if kind == "" {
 		kind = "worker"
 	}
-	if kind != "worker" {
+	if kind != "worker" && !(req.creative != nil && kind == "orchestrator") {
 		return store.Session{}, validationErr("invalid_kind", "only kind \"worker\" is supported by spawn in phase 1")
+	}
+
+	if req.creative != nil {
+		if err := m.validateCreativeSpawn(req); err != nil {
+			return store.Session{}, err
+		}
 	}
 
 	agentName := req.AgentName
@@ -420,6 +428,19 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 		break // success
 	}
 
+	if req.creative != nil {
+		if err := m.st.BindCreativeSession(id, *req.creative); err != nil {
+			m.markErrored(id, err)
+			return store.Session{}, err
+		}
+		if kind == "orchestrator" {
+			if err := m.st.SetCreativeRunOrchestrator(req.creative.RunID, id); err != nil {
+				m.markErrored(id, err)
+				return store.Session{}, err
+			}
+		}
+	}
+
 	var wtRes workspace.CreateResult
 	err = m.withMirrorHeld(ctx, repo, func(ctx context.Context) error {
 		var createErr error
@@ -448,7 +469,12 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 		Effort:       req.Profile.Effort,
 	}
 
-	if req.ParentID != "" {
+	if req.creative != nil {
+		if err := m.fillCreativePrompt(&spec, sess, *req.creative); err != nil {
+			m.markErrored(id, err)
+			return store.Session{}, err
+		}
+	} else if req.ParentID != "" {
 		sysPrompt, err := prompts.Render(m.cfg.Home, "worker", prompts.Vars{
 			"task_name":     req.Task,
 			"subtask_id":    fmt.Sprint(req.SubtaskID),
@@ -491,6 +517,9 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 	}
 
 	env, unsetEnv := prepareLaunchEnv(ag, spec, repo.Env)
+	if req.creative != nil {
+		env["ROCKET_HOME"] = m.cfg.Home
+	}
 	m.injectToken(env)
 	cmd := shellJoin(argv)
 
@@ -1005,6 +1034,15 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 		return validationErr("restore_not_allowed", "session cannot be restored from state: "+sess.State)
 	}
 
+	creative, creativeErr := m.st.GetCreativeSessionContext(sess.ID)
+	if creativeErr == nil {
+		if err := m.validateCreativeRestore(sess, creative); err != nil {
+			return err
+		}
+	} else if !errors.Is(creativeErr, store.ErrNotFound) {
+		return creativeErr
+	}
+
 	repo, err := m.st.GetRepo(sess.RepoID)
 	if err != nil {
 		return err
@@ -1049,7 +1087,15 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 		Effort: sess.Effort,
 	}
 
-	m.fillRestorePrompt(&spec, ag, sess, repo, path)
+	if creativeErr == nil {
+		if err := m.fillCreativePrompt(&spec, sess, creative); err != nil {
+			return err
+		}
+	} else if errors.Is(creativeErr, store.ErrNotFound) {
+		m.fillRestorePrompt(&spec, ag, sess, repo, path)
+	} else {
+		return creativeErr
+	}
 
 	if err := m.prepareNativeLaunch(ag, &spec, &sess); err != nil {
 		m.markErrored(id, err)
@@ -1075,6 +1121,9 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 	}
 
 	env, unsetEnv := prepareLaunchEnv(ag, spec, repo.Env)
+	if creativeErr == nil {
+		env["ROCKET_HOME"] = m.cfg.Home
+	}
 	m.injectToken(env)
 	cmd := shellJoin(argv)
 

@@ -86,7 +86,7 @@ func (c *Codex) SetupWorkspace(spec agent.LaunchSpec) error {
 	if err := agent.UpsertAgentsMD(spec.WorktreePath, spec.SystemPrompt, true); err != nil {
 		return fmt.Errorf("upsert AGENTS.md: %w", err)
 	}
-	if err := prompts.SyncOrchestratorSkills(filepath.Join(spec.WorktreePath, filepath.FromSlash(codexSkillsRelDir)), spec.BrainstormSkill, spec.Kind == "orchestrator"); err != nil {
+	if err := prompts.SyncOrchestratorSkills(filepath.Join(spec.WorktreePath, filepath.FromSlash(codexSkillsRelDir)), spec.BrainstormSkill, spec.DevelopmentOrchestrator()); err != nil {
 		return fmt.Errorf("sync orchestrator skills: %w", err)
 	}
 	agent.ExcludeFromGit(spec.WorktreePath, prompts.SkillExcludes(codexSkillsRelDir))

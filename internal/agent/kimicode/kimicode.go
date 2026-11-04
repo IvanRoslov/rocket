@@ -83,7 +83,7 @@ func (k *KimiCode) SetupWorkspace(spec agent.LaunchSpec) error {
 		return fmt.Errorf("upsert AGENTS.md: %w", err)
 	}
 	if spec.Kind == "orchestrator" {
-		if err := prompts.SyncOrchestratorSkills(filepath.Join(spec.WorktreePath, ".kimi-code", "skills"), spec.BrainstormSkill, true); err != nil {
+		if err := prompts.SyncOrchestratorSkills(filepath.Join(spec.WorktreePath, ".kimi-code", "skills"), spec.BrainstormSkill, spec.DevelopmentOrchestrator()); err != nil {
 			return err
 		}
 	}

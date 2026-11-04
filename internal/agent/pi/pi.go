@@ -159,7 +159,7 @@ func (p *Pi) SetupWorkspace(spec agent.LaunchSpec) error {
 	if err := agent.UpsertAgentsMD(spec.WorktreePath, spec.SystemPrompt, false); err != nil {
 		return fmt.Errorf("upsert AGENTS.md: %w", err)
 	}
-	if err := prompts.SyncOrchestratorSkills(filepath.Join(spec.WorktreePath, ".pi", "skills"), spec.BrainstormSkill, spec.Kind == "orchestrator"); err != nil {
+	if err := prompts.SyncOrchestratorSkills(filepath.Join(spec.WorktreePath, ".pi", "skills"), spec.BrainstormSkill, spec.DevelopmentOrchestrator()); err != nil {
 		return fmt.Errorf("sync orchestrator skills: %w", err)
 	}
 	agent.ExcludeFromGit(spec.WorktreePath, prompts.SkillExcludes(".pi/skills"))

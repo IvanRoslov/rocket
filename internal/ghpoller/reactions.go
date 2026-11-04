@@ -2,6 +2,7 @@ package ghpoller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -79,6 +80,9 @@ func (r *Reactions) RearmPending() error {
 	}
 	var toArm []string
 	for _, sess := range sessions {
+		if !r.isDevelopmentSession(sess.ID) {
+			continue
+		}
 		if sess.PRState != "merged" {
 			continue
 		}
@@ -174,6 +178,9 @@ func (r *Reactions) ChangesRequested(sess store.Session, pr *github.PR) {
 // review) to done, logs the transition, and schedules the merge-grace
 // auto-cleanup timer.
 func (r *Reactions) Merged(sess store.Session, pr *github.PR) {
+	if !r.isDevelopmentSession(sess.ID) {
+		return
+	}
 	task, err := r.st.GetTaskBySessionID(sess.ID)
 	if err == nil && (task.Status == "in_progress" || task.Status == "review") {
 		if err := r.st.UpdateTaskStatus(task.ID, "done"); err != nil {
@@ -245,6 +252,9 @@ func (r *Reactions) scheduleGrace(sessionID string, attempt int) {
 // (Stop() on an already-fired timer is a harmless no-op); the list is
 // bounded in practice by maxGraceReschedules per merge event.
 func (r *Reactions) onGraceExpired(sessionID string, attempt int) {
+	if !r.isDevelopmentSession(sessionID) {
+		return
+	}
 	defer func() {
 		if rec := recover(); rec != nil {
 			slog.Error("ghpoller: reactions: grace callback panic", "session", sessionID, "recover", rec)
@@ -288,4 +298,16 @@ func (r *Reactions) onGraceExpired(sessionID string, attempt int) {
 // is no longer active and will not accept new messages.
 func isSessionTerminal(state string) bool {
 	return state == "killed" || state == "done" || state == "errored"
+}
+
+// Creative work has no merge-based completion or automatic workspace cleanup.
+func (r *Reactions) isDevelopmentSession(id string) bool {
+	_, err := r.st.GetCreativeSessionContext(id)
+	if errors.Is(err, store.ErrNotFound) {
+		return true
+	}
+	if err != nil {
+		slog.Error("ghpoller: creative context check failed; skip cleanup", "session", id, "error", err)
+	}
+	return false
 }

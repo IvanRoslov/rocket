@@ -107,6 +107,8 @@ type NativeLaunchProvider interface {
 
 // LaunchSpec contains all configuration needed to launch an agent.
 type LaunchSpec struct {
+	Creative bool // creative pipeline lifecycle; do not install development orchestration skills
+
 	NativeDelivery         NativeLaunch
 	ClaudeLaunchGeneration string
 
@@ -318,3 +320,7 @@ func SupportsClaudeSocket(a Agent) bool {
 	v, ok := a.(ClaudeSocketCompatible)
 	return ok && v.ClaudeSocketCompatible()
 }
+
+// DevelopmentOrchestrator leaves legacy launches unchanged while keeping creative
+// sessions free of task/spec/PR orchestration skills.
+func (s LaunchSpec) DevelopmentOrchestrator() bool { return s.Kind == "orchestrator" && !s.Creative }
