@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -44,6 +45,12 @@ type Config struct {
 	// in <home>/tls/ (auto-generated self-signed; replace with an
 	// mkcert-issued pair to avoid the browser trust warning).
 	TLSPort int `yaml:"tls_port"`
+	// Preview access is opt-in and uses a separate, reachable hostname. Only
+	// explicitly allowed loopback dev-server ports can be registered.
+	PreviewHost      string `yaml:"preview_host"`
+	PreviewPort      int    `yaml:"preview_port"`
+	PreviewPublicURL string `yaml:"preview_public_url"`
+	PreviewPorts     []int  `yaml:"preview_ports"`
 	// PublicURL is how remote clients reach this daemon (typically the
 	// `tailscale serve` https://<mac>.<tailnet>.ts.net address). Used in
 	// pairing QR codes/links and in the TCP Host/Origin allowlist.
@@ -279,6 +286,10 @@ func Load(home string) (*Config, error) {
 		cfg.PublicURL = strings.TrimRight(cfg.PublicURL, "/")
 	}
 
+	if err := cfg.ValidatePreview(); err != nil {
+		return nil, err
+	}
+
 	// Restore home since YAML unmarshaling doesn't set it
 	cfg.Home = home
 
@@ -336,4 +347,40 @@ func (c *Config) PublicHost() string {
 		return ""
 	}
 	return u.Host
+}
+
+// ValidatePreview validates the isolated listener without changing Rocket access.
+func (c *Config) ValidatePreview() error {
+	if c.PreviewHost == "" {
+		c.PreviewHost = "127.0.0.1"
+	}
+	for _, port := range c.PreviewPorts {
+		if port < 1024 || port > 65535 || port == c.Port || port == c.TLSPort || port == c.PreviewPort {
+			return fmt.Errorf("config: preview_ports must contain only unprivileged dev-server ports, excluding Rocket listener ports")
+		}
+	}
+	if c.PreviewPort == 0 && c.PreviewPublicURL == "" {
+		return nil
+	}
+	if c.PreviewPort < 1024 || c.PreviewPort > 65535 || c.PreviewPort == c.Port || c.PreviewPort == c.TLSPort {
+		return fmt.Errorf("config: preview_port must be a distinct unprivileged port")
+	}
+	u, err := url.Parse(c.PreviewPublicURL)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("config: preview_public_url must be an http(s) origin without credentials, path, query or fragment")
+	}
+	host := strings.ToLower(u.Hostname())
+	if net.ParseIP(host) != nil || host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.EqualFold(host, c.Host) {
+		return fmt.Errorf("config: preview_public_url requires a separate reachable hostname from Rocket")
+	}
+	if main, err := url.Parse(c.PublicURL); err == nil && main.Host != "" {
+		if strings.EqualFold(main.Hostname(), host) {
+			return fmt.Errorf("config: preview_public_url must use a different hostname from public_url")
+		}
+		if main.Scheme == "https" && u.Scheme != "https" {
+			return fmt.Errorf("config: preview_public_url must use https when public_url uses https")
+		}
+	}
+	c.PreviewPublicURL = strings.TrimRight(c.PreviewPublicURL, "/")
+	return nil
 }

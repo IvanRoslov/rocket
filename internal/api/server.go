@@ -16,6 +16,7 @@ import (
 	"github.com/IvanRoslov/rocket/internal/config"
 	"github.com/IvanRoslov/rocket/internal/github"
 	"github.com/IvanRoslov/rocket/internal/monitor"
+	"github.com/IvanRoslov/rocket/internal/preview"
 	"github.com/IvanRoslov/rocket/internal/queue"
 	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -58,10 +59,14 @@ type Deps struct {
 	// manual re-collection). Nil disables both: POST /v1/stats/usage/collect
 	// answers 503.
 	Usage UsageCollector
+
+	// Previews is shared by authenticated management routes and the isolated listener.
+	Previews *preview.Registry
 }
 
 // NewHandler builds the routed http.Handler for rocket's API.
 func NewHandler(d Deps) http.Handler {
+	initializePreviews(&d)
 	if d.Auth == nil {
 		d.Auth = NewAuthRuntime()
 	}
@@ -117,6 +122,7 @@ func NewHandler(d Deps) http.Handler {
 	registerAttachmentRoutes(mux, d)
 	registerSettingsRoutes(mux, d)
 	registerAuthRoutes(mux, d)
+	registerCreativePreviewRoutes(mux, d)
 
 	// Any /v1 path not matched by a more specific route above is a 404,
 	// rendered in the standard error JSON shape. This is a prefix pattern,
@@ -178,6 +184,16 @@ func Serve(ctx context.Context, d Deps) error {
 			"host", d.Cfg.Host)
 	}
 
+	initializePreviews(&d)
+	previewSrv, previewLn := listenPreview(d)
+	if previewSrv != nil {
+		go func() {
+			if err := previewSrv.Serve(previewLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				d.Previews.SetUnavailable("Preview listener stopped; check Rocket logs and preview listener configuration.")
+				slog.Error("preview listener stopped", "error", err)
+			}
+		}()
+	}
 	handler := NewHandler(d)
 	tcpHandler := requireAuth(d, handler)
 	unixSrv := &http.Server{Handler: handler}
@@ -237,6 +253,10 @@ func Serve(ctx context.Context, d Deps) error {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
+	if previewSrv != nil {
+		_ = previewSrv.Shutdown(shutdownCtx)
+		_ = previewSrv.Close()
+	}
 	_ = unixSrv.Shutdown(shutdownCtx)
 	_ = tcpSrv.Shutdown(shutdownCtx)
 	if tlsSrv != nil {
