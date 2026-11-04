@@ -26,8 +26,8 @@ func creativeNotFound(err error) error {
 	return err
 }
 func validateCreativePipeline(in CreativePipelineInput) error {
-	if strings.TrimSpace(in.ProjectID) == "" || strings.TrimSpace(in.Name) == "" || len(in.Stages) == 0 {
-		return creativeInvalid("project_id, name and at least one stage are required")
+	if strings.TrimSpace(in.Name) == "" || len(in.Stages) == 0 {
+		return creativeInvalid("name and at least one stage are required")
 	}
 	for _, stage := range in.Stages {
 		if strings.TrimSpace(stage.Name) == "" {
@@ -46,12 +46,9 @@ func (s *Store) CreateCreativePipeline(in CreativePipelineInput) (CreativePipeli
 	if err := validateCreativePipeline(in); err != nil {
 		return CreativePipeline{}, err
 	}
-	if _, err := s.GetProject(in.ProjectID); err != nil {
-		return CreativePipeline{}, err
-	}
 	data, _ := json.Marshal(in.Stages)
 	now := time.Now().Unix()
-	res, err := s.db.Exec(`INSERT INTO creative_pipelines(project_id,name,stages,created_at,updated_at) VALUES(?,?,?,?,?)`, in.ProjectID, in.Name, string(data), now, now)
+	res, err := s.db.Exec(`INSERT INTO creative_pipelines(name,stages,created_at,updated_at) VALUES(?,?,?,?)`, in.Name, string(data), now, now)
 	if err != nil {
 		return CreativePipeline{}, err
 	}
@@ -66,7 +63,7 @@ func (s *Store) UpdateCreativePipeline(id int64, in CreativePipelineInput) (Crea
 		return CreativePipeline{}, err
 	}
 	data, _ := json.Marshal(in.Stages)
-	res, err := s.db.Exec(`UPDATE creative_pipelines SET name=?,stages=?,updated_at=? WHERE id=? AND project_id=?`, in.Name, string(data), time.Now().Unix(), id, in.ProjectID)
+	res, err := s.db.Exec(`UPDATE creative_pipelines SET name=?,stages=?,updated_at=? WHERE id=?`, in.Name, string(data), time.Now().Unix(), id)
 	if err != nil {
 		return CreativePipeline{}, err
 	}
@@ -78,7 +75,7 @@ func (s *Store) UpdateCreativePipeline(id int64, in CreativePipelineInput) (Crea
 func getCreativePipeline(q creativeReader, id int64) (CreativePipeline, error) {
 	var p CreativePipeline
 	var stages string
-	err := q.QueryRow(`SELECT id,project_id,name,stages,created_at,updated_at FROM creative_pipelines WHERE id=?`, id).Scan(&p.ID, &p.ProjectID, &p.Name, &stages, &p.CreatedAt, &p.UpdatedAt)
+	err := q.QueryRow(`SELECT id,name,stages,created_at,updated_at FROM creative_pipelines WHERE id=?`, id).Scan(&p.ID, &p.Name, &stages, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return p, creativeNotFound(err)
 	}
@@ -104,8 +101,8 @@ func creativeIDs(q creativeReader, query string, args ...any) ([]int64, error) {
 	}
 	return ids, rows.Err()
 }
-func (s *Store) ListCreativePipelines(projectID string) ([]CreativePipeline, error) {
-	ids, err := creativeIDs(s.db, `SELECT id FROM creative_pipelines WHERE (?='' OR project_id=?) ORDER BY id`, projectID, projectID)
+func (s *Store) ListCreativePipelines() ([]CreativePipeline, error) {
+	ids, err := creativeIDs(s.db, `SELECT id FROM creative_pipelines ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -123,6 +120,9 @@ func (s *Store) CreateCreativeRun(in CreativeRunInput) (CreativeRun, error) {
 	if strings.TrimSpace(in.Name) == "" || strings.TrimSpace(in.Brief) == "" || in.PipelineID <= 0 || in.ProjectID == "" {
 		return CreativeRun{}, creativeInvalid("project_id, pipeline_id, name and brief required")
 	}
+	if _, err := s.GetProject(in.ProjectID); err != nil {
+		return CreativeRun{}, err
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return CreativeRun{}, err
@@ -136,9 +136,6 @@ func (s *Store) CreateCreativeRun(in CreativeRunInput) (CreativeRun, error) {
 	p, err := getCreativePipeline(tx, in.PipelineID)
 	if err != nil {
 		return CreativeRun{}, err
-	}
-	if p.ProjectID != in.ProjectID {
-		return CreativeRun{}, creativeInvalid("pipeline belongs to another project")
 	}
 	now := time.Now().Unix()
 	res, err := tx.Exec(`INSERT INTO creative_runs(project_id,pipeline_id,pipeline_name,name,brief,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`, in.ProjectID, in.PipelineID, p.Name, in.Name, in.Brief, now, now)

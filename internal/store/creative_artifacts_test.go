@@ -10,7 +10,7 @@ import (
 func artifactTestContext(t *testing.T, s *Store) (int64, int64, int64) {
 	t.Helper()
 	mustSetup(t, s)
-	p, err := s.CreateCreativePipeline(CreativePipelineInput{ProjectID: "billing", Name: "Materials", Stages: []CreativeStageDefinition{{Name: "Shots", Repeated: true, Approval: "auto"}}})
+	p, err := s.CreateCreativePipeline(CreativePipelineInput{Name: "Materials", Stages: []CreativeStageDefinition{{Name: "Shots", Repeated: true, Approval: "auto"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestCreativeArtifactConcurrentPublication(t *testing.T) {
 func TestCreativeArtifactReviewBindsShownVersion(t *testing.T) {
 	s := openTestStore(t)
 	mustSetup(t, s)
-	p, err := s.CreateCreativePipeline(CreativePipelineInput{ProjectID: "billing", Name: "Review", Stages: []CreativeStageDefinition{{Name: "Film", Approval: "stage"}}})
+	p, err := s.CreateCreativePipeline(CreativePipelineInput{Name: "Review", Stages: []CreativeStageDefinition{{Name: "Film", Approval: "stage"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestCreativeArtifactReviewBindsShownVersion(t *testing.T) {
 func TestCreativeArtifactStageContextIncludesOnlySameStageItems(t *testing.T) {
 	s := openTestStore(t)
 	mustSetup(t, s)
-	p, err := s.CreateCreativePipeline(CreativePipelineInput{ProjectID: "billing", Name: "Shots", Stages: []CreativeStageDefinition{{Name: "Scenes", Repeated: true, Approval: "stage"}, {Name: "Final", Approval: "stage"}}})
+	p, err := s.CreateCreativePipeline(CreativePipelineInput{Name: "Shots", Stages: []CreativeStageDefinition{{Name: "Scenes", Repeated: true, Approval: "stage"}, {Name: "Final", Approval: "stage"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

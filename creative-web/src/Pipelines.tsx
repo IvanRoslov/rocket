@@ -12,11 +12,9 @@ const blank = (): StageDefinition => ({
   approval: "stage",
 });
 export function Pipelines({
-  project,
   pipelines,
   onClose,
 }: {
-  project: string;
   pipelines: Pipeline[];
   onClose: () => void;
 }) {
@@ -47,8 +45,8 @@ export function Pipelines({
         >
       </div>
       <p>
-        Templates define new work. Runs already underway keep their saved
-        process.
+        Shared templates define new work in any project. Runs already underway
+        keep their saved process.
       </p>
       <div className="pipeline-layout">
         <nav aria-label="Pipeline templates">
@@ -72,7 +70,7 @@ export function Pipelines({
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            const body = { project_id: project, name, stages };
+            const body = { name, stages };
             save.mutate(
               () =>
                 id

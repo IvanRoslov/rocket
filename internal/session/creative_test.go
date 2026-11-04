@@ -11,7 +11,7 @@ import (
 func TestCreativeLaunchAndRestoreKeepCreativeLifecycle(t *testing.T) {
 	m, st, _, rt, _, _ := testManagerWithConfig(t)
 	seedProjectRepo(t, st, "p", "r")
-	p, err := st.CreateCreativePipeline(store.CreativePipelineInput{ProjectID: "p", Name: "Film", Stages: []store.CreativeStageDefinition{{Name: "Scene", Approval: "auto"}}})
+	p, err := st.CreateCreativePipeline(store.CreativePipelineInput{Name: "Film", Stages: []store.CreativeStageDefinition{{Name: "Scene", Approval: "auto"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestCreativeLaunchAndRestoreKeepCreativeLifecycle(t *testing.T) {
 func TestCreativeRestoreDoesNotDuplicateCurrentOrchestrator(t *testing.T) {
 	m, st, _, _, _, _ := testManagerWithConfig(t)
 	seedProjectRepo(t, st, "p", "r")
-	p, err := st.CreateCreativePipeline(store.CreativePipelineInput{ProjectID: "p", Name: "Film", Stages: []store.CreativeStageDefinition{{Name: "Scene", Approval: "auto"}}})
+	p, err := st.CreateCreativePipeline(store.CreativePipelineInput{Name: "Film", Stages: []store.CreativeStageDefinition{{Name: "Scene", Approval: "auto"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

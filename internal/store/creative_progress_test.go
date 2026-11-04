@@ -16,7 +16,7 @@ func creativeFixture(t *testing.T, approval string, repeated bool) (*Store, Crea
 	if err := s.AddProject(Project{ID: "p", MainRepo: "repo"}); err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.CreateCreativePipeline(CreativePipelineInput{ProjectID: "p", Name: "Pipeline", Stages: []CreativeStageDefinition{{Name: "First", Approval: approval, Repeated: repeated}, {Name: "Next", Approval: "auto"}}})
+	p, err := s.CreateCreativePipeline(CreativePipelineInput{Name: "Pipeline", Stages: []CreativeStageDefinition{{Name: "First", Approval: approval, Repeated: repeated}, {Name: "Next", Approval: "auto"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

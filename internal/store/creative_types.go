@@ -16,9 +16,8 @@ type CreativeStageDefinition struct {
 	Approval          string `json:"approval"` // auto | stage | item
 }
 type CreativePipelineInput struct {
-	ProjectID string                    `json:"project_id"`
-	Name      string                    `json:"name"`
-	Stages    []CreativeStageDefinition `json:"stages"`
+	Name   string                    `json:"name"`
+	Stages []CreativeStageDefinition `json:"stages"`
 }
 type CreativePipeline struct {
 	ID int64 `json:"id"`

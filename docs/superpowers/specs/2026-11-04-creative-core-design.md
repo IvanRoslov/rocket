@@ -1,5 +1,7 @@
 # Creative workflow foundation (5987 / creative-work)
 
+> Pipeline ownership and filtering below are superseded by [the global catalog correction](2026-11-04-global-pipelines-design.md), approved for creative-work 5986 / subtask 5994. Templates are global; runs remain project-owned.
+
 Separate SQLite tables for creative pipelines, runs, stage instances and items preserve the existing task lifecycle and kanban. Reusing tasks would couple creative work to development gates; a separate external state store would duplicate project/auth infrastructure. This design uses the existing store and API with no launch or generation side effects.
 
 Pipelines belong to a project and contain an ordered `stages` array. Each definition has `name`, `description`, `expected_artifacts`, `repeated`, `approval` (`auto`, `stage`, or `item`; item requires repeated). Updating the whole array edits/reorders it. Runs copy pipeline name and all stage definitions on creation, with an initial `brief`, `name`, existing `project_id`, and source `pipeline_id`. Pipeline updates never modify runs.

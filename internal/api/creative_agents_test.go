@@ -14,7 +14,7 @@ import (
 func TestCreativeAgentLaunchAndContextualDiscussion(t *testing.T) {
 	d := sessionsTestDeps(t)
 	addTestProject(t, d, "film")
-	p, err := d.Store.CreateCreativePipeline(store.CreativePipelineInput{ProjectID: "film", Name: "Film", Stages: []store.CreativeStageDefinition{{Name: "Scene", Approval: "auto"}}})
+	p, err := d.Store.CreateCreativePipeline(store.CreativePipelineInput{Name: "Film", Stages: []store.CreativeStageDefinition{{Name: "Scene", Approval: "auto"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestCreativeAgentLaunchAndContextualDiscussion(t *testing.T) {
 func TestCreativeQuestionSurvivesOrchestratorReplacement(t *testing.T) {
 	d := sessionsTestDeps(t)
 	addTestProject(t, d, "film")
-	p, err := d.Store.CreateCreativePipeline(store.CreativePipelineInput{ProjectID: "film", Name: "Film", Stages: []store.CreativeStageDefinition{{Name: "Scene", Approval: "auto"}}})
+	p, err := d.Store.CreateCreativePipeline(store.CreativePipelineInput{Name: "Film", Stages: []store.CreativeStageDefinition{{Name: "Scene", Approval: "auto"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

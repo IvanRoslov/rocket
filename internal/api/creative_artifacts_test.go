@@ -25,7 +25,7 @@ func creativeArtifactDeps(t *testing.T) (Deps, int64, int64) {
 	if err := d.Store.AddProject(store.Project{ID: "p", Name: "Project", MainRepo: "r"}); err != nil {
 		t.Fatal(err)
 	}
-	p, err := d.Store.CreateCreativePipeline(store.CreativePipelineInput{ProjectID: "p", Name: "Creative", Stages: []store.CreativeStageDefinition{{Name: "Output", Approval: "auto"}}})
+	p, err := d.Store.CreateCreativePipeline(store.CreativePipelineInput{Name: "Creative", Stages: []store.CreativeStageDefinition{{Name: "Output", Approval: "auto"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

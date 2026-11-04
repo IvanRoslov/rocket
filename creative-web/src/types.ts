@@ -13,7 +13,6 @@ export interface StageDefinition {
 }
 export interface Pipeline {
   id: number;
-  project_id: string;
   name: string;
   stages: StageDefinition[];
 }

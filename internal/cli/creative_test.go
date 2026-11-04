@@ -13,7 +13,7 @@ import (
 func TestCreativeCLIRequests(t *testing.T) {
 	t.Setenv("ROCKET_SESSION_ID", "creative-orch")
 	file := filepath.Join(t.TempDir(), "pipeline.json")
-	if err := os.WriteFile(file, []byte(`{"project_id":"p","name":"Video","stages":[{"name":"Plan","approval":"auto"}]}`), 0600); err != nil {
+	if err := os.WriteFile(file, []byte(`{"name":"Video","stages":[{"name":"Plan","approval":"auto"}]}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -21,6 +21,9 @@ func TestCreativeCLIRequests(t *testing.T) {
 		method, path string
 		body         map[string]any
 	}{
+		{[]string{"pipeline", "ls"}, "GET", "/v1/creative/pipelines", nil},
+		{[]string{"pipeline", "ls", "--project", "old-project"}, "GET", "/v1/creative/pipelines", nil},
+		{[]string{"pipeline", "update", "3", "--file", file}, "PUT", "/v1/creative/pipelines/3", map[string]any{"name": "Video"}},
 		{[]string{"pipeline", "create", "--file", file}, "POST", "/v1/creative/pipelines", map[string]any{"name": "Video"}},
 		{[]string{"stage", "action", "3", "7", "approve", "--review-revision", "2"}, "POST", "/v1/creative/runs/3/stages/7/actions", map[string]any{"action": "approve", "review_revision": float64(2)}},
 		{[]string{"item", "action", "3", "7", "9", "submit", "--artifact-version", "42"}, "POST", "/v1/creative/runs/3/stages/7/items/9/actions", map[string]any{"action": "submit", "artifact_version_ids": []any{float64(42)}}},

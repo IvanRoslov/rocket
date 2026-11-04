@@ -51,7 +51,7 @@ export function App() {
     });
     window.history.pushState({}, "", `/creative/${p.size ? `?${p}` : ""}`);
     setSelection(next);
-    setView("work");
+    if (view !== "pipelines") setView("work");
   }
   const projects = useQuery({
     queryKey: ["creative", "projects"],
@@ -65,12 +65,8 @@ export function App() {
   const project =
     selection.project ?? run.data?.project_id ?? projects.data?.[0]?.id ?? "";
   const pipelines = useQuery({
-    queryKey: ["creative", "pipelines", project],
-    queryFn: () =>
-      api.get<Pipeline[]>(
-        `${base}/pipelines?project_id=${encodeURIComponent(project)}`,
-      ),
-    enabled: !!project,
+    queryKey: ["creative", "pipelines"],
+    queryFn: () => api.get<Pipeline[]>(`${base}/pipelines`),
   });
   const runs = useQuery({
     queryKey: ["creative", "runs", project],
@@ -134,7 +130,6 @@ export function App() {
           <Button
             variant="secondary"
             size="sm"
-            disabled={!project}
             aria-pressed={view === "pipelines"}
             onClick={() => setView("pipelines")}
           >
@@ -148,7 +143,12 @@ export function App() {
       <ErrorNotice
         error={projects.error ?? pipelines.error ?? runs.error ?? run.error}
       />
-      {projects.isPending ? (
+      {view === "pipelines" ? (
+        <Pipelines
+          pipelines={pipelines.data ?? []}
+          onClose={() => setView("work")}
+        />
+      ) : projects.isPending ? (
         <main>
           <Empty>Loading projects…</Empty>
         </main>
@@ -158,13 +158,6 @@ export function App() {
           <p>Create a Rocket project to begin.</p>
           <a href="/projects/new">Create project</a>
         </main>
-      ) : view === "pipelines" ? (
-        <Pipelines
-          key={project}
-          project={project}
-          pipelines={pipelines.data ?? []}
-          onClose={() => setView("work")}
-        />
       ) : view === "new" ? (
         <NewWork
           key={project}
