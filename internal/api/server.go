@@ -115,6 +115,7 @@ func NewHandler(d Deps) http.Handler {
 	registerModelProfileRoutes(mux, d)
 	registerModelCatalogRoutes(mux, d)
 	registerAttachmentRoutes(mux, d)
+	registerCreativeArtifactRoutes(mux, d)
 	registerSettingsRoutes(mux, d)
 	registerAuthRoutes(mux, d)
 
