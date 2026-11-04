@@ -10,7 +10,7 @@ Upload sources in their intended run/stage/item context. Text up to 1 MiB is dis
 
 Discussion automatically includes the selected context and displayed artifact versions. A draft keeps its original target and versions when selection changes; discard it to begin a draft in the new context. Question replies and answers preserve the question's original context. A deliberate Go option or written Go reply uses the existing question/message flow; stage approval is separate. The orchestrator must describe exact paid calls and cost basis and wait for the human's explicit Go. The dashboard adds no payment execution or technical spending gate.
 
-Launch the creative orchestrator using an existing enabled model profile, or restore its existing session. Landing preview uses the preview service's availability and access URL for both its sandboxed iframe and separate-tab link. When preview setup or its local server is missing, the service's actionable message is shown. See `creative-previews.md` from deliverable 5990 for operator setup.
+Launch the creative orchestrator using an existing enabled model profile, or restore its existing session. Landing preview uses the preview service's availability and access URL for both its sandboxed iframe and separate-tab link. When preview setup or its local server is missing, the service's actionable message is shown. See [creative-previews.md](creative-previews.md) for the required separate, browser-reachable private preview hostname and operator setup. Preview registrations expire on daemon restart; an orchestrator must register and start a new preview to restore access.
 
 ## Development and build
 
@@ -20,6 +20,12 @@ Launch the creative orchestrator using an existing enabled model profile, or res
 - `make build`: both application builds followed by the shared daemon binary; no restart.
 - `make test`: Go, development web, and creative web tests.
 
+After building, install the binary through the normal Rocket installation procedure and let the operator apply any required daemon restart. An already running daemon serves its embedded build; changing build files does not update it. Open `/creative/` on the existing Rocket origin after that operator-managed update. This task does not restart the daemon.
+
 `creative-web/embed.go` embeds its own `dist`; the tracked placeholder keeps plain `go build` usable before a web build. Production asset files are ignored. Do not commit generated index files; `make go-build` restores both tracked placeholders after embedding.
 
 The UI consumes the core, assets, agents and preview implementations for feature creative-work (5986), deliverables 5987–5990. It does not provide alternate storage, simulated results, generation providers, mobile screens or a development-dashboard creative mode.
+
+## Validation limits
+
+Component/API-boundary checks and production builds were verified. Browser visual behavior was not validated because the browser host was unavailable. Real creative cases are reserved for human acceptance; this work ran no paid calls, live generation, end-to-end demo projects or daemon restart.

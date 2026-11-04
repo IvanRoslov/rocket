@@ -63,4 +63,5 @@ Interfaces: creative sessions/messages/questions; existing question reply/answer
 Files: docs and necessary integration corrections only.
 - [x] Run complete Go and both web test suites, both web builds, go vet/build without starting daemon. Record any baseline failures explicitly.
 - [x] Review diff against acceptance/contracts and inspect component-rendered UI without projects/generation (browser host unavailable); fix discovered regressions with failing tests first.
-- [x] Commit final docs/corrections, push own feature branch, create one PR referencing creative-work 5986 / 5991, send orchestrator PR URL. Respond to checks/review until accepted.
+- [x] Commit final docs/corrections, push own feature branch, create one PR referencing creative-work 5986 / 5991, send orchestrator PR URL.
+- [ ] Respond to checks/review until accepted and merged by the orchestrator.

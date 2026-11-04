@@ -125,7 +125,7 @@ export function Discussion({
               value={profile}
               onChange={(e) => setProfile(e.target.value)}
             >
-              <option value="">Project default</option>
+              <option value="">Configured default</option>
               {profiles.data?.profiles
                 .filter((p) => p.enabled)
                 .map((p) => (
