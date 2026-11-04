@@ -1,0 +1,13 @@
+# Creative sessions and shared CLI tools — 5989
+
+Creative runs use existing session roles (`orchestrator` / `worker`) with a separate durable creative-session context, no development task. Dedicated launch and restore prompt paths read the run snapshot, stages/items, approval/review state and earlier results, and use existing runtime, workspace, model profiles and queued delivery. Project repository validation and isolated workspaces remain intact. Development launch and prompt paths remain unchanged.
+
+A dedicated creative session API/CLI launches one orchestrator per run and stage/item workers under that orchestrator. Migration 0030 adds context associations for sessions, messages and existing general question threads. Context is resolved by core; optional immutable artifact version references are validated against the assets store. Contextual messages use the existing delivery queue and carry an explicit readable context prefix; contextual questions reuse question participants/replies/answers, without development tasks or brainstorm gates. Reopening preserves results and downstream work; instructions require explaining consequences and agreeing rework.
+
+Shared tools use a YAML registry under Rocket home/tools, with named command, description, usage and environment requirements. `rocket tools list/show/register/install` provide discovery and explicit installation/update. Registration is data, not a provider/model/price catalog or execution gateway. Both creative roles receive discovery instructions and tool paths. Bundle the upstream CLI generation clients at an exact origin commit, with attribution, relevant license and dependency manifest; do not bundle secrets, outputs or unrelated production projects. Installation writes only when explicitly invoked, and replacement requires an explicit update option. MCP stays human configured.
+
+Paid generation instructions apply equally to CLI and MCP: explain outputs, inputs, provider/model, exact calls and cost basis; wait for explicit human Go for that set; new variants, paid retries and increased cost need another Go. Stage approval does not authorize spending; unknown costs remain unknown. No technical spend gate.
+
+Approaches considered: extending development tasks would impose the wrong lifecycle; a second runtime/chat platform would duplicate working infrastructure. Separate creative context atop existing session/message/question infrastructure is the chosen implementation approach.
+
+Validation: focused store/API/prompt/CLI/session tests in temporary fixtures, existing Go checks and relevant upstream pure tests. No paid calls, demo projects, live configuration changes or daemon restart. Real creative jobs remain human acceptance testing.
