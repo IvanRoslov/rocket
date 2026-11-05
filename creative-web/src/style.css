@@ -543,3 +543,14 @@ details p {
 .discussion .question-thread__header {
   flex-wrap: wrap;
 }
+.artifact-filename {
+  overflow-wrap: anywhere;
+}
+.media > .markdown {
+  max-height: 700px;
+  overflow: auto;
+  padding: 16px;
+  background: var(--surface-3);
+  border-radius: var(--radius-btn-sm);
+  margin-bottom: 12px;
+}

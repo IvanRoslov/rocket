@@ -289,3 +289,59 @@ it("retains image, video and audio previews and reports playback failures", () =
     screen.getAllByRole("link", { name: "Download clip.mp4" }),
   ).toHaveLength(3);
 });
+
+it("formats generic-MIME Markdown with selected filename/version and immutable download", async () => {
+  const docs = versions.map((v) => ({ ...v, filename: "paid-generation-proposal.md", mime: "application/octet-stream" }));
+  server.use(
+    http.get("/v1/creative/artifacts/2", () => HttpResponse.json({ artifact, versions: docs })),
+    http.get("/v1/creative/artifact-versions/:id/content", ({ params }) => HttpResponse.text(`# Proposal ${params.id}\n\n**Readable**\n\n| Cost | Count |\n| --- | --- |\n| 2 | 1 |`)),
+  );
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <Artifacts scope={{ run_id: 7, stage_id: 4 }} reviewIDs={[11]} onShown={() => {}} />
+  </QueryClientProvider>);
+  expect(await screen.findByRole("heading", { name: "Proposal 11" })).toBeVisible();
+  expect(screen.getByText("Readable").tagName).toBe("STRONG");
+  expect(screen.getByRole("table")).toBeVisible();
+  expect(screen.getByText("paid-generation-proposal.md · version 1")).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Opening scene" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Download paid-generation-proposal.md" })).toHaveAttribute("href", "/v1/creative/artifact-versions/11/content?download=1");
+  await userEvent.selectOptions(screen.getByLabelText("Opening scene version"), "12");
+  expect(await screen.findByRole("heading", { name: "Proposal 12" })).toBeVisible();
+  expect(screen.queryByRole("heading", { name: "Proposal 11" })).not.toBeInTheDocument();
+  expect(screen.getByText("paid-generation-proposal.md · version 2")).toBeVisible();
+  expect(screen.getByRole("link", { name: "Download paid-generation-proposal.md" })).toHaveAttribute("href", "/v1/creative/artifact-versions/12/content?download=1");
+});
+
+it("renders Markdown without active HTML, unsafe/relative links or automatic embedded resources", async () => {
+  server.use(http.get(versions[0].content_url, () => HttpResponse.text(`# Safe document\n\n<script>alert(1)</script>\n\n<iframe src='/v1/private'></iframe>\n\n<img src='https://tracker.invalid/pixel'>\n\n![Remote](https://tracker.invalid/image)\n\n[Unsafe](javascript:alert%281%29) [API](/v1/private) [Protocol](//tracker.invalid) [External](https://example.com/document)`)));
+  const { container } = render(<QueryClientProvider client={new QueryClient()}>
+    <Media version={{ ...versions[0], filename: "document.md", mime: "text/markdown" }} />
+  </QueryClientProvider>);
+  await screen.findByRole("heading", { name: "Safe document" });
+  expect(container.querySelector("script, iframe, img, object, embed")).toBeNull();
+  for (const label of ["Unsafe", "API", "Protocol"]) expect(screen.queryByRole("link", { name: label })).not.toBeInTheDocument();
+  expect(screen.getByText("Remote")).toBeVisible();
+  expect(screen.getByRole("link", { name: "External" })).toHaveAttribute("rel", "noopener noreferrer");
+});
+
+it("explains Markdown load failures and size limits with download still available", async () => {
+  server.use(http.get(versions[0].content_url, () => new HttpResponse(null, { status: 403 })));
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <Media version={{ ...versions[0], filename: "denied.md", mime: "application/octet-stream" }} />
+    <Media version={{ ...versions[1], filename: "large.md", mime: "text/markdown", size: 1024 * 1024 + 1 }} />
+  </QueryClientProvider>);
+  expect(await screen.findByText(/Could not load text \(403\)/)).toBeVisible();
+  expect(screen.queryByText("Loading text…")).not.toBeInTheDocument();
+  expect(screen.getByText(/too large to preview/)).toBeVisible();
+  expect(screen.getByRole("link", { name: "Download denied.md" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Download large.md" })).toBeVisible();
+});
+
+it("does not reinterpret HTML or media as Markdown based on filename", () => {
+  const { container } = render(<QueryClientProvider client={new QueryClient()}>
+    <Media version={{ ...versions[0], filename: "active.md", mime: "text/html" }} />
+    <Media version={{ ...versions[1], filename: "image.md", mime: "image/png" }} />
+  </QueryClientProvider>);
+  expect(screen.getByRole("link", { name: /Open HTML/ })).toBeVisible();
+  expect(container.querySelector("img")).toHaveAttribute("src", versions[1].content_url);
+});
