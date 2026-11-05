@@ -25,6 +25,11 @@ export function CreativeSessionRail({ runID, orchestrator }: { runID: number; or
   const command = useCommand();
   const session = sessions.data?.find((s) => s.id === orchestrator);
   const active = session && ["running", "spawning"].includes(session.state);
+  // Keep recoverable errored workers, but omit closed sessions from the rail.
+  // The full query remains available for orchestrator restore and history.
+  const workers = sessions.data?.filter(
+    (s) => s.kind === "worker" && s.state !== "killed" && s.state !== "done",
+  ) ?? [];
   return (
     <aside className="session-rail creative-session-rail" aria-label="Run sessions">
       <div className="heading">
@@ -89,10 +94,10 @@ export function CreativeSessionRail({ runID, orchestrator }: { runID: number; or
           {session && <SessionCard key={session.id} session={session} role="orchestrator" />}
           <div className="session-rail__workers-heading">Workers</div>
           <div className="session-rail__workers">
-            {sessions.data.filter((s) => s.kind === "worker").map((worker) => (
+            {workers.map((worker) => (
               <SessionCard key={worker.id} session={worker} role="worker" />
             ))}
-            {!sessions.data.some((s) => s.kind === "worker") && <p className="session-rail__empty">No workers yet.</p>}
+            {workers.length === 0 && <p className="session-rail__empty">No workers yet.</p>}
           </div>
         </section>
       )}
