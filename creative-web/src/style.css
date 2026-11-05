@@ -166,7 +166,7 @@ details p {
 }
 .workspace {
   display: grid;
-  grid-template-columns: 228px minmax(420px, 1fr) minmax(340px, 390px);
+  grid-template-columns: 228px minmax(0, 1fr);
   height: calc(100vh - 52px);
   min-height: 600px;
 }
@@ -249,6 +249,7 @@ details p {
   padding: 8px 6px 8px 26px;
 }
 .results {
+  min-width: 0;
   padding: 28px 32px;
   overflow: auto;
   background: var(--bg);
@@ -365,9 +366,9 @@ details p {
 }
 .discussion {
   background: var(--surface);
-  border-left: 1px solid var(--border);
-  padding: 24px 20px;
-  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  padding: 20px 24px;
 }
 .discussion > .heading {
   align-items: flex-start;
