@@ -87,6 +87,10 @@ func TestCreativeLifecycleDecisionQueueExactSnapshot(t *testing.T) {
 				t.Errorf("%s=%v want %v", k, data[k], want)
 			}
 		}
+		versions, _ := json.Marshal(data["artifact_version_ids"])
+		if string(versions) != fmt.Sprintf("[%d]", version) {
+			t.Fatalf("message versions %s", versions)
+		}
 		ts, ok := data["timestamp"].(float64)
 		if !ok || int64(ts) < begin || int64(ts) > time.Now().Unix() {
 			t.Fatalf("timestamp %v", data)
@@ -136,6 +140,11 @@ func TestCreativeLifecycleWithdrawFYIAndDenials(t *testing.T) {
 	b, err := d.Store.GetCreativeDiscussionContext("question", q.ID)
 	if err != nil || len(b.ArtifactVersionIDs) != 1 || b.ArtifactVersionIDs[0] != version {
 		t.Fatalf("FYI context %+v %v", b, err)
+	}
+	visible := creativeRequest(t, d, "GET", fmt.Sprintf("/v1/creative/runs/%d/questions?stage_id=%d", r.ID, r.Stages[0].ID), "", "", 200)
+	var notices []creativeQuestionResponse
+	if err := json.Unmarshal(visible, &notices); err != nil || len(notices) != 1 || notices[0].Status != "resolved" {
+		t.Fatalf("human discussion visibility %s %v", visible, err)
 	}
 	e := lifecycleEvent(t, d, "withdraw")
 	if e.Data["reason"] != "Correct the publication" || e.Data["actor_session_id"] != "orch" || e.Data["review_revision"] != float64(1) || e.Data["notification_status"] != "recorded" {
