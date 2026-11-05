@@ -1,5 +1,5 @@
 import { File as NativeFile } from "node:buffer";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
@@ -197,4 +197,95 @@ it("displays every submitted version when a review includes two versions of one 
     "/v1/creative/artifact-versions/12/content?download=1",
   ]);
   expect(displayed).toContainEqual([11, 12]);
+});
+
+it("opens the selected submitted HTML version in a separate isolated tab and retains download/history", async () => {
+  const htmlVersions = versions.map((v) => ({
+    ...v,
+    filename: "page.html",
+    mime: "text/html",
+  }));
+  server.use(
+    http.get("/v1/creative/artifacts/2", () =>
+      HttpResponse.json({ artifact, versions: htmlVersions }),
+    ),
+  );
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <Artifacts
+        scope={{ run_id: 7, stage_id: 4 }}
+        reviewIDs={[11]}
+        reviewing
+        onShown={() => {}}
+      />
+    </QueryClientProvider>,
+  );
+  const link = await screen.findByRole("link", { name: /Open HTML.*new tab/ });
+  expect(link).toHaveAttribute(
+    "href",
+    "/v1/creative/artifact-versions/11/view",
+  );
+  expect(link).toHaveAttribute("target", "_blank");
+  expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  expect(
+    screen.getByRole("link", { name: "Download page.html" }),
+  ).toHaveAttribute(
+    "href",
+    "/v1/creative/artifact-versions/11/content?download=1",
+  );
+  expect(screen.getByText(/self-contained/)).toBeInTheDocument();
+  await userEvent.selectOptions(
+    screen.getByLabelText("Opening scene version"),
+    "12",
+  );
+  expect(
+    screen.getByRole("link", { name: /Open HTML.*new tab/ }),
+  ).toHaveAttribute("href", "/v1/creative/artifact-versions/12/view");
+});
+
+it("explains unsupported previews and keeps downloads", () => {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <Media
+        version={{
+          ...versions[0],
+          mime: "application/zip",
+          filename: "bundle.zip",
+        }}
+      />
+    </QueryClientProvider>,
+  );
+  expect(
+    screen.getByText(/Preview is unavailable for this file type/),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("link", { name: "Download bundle.zip" }),
+  ).toBeInTheDocument();
+});
+
+it("retains image, video and audio previews and reports playback failures", () => {
+  const { container } = render(
+    <QueryClientProvider client={new QueryClient()}>
+      {["image/png", "video/mp4", "audio/mpeg"].map((mime, i) => (
+        <Media key={mime} version={{ ...versions[0], id: i + 1, mime }} />
+      ))}
+    </QueryClientProvider>,
+  );
+  expect(screen.getByRole("img")).toHaveAttribute(
+    "src",
+    versions[0].content_url,
+  );
+  expect(container.querySelector("video")).toHaveAttribute("controls");
+  expect(container.querySelector("audio")).toHaveAttribute("controls");
+  fireEvent.error(container.querySelector("video")!);
+  expect(
+    screen.getByText(/This browser could not display the file/),
+  ).toBeInTheDocument();
+  expect(
+    screen.getAllByRole("link", { name: "Download clip.mp4" }),
+  ).toHaveLength(3);
 });

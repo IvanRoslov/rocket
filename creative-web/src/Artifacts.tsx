@@ -30,6 +30,7 @@ export function Media({ version }: { version: ArtifactVersion }) {
     },
     refetchInterval: false,
   });
+  const html = /^text\/html(;|$)/.test(version.mime);
   const image = /^image\/(png|jpeg|gif|webp|avif|bmp)(;|$)/.test(version.mime);
   return (
     <div className="media">
@@ -59,7 +60,28 @@ export function Media({ version }: { version: ArtifactVersion }) {
             <ErrorNotice error={text.error} />
             <pre>{text.data ?? "Loading text…"}</pre>
           </>
-        ) : null)}
+        ) : html ? (
+          <>
+            <a
+              href={`${base}/artifact-versions/${version.id}/view`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Open HTML in new tab
+            </a>
+            <p className="muted">
+              Isolated viewing supports self-contained HTML and requires a
+              configured preview origin. External resources and sibling files
+              are blocked. Download is always available below.
+            </p>
+          </>
+        ) : (
+          <p>
+            {textType
+              ? "This text file is too large to preview. Download it to view it."
+              : "Preview is unavailable for this file type. Download it to view it."}
+          </p>
+        ))}
       {failed && (
         <p>This browser could not display the file. Download it to view it.</p>
       )}
