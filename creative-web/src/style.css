@@ -1,7 +1,7 @@
 /* Rocket owns base styles and primitives. Only Creative layout and native
    form fields live here; all presentation values use Rocket's tokens. */
 .creative-app {
-  min-width: 1060px;
+  min-width: 1200px;
   font-size: 13px;
   line-height: 1.5;
 }
@@ -166,7 +166,7 @@ details p {
 }
 .workspace {
   display: grid;
-  grid-template-columns: 228px minmax(0, 1fr);
+  grid-template-columns: 208px minmax(0, 1fr) 312px;
   height: calc(100vh - 52px);
   min-height: 600px;
 }
@@ -250,7 +250,7 @@ details p {
 }
 .results {
   min-width: 0;
-  padding: 28px 32px;
+  padding: 24px;
   overflow: auto;
   background: var(--bg);
 }
@@ -553,4 +553,9 @@ details p {
 
 .creative-sessions {
   margin-top: 18px;
+}
+
+.creative-session-rail {
+  width: auto;
+  min-width: 0;
 }

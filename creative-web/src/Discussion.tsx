@@ -1,4 +1,3 @@
-import { SessionCard } from "../../web/src/components/SessionCard";
 import { Badge } from "../../web/src/components/Badge";
 import { Button } from "../../web/src/components/Button";
 import { useState } from "react";
@@ -10,7 +9,6 @@ import type {
   Context,
   CreativeMessage,
   CreativeQuestion,
-  CreativeSession,
 } from "./types";
 import { Empty, ErrorNotice } from "./ui";
 function BoundVersions({ ids }: { ids: number[] }) {
@@ -83,25 +81,10 @@ export function Discussion({
     queryFn: () =>
       api.get<CreativeQuestion[]>(contextPath(context, "questions")),
   });
-  const sessions = useQuery({
-    queryKey: ["creative", "sessions", context.run_id],
-    queryFn: () =>
-      api.get<CreativeSession[]>(`${base}/runs/${context.run_id}/sessions`),
-  });
-  const profiles = useQuery({
-    queryKey: ["creative", "profiles"],
-    queryFn: () =>
-      api.get<{
-        profiles: { name: string; enabled: boolean; model: string }[];
-      }>("/v1/model-profiles"),
-  });
-  const [profile, setProfile] = useState(""),
-    [body, setBody] = useState(""),
+  const [body, setBody] = useState(""),
     [mode, setMode] = useState("message");
   const [draftContext, setDraftContext] = useState<Context>();
   const command = useCommand();
-  const session = sessions.data?.find((s) => s.id === orchestrator);
-  const active = session && ["running", "spawning"].includes(session.state);
   const target = draftContext ?? context;
   const changed = JSON.stringify(target) !== JSON.stringify(context);
   function reset() {
@@ -115,79 +98,9 @@ export function Discussion({
           <span className="eyebrow">Creative orchestrator</span>
           <h2>Discussion</h2>
         </div>
-        <Badge tone={active ? "ok" : "neutral"}>
-          {active ? "Connected" : orchestrator ? "Offline" : "Not started"}
-        </Badge>
       </div>
       <p className="context-label">{context.label}</p>
-      {!orchestrator ? (
-        <div className="session-controls">
-          <label>
-            Model profile
-            <select
-              value={profile}
-              onChange={(e) => setProfile(e.target.value)}
-            >
-              <option value="">Configured default</option>
-              {profiles.data?.profiles
-                .filter((p) => p.enabled)
-                .map((p) => (
-                  <option key={p.name} value={p.name}>
-                    {p.name} · {p.model}
-                  </option>
-                ))}
-            </select>
-          </label>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={command.isPending}
-            onClick={() =>
-              command.mutate(() =>
-                api.post(
-                  `${base}/runs/${context.run_id}/sessions`,
-                  profile ? { profile } : {},
-                ),
-              )
-            }
-          >
-            Start creative orchestrator
-          </Button>
-        </div>
-      ) : !active && !sessions.isPending ? (
-        <Button
-          variant="secondary"
-          size="sm"
-          disabled={command.isPending}
-          onClick={() =>
-            command.mutate(() =>
-              api.post(
-                `/v1/sessions/${encodeURIComponent(orchestrator)}/restore`,
-              ),
-            )
-          }
-        >
-          Restore creative orchestrator
-        </Button>
-      ) : null}
-      <ErrorNotice
-        error={
-          sessions.error ?? profiles.error ?? messages.error ?? questions.error
-        }
-      />
-      {sessions.data && (
-        <section className="creative-sessions" aria-label="Run sessions">
-          <div className="session-rail__heading">Sessions</div>
-          {session && <SessionCard key={session.id} session={session} role="orchestrator" />}
-          <div className="session-rail__workers-heading">Workers</div>
-          <div className="session-rail__workers">
-            {sessions.data.filter((s) => s.kind === "worker").map((worker) => (
-              <SessionCard key={worker.id} session={worker} role="worker" />
-            ))}
-            {!sessions.data.some((s) => s.kind === "worker") && <p className="session-rail__empty">No workers yet.</p>}
-          </div>
-        </section>
-      )}
+      <ErrorNotice error={messages.error ?? questions.error} />
       <div className="discussion-feed">
         <h3>Questions & decisions</h3>
         {questions.isPending && <p>Loading questions…</p>}

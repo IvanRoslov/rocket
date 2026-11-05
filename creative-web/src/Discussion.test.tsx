@@ -5,6 +5,7 @@ import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 import { Discussion } from "./Discussion";
+import { CreativeSessionRail } from "./SessionRail";
 const posted: unknown[] = [];
 const server = setupServer(
   http.get("/v1/creative/runs/7/messages", () => HttpResponse.json([])),
@@ -124,11 +125,7 @@ it("launches the dedicated creative orchestrator with an existing enabled profil
   });
   render(
     <QueryClientProvider client={client}>
-      <Discussion
-        context={{ run_id: 7, label: "Film", artifact_version_ids: [] }}
-        orchestrator=""
-        ready
-      />
+      <CreativeSessionRail runID={7} orchestrator="" />
     </QueryClientProvider>,
   );
   await screen.findByRole("option", { name: "director · configured-model" });
@@ -153,8 +150,7 @@ function renderAccess() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const tree = (run = 7, orchestrator = "orch /7?") => (
     <QueryClientProvider client={client}>
-      <Discussion context={{ run_id: run, label: "Film", artifact_version_ids: [] }}
-        orchestrator={orchestrator} ready />
+      <CreativeSessionRail runID={run} orchestrator={orchestrator} />
     </QueryClientProvider>
   );
   return { ...render(tree()), tree };
@@ -184,7 +180,6 @@ it("shows actual run session identities and models with safe encoded root access
   }
   expect(screen.queryByRole("button", { name: /kill|delete|restore/i })).not.toBeInTheDocument();
   expect(screen.queryByText(/PR #|PR —/)).not.toBeInTheDocument();
-  expect(screen.getByLabelText("Message or question")).toBeInTheDocument();
 });
 it("confirms attach only after clipboard success and clears stale confirmation on failure", async () => {
   const user = userEvent.setup();

@@ -247,7 +247,7 @@ it("retains an older selected version and draft through tabs and keeps the draft
   expect(screen.getByRole("img", { name: "scene-11.png" })).toBeVisible();
   await user.click(screen.getByRole("tab", { name: "Questions & discussion" }));
   expect(screen.getByLabelText("Message or question")).toHaveValue("Keep this framing");
-  const sessions = screen.getByRole("region", { name: "Run sessions" });
+  const sessions = screen.getByRole("complementary", { name: "Run sessions" });
   expect(within(sessions).getByRole("link", { name: /term/ })).toHaveAttribute("href", "/term/creative-7");
   expect(within(sessions).getByRole("link", { name: /chat/ })).toHaveAttribute("href", "/chat/creative-7");
   expect(within(sessions).getByRole("button", { name: "Copy attach command for creative-7" })).toBeEnabled();
@@ -291,4 +291,18 @@ it("keeps heading and progress compact while full work details remain available"
   const brief = screen.getAllByText("Creative brief").map((s) => s.closest("details")).filter(Boolean);
   expect(brief).toHaveLength(2);
   brief.forEach((d) => expect(d).not.toHaveAttribute("open"));
+});
+
+it("keeps the session rail outside central content and visible on every workspace tab", async () => {
+  workspaceFixture();
+  open();
+  const user = userEvent.setup();
+  const rail = await screen.findByRole("complementary", { name: "Run sessions" });
+  expect(screen.getByRole("main")).not.toContainElement(rail);
+  for (const tab of ["Artifacts", "Landing preview", "Questions & discussion"]) {
+    await user.click(screen.getByRole("tab", { name: tab }));
+    expect(rail).toBeVisible();
+    expect(within(rail).getByRole("link", { name: /term/ })).toHaveAttribute("href", "/term/creative-7");
+    expect(within(rail).getByRole("button", { name: /Copy attach/ })).toBeEnabled();
+  }
 });
