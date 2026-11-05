@@ -293,6 +293,10 @@ func handleCreativeDiscussionPost(w http.ResponseWriter, r *http.Request, d Deps
 		if to == "" {
 			to = c.OrchestratorSessionID
 		}
+		if caller != nil && to == caller.ID {
+			writeErr(w, http.StatusBadRequest, "self_send", "cannot send a Creative message to yourself; use --to <recipient-session> (orchestrators must name the worker); list recipients with rocket creative agent sessions RUN")
+			return
+		}
 		target, err := d.Store.GetSession(to)
 		if err != nil {
 			creativeError(w, err)

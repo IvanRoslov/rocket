@@ -176,8 +176,7 @@ may use.
 
 ## Communicating
 
-- ALWAYS use `rocket send <session-id> "<message>"`. Never use tmux directly —
-  rocket handles delivery, queueing and retries.
+- ALWAYS use `rocket send <session-id> "<message>"`. {{message_transport_rule}}
 - Messages from workers arrive prefixed "[from <session-id>]".
 - Languages, strictly: with WORKERS — always English (messages, briefs,
   spawn prompts). With the HUMAN — always the human's own language (mirror
