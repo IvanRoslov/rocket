@@ -40,6 +40,24 @@ func Render(home, name string, v Vars) (string, error) {
 		content = string(data)
 	}
 
+	// Fixed embedded fragments share existing instructions, without introducing
+	// user-defined includes or changing template override selection. Expand before
+	// validating Vars so placeholders inside fragments obey the same contract.
+	for _, fragment := range []struct{ key, file string }{
+		{"creative_rules", "creative-rules.md"},
+		{"message_transport_rule", "message-transport.md"},
+	} {
+		marker := "{{" + fragment.key + "}}"
+		if !strings.Contains(content, marker) {
+			continue
+		}
+		data, err := templates.ReadFile(filepath.Join("templates", fragment.file))
+		if err != nil {
+			return "", fmt.Errorf("failed to load shared instructions %q: %w", fragment.key, err)
+		}
+		content = strings.ReplaceAll(content, marker, strings.TrimSuffix(string(data), "\n"))
+	}
+
 	// Extract all placeholders from the template
 	placeholderRe := regexp.MustCompile(`\{\{([a-z_]+)\}\}`)
 	matches := placeholderRe.FindAllStringSubmatch(content, -1)
