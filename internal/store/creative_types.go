@@ -82,7 +82,8 @@ type CreativeContext struct {
 	OrchestratorSessionID string `json:"orchestrator_session_id"`
 }
 type CreativeAction struct {
-	Action             string  `json:"action"`                         // start | submit | approve | reject | reopen
-	ReviewRevision     int64   `json:"review_revision,omitempty"`      // required for approve/reject
+	Reason             string  `json:"reason,omitempty"`               // required for withdraw
+	Action             string  `json:"action"`                         // start | submit | approve | reject | reopen | withdraw
+	ReviewRevision     int64   `json:"review_revision,omitempty"`      // required for approve/reject/withdraw
 	ArtifactVersionIDs []int64 `json:"artifact_version_ids,omitempty"` // submit snapshot
 }
