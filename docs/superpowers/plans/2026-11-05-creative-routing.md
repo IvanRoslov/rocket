@@ -65,7 +65,7 @@
 
 - [x] Run go test ./... and go vet ./... and go build ./cmd/...; expected PASS, report any environmental failures by name.
 - [x] Review whole branch against scope/ordinary regression and fix acceptance findings with TDD.
-- [ ] Push feature/creative-work/routing-prompts and open PR referencing creative-work, with concrete behavior and validation.
+- [x] Push feature/creative-work/routing-prompts and open PR referencing creative-work, with concrete behavior and validation.
 
 ## Execution record
 
@@ -81,3 +81,5 @@ Review rulings (no deferred minors):
 - Provider readiness implementation stays sibling-owned; prompts describe uncertainty and configuration presence without assuming new fields. Users must read the tool's documented setup until that contract ships.
 
 All checks use synthetic fixtures/local builds. No live session/config changes, old-message resends, manual status writes or paid calls.
+
+PR: https://github.com/IvanRoslov/rocket/pull/199 (awaiting orchestrator review/merge).
