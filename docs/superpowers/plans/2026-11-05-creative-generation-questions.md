@@ -19,7 +19,7 @@
 
 ## Review Focus
 
-- Human reduces a batch: restate final scope/cost and wait for explicit Go.
+- Human reduces a batch: restate final scope/cost and wait for explicit Go; use existing reply --dispute if the prior answer resolved the thread.
 - Unknown price: clarify before execution, rather than merely label unknown.
 - Extra variants/retries after Go: fresh agreement for additional paid attempts/cost.
 - Interruption: inspect actual completed calls before retrying.

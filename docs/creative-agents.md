@@ -30,7 +30,7 @@ replacement. Creative workers are excluded from PR polling and merge cleanup.
 
 ```sh
 rocket creative agent send RUN --stage STAGE --item ITEM --version VERSION --file note.md
-rocket creative agent ask RUN --stage STAGE --item ITEM --version VERSION --file proposal.md --option Go --option Revise
+rocket creative agent ask RUN --stage STAGE --item ITEM --version VERSION --body "Generate one image with TOOL / PROVIDER / MODEL from VERSION; send INPUTS via UPLOAD_SERVICE; 1 call: EXACT_CALL; estimated PRICE based on BASIS. Go?" --option Go --option Revise --option Deny
 rocket creative agent messages RUN --stage STAGE --item ITEM
 rocket creative agent questions RUN --stage STAGE --item ITEM
 rocket creative agent reply QUESTION --file reply.md
@@ -44,6 +44,25 @@ context remains exact, as does run context. All references are explicit immutabl
 IDs. Artifact listing remains exact to its storage scope. Paid Go follows the
 agent rule in [creative-tools.md](creative-tools.md); answering a question never
 changes stage approval or technically authorizes tool execution.
+
+Paid proposals belong in these existing question threads, for an individual call
+or clearly enumerated batch. The example above uses placeholders: replace them
+with the intended output, actual tool/provider/model, all transmitted inputs and
+upload services, complete call list and count, and price/estimate basis. Omit
+`--version` if no existing artifact is being discussed; do not create a proposal
+file or artifact solely to ask permission. Existing results retain their versions
+and newly generated results are published normally.
+
+The human may deny, clarify or reduce a batch. Agents continue the discussion with
+`reply QUESTION --body TEXT` (or `--file` for existing markdown/large text). A
+clarification or reduction is not approval: reply in that thread with the revised
+scope and cost, then wait for explicit human Go on that proposal. If the previous
+answer resolved the question, include `--dispute` on the reply with the updated
+proposal to reopen that same thread for a new answer; an ordinary agent reply to a
+resolved question only adds history. Resolve unknown pricing with the human
+before executing. Additional paid attempts or cost require
+fresh agreement and a new Go; a previous Go never covers a changed proposal.
+Question history remains intact throughout discussion.
 
 HTTP contracts (snake_case, existing authentication):
 
