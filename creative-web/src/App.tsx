@@ -341,7 +341,7 @@ function Workspace({
     ready: boolean;
   }>({ key: "", shown: [], ready: false });
   const [reset, setReset] = useState(0);
-  const [tab, setTab] = useState<"results" | "preview">("results");
+  const [tab, setTab] = useState<"discussion" | "results" | "preview">("discussion");
   const onShown = useCallback(
     (shown: ShownVersion[], ready: boolean) =>
       setArtifactState((prev) => {
@@ -379,33 +379,62 @@ function Workspace({
             <WorkDescription stage={stage} item={item} />
             {!work && (
               <>
-                <span className="eyebrow">Creative brief</span>
                 <h1>{run.name}</h1>
-                <p className="prose">{run.brief}</p>
+                <details className="run-brief">
+                  <summary>Creative brief</summary>
+                  <p className="prose">{run.brief}</p>
+                </details>
               </>
-            )}
-            {work && (
-              <ReviewActions
-                scope={scope}
-                work={work}
-                canProgress={!!canProgress}
-                shown={shown}
-                ready={ready}
-                onShowReview={() => setReset((n) => n + 1)}
-              />
             )}
             <div className="view-tabs">
               <Tabs
-                label="Result view"
+                label="Workspace"
                 items={[
+                  { id: "discussion", label: "Questions & discussion" },
                   { id: "results", label: "Artifacts" },
                   { id: "preview", label: "Landing preview" },
                 ]}
                 activeId={tab}
-                onChange={(id) => setTab(id as "results" | "preview")}
+                onChange={(id) =>
+                  setTab(id as "discussion" | "results" | "preview")
+                }
+              />
+            </div>
+            <div hidden={tab !== "discussion"}>
+              <Discussion
+                context={{
+                  ...scope,
+                  label: [
+                    run.name,
+                    stage?.name,
+                    item?.name,
+                    ...shown.map(
+                      (s) =>
+                        `${s.item_name ? `${s.item_name} / ` : ""}${s.artifact.name} version ${s.version.version_number}`,
+                    ),
+                  ]
+                    .filter(Boolean)
+                    .join(" / "),
+                  artifact_version_ids: shown.map((s) => s.version.id),
+                }}
+                orchestrator={run.orchestrator_session_id}
+                ready={ready}
               />
             </div>
             <div hidden={tab !== "results"}>
+              {work && (
+                <ReviewActions
+                  scope={scope}
+                  work={work}
+                  canProgress={!!canProgress}
+                  shown={shown}
+                  ready={ready && tab === "results"}
+                  onShowReview={() => {
+                    setTab("results");
+                    setReset((n) => n + 1);
+                  }}
+                />
+              )}
               <Artifacts
                 key={`${scopeKey}:${reset}`}
                 scope={scope}
@@ -419,32 +448,11 @@ function Workspace({
                 onShown={onShown}
               />
             </div>
-            {tab === "preview" && <Preview scope={scope} />}{" "}
+            {tab === "preview" && <Preview scope={scope} />}
             {stage && <ItemEditor key={stage.id} scope={scope} stage={stage} />}
           </>
         )}
       </main>
-      {!invalid && (
-        <Discussion
-          context={{
-            ...scope,
-            label: [
-              run.name,
-              stage?.name,
-              item?.name,
-              ...shown.map(
-                (s) =>
-                  `${s.item_name ? `${s.item_name} / ` : ""}${s.artifact.name} version ${s.version.version_number}`,
-              ),
-            ]
-              .filter(Boolean)
-              .join(" / "),
-            artifact_version_ids: shown.map((s) => s.version.id),
-          }}
-          orchestrator={run.orchestrator_session_id}
-          ready={ready}
-        />
-      )}
     </div>
   );
 }

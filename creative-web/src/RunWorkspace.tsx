@@ -94,23 +94,24 @@ export function WorkDescription({
           ? ` · ${stage.approval === "auto" ? "Automatic progression" : stage.approval === "item" ? "Approval for each item" : "Approval for whole stage"}`
           : ""}
       </span>
-      <h1>{work.name}</h1>
-      <p className="prose">
-        {work.description || "No work description provided."}
-      </p>
-      <details open>
-        <summary>Expected artifacts</summary>
+      <div className="work-heading">
+        <h1>{work.name}</h1>
+        <div className="progress">
+          <progress aria-label="Work progress" max={100} value={work.progress} />
+          <span>{work.progress}% · {statusLabel[work.status]}</span>
+        </div>
+      </div>
+      <details>
+        <summary>Work details</summary>
+        <p className="prose">
+          {work.description || "No work description provided."}
+        </p>
+        <h3>Expected artifacts</h3>
         <p className="prose">
           {work.expected_artifacts || "No expected artifacts specified."}
         </p>
+        {work.progress_note && <p className="prose">{work.progress_note}</p>}
       </details>
-      <div className="progress">
-        <progress max={100} value={work.progress} />
-        <span>
-          {work.progress}% · {statusLabel[work.status]}
-        </span>
-      </div>
-      {work.progress_note && <p>{work.progress_note}</p>}
     </div>
   );
 }
