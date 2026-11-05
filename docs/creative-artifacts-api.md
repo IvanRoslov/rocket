@@ -51,3 +51,39 @@ Content is streamed with a **2 GiB per file** limit. This accommodates the exist
 Private files live under `<Rocket home>/creative-artifacts`, independent of source files and worker worktrees. Files are synced and committed using a non-overwriting hard link before the version/current database transaction. Failed/incomplete uploads publish no version, preserve the previous current version and remove their temporary/new blob. A crash before the database commit can leave an unreferenced file; automatic garbage collection is outside this deliverable. Back up this directory together with Rocket's database.
 
 Errors use Rocket's JSON error envelope: 400 invalid input/empty or interrupted transfer, 401 unknown session/unauthenticated TCP, 403 wrong-project write, 404 missing context/artifact/version, 413 over 2 GiB, 500 storage/publication/unavailable-content failure. A missing on-disk published file is a visible storage error. Clients should retain local files after an unsuccessful transfer and display the returned error.
+
+## Open a published HTML version
+
+`GET /v1/creative/artifact-versions/{version}/view` uses the existing device
+access check on TCP and validates project identity for Unix-socket agents. It
+returns a 303 redirect to a private, random, version-scoped link on the existing
+preview listener. Rocket credentials are never included in the link. It expires
+in five minutes (or on daemon restart); device revocation also blocks subsequent
+access. Already rendered bytes cannot be recalled. Treat this short-lived link
+as private: anyone holding it can view that one version until expiry/revocation.
+
+The Sources & results HTML link opens in a new tab with no opener/referrer. It
+always identifies the selected immutable version, including retained/submitted
+versions, independently of which version is current. Download remains available;
+HTML on the privileged `/content` route still has attachment disposition.
+
+Viewing requires `preview_port` and `preview_public_url` configured for a separate
+reachable hostname, as described in [creative previews](creative-previews.md).
+The private reverse proxy must preserve the configured preview Host. Dev-server
+registration and `preview_ports` are not needed for file viewing. Missing or
+stopped setup returns an actionable 503; unsupported MIME returns 415; unavailable
+content and expired/revoked links return 410. No setup or restart happens
+automatically. At most 256 links remain outstanding per daemon; a busy response
+asks the user to retry after existing links expire.
+
+Only `text/html` single-file, self-contained documents are supported. A trusted
+wrapper shows filename/version and a persistent explanation of this limit even
+when blocked dependencies leave the artifact blank. Inline JavaScript and CSS,
+and embedded data/blob images, audio/video and fonts are allowed. Remote/sibling
+resources, network APIs, nested frames, forms, popups, workers and browser storage
+are blocked. The artifact receives an opaque origin using CSP sandbox without
+`allow-same-origin`; the wrapper iframe also applies that sandbox. Responses are
+no-store/no-referrer/nosniff and do not set cookies. The preview listener has no
+Rocket interface/API routes. This is viewing a published file, not deploying an
+application or publishing it publicly. Keep using ordinary artifact previews for
+image/video/audio files and Download for unsupported types.
