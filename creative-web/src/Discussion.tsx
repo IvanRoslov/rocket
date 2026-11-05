@@ -1,3 +1,4 @@
+import { SessionCard } from "../../web/src/components/SessionCard";
 import { Badge } from "../../web/src/components/Badge";
 import { Button } from "../../web/src/components/Button";
 import { useState } from "react";
@@ -174,6 +175,19 @@ export function Discussion({
           sessions.error ?? profiles.error ?? messages.error ?? questions.error
         }
       />
+      {sessions.data && (
+        <section className="creative-sessions" aria-label="Run sessions">
+          <div className="session-rail__heading">Sessions</div>
+          {session && <SessionCard key={session.id} session={session} role="orchestrator" />}
+          <div className="session-rail__workers-heading">Workers</div>
+          <div className="session-rail__workers">
+            {sessions.data.filter((s) => s.kind === "worker").map((worker) => (
+              <SessionCard key={worker.id} session={worker} role="worker" />
+            ))}
+            {!sessions.data.some((s) => s.kind === "worker") && <p className="session-rail__empty">No workers yet.</p>}
+          </div>
+        </section>
+      )}
       <div className="discussion-feed">
         <h3>Questions & decisions</h3>
         {questions.isPending && <p>Loading questions…</p>}

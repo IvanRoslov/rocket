@@ -541,3 +541,7 @@ details p {
   font-size: 12px;
   color: var(--text-3);
 }
+
+.creative-sessions {
+  margin-top: 18px;
+}
