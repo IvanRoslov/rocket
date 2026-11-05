@@ -131,13 +131,14 @@ func creativeShowCommand(open creativeConnection, resource string) *cobra.Comman
 	}}
 }
 func creativeActionCommand(open creativeConnection, item bool) *cobra.Command {
-	n, use := 2, "action <run> <stage> <start|submit|approve|reject|reopen>"
+	n, use := 2, "action <run> <stage> <start|submit|approve|reject|reopen|withdraw>"
 	if item {
-		n, use = 3, "action <run> <stage> <item> <start|submit|approve|reject|reopen>"
+		n, use = 3, "action <run> <stage> <item> <start|submit|approve|reject|reopen|withdraw>"
 	}
 	var revision int64
+	var reason string
 	var versions []int64
-	cmd := &cobra.Command{Use: use, Short: "Submit, approve, reject or explicitly reopen work", Args: func(cmd *cobra.Command, a []string) error {
+	cmd := &cobra.Command{Use: use, Short: "Submit, approve, reject, reopen or withdraw review", Args: func(cmd *cobra.Command, a []string) error {
 		if len(a) != n+1 {
 			return &usageError{message: "usage: " + cmd.UseLine()}
 		}
@@ -145,12 +146,15 @@ func creativeActionCommand(open creativeConnection, item bool) *cobra.Command {
 	}, RunE: func(cmd *cobra.Command, a []string) error {
 		action := a[n]
 		switch action {
-		case "start", "submit", "approve", "reject", "reopen":
+		case "start", "submit", "approve", "reject", "reopen", "withdraw":
 		default:
 			return &usageError{message: "unknown action: " + action}
 		}
-		if (action == "approve" || action == "reject") && revision <= 0 {
+		if (action == "approve" || action == "reject" || action == "withdraw") && revision <= 0 {
 			return &usageError{message: "--review-revision from the displayed review is required"}
+		}
+		if action == "withdraw" && strings.TrimSpace(reason) == "" {
+			return &usageError{message: "--reason is required for withdraw"}
 		}
 		if action != "submit" && len(versions) > 0 {
 			return &usageError{message: "--artifact-version is only valid for submit"}
@@ -160,9 +164,10 @@ func creativeActionCommand(open creativeConnection, item bool) *cobra.Command {
 				return &usageError{message: "artifact version IDs must be positive"}
 			}
 		}
-		return creativeCall(cmd, open, "POST", creativeTargetPath(a[:n])+"/actions", store.CreativeAction{Action: action, ReviewRevision: revision, ArtifactVersionIDs: versions})
+		return creativeCall(cmd, open, "POST", creativeTargetPath(a[:n])+"/actions", store.CreativeAction{Action: action, ReviewRevision: revision, ArtifactVersionIDs: versions, Reason: strings.TrimSpace(reason)})
 	}}
-	cmd.Flags().Int64Var(&revision, "review-revision", 0, "Displayed revision required for approve/reject")
+	cmd.Flags().StringVar(&reason, "reason", "", "Required explanation for withdrawing a pending review")
+	cmd.Flags().Int64Var(&revision, "review-revision", 0, "Displayed revision required for approve/reject/withdraw")
 	cmd.Flags().Int64SliceVar(&versions, "artifact-version", nil, "Immutable version IDs to submit for review (repeat or comma separate)")
 	return cmd
 }

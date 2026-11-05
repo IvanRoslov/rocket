@@ -4,7 +4,7 @@ After a committed human approve/reject, enqueue one contextual message for the r
 
 Withdraw extends the stage/item action endpoint and CLI with required review_revision and nonblank reason. A separate authenticated store entry accepts a caller session ID and checks current run orchestrator identity, binding, kind and live state under the existing creativeWrite transaction lock. The legacy boolean-human entry cannot withdraw. Only exact awaiting_approval becomes in_progress; versions and revision remain, subsequent submit increments revision. Approve and withdraw serialize through the same lock.
 
-A successful withdrawal records reason, actor, revision and versions in the existing action event and creates a contextual FYI discussion (already answered, no approval requested), with human/orchestrator participants. Discussion creation failure is observable without reversing the withdrawal. Reuse the existing FYI semantics, allowing AddCreativeQuestion to preserve its default decision behavior.
+A successful withdrawal records reason, actor, revision and versions in the existing action event and creates a contextual FYI discussion (already resolved, no approval requested), with human/orchestrator participants. Discussion creation failure is observable without reversing the withdrawal. Reuse the existing FYI semantics, allowing AddCreativeQuestion to preserve its default decision behavior.
 
 ## Approach and boundaries
 
