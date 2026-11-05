@@ -45,8 +45,8 @@ Interfaces: Media derives authenticated /view path from immutable version ID for
 
 - [x] Exercise synthetic browser fixture for sandbox/storage/opener/network and visible wrapper; record limits.
 - [x] Review full diff using fresh reviewer, fix acceptance/security findings with regression tests.
-- [ ] Run final targeted Go checks, creative-web tests/build, git diff --check.
-- [ ] Push feature/creative-work/artifact-view, create one PR referencing creative-work; notify orchestrator with URL and constraints.
+- [x] Run final targeted Go checks, creative-web tests/build, git diff --check.
+- [x] Push feature/creative-work/artifact-view, create one PR referencing creative-work; notify orchestrator with URL and constraints.
 
 ## Execution ledger
 
@@ -58,3 +58,5 @@ Task 2 complete: frontend RED missing HTML link/unsupported notice, GREEN 25/25 
 Task 3 browser verification: synthetic Chrome HTTPS-to-local-preview new-tab path rendered selected HTML; inline script ran, cookie/storage/parent/opener/network isolation passed; wrapper visually inspected. Local configuration validation is unchanged pending orchestrator gate.
 Final review: fresh security reviewer found one Important acceptance failure: same-size replacement bypassed size check. Regression reproduced HTTP 200 for replaced bytes; digest verification now rejects mismatched SHA256 on issuance and existing capabilities. No other actionable findings.
 Ruling: live proxy/DNS availability and real-case evaluation remain operator-owned; no restart/config changes performed. Browser evidence is Chrome-only; other engines not claimed. Pending local-mode delta is outside this completed implementation until separately approved.
+
+Final verification after review fix: go test ./... PASS; targeted artifact/preview race PASS; creative-web 25 tests/build PASS; git diff --check clean. Delivered PR https://github.com/IvanRoslov/rocket/pull/191 (open, mergeable; no configured status checks reported). Local-only validation delta awaits separate gate.
