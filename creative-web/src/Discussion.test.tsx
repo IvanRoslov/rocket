@@ -14,7 +14,7 @@ const server = setupServer(
     HttpResponse.json([{ id: "creative-7", tmux_name: "creative-7", kind: "orchestrator", agent: "codex", state: "running" }]),
   ),
   http.get("/v1/model-profiles", () => HttpResponse.json({ profiles: [] })),
-  http.post("/v1/creative/runs/7/messages", async ({ request }) => {
+  http.post("/v1/creative/runs/7/questions", async ({ request }) => {
     posted.push(await request.json());
     return HttpResponse.json({ id: 1 });
   }),
@@ -45,14 +45,14 @@ it("keeps a draft bound to the stage and artifact version originally shown when 
   );
   const user = userEvent.setup();
   await user.type(
-    screen.getByLabelText("Message or question"),
+    screen.getByLabelText("Question"),
     "Make the opening warmer",
   );
   view.rerender(tree(5, 12, "Film / Edit · Final cut version 2"));
   expect(
     screen.getByText(/Draft stays with Film \/ Scenes \/ Opening/),
   ).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Send message" }));
+  await user.click(screen.getByRole("button", { name: "Open question" }));
   await waitFor(() =>
     expect(posted).toEqual([
       {
@@ -348,4 +348,21 @@ it("keeps newer reply text when an earlier submission finishes after navigating 
   deliver!();
   await waitFor(() => expect(view.client.isMutating()).toBe(0));
   expect(box).toHaveValue("Newer unsent clarification");
+});
+
+it("removes central messages while preserving contextual question creation", async () => {
+  let reads = 0;
+  server.use(http.get("/v1/creative/runs/7/messages", () => {
+    reads++;
+    return HttpResponse.json([{ id: 1, from: "human", body: "Hidden feed message" }]);
+  }));
+  renderThreads();
+  await screen.findByText("No questions in this context.");
+  expect(reads).toBe(0);
+  expect(screen.queryByRole("heading", { name: "Messages" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Hidden feed message")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Send as")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Send message" })).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Question")).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Open question" })).toBeDisabled();
 });

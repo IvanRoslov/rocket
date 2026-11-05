@@ -1,0 +1,8 @@
+Gate298 bounded design for acceptance (specv10/planv9, deliverable2)
+- Remove only Creative Discussion's central Messages fetch/feed and message mode; retain a question-only form, contextual draft/version binding, all thread reply/answer actions, and untouched session rail/chat/term/attach and backend message storage/delivery.
+- Root cause in code: Artifacts.Media renders Markdown as raw preformatted text; only recognized text MIME values are fetched, so Markdown published with generic MIME has no preview. HTML /view is deliberately HTML-only and requires separate preview configuration.
+- Render selected immutable Markdown bytes inline with existing react-markdown/GFM infrastructure, raw HTML disabled, unsafe URLs blocked, and no automatic embedded-image/network loads. Restrict filename fallback to .md/.markdown with generic/text MIME; do not reinterpret active HTML or media.
+- Retain artifact name; show selected filename/version and existing scope context/download. Keep 1 MiB preview limit and clear load/size failures; no publication rewrite, deletion, approval or spend action.
+- Prefer the existing authenticated selected-version content endpoint and client rendering over a new server HTML/view route: no new capabilities, configuration, dependencies or live restart.
+- Gather only read-only current-run artifact metadata needed for diagnosis; preserve content and access boundaries. Test selected/retained versions, malicious Markdown, generic MIME, failure/size/media behavior, and question creation/replies/answers after feed removal; run relevant frontend/backend checks and builds.
+- One Rocket PR only; no agent-instruction changes (generation-questions owns those), no broader redesign. Human owns real-case evaluation.

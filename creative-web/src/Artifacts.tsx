@@ -1,3 +1,4 @@
+import { Markdown } from "../../web/src/components/Markdown";
 import { Card } from "../../web/src/components/Card";
 import { Badge } from "../../web/src/components/Badge";
 import { Button } from "../../web/src/components/Button";
@@ -14,7 +15,10 @@ import type {
 import { Empty, ErrorNotice } from "./ui";
 export function Media({ version }: { version: ArtifactVersion }) {
   const [failed, setFailed] = useState(false);
-  const textType = /^(text\/(plain|markdown|csv)|application\/json)(;|$)/.test(
+  const mime = version.mime.split(";", 1)[0].trim().toLowerCase();
+  const markdown = mime === "text/markdown" || mime === "text/x-markdown" ||
+    (["application/octet-stream", "text/plain", ""].includes(mime) && /\.(md|markdown)$/i.test(version.filename));
+  const textType = markdown || /^(text\/(plain|markdown|csv)|application\/json)(;|$)/.test(
     version.mime,
   );
   const text = useQuery({
@@ -58,7 +62,13 @@ export function Media({ version }: { version: ArtifactVersion }) {
         ) : textType && version.size <= 1024 * 1024 ? (
           <>
             <ErrorNotice error={text.error} />
-            <pre>{text.data ?? "Loading text…"}</pre>
+            {!text.error && (text.data === undefined ? (
+              <p>Loading text…</p>
+            ) : markdown ? (
+              <Markdown resourcePolicy="linked-only">{text.data}</Markdown>
+            ) : (
+              <pre>{text.data}</pre>
+            ))}
           </>
         ) : html ? (
           <>
@@ -284,6 +294,7 @@ export function Artifacts({
                   </Button>
                 )}
               </div>
+              <p className="artifact-filename">{version.filename} · version {version.version_number}</p>
               <Media key={version.id} version={version} />
             </Card>
           );

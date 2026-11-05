@@ -14,9 +14,11 @@ import './markdown.css'
 export interface MarkdownProps {
   children: string
   compact?: boolean
+  /** Documents cannot load embedded resources or navigate relative app/API URLs. */
+  resourcePolicy?: 'linked-only'
 }
 
-export function Markdown({ children, compact }: MarkdownProps) {
+export function Markdown({ children, compact, resourcePolicy }: MarkdownProps) {
   return (
     <div className={compact ? 'markdown markdown--compact' : 'markdown'}>
       <ReactMarkdown
@@ -28,6 +30,9 @@ export function Markdown({ children, compact }: MarkdownProps) {
             </div>
           ),
           a: ({ href, children: linkChildren, ...rest }) => {
+            if (resourcePolicy === 'linked-only' && !/^(https?:\/\/|mailto:)/i.test(href ?? '')) {
+              return <span>{linkChildren}</span>
+            }
             const external = /^[a-z]+:\/\//i.test(href ?? '')
             return (
               <a
@@ -46,7 +51,9 @@ export function Markdown({ children, compact }: MarkdownProps) {
               <input type={type} {...rest} />
             ),
           img: ({ src, alt }) =>
-            src ? (
+            resourcePolicy === 'linked-only' ? (
+              <span>{alt ?? ''}</span>
+            ) : src ? (
               <a href={src} target="_blank" rel="noopener noreferrer">
                 <img src={src} alt={alt ?? ''} className="markdown__img" />
               </a>
