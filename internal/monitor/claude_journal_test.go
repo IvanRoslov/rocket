@@ -22,6 +22,7 @@ const journalTestUUID = "329baa3b-27eb-40ed-82e1-1d9f3dde01e5"
 const claudeJournalMetadata = `{"type":"last-prompt","sessionId":"SESSION","lastPrompt":"fixture"}
 {"type":"mode","sessionId":"SESSION","mode":"default"}
 {"type":"permission-mode","sessionId":"SESSION","permissionMode":"default"}
+{"type":"session-owner","sessionId":"SESSION","accountUuid":"","organizationUuid":""}
 {"type":"atis-latch","sessionId":"SESSION"}
 {"type":"ai-title","sessionId":"SESSION","title":"fixture"}
 {"type":"tools-used","sessionId":"SESSION","tools":[]}
@@ -38,6 +39,7 @@ const claudeJournalMetadata = `{"type":"last-prompt","sessionId":"SESSION","last
 const claudeJournalOrderedFixture = `{"type":"last-prompt","sessionId":"SESSION","lastPrompt":"fixture"}
 {"type":"mode","sessionId":"SESSION","mode":"default"}
 {"type":"permission-mode","sessionId":"SESSION","permissionMode":"default"}
+{"type":"session-owner","sessionId":"SESSION","accountUuid":"","organizationUuid":""}
 {"type":"atis-latch","sessionId":"SESSION"}
 {"type":"attachment","sessionId":"SESSION","timestamp":"STAMP"}
 {"type":"user","sessionId":"SESSION","uuid":"user-1","timestamp":"STAMP","message":{"role":"user","content":"fixture prompt"}}
@@ -49,6 +51,7 @@ const claudeJournalOrderedFixture = `{"type":"last-prompt","sessionId":"SESSION"
 {"type":"last-prompt","sessionId":"SESSION","lastPrompt":"fixture"}
 {"type":"mode","sessionId":"SESSION","mode":"default"}
 {"type":"permission-mode","sessionId":"SESSION","permissionMode":"default"}
+{"type":"session-owner","sessionId":"SESSION","accountUuid":"","organizationUuid":""}
 {"type":"atis-latch","sessionId":"SESSION"}
 {"type":"ai-title","sessionId":"SESSION","title":"fixture"}
 {"type":"tools-used","sessionId":"SESSION","tools":[]}
@@ -147,6 +150,10 @@ func TestClaudeJournalConservativeRecords(t *testing.T) {
 	at := time.Now().Add(-time.Minute).UTC()
 	valid := journalFixtureText(`{"type":"assistant","sessionId":"SESSION","timestamp":"STAMP"}`+"\n", at)
 	for _, tc := range []struct{ name, tail string }{
+		{"owner error missing timestamp", `{"type":"session-owner","sessionId":"SESSION","isApiErrorMessage":true}` + "\n"},
+		{"owner nested error missing timestamp", `{"type":"session-owner","sessionId":"SESSION","message":{"isApiErrorMessage":true}}` + "\n"},
+		{"owner invalid timestamp", `{"type":"session-owner","sessionId":"SESSION","timestamp":"invalid"}` + "\n"},
+		{"malformed owner", `{"type":"session-owner","sessionId":"SESSION",` + "\n"},
 		{"missing user timestamp", `{"type":"user","sessionId":"SESSION"}` + "\n"},
 		{"missing assistant timestamp", `{"type":"assistant","sessionId":"SESSION"}` + "\n"},
 		{"null timestamp", `{"type":"assistant","sessionId":"SESSION","timestamp":null}` + "\n"},
@@ -182,6 +189,8 @@ func TestClaudeJournalMetadataIdentityAndErrorPrecedence(t *testing.T) {
 		{"foreign lifecycle only", `{"type":"assistant","sessionId":"foreign","timestamp":"STAMP"}` + "\n", "", true},
 		{"metadata and foreign lifecycle", claudeJournalMetadata + `{"type":"assistant","sessionId":"foreign","timestamp":"STAMP"}` + "\n", "", true},
 		{"foreign error after valid", `{"type":"assistant","sessionId":"SESSION","timestamp":"STAMP"}` + "\n" + `{"type":"assistant","sessionId":"foreign","isApiErrorMessage":true}` + "\n", activity.Ready, false},
+		{"top level error on owner", `{"type":"session-owner","sessionId":"SESSION","timestamp":"STAMP","isApiErrorMessage":true}` + "\n", activity.Blocked, false},
+		{"nested error on owner", `{"type":"session-owner","sessionId":"SESSION","timestamp":"STAMP","message":{"isApiErrorMessage":true}}` + "\n", activity.Blocked, false},
 		{"top level error on metadata", `{"type":"mode","sessionId":"SESSION","timestamp":"STAMP","isApiErrorMessage":true}` + "\n", activity.Blocked, false},
 		{"nested error on metadata", `{"type":"mode","sessionId":"SESSION","timestamp":"STAMP","message":{"isApiErrorMessage":true}}` + "\n", activity.Blocked, false},
 		{"genuine lifecycle clears block", `{"type":"assistant","sessionId":"SESSION","timestamp":"STAMP","isApiErrorMessage":true}` + "\n" + claudeJournalMetadata + `{"type":"user","sessionId":"SESSION","timestamp":"STAMP"}` + "\n", activity.Ready, false},

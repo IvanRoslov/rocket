@@ -80,7 +80,7 @@ func claudeJournalActivity(ctx context.Context, id claudeinstance.Identity) (act
 		if !record.Error && !record.Message.Error {
 			switch record.Type {
 			case "last-prompt", "mode", "permission-mode", "atis-latch", "ai-title", "tools-used", "api-request-blob",
-				"attachment", "api-request-shape", "api-request":
+				"attachment", "api-request-shape", "api-request", "session-owner":
 				continue
 			case "system":
 				if record.Subtype == "stop_hook_summary" || record.Subtype == "turn_duration" {
