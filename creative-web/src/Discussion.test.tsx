@@ -302,3 +302,50 @@ it("retains thread drafts on failed delivery, scope navigation and a newer quest
   expect(await screen.findByLabelText("Reply to creative/Q21")).toHaveValue("Keep this clarification");
   expect(screen.getByLabelText("Reply to creative/Q23")).toBeVisible();
 });
+
+it("clears a successfully delivered thread draft even when scope navigation unmounts the thread", async () => {
+  let deliver: (() => void) | undefined;
+  server.use(
+    http.get("/v1/creative/runs/7/questions", ({ request }) => HttpResponse.json(new URL(request.url).searchParams.get("stage_id") === "5" ? [] : [questionFixture(21)])),
+    http.post("/v1/questions/21/reply", async () => {
+      await new Promise<void>((resolve) => { deliver = resolve; });
+      return HttpResponse.json(questionFixture(21));
+    }),
+  );
+  const view = renderThreads();
+  const user = userEvent.setup();
+  await user.type(await screen.findByLabelText("Reply to creative/Q21"), "Delivered clarification");
+  await user.click(screen.getByRole("button", { name: /Clarify/ }));
+  await waitFor(() => expect(deliver).toBeTypeOf("function"));
+  view.rerender(view.tree(5));
+  await screen.findByText("No questions in this context.");
+  deliver!();
+  await waitFor(() => expect(view.client.isMutating()).toBe(0));
+  view.rerender(view.tree());
+  expect(await screen.findByLabelText("Reply to creative/Q21")).toHaveValue("");
+});
+
+it("keeps newer reply text when an earlier submission finishes after navigating back", async () => {
+  let deliver: (() => void) | undefined;
+  server.use(
+    http.get("/v1/creative/runs/7/questions", ({ request }) => HttpResponse.json(new URL(request.url).searchParams.get("stage_id") === "5" ? [] : [questionFixture(21)])),
+    http.post("/v1/questions/21/reply", async () => {
+      await new Promise<void>((resolve) => { deliver = resolve; });
+      return HttpResponse.json(questionFixture(21));
+    }),
+  );
+  const view = renderThreads();
+  const user = userEvent.setup();
+  await user.type(await screen.findByLabelText("Reply to creative/Q21"), "First clarification");
+  await user.click(screen.getByRole("button", { name: /Clarify/ }));
+  await waitFor(() => expect(deliver).toBeTypeOf("function"));
+  view.rerender(view.tree(5));
+  await screen.findByText("No questions in this context.");
+  view.rerender(view.tree());
+  const box = await screen.findByLabelText("Reply to creative/Q21");
+  await user.clear(box);
+  await user.type(box, "Newer unsent clarification");
+  deliver!();
+  await waitFor(() => expect(view.client.isMutating()).toBe(0));
+  expect(box).toHaveValue("Newer unsent clarification");
+});

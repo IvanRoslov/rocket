@@ -1,6 +1,6 @@
 # Creative Questions Layout Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Deliver gate297 specv9/planv8 UI correction with permanent sessions and central threaded questions.
 
@@ -31,10 +31,10 @@
 
 **Interfaces:** CreativeSessionRail({runID: number, orchestrator: string}) owns existing session queries/controls. Discussion keeps message/question queries and composer.
 
-- [ ] Add failing App integration test asserting session rail visibility and access links on discussion/artifacts/preview and outside main content.
-- [ ] Run Creative App tests; confirm regression fails because sessions are hidden in Discussion.
-- [ ] Extract unchanged Creative controls/cards to permanent sibling rail; use flexible center and desktop minimum width preserving readable questions.
-- [ ] Update session unit tests to mount rail directly; run Creative suite and commit.
+- [x] Add failing App integration test asserting session rail visibility and access links on discussion/artifacts/preview and outside main content.
+- [x] Run Creative App tests; confirm regression fails because sessions are hidden in Discussion.
+- [x] Extract unchanged Creative controls/cards to permanent sibling rail; use flexible center and desktop minimum width preserving readable questions.
+- [x] Update session unit tests to mount rail directly; run Creative suite and commit.
 
 ### Task 2: Shared central question threads
 
@@ -42,8 +42,16 @@
 
 **Interfaces:** QuestionThreadView gains optional readOnly, children context slot, and controlled draft hooks; defaults unchanged. Creative callbacks post existing /reply or /answer contracts and clear retained text only on success.
 
-- [ ] Add failing regression tests: newest-first open questions, individually collapsed resolved history with all replies, clarification vs answer payloads, earlier threads surviving new arrival, drafts across navigation and failure.
-- [ ] Add shared view tests for read-only full history and controlled drafts without changing default behavior; run tests and confirm intended failures.
-- [ ] Reuse shared QuestionThreadView/Markdown for Creative question and message rendering; retain drafts keyed by question identity; use shared form/action styling for discussion composer.
-- [ ] Run focused regressions, full Creative and shared web suites and both builds; inspect diff for context/review/renderer preservation.
-- [ ] Commit, fresh branch review, address acceptance failures, push branch and open one PR referencing creative-work.
+- [x] Add failing regression tests: newest-first open questions, individually collapsed resolved history with all replies, clarification vs answer payloads, earlier threads surviving new arrival, drafts across navigation and failure.
+- [x] Add shared view tests for read-only full history and controlled drafts without changing default behavior; run tests and confirm intended failures.
+- [x] Reuse shared QuestionThreadView/Markdown for Creative question and message rendering; retain drafts keyed by question identity; use shared form/action styling for discussion composer.
+- [x] Run focused regressions, full Creative and shared web suites and both builds; inspect diff for context/review/renderer preservation.
+- [x] Commit, fresh branch review, address acceptance failures, push branch and open one PR referencing creative-work.
+
+## Verification and review
+
+- Full Creative suite: 35/35 passed; full main web suite: 722/722 passed.
+- Both production builds pass; whole-branch diff whitespace check passes. Build-generated index files excluded, matching existing Creative PR convention.
+- Independent review found one acceptance failure: per-call mutation callbacks skip draft clearing after thread unmount. Two added RED→GREEN regressions cover successful delivery while navigating and retention of newer unsent text; completion now clears only the submitted draft.
+- One pre-existing main Task.test attach selector was corrected to the accessible name already supplied by SessionCard; no main-dashboard behavior change.
+- Existing environment warnings: Node experimental localStorage and main production bundle size. Real visual cases remain the designated human check; no live runs, restart/config changes or paid calls.

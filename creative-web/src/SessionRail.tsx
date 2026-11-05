@@ -86,7 +86,6 @@ export function CreativeSessionRail({ runID, orchestrator }: { runID: number; or
       <ErrorNotice error={sessions.error ?? profiles.error ?? command.error} />
       {sessions.data && (
         <section className="creative-sessions" aria-label="Run sessions">
-          
           {session && <SessionCard key={session.id} session={session} role="orchestrator" />}
           <div className="session-rail__workers-heading">Workers</div>
           <div className="session-rail__workers">

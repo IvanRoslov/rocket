@@ -235,9 +235,13 @@ function Question({ question: q, draft, readOnly = false }: {
 }) {
   const command = useCommand();
   function send(action: "reply" | "answer", payload: unknown) {
-    command.mutate(() => api.post(`/v1/questions/${q.id}/${action}`, payload), {
-      onSuccess: () => draft?.setBody(""),
-    });
+    const submittedDraft = draft?.body;
+    // Per-call mutate callbacks are skipped after a scope change unmounts the
+    // thread. Promise completion still clears its owned draft after delivery.
+    void command.mutateAsync(() => api.post(`/v1/questions/${q.id}/${action}`, payload)).then(
+      () => draft?.setBody((current) => current === submittedDraft ? "" : current),
+      () => { /* The mutation renders the error and keeps the draft for retry. */ },
+    );
   }
   return (
     <div>
