@@ -531,3 +531,46 @@ func TestPreviewConfiguration(t *testing.T) {
 		})
 	}
 }
+
+func TestLocalArtifactPreviewConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		name, extra, url string
+		ok               bool
+	}{
+		{"default-loopback", "", "http://artifact-preview.localhost:4480", true},
+		{"explicit-loopback", "preview_host: 127.0.0.1\n", "http://artifact-preview.localhost:4480", true},
+		{"ipv6-loopback-validation", "preview_host: '::1'\n", "http://artifact-preview.localhost:4480", true},
+		{"wildcard", "preview_host: 0.0.0.0\n", "http://artifact-preview.localhost:4480", false},
+		{"ipv6-wildcard", "preview_host: '::'\n", "http://artifact-preview.localhost:4480", false},
+		{"lan", "preview_host: 192.0.2.10\n", "http://artifact-preview.localhost:4480", false},
+		{"unresolved-bind", "preview_host: localhost\n", "http://artifact-preview.localhost:4480", false},
+		{"wrong-port", "", "http://artifact-preview.localhost:4481", false},
+		{"missing-port", "", "http://artifact-preview.localhost", false},
+		{"other-alias", "", "http://other.localhost:4480", false},
+		{"plain-localhost", "", "http://localhost:4480", false},
+		{"nested-alias", "", "http://sub.artifact-preview.localhost:4480", false},
+		{"https-local", "", "https://artifact-preview.localhost:4480", false},
+		{"path", "", "http://artifact-preview.localhost:4480/path", false},
+		{"query", "", "http://artifact-preview.localhost:4480/?x=1", false},
+		{"credentials", "", "http://user@artifact-preview.localhost:4480", false},
+		{"same-listen-host", "host: artifact-preview.localhost\n", "http://artifact-preview.localhost:4480", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			data := "public_url: https://rocket.example.com\npreview_port: 4480\n" + tc.extra + "preview_public_url: " + tc.url + "\n"
+			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(data), 0600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(home)
+			if (err == nil) != tc.ok {
+				t.Fatalf("accepted=%v want=%v error=%v", err == nil, tc.ok, err)
+			}
+		})
+	}
+	t.Run("same-public-host", func(t *testing.T) {
+		cfg := Config{Host: "127.0.0.1", Port: 4477, PublicURL: "https://artifact-preview.localhost:4477", PreviewHost: "127.0.0.1", PreviewPort: 4480, PreviewPublicURL: "http://artifact-preview.localhost:4480"}
+		if err := cfg.ValidatePreview(); err == nil {
+			t.Fatal("shared Rocket hostname accepted")
+		}
+	})
+}

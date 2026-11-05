@@ -226,3 +226,32 @@ func TestCreativeArtifactViewRejectsReplacedBlobWithSameSize(t *testing.T) {
 		t.Fatalf("replaced issuer %d", got.Code)
 	}
 }
+
+func TestCreativeArtifactViewValidatedLocalOrigin(t *testing.T) {
+	d, run, stage := creativeArtifactDeps(t)
+	d.Cfg.PublicURL = "https://rocket.example.com"
+	d.Cfg.PreviewHost = "127.0.0.1"
+	d.Cfg.PreviewPort = 4480
+	d.Cfg.PreviewPublicURL = "http://artifact-preview.localhost:4480"
+	if err := d.Cfg.ValidatePreview(); err != nil {
+		t.Fatal(err)
+	}
+	initializePreviews(&d)
+	h := NewHandler(d)
+	p := decodePublication(t, artifactRequest(h, "POST", creativePublishPath(run, stage, "Local", "result", "local.html"), "text/html", "", strings.NewReader("<h1>Local version</h1>")))
+	path := "/v1/creative/artifact-versions/" + itoa(p.Version.ID) + "/view"
+	w := artifactRequest(h, "GET", "https://rocket.example.com"+path, "", "", nil)
+	if w.Code != 303 || !strings.HasPrefix(w.Header().Get("Location"), "http://artifact-preview.localhost:4480/a/") {
+		t.Fatalf("local redirect %d %s", w.Code, w.Header())
+	}
+	content := artifactRequest(creativePreviewHandler(d), "GET", w.Header().Get("Location")+"content", "", "", nil)
+	if content.Code != 200 || content.Body.String() != "<h1>Local version</h1>" || !strings.Contains(content.Header().Get("Content-Security-Policy"), "sandbox allow-scripts;") {
+		t.Fatalf("local content %d %s", content.Code, content.Body)
+	}
+	for _, host := range []string{"artifact-preview.localhost:4477", "ARTIFACT-PREVIEW.LOCALHOST:4477"} {
+		got := artifactRequest(h, "GET", "http://"+host+path, "", "", nil)
+		if got.Code != 503 || got.Header().Get("Location") != "" {
+			t.Fatalf("shared request host %s: %d", host, got.Code)
+		}
+	}
+}

@@ -370,14 +370,19 @@ func (c *Config) ValidatePreview() error {
 		return fmt.Errorf("config: preview_public_url must be an http(s) origin without credentials, path, query or fragment")
 	}
 	host := strings.ToLower(u.Hostname())
-	if net.ParseIP(host) != nil || host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.EqualFold(host, c.Host) {
+	// This exact origin is for a browser on the daemon's machine. A literal
+	// loopback bind and matching explicit port avoid DNS/forwarding assumptions.
+	bindIP := net.ParseIP(c.PreviewHost)
+	localArtifact := host == "artifact-preview.localhost" && u.Scheme == "http" &&
+		bindIP != nil && bindIP.IsLoopback() && u.Port() == fmt.Sprint(c.PreviewPort)
+	if net.ParseIP(host) != nil || host == "localhost" || (strings.HasSuffix(host, ".localhost") && !localArtifact) || strings.EqualFold(host, c.Host) {
 		return fmt.Errorf("config: preview_public_url requires a separate reachable hostname from Rocket")
 	}
 	if main, err := url.Parse(c.PublicURL); err == nil && main.Host != "" {
 		if strings.EqualFold(main.Hostname(), host) {
 			return fmt.Errorf("config: preview_public_url must use a different hostname from public_url")
 		}
-		if main.Scheme == "https" && u.Scheme != "https" {
+		if main.Scheme == "https" && u.Scheme != "https" && !localArtifact {
 			return fmt.Errorf("config: preview_public_url must use https when public_url uses https")
 		}
 	}
