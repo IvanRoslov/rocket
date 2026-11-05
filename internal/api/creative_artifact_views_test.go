@@ -196,3 +196,33 @@ func TestCreativeArtifactViewRejectsCrossProjectAgent(t *testing.T) {
 		t.Fatalf("cross-project %d %s", w.Code, w.Body)
 	}
 }
+
+func TestCreativeArtifactViewRejectsReplacedBlobWithSameSize(t *testing.T) {
+	d, run, stage := creativeArtifactDeps(t)
+	d.Cfg.PreviewPort = 4480
+	d.Cfg.PreviewPublicURL = "https://preview.example.net"
+	initializePreviews(&d)
+	h := NewHandler(d)
+	p := decodePublication(t, artifactRequest(h, "POST", creativePublishPath(run, stage, "Page", "result", "page.html"), "text/html", "", strings.NewReader("<h1>First</h1>")))
+	view := "/v1/creative/artifact-versions/" + itoa(p.Version.ID) + "/view"
+	w := artifactRequest(h, "GET", view, "", "", nil)
+	if w.Code != 303 {
+		t.Fatalf("view %d %s", w.Code, w.Body)
+	}
+	stored, err := d.Store.GetCreativeArtifactVersion(p.Version.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(d.Cfg.Home, "creative-artifacts", stored.StorageKey), []byte("<h1>Other</h1>"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{w.Header().Get("Location"), w.Header().Get("Location") + "content"} {
+		got := artifactRequest(creativePreviewHandler(d), "GET", path, "", "", nil)
+		if got.Code != 410 || strings.Contains(got.Body.String(), "Other") {
+			t.Fatalf("replaced blob %d %s", got.Code, got.Body)
+		}
+	}
+	if got := artifactRequest(h, "GET", view, "", "", nil); got.Code != 410 {
+		t.Fatalf("replaced issuer %d", got.Code)
+	}
+}

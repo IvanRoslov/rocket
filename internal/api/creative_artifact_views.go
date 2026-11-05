@@ -2,8 +2,10 @@ package api
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"html/template"
+	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -102,7 +104,13 @@ func openArtifactViewFile(w http.ResponseWriter, d Deps, v store.CreativeArtifac
 	if err == nil {
 		info, statErr := f.Stat()
 		if statErr == nil && info.Mode().IsRegular() && info.Size() == v.Size {
-			return f, true
+			digest := sha256.New()
+			size, readErr := io.Copy(digest, io.LimitReader(f, v.Size+1))
+			if readErr == nil && size == v.Size && hex.EncodeToString(digest.Sum(nil)) == v.SHA256 {
+				if _, seekErr := f.Seek(0, io.SeekStart); seekErr == nil {
+					return f, true
+				}
+			}
 		}
 		f.Close()
 	}
