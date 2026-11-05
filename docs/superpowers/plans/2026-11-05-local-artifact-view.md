@@ -12,11 +12,11 @@ Only http://artifact-preview.localhost:<preview_port> qualifies, with a literal 
 
 ## Tasks
 
-- [ ] Add Load table tests accepting default/explicit loopback binds and rejecting wildcard/LAN binds, missing/wrong URL port, other aliases, shared Rocket hostname, and malformed origins; run focused config tests RED.
-- [ ] Implement exact-host/HTTP/loopback/port qualification before existing localhost and HTTPS restrictions; run configuration suite GREEN.
-- [ ] Add API regression exercising validated local configuration, separate-host redirect/content and same-request-host denial; run artifact/preview tests.
-- [ ] Document exact same-machine config and human restart, preserve public_url and explain remote browsers unsupported.
-- [ ] Run focused race/full relevant suites and synthetic Chrome through validated local config; fresh review; open separate PR based on merged main.
+- [x] Add Load table tests accepting default/explicit loopback binds and rejecting wildcard/LAN binds, missing/wrong URL port, other aliases, shared Rocket hostname, and malformed origins; run focused config tests RED.
+- [x] Implement exact-host/HTTP/loopback/port qualification before existing localhost and HTTPS restrictions; run configuration suite GREEN.
+- [x] Add API regression exercising validated local configuration, separate-host redirect/content and same-request-host denial; run artifact/preview tests.
+- [x] Document exact same-machine config and human restart, preserve public_url and explain remote browsers unsupported.
+- [x] Run focused race/full relevant suites and synthetic Chrome through validated local config; fresh review; open separate PR based on merged main.
 
 ## Review focus
 
@@ -25,3 +25,7 @@ Local allowance must not permit nonlocal binding, other localhost aliases, misma
 ## Ledger
 
 Design confirmed to orchestrator; gate #297 explicitly authorizes implementation. Existing worktree reused on a new branch from merged main, per orchestrator instruction.
+
+Validation: initial focused config RED rejected all three intended local cases; GREEN after narrow exception. Config/API/preview suites and targeted race checks pass. Full go test ./... passes before review fix; final rerun recorded in delivery log.
+Synthetic Chrome with ValidatePreview enabled passed HTTPS-to-local new tab, selected HTML rendering, visible wrapper, denied storage/cookies/parent/network and null opener. Fixture uses loopback temporary listeners and temporary data only. IPv6-only and other-engine connectivity not claimed.
+Fresh review found no security regression; one exact-origin acceptance defect allowed bracketed DNS host syntax that browsers reject. Ruling: fix before delivery because accepted local configuration must be browser-usable, despite review labeling it minor. Added bracketed-host rejection test (RED), compare complete hostname:port for the exception (GREEN). Nonlocal validation remains unchanged.

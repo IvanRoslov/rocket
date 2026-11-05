@@ -373,8 +373,8 @@ func (c *Config) ValidatePreview() error {
 	// This exact origin is for a browser on the daemon's machine. A literal
 	// loopback bind and matching explicit port avoid DNS/forwarding assumptions.
 	bindIP := net.ParseIP(c.PreviewHost)
-	localArtifact := host == "artifact-preview.localhost" && u.Scheme == "http" &&
-		bindIP != nil && bindIP.IsLoopback() && u.Port() == fmt.Sprint(c.PreviewPort)
+	localArtifact := strings.EqualFold(u.Host, "artifact-preview.localhost:"+fmt.Sprint(c.PreviewPort)) &&
+		u.Scheme == "http" && bindIP != nil && bindIP.IsLoopback()
 	if net.ParseIP(host) != nil || host == "localhost" || (strings.HasSuffix(host, ".localhost") && !localArtifact) || strings.EqualFold(host, c.Host) {
 		return fmt.Errorf("config: preview_public_url requires a separate reachable hostname from Rocket")
 	}

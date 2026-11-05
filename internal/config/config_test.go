@@ -544,6 +544,7 @@ func TestLocalArtifactPreviewConfiguration(t *testing.T) {
 		{"ipv6-wildcard", "preview_host: '::'\n", "http://artifact-preview.localhost:4480", false},
 		{"lan", "preview_host: 192.0.2.10\n", "http://artifact-preview.localhost:4480", false},
 		{"unresolved-bind", "preview_host: localhost\n", "http://artifact-preview.localhost:4480", false},
+		{"bracketed-host", "", "http://[artifact-preview.localhost]:4480", false},
 		{"wrong-port", "", "http://artifact-preview.localhost:4481", false},
 		{"missing-port", "", "http://artifact-preview.localhost", false},
 		{"other-alias", "", "http://other.localhost:4480", false},
