@@ -15,6 +15,7 @@ func newCreativeAgentCmd() *cobra.Command {
 }
 func creativeAgentCommands(open creativeConnection) *cobra.Command {
 	root := &cobra.Command{Use: "agent", Short: "Creative sessions and contextual discussion"}
+	root.AddCommand(creativeCloseCommand(open))
 	for _, action := range []string{"launch", "spawn", "sessions", "send", "messages", "ask", "questions", "reply", "answer"} {
 		var stage, item int64
 		var versions []int64

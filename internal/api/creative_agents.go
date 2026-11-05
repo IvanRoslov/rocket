@@ -35,6 +35,9 @@ func versionsOrEmpty(ids []int64) []int64 {
 }
 func scopeOnly(b store.CreativeBinding) store.CreativeBinding { b.ArtifactVersionIDs = nil; return b }
 func registerCreativeAgentRoutes(mux *http.ServeMux, d Deps) {
+	mux.HandleFunc("POST /v1/creative/runs/{run}/workers/{session}/close", creativeRoute(d, func(w http.ResponseWriter, r *http.Request, c *store.Session) {
+		handleCreativeClose(w, r, d, c)
+	}))
 	mux.HandleFunc("GET /v1/tools", creativeRoute(d, func(w http.ResponseWriter, r *http.Request, _ *store.Session) {
 		entries, err := toolcatalog.Load(d.Cfg.Home)
 		if err != nil {

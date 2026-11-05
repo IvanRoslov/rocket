@@ -28,6 +28,27 @@ Restore uses `rocket restore SESSION`, retaining the same creative context and
 profile snapshot. A superseded orchestrator cannot be restored alongside a live
 replacement. Creative workers are excluded from PR polling and merge cleanup.
 
+The current live run orchestrator explicitly stops its workers with:
+
+```sh
+rocket creative agent close RUN WORKER_SESSION
+```
+
+Before closing a completed assignment, verify that its outputs are durably
+published as the required artifact versions. This is semantic verification against
+the assignment; file existence, a preview or a worker's report alone is insufficient.
+After stage/item approval, verify publications and close the appropriate stage/item
+workers. Approval never closes workers automatically; retain workers still needed
+for unfinished work. Close permits workers belonging to the same run/project,
+including those launched by a predecessor orchestrator, and prohibits foreign-run,
+foreign-project and orchestrator targets. Only the current live bound orchestrator
+may invoke this command. Human session administration remains available through
+ordinary Rocket commands.
+
+Close reuses ordinary session stop without cleanup or cascade: workspace files,
+published artifacts/versions, session context and discussion history remain.
+Repeating close on a terminal worker succeeds and retains its terminal state.
+
 ```sh
 rocket creative agent send RUN --to WORKER_SESSION --stage STAGE --item ITEM --version VERSION --file note.md --wait
 rocket creative agent ask RUN --stage STAGE --item ITEM --version VERSION --body "Generate one image with TOOL / PROVIDER / MODEL from VERSION; send INPUTS via UPLOAD_SERVICE; 1 call: EXACT_CALL; estimated PRICE based on BASIS. Go?" --option Go --option Revise --option Deny
@@ -83,6 +104,10 @@ HTTP contracts (snake_case, existing authentication):
 
 - POST `/v1/creative/runs/{run}/sessions`: `{profile?,agent?,prompt?}`, human launch.
 - POST `/v1/creative/runs/{run}/workers`: `{stage_id,item_id?,repo?,name,prompt,profile?,agent?}`, orchestrator-only.
+- POST `/v1/creative/runs/{run}/workers/{session}/close`: current run orchestrator
+  only, own-run/project worker target; no body or cleanup/cascade options. Returns
+  the ordinary session-stop response `{"status":"killed"}` (already-terminal
+  targets keep their stored state).
 - GET `/v1/creative/runs/{run}/sessions`: session array with `creative_context`.
 - GET/POST `/v1/creative/runs/{run}/messages` and `/questions`: reads take exact
   `stage_id`/`item_id` query scope; writes take `{stage_id?,item_id?,artifact_version_ids?,body}`.
