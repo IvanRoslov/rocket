@@ -1,19 +1,15 @@
 import { Button } from "../../web/src/components/Button";
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { QuestionThreadView } from "../../web/src/components/QuestionThreadView";
-import { Markdown } from "../../web/src/components/Markdown";
 import { isHuman } from "../../web/src/lib/participants";
 import { questionTitle } from "../../web/src/lib/thread";
-import { timeAgo } from "../../web/src/lib/format";
 import "../../web/src/screens/task/QuestionsTab.css";
-import "../../web/src/screens/chat/ChatScreen.css";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { api, base, contextPath, useCommand } from "./api";
 import type {
   ArtifactDetail,
   ArtifactVersion,
   Context,
-  CreativeMessage,
   CreativeQuestion,
 } from "./types";
 import { Empty, ErrorNotice } from "./ui";
@@ -59,23 +55,12 @@ function BoundVersions({ ids }: { ids: number[] }) {
 }
 export function Discussion({
   context,
-  orchestrator,
   ready,
 }: {
   context: Context;
   orchestrator: string;
   ready: boolean;
 }) {
-  const messages = useQuery({
-    queryKey: [
-      "creative",
-      "messages",
-      context.run_id,
-      context.stage_id,
-      context.item_id,
-    ],
-    queryFn: () => api.get<CreativeMessage[]>(contextPath(context, "messages")),
-  });
   const questions = useQuery({
     queryKey: [
       "creative",
@@ -87,8 +72,7 @@ export function Discussion({
     queryFn: () =>
       api.get<CreativeQuestion[]>(contextPath(context, "questions")),
   });
-  const [body, setBody] = useState(""),
-    [mode, setMode] = useState("message");
+  const [body, setBody] = useState("");
   const [draftContext, setDraftContext] = useState<Context>();
   const [replies, setReplies] = useState<Record<number, string>>({});
   const command = useCommand();
@@ -119,7 +103,7 @@ export function Discussion({
         </div>
       </div>
       <p className="context-label">{context.label}</p>
-      <ErrorNotice error={messages.error ?? questions.error} />
+      <ErrorNotice error={questions.error} />
       <div className="discussion-feed">
         <h3>Questions & decisions</h3>
         {questions.isPending && <p>Loading questions…</p>}
@@ -131,24 +115,6 @@ export function Discussion({
           {resolved.length > 0 && <div className="questions-tab__resolved-label">Resolved</div>}
           {resolved.map((q) => <ResolvedQuestion key={q.id} question={q} />)}
         </div>
-        <h3>Messages</h3>
-        {messages.isPending && <p>Loading messages…</p>}
-        {messages.data?.length === 0 && (
-          <Empty>Discuss the selected work and shown versions here.</Empty>
-        )}
-        {messages.data?.map((m) => (
-          <article className={`chat-screen__row ${isHuman(m.from) ? "chat-screen__row--own" : ""}`} key={m.id}>
-            <div className={`chat-screen__bubble ${isHuman(m.from) ? "chat-screen__bubble--own" : ""}`}>
-              <strong className="question-thread__message-author">
-                {isHuman(m.from) ? "You" : m.from === orchestrator ? "Orchestrator" : m.from}
-              </strong>
-              <div className="chat-screen__body"><Markdown compact>{m.body}</Markdown></div>
-              <div className="chat-screen__when">{timeAgo(m.created_at)} · {m.status}</div>
-              <BoundVersions ids={m.artifact_version_ids ?? []} />
-              {m.reason && <p className="error">{m.reason}</p>}
-            </div>
-          </article>
-        ))}
       </div>
       <form
         className="composer question-thread__form"
@@ -164,27 +130,20 @@ export function Discussion({
           command.mutate(
             () =>
               api.post(
-                `${base}/runs/${run_id}/${mode === "question" ? "questions" : "messages"}`,
+                `${base}/runs/${run_id}/questions`,
                 payload,
               ),
             { onSuccess: reset },
           );
         }}
       >
-        <label>
-          Send as
-          <select value={mode} onChange={(e) => setMode(e.target.value)}>
-            <option value="message">Message</option>
-            <option value="question">Question thread</option>
-          </select>
-        </label>
         <p className="draft-context">
           {changed
             ? `Draft stays with ${target.label}`
             : `About ${target.label}`}
         </p>
         <label>
-          Message or question
+          Question
           <textarea
             rows={4}
             value={body}
@@ -196,7 +155,7 @@ export function Discussion({
                 });
               setBody(e.target.value);
             }}
-            placeholder="Discuss these results; include timecodes in your message."
+            placeholder="Ask about the selected work and versions; include timecodes if helpful."
             disabled={command.isPending || (!ready && !draftContext)}
           />
         </label>
@@ -206,11 +165,10 @@ export function Discussion({
             type="submit"
             disabled={
               !body.trim() ||
-              command.isPending ||
-              (!orchestrator && mode === "message")
+              command.isPending
             }
           >
-            {mode === "question" ? "Open question" : "Send message"}
+            Open question
           </button>
           {body && (
             <Button

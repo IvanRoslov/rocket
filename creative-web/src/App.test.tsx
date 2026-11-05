@@ -199,7 +199,7 @@ function workspaceFixture(status = "awaiting_approval") {
       actions.push(await request.json());
       return HttpResponse.json({});
     }),
-    http.post("/v1/creative/runs/7/messages", async ({ request }) => {
+    http.post("/v1/creative/runs/7/questions", async ({ request }) => {
       messages.push(await request.json());
       return HttpResponse.json({});
     }),
@@ -215,7 +215,7 @@ it("defaults to central shared discussion tabs and requires visible artifacts fo
   const tabs = await screen.findByRole("tablist", { name: "Workspace" });
   expect(tabs).toHaveClass("tabs");
   expect(within(tabs).getByRole("tab", { name: "Questions & discussion" })).toHaveAttribute("aria-selected", "true");
-  await waitFor(() => expect(screen.getByLabelText("Message or question")).toBeEnabled());
+  await waitFor(() => expect(screen.getByLabelText("Question")).toBeEnabled());
   expect(screen.getByRole("heading", { name: "Discussion" })).toBeVisible();
   expect(screen.queryByRole("button", { name: "Approve shown results" })).not.toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Sources & results" })).not.toBeInTheDocument();
@@ -239,14 +239,14 @@ it("retains an older selected version and draft through tabs and keeps the draft
   await user.selectOptions(await screen.findByLabelText("Scene image version"), "11");
   await user.click(screen.getByRole("tab", { name: "Questions & discussion" }));
   await waitFor(() => expect(screen.getByText(/About Opening \/ Scenes \/ Opening scene \/ Scene image version 1/)).toBeVisible());
-  await user.type(screen.getByLabelText("Message or question"), "Keep this framing");
+  await user.type(screen.getByLabelText("Question"), "Keep this framing");
   await user.click(screen.getByRole("tab", { name: "Landing preview" }));
   await screen.findByRole("heading", { name: "Interactive landing preview" });
   await user.click(screen.getByRole("tab", { name: "Artifacts" }));
   expect(screen.getByLabelText("Scene image version")).toHaveValue("11");
   expect(screen.getByRole("img", { name: "scene-11.png" })).toBeVisible();
   await user.click(screen.getByRole("tab", { name: "Questions & discussion" }));
-  expect(screen.getByLabelText("Message or question")).toHaveValue("Keep this framing");
+  expect(screen.getByLabelText("Question")).toHaveValue("Keep this framing");
   const sessions = screen.getByRole("complementary", { name: "Run sessions" });
   expect(within(sessions).getByRole("link", { name: /term/ })).toHaveAttribute("href", "/term/creative-7");
   expect(within(sessions).getByRole("link", { name: /chat/ })).toHaveAttribute("href", "/chat/creative-7");
@@ -254,7 +254,7 @@ it("retains an older selected version and draft through tabs and keeps the draft
   await user.click(screen.getByRole("button", { name: /1. Scenes/ }));
   expect(window.location.search).toBe("?project=film&run=7&stage=4");
   expect(screen.getByText(/Draft stays with Opening \/ Scenes \/ Opening scene/)).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "Send message" }));
+  await user.click(screen.getByRole("button", { name: "Open question" }));
   await waitFor(() => expect(messages).toEqual([{ stage_id: 4, item_id: 5, artifact_version_ids: [11], body: "Keep this framing" }]));
 });
 
