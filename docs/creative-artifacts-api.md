@@ -87,3 +87,37 @@ no-store/no-referrer/nosniff and do not set cookies. The preview listener has no
 Rocket interface/API routes. This is viewing a published file, not deploying an
 application or publishing it publicly. Keep using ordinary artifact previews for
 image/video/audio files and Download for unsupported types.
+
+### Same-machine viewing without DNS or certificates
+
+When the browser runs on the same machine as Rocket, use this exact local setup
+in Rocket's `config.yaml` (keep your existing `public_url` unchanged):
+
+```yaml
+preview_host: 127.0.0.1
+preview_port: 4480
+preview_public_url: http://artifact-preview.localhost:4480
+```
+
+The distinct `artifact-preview.localhost` hostname resolves to the browser's own
+loopback interface. No domain, DNS record, certificate or reverse proxy is needed.
+The selected HTML opens in a separate top-level tab, including when Rocket itself
+is accessed over HTTPS. This local path was verified in Chrome with a
+`127.0.0.1` listener; other browser engines and IPv6-only connectivity were not
+verified. Validation also recognizes literal IPv6 loopback binds, but the example
+above is the verified configuration.
+
+This is **same-machine only**: on another computer or phone, `.localhost` points
+to that device, not the Rocket machine. Use the existing separate reachable HTTPS
+preview-origin setup for remote browsers. The local exception requires the exact
+HTTP hostname shown, an explicit URL port equal to `preview_port`, and a literal
+loopback listener address. Wildcard/LAN binds, other localhost aliases, and sharing
+Rocket's configured or actual request hostname are rejected. A different port on
+Rocket's own hostname is insufficient.
+
+The operator must edit configuration and perform a **human-controlled Rocket
+restart** to apply it; neither this feature nor the implementation task changes
+live configuration or restarts Rocket. Port 4480 must be available and distinct
+from Rocket's API/TLS ports. No dev-server registration or `preview_ports` entry
+is required for published HTML. Existing authentication, private expiring links,
+HTML sandboxing and optional downloads apply unchanged.

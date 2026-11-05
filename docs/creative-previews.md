@@ -7,7 +7,12 @@ creative session. Only servers configured for a URL base path are supported.
 
 ## Installation
 
-Configure a **separate reachable hostname** for previews. A different path or
+For published single-file HTML in a browser on the Rocket machine, see
+[the same-machine configuration](creative-artifacts-api.md#same-machine-viewing-without-dns-or-certificates).
+That narrowly validated local mode requires no DNS or certificates. The remote
+preview setup below remains unchanged.
+
+Configure a **separate reachable hostname** for remote previews. A different path or
 port on Rocket's own hostname is insufficient. For example:
 
 ```yaml
