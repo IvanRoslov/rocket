@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"github.com/IvanRoslov/rocket/internal/store"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
+	"time"
 )
 
 func creativeRequest(t *testing.T, d Deps, method, path, body, caller string, status int) []byte {
@@ -133,4 +136,122 @@ func TestCreativeGlobalPipelineAPI(t *testing.T) {
 	}
 	creativeRequest(t, d, "POST", "/v1/creative/pipelines", body, "unknown", 401)
 	creativeRequest(t, d, "PUT", path, body, "unknown", 401)
+}
+
+// Removing the successful-action publish or taking versions/actor from request
+// data instead of the committed result/resolved caller must break these checks.
+func TestCreativeActionEventsCommittedContextAndAttribution(t *testing.T) {
+	d, run := creativeAPISetup(t)
+	startTime := time.Now().Unix()
+	base := fmt.Sprintf("/v1/creative/runs/%d/stages/%d", run.ID, run.Stages[0].ID)
+	creativeRequest(t, d, "POST", base+"/actions", `{"action":"start"}`, "orch", 200)
+	// Publish an immutable result and exercise the entire stage review cycle.
+	publication := decodePublication(t, artifactRequest(NewHandler(d), "POST", creativePublishPath(run.ID, run.Stages[0].ID, "Plan result", "result", "plan.txt"), "text/plain", "orch", strings.NewReader("plan")))
+	submit := fmt.Sprintf(`{"action":"submit","artifact_version_ids":[%d]}`, publication.Version.ID)
+	creativeRequest(t, d, "POST", base+"/actions", submit, "orch", 200)
+	creativeRequest(t, d, "POST", base+"/actions", `{"action":"reject","review_revision":1}`, "", 200)
+	creativeRequest(t, d, "POST", base+"/actions", submit, "", 200) // Deliberate same-version resubmission.
+	creativeRequest(t, d, "POST", base+"/actions", `{"action":"approve","review_revision":2}`, "", 200)
+	creativeRequest(t, d, "POST", base+"/actions", `{"action":"reopen"}`, "", 200)
+	events, err := d.Store.ListEvents(0, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var actions []store.Event
+	for _, event := range events {
+		if event.Type == "creative.stage_action" {
+			actions = append(actions, event)
+		}
+	}
+	if len(actions) != 6 {
+		t.Fatalf("stage action events = %d, want 6: %+v", len(actions), events)
+	}
+	wants := []struct {
+		action, status, session string
+		revision                int
+		versions                []int64
+	}{
+		{"start", "in_progress", "orch", 0, []int64{}},
+		{"submit", "awaiting_approval", "orch", 1, []int64{publication.Version.ID}},
+		{"reject", "in_progress", "", 1, []int64{publication.Version.ID}},
+		{"submit", "awaiting_approval", "", 2, []int64{publication.Version.ID}},
+		{"approve", "completed", "", 2, []int64{publication.Version.ID}},
+		{"reopen", "in_progress", "", 2, []int64{publication.Version.ID}},
+	}
+	for i, want := range wants {
+		event := actions[i]
+		if event.TS < startTime || event.TS > time.Now().Unix() {
+			t.Fatalf("event time = %d", event.TS)
+		}
+		if event.SessionID != want.session || event.Data["actor_session_id"] != want.session {
+			t.Fatalf("actor: %+v", event)
+		}
+		kind, source := "session", "session_header"
+		if want.session == "" {
+			kind, source = "unattributed", "no_session_header"
+		}
+		expected := map[string]any{"project_id": "p", "run_id": float64(run.ID), "stage_id": float64(run.Stages[0].ID), "item_id": float64(0), "action": want.action, "status": want.status, "review_revision": float64(want.revision), "actor_kind": kind, "actor_source": source, "actor_session_id": want.session}
+		for key, value := range expected {
+			if event.Data[key] != value {
+				t.Errorf("event %d %s = %v, want %v", i, key, event.Data[key], value)
+			}
+		}
+		raw, _ := json.Marshal(want.versions)
+		got, _ := json.Marshal(event.Data["artifact_version_ids"])
+		if string(got) != string(raw) {
+			t.Errorf("event %d versions = %s, want %s", i, got, raw)
+		}
+	}
+}
+
+func TestCreativeItemActionEventsAndFailures(t *testing.T) {
+	d, run := creativeAPISetup(t)
+	first := fmt.Sprintf("/v1/creative/runs/%d/stages/%d/actions", run.ID, run.Stages[0].ID)
+	creativeRequest(t, d, "POST", first, `{"action":"start"}`, "orch", 200)
+	creativeRequest(t, d, "POST", first, `{"action":"submit"}`, "orch", 200)
+	creativeRequest(t, d, "POST", first, `{"action":"approve","review_revision":1}`, "", 200)
+	base := fmt.Sprintf("/v1/creative/runs/%d/stages/%d", run.ID, run.Stages[1].ID)
+	creativeRequest(t, d, "POST", base+"/actions", `{"action":"start"}`, "orch", 200)
+	body := creativeRequest(t, d, "POST", base+"/items", `{"name":"Scene"}`, "orch", 201)
+	var item store.CreativeItem
+	if err := json.Unmarshal(body, &item); err != nil {
+		t.Fatal(err)
+	}
+	path := fmt.Sprintf("%s/items/%d/actions", base, item.ID)
+	for _, step := range []struct {
+		body, caller string
+		status       int
+	}{
+		{`{"action":"start"}`, "unknown", 401},
+		{`{"action":"start"}`, "outsider", 403},
+		{`{"action":"start","actor_session_id":"invented"}`, "", 400},
+		{`{"action":"start"}`, "orch", 200},
+		{`{"action":"start"}`, "orch", 409},
+		{`{"action":"submit"}`, "orch", 200},
+		{`{"action":"reject","review_revision":1}`, "orch", 403},
+		{`{"action":"approve","review_revision":9}`, "", 409},
+		{`{"action":"reject","review_revision":1}`, "", 200},
+		{`{"action":"submit"}`, "orch", 200},
+		{`{"action":"approve","review_revision":2}`, "", 200},
+		{`{"action":"reopen"}`, "", 200},
+	} {
+		creativeRequest(t, d, "POST", path, step.body, step.caller, step.status)
+	}
+	events, err := d.Store.ListEvents(0, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var actions []string
+	for _, event := range events {
+		if event.Type != "creative.item_action" {
+			continue
+		}
+		if event.Data["item_id"] != float64(item.ID) || event.Data["stage_id"] != float64(run.Stages[1].ID) || event.Data["run_id"] != float64(run.ID) {
+			t.Fatalf("wrong scope: %+v", event)
+		}
+		actions = append(actions, event.Data["action"].(string))
+	}
+	if !reflect.DeepEqual(actions, []string{"start", "submit", "reject", "submit", "approve", "reopen"}) {
+		t.Fatalf("successful item actions = %v", actions)
+	}
 }

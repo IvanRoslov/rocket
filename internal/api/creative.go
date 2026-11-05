@@ -208,6 +208,7 @@ func registerCreativeRoutes(mux *http.ServeMux, d Deps) {
 				creativeError(w, err)
 				return
 			}
+			publishCreativeAction(d, caller, ctx, in.Action, out)
 			writeJSON(w, 200, out)
 		}))
 	}
@@ -302,4 +303,43 @@ func writeCreativeRun(w http.ResponseWriter, d Deps, id int64, status int) {
 		return
 	}
 	writeJSON(w, status, out)
+}
+
+// publishCreativeAction records only a successfully committed transition. Context
+// comes from the returned transaction snapshot, never a second racing read or
+// request-supplied actor/review metadata. Bus owns persistence and server time.
+func publishCreativeAction(d Deps, caller *store.Session, ctx store.CreativeContext, action string, run store.CreativeRun) {
+	if d.Bus == nil {
+		return
+	}
+	for _, stage := range run.Stages {
+		if stage.ID != ctx.StageID {
+			continue
+		}
+		review, status, typ := stage.CreativeReview, stage.Status, "creative.stage_action"
+		if ctx.ItemID != 0 {
+			found := false
+			for _, item := range stage.Items {
+				if item.ID == ctx.ItemID {
+					review, status, typ = item.CreativeReview, item.Status, "creative.item_action"
+					found = true
+					break
+				}
+			}
+			if !found {
+				return
+			}
+		}
+		sessionID, actorKind, actorSource := "", "unattributed", "no_session_header"
+		if caller != nil {
+			sessionID, actorKind, actorSource = caller.ID, "session", "session_header"
+		}
+		versions := append([]int64{}, review.ArtifactVersionIDs...)
+		d.Bus.Publish(typ, sessionID, map[string]any{
+			"project_id": ctx.ProjectID, "run_id": run.ID, "stage_id": stage.ID, "item_id": ctx.ItemID,
+			"action": action, "status": status, "review_revision": review.ReviewRevision, "artifact_version_ids": versions,
+			"actor_kind": actorKind, "actor_source": actorSource, "actor_session_id": sessionID,
+		})
+		return
+	}
 }
