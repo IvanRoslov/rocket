@@ -3,8 +3,10 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/IvanRoslov/rocket/internal/prompts"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -239,5 +241,76 @@ func TestCreativeMessageRecipients(t *testing.T) {
 				t.Fatal("no queue wake event")
 			}
 		})
+	}
+}
+
+// Follow the actual worker report instruction after a restore/replacement. A
+// report pinned to ParentID fails even though the run's current orchestrator lives.
+func TestCreativeWorkerReportFollowsReplacement(t *testing.T) {
+	d, run, stage := creativeArtifactDeps(t)
+	d.Queue = nil
+	for _, id := range []string{"original-orch", "replacement-orch", "worker"} {
+		kind := "orchestrator"
+		parent := ""
+		scope := store.CreativeBinding{RunID: run}
+		if id == "worker" {
+			kind = "worker"
+			parent = "original-orch"
+			scope.StageID = stage
+		}
+		if err := d.Store.AddSession(store.Session{ID: id, Kind: kind, ParentID: parent, ProjectID: "p", RepoID: "r", Agent: "claude-code", State: "running"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.Store.BindCreativeSession(id, scope); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := d.Store.SetCreativeRunOrchestrator(run, "original-orch"); err != nil {
+		t.Fatal(err)
+	}
+	original, err := d.Store.GetSession("original-orch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original.State = "terminated"
+	if err := d.Store.UpdateSession(original); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Store.SetCreativeRunOrchestrator(run, "replacement-orch"); err != nil {
+		t.Fatal(err)
+	}
+	worker, err := d.Store.GetSession("worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := prompts.Render("", "creative-worker", prompts.Vars{"session_id": worker.ID, "parent_id": worker.ParentID, "project_name": "Project", "worktree_path": "/tmp/work", "allowed_repos": "r", "creative_context": "assigned stage", "run_snapshot": "current replacement", "tools_home": "/tmp/tools", "brief": "Report result"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := regexp.MustCompile("(?s)`rocket creative agent send RUN ([^`]+)`").FindStringSubmatch(rendered)
+	if len(command) != 2 {
+		t.Fatal("worker has no report command")
+	}
+	to := ""
+	words := strings.Fields(command[1])
+	for i, word := range words {
+		if word == "--to" && i+1 < len(words) {
+			to = words[i+1]
+		}
+	}
+	input, err := json.Marshal(map[string]any{"stage_id": stage, "to": to, "body": "Report after restore"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := artifactRequest(NewHandler(d), "POST", fmt.Sprintf("/v1/creative/runs/%d/messages", run), "application/json", worker.ID, strings.NewReader(string(input)))
+	if w.Code != 201 {
+		t.Fatalf("following worker report command targets stale parent: %d %s", w.Code, w.Body.String())
+	}
+	var msg creativeMessageResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &msg); err != nil {
+		t.Fatal(err)
+	}
+	if msg.To != "replacement-orch" || msg.From != "worker" || msg.CreativeContext.RunID != run || msg.CreativeContext.StageID != stage {
+		t.Fatalf("report misrouted: %+v", msg)
 	}
 }

@@ -34,11 +34,11 @@ func TestCreativePromptsAddressRolesAndDelivery(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		recipient := "WORKER_SESSION"
+		reportCommand := "rocket creative agent send RUN --to WORKER_SESSION"
 		if role == "creative-worker" {
-			recipient = "creative-orch"
+			reportCommand = "rocket creative agent send RUN --stage STAGE"
 		}
-		for _, want := range []string{"--to " + recipient, "--wait", "accepted", "delivered", "failed", "rocket creative agent sessions RUN", "Never use tmux directly", "readiness is unknown", "--file", "explicit human Go"} {
+		for _, want := range []string{reportCommand, "--wait", "accepted", "delivered", "failed", "rocket creative agent sessions RUN", "Never use tmux directly", "readiness is unknown", "--file", "explicit human Go"} {
 			if !strings.Contains(rendered, want) {
 				t.Errorf("%s missing operational instruction %q", role, want)
 			}
