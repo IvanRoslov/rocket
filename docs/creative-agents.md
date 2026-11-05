@@ -29,13 +29,28 @@ profile snapshot. A superseded orchestrator cannot be restored alongside a live
 replacement. Creative workers are excluded from PR polling and merge cleanup.
 
 ```sh
-rocket creative agent send RUN --stage STAGE --item ITEM --version VERSION --file note.md
+rocket creative agent send RUN --to WORKER_SESSION --stage STAGE --item ITEM --version VERSION --file note.md --wait
 rocket creative agent ask RUN --stage STAGE --item ITEM --version VERSION --body "Generate one image with TOOL / PROVIDER / MODEL from VERSION; send INPUTS via UPLOAD_SERVICE; 1 call: EXACT_CALL; estimated PRICE based on BASIS. Go?" --option Go --option Revise --option Deny
 rocket creative agent messages RUN --stage STAGE --item ITEM
 rocket creative agent questions RUN --stage STAGE --item ITEM
 rocket creative agent reply QUESTION --file reply.md
 rocket creative agent answer QUESTION --choose 1
 ```
+
+Use the actual worker session ID returned by spawn or listed by `sessions` when
+sending from the orchestrator. Workers can explicitly use `--to ORCHESTRATOR_SESSION`
+or omit `--to` to reply to the run orchestrator. Explicit and default self-send are
+rejected before enqueue with a recipient hint; contextual metadata is preserved.
+
+Without `--wait`, send prints the contextual message response, including its actual
+recipient, ID and status. With `--wait`, it reuses ordinary `rocket send` polling:
+queued/delivering is pending, accepted is transport acceptance awaiting confirmation,
+delivered is confirmed delivery, and failed is terminal with its reason. Text output
+identifies the recipient; `--json --wait` prints one terminal JSON object with the
+recipient, message ID and status. Confirmation does not mean work is completed or
+approved; missing confirmation does not establish non-reception or authorize a
+blind resend. Read contextual `messages` and match the ID before taking action.
+Ordinary `rocket send <session> ... [--wait]` keeps its existing contract.
 
 `answer` is human-only for creative questions; agents reply. `--version` may be
 repeated. Question context and shown versions remain fixed across replies and
@@ -71,7 +86,8 @@ HTTP contracts (snake_case, existing authentication):
 - GET `/v1/creative/runs/{run}/sessions`: session array with `creative_context`.
 - GET/POST `/v1/creative/runs/{run}/messages` and `/questions`: reads take exact
   `stage_id`/`item_id` query scope; writes take `{stage_id?,item_id?,artifact_version_ids?,body}`.
-  Message adds optional `to` (default run orchestrator); question adds `title`/`options`.
+  Message adds optional `to` (default run orchestrator); self-send returns HTTP 400
+  `self_send` before enqueue. Question adds `title`/`options`.
   Responses use existing message/question fields plus `creative_context` and
   `artifact_version_ids` (always an array). Lists are arrays.
 - POST `/v1/questions/{id}/reply` and `/answer`: existing body/choose shape, original
