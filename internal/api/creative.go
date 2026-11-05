@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/IvanRoslov/rocket/internal/store"
 )
@@ -203,12 +205,23 @@ func registerCreativeRoutes(mux *http.ServeMux, d Deps) {
 			if !creativeBody(w, r, &in) {
 				return
 			}
-			out, err := d.Store.ApplyCreativeAction(ctx.RunID, ctx.StageID, ctx.ItemID, in, caller == nil)
+			var out store.CreativeRun
+			var err error
+			if in.Action == "withdraw" {
+				callerID := ""
+				if caller != nil {
+					callerID = caller.ID
+				}
+				in.Reason = strings.TrimSpace(in.Reason)
+				out, err = d.Store.WithdrawCreativeReview(ctx.RunID, ctx.StageID, ctx.ItemID, in, callerID)
+			} else {
+				out, err = d.Store.ApplyCreativeAction(ctx.RunID, ctx.StageID, ctx.ItemID, in, caller == nil)
+			}
 			if err != nil {
 				creativeError(w, err)
 				return
 			}
-			publishCreativeAction(d, caller, ctx, in.Action, out)
+			publishCreativeAction(d, caller, ctx, in, out)
 			writeJSON(w, 200, out)
 		}))
 	}
@@ -308,10 +321,7 @@ func writeCreativeRun(w http.ResponseWriter, d Deps, id int64, status int) {
 // publishCreativeAction records only a successfully committed transition. Context
 // comes from the returned transaction snapshot, never a second racing read or
 // request-supplied actor/review metadata. Bus owns persistence and server time.
-func publishCreativeAction(d Deps, caller *store.Session, ctx store.CreativeContext, action string, run store.CreativeRun) {
-	if d.Bus == nil {
-		return
-	}
+func publishCreativeAction(d Deps, caller *store.Session, ctx store.CreativeContext, action store.CreativeAction, run store.CreativeRun) {
 	for _, stage := range run.Stages {
 		if stage.ID != ctx.StageID {
 			continue
@@ -335,11 +345,19 @@ func publishCreativeAction(d Deps, caller *store.Session, ctx store.CreativeCont
 			sessionID, actorKind, actorSource = caller.ID, "session", "session_header"
 		}
 		versions := append([]int64{}, review.ArtifactVersionIDs...)
-		d.Bus.Publish(typ, sessionID, map[string]any{
+		data := map[string]any{
 			"project_id": ctx.ProjectID, "run_id": run.ID, "stage_id": stage.ID, "item_id": ctx.ItemID,
-			"action": action, "status": status, "review_revision": review.ReviewRevision, "artifact_version_ids": versions,
+			"action": action.Action, "status": status, "review_revision": review.ReviewRevision, "artifact_version_ids": versions,
 			"actor_kind": actorKind, "actor_source": actorSource, "actor_session_id": sessionID,
-		})
+			"timestamp": time.Now().Unix(),
+		}
+		if action.Action == "withdraw" {
+			data["reason"] = action.Reason
+		}
+		notifyCreativeAction(d, run, store.CreativeBinding{RunID: run.ID, StageID: stage.ID, ItemID: ctx.ItemID, ArtifactVersionIDs: versions}, action, data)
+		if d.Bus != nil {
+			d.Bus.Publish(typ, sessionID, data)
+		}
 		return
 	}
 }

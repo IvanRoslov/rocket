@@ -146,7 +146,12 @@ func (s *Store) AddCreativeQuestion(q Question, b CreativeBinding) (int64, error
 		return 0, err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`INSERT INTO questions(asked_by,title,brief,body,status,type,options,asked_at) VALUES(?,?,?,?,'open','decision',?,?)`, q.AskedBy, q.Title, q.Brief, q.Body, encodeOptions(q.Options), time.Now().Unix())
+	now := time.Now().Unix()
+	status, typ, resolution, resolvedAt := "open", QuestionTypeDecision, "", int64(0)
+	if q.Type == QuestionTypeFYI {
+		status, typ, resolution, resolvedAt = "resolved", QuestionTypeFYI, QuestionResolutionFYI, now
+	}
+	res, err := tx.Exec(`INSERT INTO questions(asked_by,title,brief,body,status,type,options,asked_at,resolution,resolved_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, q.AskedBy, q.Title, q.Brief, q.Body, status, typ, encodeOptions(q.Options), now, nullIfEmpty(resolution), nullIfZero(resolvedAt))
 	if err != nil {
 		return 0, err
 	}
