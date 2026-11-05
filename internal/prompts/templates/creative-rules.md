@@ -22,6 +22,17 @@ with the human, and use explicit reopening; never automatically rerun/reset down
 work or silently replace an approved result. Inspect messages/questions and older
 results before resuming after interruption.
 
+Workers are never closed automatically by approval. After a stage/item is approved,
+the orchestrator must verify that the completed assignment outputs are durably
+published, then explicitly close the appropriate stage/item workers with
+`rocket creative agent close RUN WORKER_SESSION`. Verify the publications against
+the assignment and exact published versions; a file's existence, preview or chat
+report alone does not establish that the required outputs have been published.
+Only the current run orchestrator can close this run's workers, including workers
+launched by a predecessor. Never close another run's sessions or an orchestrator.
+Close stops the existing Rocket session while preserving workspace files, published
+artifacts/versions and discussion history. Do not use cleanup or cascade.
+
 For agent messages, use the role-specific recipient command above. Discover actual
 session IDs with `rocket creative agent sessions RUN`; never send to your own ID.
 {{message_transport_rule}}
