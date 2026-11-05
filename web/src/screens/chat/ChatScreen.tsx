@@ -39,10 +39,7 @@ const AUTOSCROLL_THRESHOLD_PX = 48
 /** How close (seconds) an own send and a `[large message]` pointer entry must land to be matched. */
 const LARGE_MESSAGE_MATCH_WINDOW_S = 15
 
-/** Builds the dashboard path for a session's dedicated chat page. */
-export function chatPagePath(sessionId: string): string {
-  return `/chat/${encodeURIComponent(sessionId)}`
-}
+export { chatPagePath } from '../../lib/sessionPaths'
 
 function dotState(session: ChatSessionRef): DotState {
   if (session.activity) return session.activity

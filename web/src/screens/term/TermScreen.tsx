@@ -15,10 +15,7 @@ import './TermScreen.css'
 
 const COPY_FEEDBACK_MS = 2000
 
-/** Builds the dashboard path for a session's dedicated terminal page. */
-export function termPagePath(sessionId: string): string {
-  return `/term/${encodeURIComponent(sessionId)}`
-}
+export { termPagePath } from '../../lib/sessionPaths'
 
 export function TermScreen() {
   const { sessionId } = useParams<{ sessionId: string }>()

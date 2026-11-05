@@ -1,3 +1,5 @@
+import type { Session } from "../../web/src/lib/types";
+
 export type Approval = "auto" | "stage" | "item";
 export type Status =
   | "pending"
@@ -93,10 +95,7 @@ export interface PreviewAccess extends Scope {
   url?: string;
   message?: string;
 }
-export interface CreativeSession {
-  id: string;
-  state: string;
-  activity?: string;
+export interface CreativeSession extends Session {
   creative_context?: Scope;
 }
 export interface CreativeMessage {

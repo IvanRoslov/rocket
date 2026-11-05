@@ -1,52 +1,14 @@
-// Right rail (docs/design/Task.dc.html "RIGHT: session rail"): the task's
-// orchestrator session plus its worker sessions, each with term/attach/kill
-// actions. Errored workers get a "restore" action instead of relying on
-// kill alone (`POST /v1/sessions/{id}/restore`, phase 4).
-//
-// «▣ term» opens the dedicated full-window terminal page (/term/:id) in a
-// NEW TAB — a plain anchor with target="_blank" rather than the in-page
-// TermOverlay (which is kept around in TermOverlay.tsx but no longer
-// wired to these buttons).
-
-import { useEffect, useState } from 'react'
-import { Badge, type BadgeTone } from '../../components/Badge'
-import { Dot, type DotState } from '../../components/Dot'
-import { sessionModelLabel } from '../../lib/profiles'
+// Development session rail. Shared cards own identity/status/access; this
+// screen retains its quiz, PR and lifecycle controls.
+import { Badge } from '../../components/Badge'
+import { SessionCard } from '../../components/SessionCard'
 import { useKillSession, useRestoreSession } from '../../lib/queries'
 import type { PendingQuiz, Session } from '../../lib/types'
-import { chatPagePath } from '../chat/ChatScreen'
-import { termPagePath } from '../term/TermScreen'
 import './SessionRail.css'
 
 export interface SessionRailProps {
   orchestrator?: Session
   workers: Session[]
-}
-
-const COPY_FEEDBACK_MS = 2500
-
-function dotState(session: Session): DotState {
-  if (session.activity) return session.activity
-  switch (session.state) {
-    case 'spawning':
-      return 'spawning'
-    case 'errored':
-      return 'errored'
-    case 'done':
-    case 'killed':
-      return 'exited'
-    default:
-      return 'ready'
-  }
-}
-
-function badgeTone(session: Session): BadgeTone {
-  const label = session.activity ?? session.state
-  if (label === 'active' || label === 'ready' || label === 'running') return 'ok'
-  if (label === 'blocked' || label === 'waiting_input') return 'warn'
-  if (label === 'errored' || label === 'exited' || label === 'killed') return 'err'
-  if (label === 'spawning') return 'indigo'
-  return 'neutral'
 }
 
 function prText(session: Session): { text: string; tone: string } {
@@ -65,18 +27,6 @@ function prText(session: Session): { text: string; tone: string } {
   return { text: `PR #${session.pr_number}`, tone: 'session-rail__pr--neutral' }
 }
 
-/** The session's model-profile snapshot (task #5026); nothing for a session
- * launched without a profile. */
-function ModelLabel({ session }: { session: Session }) {
-  const label = sessionModelLabel(session)
-  if (!label) return null
-  return (
-    <span className="session-rail__model" title={`profile: ${label}`}>
-      {label}
-    </span>
-  )
-}
-
 /** «quiz» for an AskUserQuestion quiz, «Разрешение» for a TUI permission prompt (task #4881). */
 function QuizBadge({ quiz }: { quiz: PendingQuiz }) {
   return quiz.source === 'permission' ? (
@@ -86,32 +36,9 @@ function QuizBadge({ quiz }: { quiz: PendingQuiz }) {
   )
 }
 
-function useCopyAttach() {
-  const [copiedId, setCopiedId] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!copiedId) return
-    const timer = setTimeout(() => setCopiedId(null), COPY_FEEDBACK_MS)
-    return () => clearTimeout(timer)
-  }, [copiedId])
-
-  async function copy(session: Session) {
-    try {
-      await navigator.clipboard.writeText(`rocket attach ${session.tmux_name}`)
-      setCopiedId(session.id)
-    } catch {
-      // Clipboard access can fail (permissions, non-secure context); just
-      // skip the "copied" confirmation.
-    }
-  }
-
-  return { copiedId, copy }
-}
-
 export function SessionRail({ orchestrator, workers }: SessionRailProps) {
   const kill = useKillSession()
   const restore = useRestoreSession()
-  const { copiedId, copy } = useCopyAttach()
 
   function handleKill(session: Session) {
     if (!window.confirm(`Kill session ${session.tmux_name}?`)) return
@@ -121,120 +48,28 @@ export function SessionRail({ orchestrator, workers }: SessionRailProps) {
   return (
     <aside className="session-rail">
       <div className="session-rail__heading">Sessions</div>
-
       {orchestrator && (
-        <div className="session-rail__orch">
-          <div className="session-rail__orch-head">
-            <Dot state={dotState(orchestrator)} />
-            <span className="session-rail__name" title={orchestrator.tmux_name}>
-              {orchestrator.tmux_name}
-            </span>
-          </div>
-          <div className="session-rail__orch-meta">
-            <span className="session-rail__orch-label">Orchestrator</span>
-            <span className="session-rail__agent" title={`agent: ${orchestrator.agent}`}>
-              {orchestrator.agent}
-            </span>
-            <ModelLabel session={orchestrator} />
-            <div className="session-rail__spacer" />
-            {orchestrator.pending_quiz && <QuizBadge quiz={orchestrator.pending_quiz} />}
-            <Badge tone={badgeTone(orchestrator)}>{orchestrator.activity ?? orchestrator.state}</Badge>
-          </div>
-          <div className="session-rail__orch-actions">
-            <a
-              className="session-rail__term-btn"
-              href={termPagePath(orchestrator.id)}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              ▣ term
-            </a>
-            <a
-              className="session-rail__chat-btn"
-              href={chatPagePath(orchestrator.id)}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              💬 chat
-            </a>
-            <button type="button" className="session-rail__attach-btn" onClick={() => copy(orchestrator)}>
-              attach ⧉
-            </button>
-            <button type="button" className="session-rail__kill-btn" onClick={() => handleKill(orchestrator)}>
-              kill
-            </button>
-          </div>
-          {copiedId === orchestrator.id && (
-            <div className="session-rail__copied">copied: rocket attach {orchestrator.tmux_name}</div>
-          )}
-        </div>
+        <SessionCard session={orchestrator} role="orchestrator"
+          beforeStatus={orchestrator.pending_quiz && <QuizBadge quiz={orchestrator.pending_quiz} />}
+          actions={<button type="button" className="session-rail__kill-btn" onClick={() => handleKill(orchestrator)}>kill</button>}
+        />
       )}
-
       <div className="session-rail__workers-heading">Workers</div>
       <div className="session-rail__workers">
         {workers.length === 0 && <p className="session-rail__empty">No workers yet.</p>}
         {workers.map((w) => {
           const pr = prText(w)
-          const errored = w.state === 'errored'
           return (
-            <div key={w.id} className="session-rail__worker">
-              <div className="session-rail__worker-head">
-                <Dot state={dotState(w)} />
-                <span className="session-rail__name" title={w.tmux_name}>
-                  {w.tmux_name}
-                </span>
-              </div>
-              <div className="session-rail__worker-repo" title={w.repo_id}>
-                {w.repo_id}
-              </div>
-              <div className="session-rail__worker-status">
-                <span className="session-rail__agent" title={`agent: ${w.agent}`}>
-                  {w.agent}
-                </span>
-                <ModelLabel session={w} />
-                {w.pending_quiz && <QuizBadge quiz={w.pending_quiz} />}
-                <Badge tone={badgeTone(w)}>{w.activity ?? w.state}</Badge>
-                <span className={`session-rail__pr ${pr.tone}`}>{pr.text}</span>
-              </div>
-              <div className="session-rail__worker-actions">
-                <a
-                  className="session-rail__worker-term"
-                  href={termPagePath(w.id)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  ▣ term
-                </a>
-                <a
-                  className="session-rail__worker-chat"
-                  href={chatPagePath(w.id)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  💬 chat
-                </a>
-                <button type="button" className="session-rail__worker-attach" onClick={() => copy(w)}>
-                  ⧉
-                </button>
-                {errored ? (
-                  <button
-                    type="button"
-                    className="session-rail__worker-restore"
-                    onClick={() => restore.mutate(w.id)}
-                    disabled={restore.isPending}
-                  >
-                    restore
-                  </button>
-                ) : (
-                  <button type="button" className="session-rail__worker-kill" onClick={() => handleKill(w)}>
-                    kill
-                  </button>
-                )}
-              </div>
-              {copiedId === w.id && (
-                <div className="session-rail__copied">copied: rocket attach {w.tmux_name}</div>
+            <SessionCard key={w.id} session={w} role="worker" repo={w.repo_id}
+              beforeStatus={w.pending_quiz && <QuizBadge quiz={w.pending_quiz} />}
+              afterStatus={<span className={`session-rail__pr ${pr.tone}`}>{pr.text}</span>}
+              actions={w.state === 'errored' ? (
+                <button type="button" className="session-rail__worker-restore"
+                  onClick={() => restore.mutate(w.id)} disabled={restore.isPending}>restore</button>
+              ) : (
+                <button type="button" className="session-rail__worker-kill" onClick={() => handleKill(w)}>kill</button>
               )}
-            </div>
+            />
           )
         })}
       </div>
