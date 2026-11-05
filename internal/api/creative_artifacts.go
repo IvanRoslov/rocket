@@ -129,6 +129,7 @@ func registerCreativeArtifactRoutes(mux *http.ServeMux, d Deps) {
 		}
 		writeJSON(w, 200, creativeVersionJSON(v))
 	})
+	register("GET /v1/creative/artifact-versions/{version}/view", func(w http.ResponseWriter, r *http.Request) { handleCreativeArtifactView(w, r, d) })
 	// A GET pattern also handles HEAD; ServeContent implements range/conditional access.
 	register("GET /v1/creative/artifact-versions/{version}/content", func(w http.ResponseWriter, r *http.Request) { handleCreativeArtifactContent(w, r, d) })
 }

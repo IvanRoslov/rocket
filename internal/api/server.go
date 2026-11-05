@@ -61,7 +61,8 @@ type Deps struct {
 	Usage UsageCollector
 
 	// Previews is shared by authenticated management routes and the isolated listener.
-	Previews *preview.Registry
+	Previews      *preview.Registry
+	ArtifactViews *artifactViewRegistry
 }
 
 // NewHandler builds the routed http.Handler for rocket's API.

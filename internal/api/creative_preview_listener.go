@@ -11,6 +11,9 @@ import (
 )
 
 func initializePreviews(d *Deps) {
+	if d.ArtifactViews == nil {
+		d.ArtifactViews = &artifactViewRegistry{entries: make(map[string]artifactViewAccess)}
+	}
 	if d.Previews != nil {
 		return
 	}
@@ -41,5 +44,5 @@ func listenPreview(d Deps) (*http.Server, net.Listener) {
 		slog.Error("preview listener disabled", "error", err)
 		return nil, nil
 	}
-	return &http.Server{Handler: d.Previews, ReadHeaderTimeout: 5 * time.Second}, ln
+	return &http.Server{Handler: creativePreviewHandler(d), ReadHeaderTimeout: 5 * time.Second}, ln
 }

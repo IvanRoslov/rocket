@@ -25,10 +25,10 @@
 
 Files: create internal/api/creative_artifact_views.go and _test.go; modify server.go, creative_preview_listener.go, creative_artifacts.go.
 Interfaces: GET /v1/creative/artifact-versions/{version}/view issues redirect; preview-only /a/{token}/ and /a/{token}/content serve wrapper/file. Deps shares *artifactViewRegistry between listeners.
-- [ ] Write API tests for authenticated redirect, immutable version bytes, sandbox/no-store/referrer headers, no privileges, download unchanged, missing setup/blob, wrong host/path/method, expiry and revocation.
-- [ ] Run go test ./internal/api -run TestCreativeArtifactView -count=1; observe missing-route failure.
-- [ ] Implement bounded registry (256 entries, five-minute expiry), authenticated issuer and separate listener handler with strict sandbox and trusted wrapper.
-- [ ] Run targeted API tests plus existing preview/artifact tests; expect PASS.
+- [x] Write API tests for authenticated redirect, immutable version bytes, sandbox/no-store/referrer headers, no privileges, download unchanged, missing setup/blob, wrong host/path/method, expiry and revocation.
+- [x] Run go test ./internal/api -run TestCreativeArtifactView -count=1; observe missing-route failure.
+- [x] Implement bounded registry (256 entries, five-minute expiry), authenticated issuer and separate listener handler with strict sandbox and trusted wrapper.
+- [x] Run targeted API tests plus existing preview/artifact tests; expect PASS.
 - [ ] Commit server feature and tests.
 
 ### Task 2: Selected-version links and errors
@@ -51,3 +51,5 @@ Interfaces: Media derives authenticated /view path from immutable version ID for
 ## Execution ledger
 
 Design accepted; native execution per worker instructions. Existing isolated worktree verified on feature/creative-work/artifact-view, initially clean and matching fetched origin/main.
+
+Task 1 verification: targeted artifact/preview Go tests pass. Initial RED missing view handler; fixture corrections used stored (non-JSON) storage key and existing pairing helper hostname. No production scope deviation.
