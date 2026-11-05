@@ -27,6 +27,8 @@ func TestCreativeCLIRequests(t *testing.T) {
 		{[]string{"pipeline", "create", "--file", file}, "POST", "/v1/creative/pipelines", map[string]any{"name": "Video"}},
 		{[]string{"stage", "action", "3", "7", "approve", "--review-revision", "2"}, "POST", "/v1/creative/runs/3/stages/7/actions", map[string]any{"action": "approve", "review_revision": float64(2)}},
 		{[]string{"item", "action", "3", "7", "9", "submit", "--artifact-version", "42"}, "POST", "/v1/creative/runs/3/stages/7/items/9/actions", map[string]any{"action": "submit", "artifact_version_ids": []any{float64(42)}}},
+		{[]string{"stage", "action", "3", "7", "withdraw", "--review-revision", "2", "--reason", "Correct result"}, "POST", "/v1/creative/runs/3/stages/7/actions", map[string]any{"action": "withdraw", "review_revision": float64(2), "reason": "Correct result"}},
+		{[]string{"item", "action", "3", "7", "9", "withdraw", "--review-revision", "2", "--reason", "Correct scene"}, "POST", "/v1/creative/runs/3/stages/7/items/9/actions", map[string]any{"action": "withdraw", "review_revision": float64(2), "reason": "Correct scene"}},
 		{[]string{"run", "ls", "--project", "a b"}, "GET", "/v1/creative/runs?project_id=a+b", nil},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
@@ -76,6 +78,18 @@ func TestCreativeCLIRejectsInvalidInputBeforeConnecting(t *testing.T) {
 		cmd.SetErr(new(bytes.Buffer))
 		if err := cmd.Execute(); err == nil {
 			t.Fatalf("accepted %v", args)
+		}
+	}
+}
+
+func TestCreativeCLIWithdrawRequiresReasonAndRevision(t *testing.T) {
+	for _, flags := range [][]string{{}, {"--review-revision", "1"}, {"--reason", "Fix"}, {"--review-revision", "1", "--reason", "  "}} {
+		cmd := creativeCommands(func() (*client.Client, error) { t.Fatal("connected with invalid withdrawal"); return nil, nil })
+		cmd.SetArgs(append([]string{"stage", "action", "1", "2", "withdraw"}, flags...))
+		cmd.SetOut(new(bytes.Buffer))
+		cmd.SetErr(new(bytes.Buffer))
+		if err := cmd.Execute(); err == nil {
+			t.Fatalf("accepted %v", flags)
 		}
 	}
 }

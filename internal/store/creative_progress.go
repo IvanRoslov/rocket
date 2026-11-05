@@ -210,6 +210,28 @@ func validateCreativeReviewVersions(tx *sql.Tx, runID, stageID, itemID int64, id
 // ApplyCreativeAction is the sole completion/review transition path. human is
 // derived from authenticated caller identity by the API, never a request field.
 func (s *Store) ApplyCreativeAction(runID, stageID, itemID int64, action CreativeAction, human bool) (CreativeRun, error) {
+	if action.Action == "withdraw" {
+		return CreativeRun{}, ErrCreativeForbidden
+	}
+	return s.applyCreativeAction(runID, stageID, itemID, action, human, "")
+}
+
+// WithdrawCreativeReview authorizes the authenticated session inside the same
+// write transaction as the revision check. Caller identity is never a body field.
+func (s *Store) WithdrawCreativeReview(runID, stageID, itemID int64, action CreativeAction, callerID string) (CreativeRun, error) {
+	if callerID == "" {
+		return CreativeRun{}, ErrCreativeForbidden
+	}
+	if action.Action != "withdraw" {
+		return CreativeRun{}, creativeInvalid("withdraw action required")
+	}
+	if strings.TrimSpace(action.Reason) == "" {
+		return CreativeRun{}, creativeInvalid("withdraw reason is required")
+	}
+	return s.applyCreativeAction(runID, stageID, itemID, action, false, callerID)
+}
+
+func (s *Store) applyCreativeAction(runID, stageID, itemID int64, action CreativeAction, human bool, withdrawCaller string) (CreativeRun, error) {
 	if stageID <= 0 {
 		return CreativeRun{}, creativeInvalid("stage ID required")
 	}
@@ -227,6 +249,16 @@ func (s *Store) ApplyCreativeAction(runID, stageID, itemID int64, action Creativ
 	run, err := getCreativeRun(tx, runID)
 	if err != nil {
 		return run, err
+	}
+	if action.Action == "withdraw" {
+		var authorized int
+		err = tx.QueryRow(`SELECT COUNT(*) FROM sessions s JOIN creative_session_contexts c ON c.session_id=s.id WHERE s.id=? AND s.id=? AND s.project_id=? AND s.kind='orchestrator' AND s.state IN ('running','spawning') AND c.run_id=?`, withdrawCaller, run.OrchestratorSessionID, run.ProjectID, runID).Scan(&authorized)
+		if err != nil {
+			return run, err
+		}
+		if authorized != 1 {
+			return run, ErrCreativeForbidden
+		}
 	}
 	stage, err := getCreativeStage(tx, stageID)
 	if err != nil {
@@ -288,9 +320,9 @@ func (s *Store) ApplyCreativeAction(runID, stageID, itemID int64, action Creativ
 		if (itemID == 0 && stage.Approval == "stage") || (itemID != 0 && stage.Approval == "item") {
 			status = "awaiting_approval"
 		}
-	case "approve", "reject":
+	case "approve", "reject", "withdraw":
 		if status != "awaiting_approval" || action.ReviewRevision <= 0 || action.ReviewRevision != review.ReviewRevision {
-			return run, creativeConflict("approval requires the current pending review revision")
+			return run, creativeConflict("action requires the current pending review revision")
 		}
 		if action.Action == "approve" {
 			status = "completed"

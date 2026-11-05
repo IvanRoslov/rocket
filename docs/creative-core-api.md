@@ -44,7 +44,7 @@ Under `/v1/creative/runs/{run}/stages/{stage}`:
 | `POST /actions` | Action below | Transition stage, return run |
 | `POST /items/{item}/actions` | Action below | Transition item, return run |
 
-Actions use `{ "action": "start|submit|approve|reject|reopen" }`. Start transitions pending work to in_progress. Only the first unfinished stage can progress. An item needs its stage in progress; in per-item mode all preceding items must be completed before any later item progression. Repeated stages need at least one item and all items completed before submission.
+Actions use `{ "action": "start|submit|approve|reject|reopen|withdraw" }`. Start transitions pending work to in_progress. Only the first unfinished stage can progress. An item needs its stage in progress; in per-item mode all preceding items must be completed before any later item progression. Repeated stages need at least one item and all items completed before submission.
 
 Submit may carry `artifact_version_ids:[10,11]`. These immutable version IDs become the review snapshot and `review_revision` increments. Auto work completes; human-gated work becomes awaiting_approval. Stage review accepts versions belonging to that run/stage, including its items. Item review accepts only that exact item. Other stages/runs never match. Empty lists allow text-only work; nonempty lists fail closed until the assets migration exists. Current artifact pointer changes cannot alter review snapshots.
 
@@ -88,3 +88,19 @@ rocket creative item progress 1 2 3 --progress 75 --note 'Rendering'
 ```
 
 Agent identity comes from the existing `ROCKET_SESSION_ID` client behavior. CLI approval flags do not override identity. The human uses the dashboard or a human CLI session for human-only actions.
+
+
+### Review withdrawal and notifications
+
+The current bound run orchestrator may withdraw an exact still-pending stage or item review:
+
+```sh
+rocket creative stage action RUN STAGE withdraw --review-revision N --reason "Correct the publication"
+rocket creative item action RUN STAGE ITEM withdraw --review-revision N --reason "Correct the scene"
+```
+
+The action JSON is `{"action":"withdraw","review_revision":N,"reason":"..."}`. The server checks the current orchestrator session, run binding, live state, and review revision under the same write lock as approve. Workers, other runs, replaced orchestrators and human callers cannot withdraw. Only `awaiting_approval` becomes `in_progress`; completed or changed reviews cannot be withdrawn. Artifacts and the reviewed snapshot remain intact; the next submit increments the review revision. The existing action event records actor, reason, revision and version IDs. A resolved contextual FYI discussion informs the human of successful withdrawal without requesting permission.
+
+After a successful human approve/reject, the server enqueues a contextual message to the run orchestrator from the committed review snapshot. It includes run/stage/item, decision, revision, immutable artifact version IDs, server timestamp and available actor attribution. No-session requests remain explicitly unattributed; no personal identity is inferred. Approval includes a reminder to verify durable publications and explicitly close relevant workers; approval itself never closes them.
+
+The action event records `notification_status` (`queued`, `recorded` for a withdrawal FYI, or `failed`), the message/question ID when available, and failure details. Queued does not mean delivered: existing message status and delivery events track delivery/consumption/failure. Notification persistence failure is logged and recorded on the action event without rolling back the committed action or returning a misleading transition failure. This is the existing post-commit integration: a process crash between transition commit and notification/event persistence can leave a notification absent; event-store failure is logged by the existing bus. No historical replay or automatic notification retry is added. Existing queued messages retain their usual delivery retries.
