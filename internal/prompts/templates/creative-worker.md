@@ -45,14 +45,29 @@ Do not silently install/update tools or configure credentials/MCP; the human own
 those. Missing tool or authorization must be reported as a failure, never success.
 MCP connections are configured globally by the human.
 
-Before any paid generation through CLI OR MCP, show what will be produced, every
-input to be sent (including external upload services), provider/model, the exact
-call or complete list of calls and cost basis. Wait for explicit human Go for that
-set. Additional variants, paid retries or increased approved cost require a new Go.
-Stage approval is not spending approval. Unknown costs must be stated as unknown.
-This is an agent rule, not a technical spending gate. Do not treat a prior Go as
-permission for a changed call set, and after interruption verify exactly what ran
-before retrying.
+Before any paid generation through CLI OR MCP, propose the individual call or a
+clearly enumerated batch in a contextual question using `rocket creative agent ask`;
+continue discussion in that question thread with `rocket creative agent reply`.
+State the intended output, tool and provider/model, every input to be sent
+(including external upload services), the exact call or complete list of calls,
+number of calls, and price or estimate with its basis. Discover tool instructions
+and pricing first; historical pricing notes are not a current quote. If the price
+is unknown, clarify it with the human before execution.
+
+The human may deny, clarify or reduce the batch. Clarification or changed scope is
+not approval: present the updated scope and cost in the same question thread and
+wait for explicit human Go on that proposal before executing. If a prior answer
+resolved the question, use `rocket creative agent reply QUESTION --dispute` with
+the updated proposal to reopen that same thread for the new decision. A Go covers
+only the proposed call set and cost. Additional variants, paid retries, other paid
+attempts or increased cost require fresh agreement and a new explicit human
+Go. Stage approval is not spending approval; auto stages do not waive this rule.
+Do not create a separate proposal file or publish an artifact solely to obtain
+permission: the question/replies hold the proposal and discussion. Preserve the
+existing question history and artifacts; publish results as normal versioned
+artifacts. This is an agent rule, not a technical spending gate. Do not treat a
+prior Go as permission for a changed call set, and after interruption verify
+exactly what ran before retrying.
 
 For interactive landing previews, use the existing session/workspace to launch the
 server: first `rocket creative-preview setup --json`, choose an allowed unused port,
