@@ -1,6 +1,12 @@
-import { Badge } from "../../web/src/components/Badge";
 import { Button } from "../../web/src/components/Button";
-import { useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
+import { QuestionThreadView } from "../../web/src/components/QuestionThreadView";
+import { Markdown } from "../../web/src/components/Markdown";
+import { isHuman } from "../../web/src/lib/participants";
+import { questionTitle } from "../../web/src/lib/thread";
+import { timeAgo } from "../../web/src/lib/format";
+import "../../web/src/screens/task/QuestionsTab.css";
+import "../../web/src/screens/chat/ChatScreen.css";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { api, base, contextPath, useCommand } from "./api";
 import type {
@@ -84,6 +90,7 @@ export function Discussion({
   const [body, setBody] = useState(""),
     [mode, setMode] = useState("message");
   const [draftContext, setDraftContext] = useState<Context>();
+  const [replies, setReplies] = useState<Record<number, string>>({});
   const command = useCommand();
   const target = draftContext ?? context;
   const changed = JSON.stringify(target) !== JSON.stringify(context);
@@ -91,8 +98,20 @@ export function Discussion({
     setBody("");
     setDraftContext(undefined);
   }
+  const sorted = [...(questions.data ?? [])].sort(
+    (a, b) => (b.asked_at ?? b.id) - (a.asked_at ?? a.id) || b.id - a.id,
+  );
+  const open = sorted.filter((q) => q.status === "open");
+  const resolved = sorted.filter((q) => q.status !== "open");
+  const draft = (id: number) => ({
+    body: replies[id] ?? "",
+    setBody: ((value) => setReplies((prev) => ({
+      ...prev,
+      [id]: typeof value === "function" ? value(prev[id] ?? "") : value,
+    }))) as Dispatch<SetStateAction<string>>,
+  });
   return (
-    <aside className="discussion">
+    <section className="discussion">
       <div className="heading">
         <div>
           <span className="eyebrow">Creative orchestrator</span>
@@ -107,34 +126,32 @@ export function Discussion({
         {questions.data?.length === 0 && (
           <Empty>No questions in this context.</Empty>
         )}
-        {questions.data?.map((q) => (
-          <Question key={q.id} question={q} />
-        ))}
+        <div className="questions-tab">
+          {open.map((q) => <Question key={q.id} question={q} draft={draft(q.id)} />)}
+          {resolved.length > 0 && <div className="questions-tab__resolved-label">Resolved</div>}
+          {resolved.map((q) => <ResolvedQuestion key={q.id} question={q} />)}
+        </div>
         <h3>Messages</h3>
         {messages.isPending && <p>Loading messages…</p>}
         {messages.data?.length === 0 && (
           <Empty>Discuss the selected work and shown versions here.</Empty>
         )}
         {messages.data?.map((m) => (
-          <article className="message" key={m.id}>
-            <div className="row">
-              <strong>
-                {!m.from || m.from === "human"
-                  ? "You"
-                  : m.from === orchestrator
-                    ? "Orchestrator"
-                    : m.from}
+          <article className={`chat-screen__row ${isHuman(m.from) ? "chat-screen__row--own" : ""}`} key={m.id}>
+            <div className={`chat-screen__bubble ${isHuman(m.from) ? "chat-screen__bubble--own" : ""}`}>
+              <strong className="question-thread__message-author">
+                {isHuman(m.from) ? "You" : m.from === orchestrator ? "Orchestrator" : m.from}
               </strong>
-              <small>{m.status}</small>
+              <div className="chat-screen__body"><Markdown compact>{m.body}</Markdown></div>
+              <div className="chat-screen__when">{timeAgo(m.created_at)} · {m.status}</div>
+              <BoundVersions ids={m.artifact_version_ids ?? []} />
+              {m.reason && <p className="error">{m.reason}</p>}
             </div>
-            <p className="prose">{m.body}</p>
-            <BoundVersions ids={m.artifact_version_ids ?? []} />
-            {m.reason && <p className="error">{m.reason}</p>}
           </article>
         ))}
       </div>
       <form
-        className="composer"
+        className="composer question-thread__form"
         onSubmit={(e) => {
           e.preventDefault();
           const { run_id, stage_id, item_id, artifact_version_ids } = target;
@@ -184,9 +201,8 @@ export function Discussion({
           />
         </label>
         <div className="row">
-          <Button
-            variant="primary"
-            size="sm"
+          <button
+            className="question-thread__answer"
             type="submit"
             disabled={
               !body.trim() ||
@@ -195,7 +211,7 @@ export function Discussion({
             }
           >
             {mode === "question" ? "Open question" : "Send message"}
-          </Button>
+          </button>
           {body && (
             <Button
               variant="secondary"
@@ -209,80 +225,60 @@ export function Discussion({
         </div>
         <ErrorNotice error={command.error} />
       </form>
-    </aside>
+    </section>
   );
 }
-function Question({ question: q }: { question: CreativeQuestion }) {
-  const [reply, setReply] = useState("");
+function Question({ question: q, draft, readOnly = false }: {
+  question: CreativeQuestion;
+  draft?: { body: string; setBody: Dispatch<SetStateAction<string>> };
+  readOnly?: boolean;
+}) {
   const command = useCommand();
-  const open = q.status === "open";
   function send(action: "reply" | "answer", payload: unknown) {
     command.mutate(() => api.post(`/v1/questions/${q.id}/${action}`, payload), {
-      onSuccess: () => setReply(""),
+      onSuccess: () => draft?.setBody(""),
     });
   }
   return (
-    <article className={`question ${q.your_turn ? "your-turn" : ""}`}>
-      <div className="heading">
-        <strong>{q.title || "Question"}</strong>
-        <Badge tone={open ? (q.your_turn ? "warn" : "neutral") : "ok"}>
-          {open ? (q.your_turn ? "Your reply needed" : "Open") : "Resolved"}
-        </Badge>
-      </div>
-      <p className="prose">{q.body}</p>
-      <BoundVersions ids={q.artifact_version_ids ?? []} />
-      {q.messages?.map((m) => (
-        <div className="thread-reply" key={m.id}>
-          <strong>
-            {!m.author || m.author === "human" ? "You" : m.author}
-          </strong>
-          <p className="prose">{m.body}</p>
-        </div>
-      ))}
-      {q.resolution && <p className="prose">Resolution: {q.resolution}</p>}
-      {open && (
-        <>
-          <div className="row">
-            {q.options?.map((option, i) => (
-              <Button
-                variant="secondary"
-                size="sm"
-                key={i}
-                disabled={command.isPending}
-                onClick={() => send("answer", { choose: i + 1 })}
-              >
-                {option}
-              </Button>
-            ))}
-          </div>
-          <label>
-            Reply to {q.title || "question"}
-            <textarea
-              value={reply}
-              onChange={(e) => setReply(e.target.value)}
-            />
-          </label>
-          <div className="row">
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={!reply.trim() || command.isPending}
-              onClick={() => send("reply", { body: reply })}
-            >
-              Reply
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={!reply.trim() || command.isPending}
-              onClick={() => send("answer", { body: reply })}
-            >
-              Answer & close
-            </Button>
-          </div>
-        </>
-      )}
+    <div>
+      <QuestionThreadView
+        ordinal={q.ordinal ?? q.id}
+        localRef={q.local_ref || `creative/Q${q.id}`}
+        title={q.title}
+        body={q.body}
+        brief={q.brief}
+        messages={q.messages ?? []}
+        turnLabel={readOnly ? "Resolved" : q.your_turn ? "Your reply needed" : "Open"}
+        turnWarn={!readOnly && q.your_turn}
+        askerLabel={isHuman(q.asked_by) ? "you asked" : `${q.asked_by} asked`}
+        options={q.options}
+        stale={q.stale}
+        busy={command.isPending}
+        draft={draft}
+        readOnly={readOnly}
+        onClarify={(body) => send("reply", { body })}
+        onAnswer={(body) => send("answer", { body })}
+        onChoose={(choose) => send("answer", { choose })}
+        onDismiss={() => send("answer", { dismiss: true })}
+      >
+        <BoundVersions ids={q.artifact_version_ids ?? []} />
+      </QuestionThreadView>
       <ErrorNotice error={command.error} />
-    </article>
+    </div>
+  );
+}
+function ResolvedQuestion({ question: q }: { question: CreativeQuestion }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="questions-tab__resolved">
+      <button type="button" className="questions-tab__resolved-row" aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}>
+        <span className="questions-tab__resolved-tag">{q.local_ref || `creative/Q${q.id}`}</span>
+        <span className="questions-tab__resolved-badge">{q.resolution || "resolved"}</span>
+        <span className="questions-tab__resolved-text">{questionTitle(q)}</span>
+        <span className="questions-tab__resolved-chevron">{expanded ? "▴" : "▾"}</span>
+      </button>
+      {expanded && <Question question={q} readOnly />}
+    </div>
   );
 }

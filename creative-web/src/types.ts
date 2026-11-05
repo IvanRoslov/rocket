@@ -118,6 +118,10 @@ export interface CreativeQuestion {
   options?: string[];
   your_turn: boolean;
   local_ref: string;
+  ordinal?: number;
+  asked_at?: number;
+  brief?: string;
+  stale?: boolean;
   asked_by: string;
   creative_context: Scope;
   artifact_version_ids: number[];

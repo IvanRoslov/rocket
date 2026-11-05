@@ -312,7 +312,7 @@ describe('TaskScreen', () => {
     renderTask()
     expect(await screen.findByText('billing-v2-orch')).toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: 'attach ⧉' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Copy attach command for billing-v2-orch' }))
 
     expect(writeText).toHaveBeenCalledWith('rocket attach billing-v2-orch')
     expect(await screen.findByText('copied: rocket attach billing-v2-orch')).toBeInTheDocument()
