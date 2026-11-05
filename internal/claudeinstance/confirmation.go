@@ -110,6 +110,7 @@ func FindProof(ctx context.Context, s Snapshot) (Proof, bool, error) {
 	offset := s.Boundary.Offset
 	var proof Proof
 	matches := 0
+	midturn := make(midturnProofScan)
 	for {
 		if err := ctx.Err(); err != nil {
 			return Proof{}, false, err
@@ -169,6 +170,10 @@ func FindProof(ctx context.Context, s Snapshot) (Proof, bool, error) {
 					proof = Proof{RecordID: record.UUID, Offset: offset, End: end}
 				}
 			}
+		}
+		if recordID, found := midturn.match(line, s); found {
+			matches++
+			proof = Proof{RecordID: recordID, Offset: offset, End: end}
 		}
 		offset = end
 	}
