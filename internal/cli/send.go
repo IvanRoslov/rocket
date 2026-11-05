@@ -158,6 +158,25 @@ type msgResp struct {
 // errored) so that future statuses added server-side don't break existing
 // clients.
 func waitForMessage(cmd *cobra.Command, c *client.Client, msgID int64) error {
+	return waitForMessageTo(cmd, c, msgID, "")
+}
+
+// waitForMessageTo shares ordinary send polling with Creative sends. A recipient
+// adds display context only; the ordinary wrapper retains its output contract.
+func waitForMessageTo(cmd *cobra.Command, c *client.Client, msgID int64, to string) error {
+	label := fmt.Sprintf("message %d", msgID)
+	if to != "" {
+		label += " to " + to
+	}
+	printResult := func(msg msgResp) error {
+		if to == "" {
+			return printJSON(cmd, msg)
+		}
+		return printJSON(cmd, struct {
+			msgResp
+			To string `json:"to"`
+		}{msg, to})
+	}
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
@@ -174,9 +193,9 @@ func waitForMessage(cmd *cobra.Command, c *client.Client, msgID int64) error {
 			switch msg.Status {
 			case "delivered":
 				if flags.JSON {
-					return printJSON(cmd, msg)
+					return printResult(msg)
 				}
-				cmd.Printf("message %d delivered\n", msgID)
+				cmd.Printf("%s delivered\n", label)
 				return nil
 			case "failed":
 				reason := msg.Reason
@@ -187,14 +206,14 @@ func waitForMessage(cmd *cobra.Command, c *client.Client, msgID int64) error {
 					reason = "unknown error"
 				}
 				if flags.JSON {
-					_ = printJSON(cmd, msg)
+					_ = printResult(msg)
 				} else {
-					cmd.PrintErrf("message %d failed: %s\n", msgID, reason)
+					cmd.PrintErrf("%s failed: %s\n", label, reason)
 				}
 				return fmt.Errorf("message delivery failed")
 			case "accepted":
 				if !announcedAccepted && !flags.JSON {
-					cmd.Printf("message %d accepted (the agent has it; waiting for confirmation)\n", msgID)
+					cmd.Printf("%s accepted (the agent has it; waiting for confirmation)\n", label)
 				}
 				announcedAccepted = true
 				continue

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -20,7 +21,7 @@ func creativeAgentCommands(open creativeConnection) *cobra.Command {
 		var body, file, profile, agentName, repo, name, to, title string
 		var options []string
 		var choose int
-		var dispute bool
+		var dispute, wait bool
 		cmd := &cobra.Command{Use: action + " ID", Args: creativeArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 			if stage < 0 || item < 0 || item != 0 && stage == 0 {
 				return &usageError{message: "item requires a positive stage; IDs cannot be negative"}
@@ -101,6 +102,9 @@ func creativeAgentCommands(open creativeConnection) *cobra.Command {
 			default:
 				return fmt.Errorf("unsupported action")
 			}
+			if action == "send" {
+				return creativeSend(cmd, open, path, in, wait)
+			}
 			return creativeCall(cmd, open, method, path, in)
 		}}
 		switch action {
@@ -117,7 +121,8 @@ func creativeAgentCommands(open creativeConnection) *cobra.Command {
 			cmd.Flags().Int64SliceVar(&versions, "version", nil, "Exact shown immutable version IDs (repeatable)")
 		}
 		if action == "send" {
-			cmd.Flags().StringVar(&to, "to", "", "Recipient session (default run orchestrator)")
+			cmd.Flags().StringVar(&to, "to", "", "Recipient session (default run orchestrator; orchestrators must specify a worker)")
+			cmd.Flags().BoolVar(&wait, "wait", false, "Poll normal message delivery until confirmed or failed (accepted is not confirmed)")
 		}
 		if action == "ask" {
 			cmd.Flags().StringVar(&title, "title", "", "Question title")
@@ -140,4 +145,32 @@ func creativeAgentCommands(open creativeConnection) *cobra.Command {
 		root.AddCommand(cmd)
 	}
 	return root
+}
+
+// creativeSend retains the contextual POST response and uses the ordinary send
+// waiter for delivery, rather than implementing a Creative delivery mechanism.
+func creativeSend(cmd *cobra.Command, open creativeConnection, path string, in any, wait bool) error {
+	c, err := open()
+	if err != nil {
+		return err
+	}
+	var out json.RawMessage
+	if err := c.Post(path, in, &out); err != nil {
+		return err
+	}
+	if !wait {
+		return printJSON(cmd, out)
+	}
+	var response struct {
+		ID     int64  `json:"id"`
+		To     string `json:"to"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(out, &response); err != nil {
+		return err
+	}
+	if !flags.JSON {
+		cmd.Printf("message %d to %s %s\n", response.ID, response.To, response.Status)
+	}
+	return waitForMessageTo(cmd, c, response.ID, response.To)
 }

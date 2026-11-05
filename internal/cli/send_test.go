@@ -373,3 +373,34 @@ func TestWaitForMessageAcceptedPrintedOnce(t *testing.T) {
 		t.Fatalf("accepted treated as unknown: %q", errBuf.String())
 	}
 }
+
+func TestOrdinaryWaitOutputContract(t *testing.T) {
+	restore := setPollIntervalForTest(t, time.Millisecond)
+	defer restore()
+	oldJSON := flags.JSON
+	defer func() { flags.JSON = oldJSON }()
+	for _, asJSON := range []bool{false, true} {
+		flags.JSON = asJSON
+		c := newUnixSocketTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"id":42,"to":"worker","status":"delivered","attempts":1}`))
+		}))
+		cmd := &cobra.Command{}
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		if err := waitForMessage(cmd, c, 42); err != nil {
+			t.Fatal(err)
+		}
+		if asJSON {
+			var result map[string]any
+			if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if len(result) != 3 || result["id"] != float64(42) || result["status"] != "delivered" || result["attempts"] != float64(1) {
+				t.Fatalf("ordinary JSON changed: %s", out.String())
+			}
+		} else if out.String() != "message 42 delivered\n" {
+			t.Fatalf("ordinary output changed: %q", out.String())
+		}
+	}
+}
