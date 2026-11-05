@@ -4,7 +4,7 @@
 // «Q&A-треды роли») render exactly the same UI as task threads and only differ
 // in the mutations wired into the callbacks below.
 
-import { useState } from 'react'
+import { useState, type Dispatch, type SetStateAction, type ReactNode } from 'react'
 import { BrainstormOptions } from './BrainstormOptions'
 import { Markdown } from './Markdown'
 import { QuestionContent } from './QuestionContent'
@@ -30,6 +30,12 @@ export interface ThreadEntry {
 
 export interface QuestionThreadViewProps {
   ordinal: number
+  /** Resolved history: show every entry and omit all mutation controls. */
+  readOnly?: boolean
+  /** A controlled draft is cleared by its owner only after successful delivery. */
+  draft?: { body: string; setBody: Dispatch<SetStateAction<string>> }
+  /** Context such as immutable artifact references, beneath the question. */
+  children?: ReactNode
   /**
    * The one thread id a human sees — "1023/Q2" for a task thread, "cto/Q1"
    * for a role thread. Absent on a daemon older than task #1023, where the
@@ -90,6 +96,9 @@ export interface QuestionThreadViewProps {
 
 export function QuestionThreadView({
   ordinal,
+  readOnly = false,
+  draft,
+  children,
   localRef,
   title,
   body: question,
@@ -113,12 +122,14 @@ export function QuestionThreadView({
   recommendedOption,
   onChooseWithComment,
 }: QuestionThreadViewProps) {
-  const [body, setBody] = useState('')
+  const [localBody, setLocalBody] = useState('')
+  const body = draft?.body ?? localBody
+  const setBody = draft?.setBody ?? setLocalBody
   const [allReplies, setAllReplies] = useState(false)
   const [to, setTo] = useState<string[]>([])
   const paste = usePasteImage(setBody)
   const ref = localRef ?? `Q${ordinal}`
-  const replies = splitReplies(messages, allReplies)
+  const replies = splitReplies(messages, readOnly || allReplies)
 
   // You are never your own addressee, so the human is not a candidate.
   const addressees = (participants ?? []).filter((p) => !isHuman(p))
@@ -131,7 +142,7 @@ export function QuestionThreadView({
   function submit(handler: (body: string, to: string[]) => void) {
     if (!body.trim()) return
     handler(body, to)
-    setBody('')
+    if (!draft) setBody('')
   }
 
   return (
@@ -174,6 +185,8 @@ export function QuestionThreadView({
           body={question}
           bodyClassName="question-thread__question"
         />
+
+        {children}
 
         <div className="question-thread__discussion-label">
           Discussion · {messages.length} replies
@@ -220,7 +233,7 @@ export function QuestionThreadView({
           })}
         </div>
 
-        {brainstorm && options && options.length > 0 && onChooseWithComment && (
+        {!readOnly && brainstorm && options && options.length > 0 && onChooseWithComment && (
           <BrainstormOptions
             options={options}
             recommended={recommendedOption}
@@ -232,7 +245,7 @@ export function QuestionThreadView({
           />
         )}
 
-        {!brainstorm && options && options.length > 0 && onChoose && (
+        {!readOnly && !brainstorm && options && options.length > 0 && onChoose && (
           <div className="question-thread__options" aria-label="Answer options">
             {options.map((label, i) => (
               <button
@@ -251,7 +264,7 @@ export function QuestionThreadView({
           </div>
         )}
 
-        <div className="question-thread__form">
+        {!readOnly && <div className="question-thread__form">
           <textarea
             aria-label={`Reply to ${ref}`}
             placeholder={placeholder}
@@ -308,7 +321,7 @@ export function QuestionThreadView({
               Dismiss as not relevant
             </button>
           </div>
-        </div>
+        </div>}
       </div>
     </div>
   )

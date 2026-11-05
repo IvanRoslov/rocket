@@ -338,3 +338,23 @@ describe('QuestionThreadView — storm thread', () => {
     expect(screen.queryByText(/goes with the option as your comment/)).not.toBeInTheDocument()
   })
 })
+
+it('renders complete read-only history without controls that can resolve or reply', () => {
+  render(<QuestionThreadView {...base} readOnly options={['Ship']} onChoose={vi.fn()}
+    messages={[1, 2, 3, 4, 5].map((id) => ({ id, body: `reply ${id}`, author: 'human', created_at: 100 }))} />)
+  expect(screen.getByText('reply 1')).toBeInTheDocument()
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Ship' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /Dismiss/ })).not.toBeInTheDocument()
+})
+
+it('leaves controlled drafts with their owner until a successful mutation clears them', async () => {
+  const onClarify = vi.fn()
+  const setBody = vi.fn()
+  render(<QuestionThreadView {...base} onClarify={onClarify}
+    draft={{ body: 'Keep my question', setBody }} />)
+  expect(screen.getByLabelText('Reply to Q2')).toHaveValue('Keep my question')
+  await userEvent.click(screen.getByRole('button', { name: /Clarify/ }))
+  expect(onClarify).toHaveBeenCalledWith('Keep my question', [])
+  expect(setBody).not.toHaveBeenCalledWith('')
+})

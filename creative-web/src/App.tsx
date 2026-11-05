@@ -12,6 +12,7 @@ import { Artifacts } from "./Artifacts";
 import { ReviewActions } from "./ReviewActions";
 import { Empty, ErrorNotice } from "./ui";
 import { Discussion } from "./Discussion";
+import { CreativeSessionRail } from "./SessionRail";
 import { Preview } from "./Preview";
 interface Selection {
   project?: string;
@@ -453,6 +454,7 @@ function Workspace({
           </>
         )}
       </main>
+      <CreativeSessionRail key={run.id} runID={run.id} orchestrator={run.orchestrator_session_id} />
     </div>
   );
 }
