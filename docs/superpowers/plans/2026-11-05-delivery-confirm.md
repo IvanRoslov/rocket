@@ -19,10 +19,10 @@ Missing removal, foreign correlation, incomplete render, duplicate consumption a
 
 Files: create internal/claudeinstance/confirmation_midturn.go and confirmation_midturn_test.go; modify confirmation.go; add internal/queue/claude_midturn_test.go. Existing FindProof signature and Proof physical-record identity stay unchanged.
 
-- [ ] Add synthetic parser table tests: valid removal + rendered attachment yields attachment UUID/offsets; missing/mismatched identity, envelope, command/delivery/wire/address, wrapper, incomplete record, duplicate and pre-boundary evidence reject.
-- [ ] Add queue integration tests: accepted becomes delivered with durable consumed attachment proof exactly once, ordinary proof still works; foreign/incomplete proof remains accepted; failed/deadline rows cannot resurrect; sends remain one.
-- [ ] Run focused tests and observe valid mid-turn cases fail on current parser.
-- [ ] Implement a private matcher retaining matching post-boundary removal IDs and requiring the observed complete attachment shape and rendered wrapper. Count its match alongside ordinary user records without changing finalization/store semantics.
-- [ ] Run focused tests GREEN and commit the coherent fix.
-- [ ] Run claudeinstance/store/queue suites, race checks and repository Go tests/vet. Review the diff for scope and proof weakening.
-- [ ] Record evidence/recovery limits and create one PR for creative-work; report URL and verification to orchestrator.
+- [x] Add synthetic parser table tests: valid removal + rendered attachment yields attachment UUID/offsets; missing/mismatched identity, envelope, command/delivery/wire/address, wrapper, incomplete record, duplicate and pre-boundary evidence reject.
+- [x] Add queue integration tests: accepted becomes delivered with durable consumed attachment proof exactly once, ordinary proof still works; foreign/incomplete proof remains accepted; failed/deadline rows cannot resurrect; sends remain one.
+- [x] Run focused tests and observe valid mid-turn cases fail on current parser.
+- [x] Implement a private matcher retaining matching post-boundary removal IDs and requiring the observed complete attachment shape and rendered wrapper. Count its match alongside ordinary user records without changing finalization/store semantics.
+- [x] Run focused tests GREEN and commit the coherent fix.
+- [x] Run claudeinstance/store/queue suites, race checks and repository Go tests/vet. Review the diff for scope and proof weakening.
+- [x] Record evidence/recovery limits; deliver one PR for creative-work with URL and verification to orchestrator.

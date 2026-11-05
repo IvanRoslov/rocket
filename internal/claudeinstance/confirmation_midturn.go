@@ -3,6 +3,8 @@ package claudeinstance
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/IvanRoslov/rocket/internal/socketmsg"
 )
 
 // Mid-turn peer input is consumed as a rendered queued_command attachment,
@@ -49,7 +51,7 @@ func (seen midturnProofScan) match(line []byte, s Snapshot) (string, bool) {
 		return "", false
 	}
 	a := r.Attachment
-	if r.Type != "attachment" || r.UUID == "" || a.Type != "queued_command" || a.Prompt != s.Envelope || a.CommandMode != "prompt" || !a.IsMeta || a.Origin.Kind != "peer" || a.Origin.MessageID != s.WireID || a.Origin.From != "uds:"+s.ReplyPath || a.SourceUUID == "" || a.DeliveryID == "" || seen[midturnCommand{a.SourceUUID, a.DeliveryID}] != 1 {
+	if r.Type != "attachment" || r.UUID == "" || a.Type != "queued_command" || a.Prompt != s.Envelope || a.CommandMode != "prompt" || !a.IsMeta || a.Origin.Kind != "peer" || a.Origin.MessageID != s.WireID || a.Origin.From != socketmsg.EncodeAddr(s.ReplyPath) || a.SourceUUID == "" || a.DeliveryID == "" || seen[midturnCommand{a.SourceUUID, a.DeliveryID}] != 1 {
 		return "", false
 	}
 	// Exact observed wrapper, including its security notice. No substring match

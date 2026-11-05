@@ -35,7 +35,7 @@ func (f midturnSocket) Prepare(ctx context.Context, sess store.Session, name, te
 }
 
 func TestClaudeMidturnFinalization(t *testing.T) {
-	for _, name := range []string{"valid", "foreign", "incomplete", "deadline", "already failed", "ordinary"} {
+	for _, name := range []string{"valid", "foreign", "repeated consumption", "incomplete", "deadline", "already failed", "ordinary"} {
 		t.Run(name, func(t *testing.T) {
 			h := newTestQueue(t)
 			h.addRunningSession(t, "recv", activity.Active)
@@ -62,6 +62,16 @@ func TestClaudeMidturnFinalization(t *testing.T) {
 					t.Fatal(e)
 				}
 				data = append(data, append(b, '\n')...)
+			}
+			if name == "repeated consumption" {
+				record["uuid"] = "second-consumption"
+				for _, r := range []any{removal, record} {
+					b, e := json.Marshal(r)
+					if e != nil {
+						t.Fatal(e)
+					}
+					data = append(data, append(b, '\n')...)
+				}
 			}
 			if name == "incomplete" {
 				data = data[:len(data)-1]

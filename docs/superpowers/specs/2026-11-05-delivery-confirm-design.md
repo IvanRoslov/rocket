@@ -15,3 +15,11 @@ Alternatives rejected: treating API blobs, enqueue, socket acceptance or reporte
 Use synthetic RED/GREEN tests for valid correlated consumption; missing/foreign/mismatched/duplicate/incomplete records; ordinary user proof; and queue/store finalization without replay or proof reuse. Run existing claudeinstance, store and queue suites. The fix applies to unresolved deliveries with valid proof inside their saved deadlines. Already failed rows 81163/81165 remain failed: no automatic resurrection, resend or historical database repair. Their historical receipt can be reported separately from the stored terminal state.
 
 Classification: shared finalization parser gap breaks acceptance; assuming delivery_proof_at=0 means no Claude proof is a wrong status interpretation; historical operator recovery tooling is an optional extra and excluded.
+
+## Verification outcome
+
+Synthetic parser and queue/store regressions failed before implementation and passed afterward. Independent review identified interleaved duplicate removal/attachment ambiguity; additional RED/GREEN tests now require rejection across the complete scan. Reply addresses use the existing percent-encoding function, with a synthetic escaped-path regression.
+
+The final `go test ./...`, `go vet ./...`, and focused mid-turn `-race` tests pass. The broader claudeinstance/store/queue race suites also passed before the review corrections. An initial full-suite run hit `TestAnswerQuiz_SecondCallWhileInFlightIs409ThenClearsAfterResolved` (2-second timeout); three isolated repetitions and subsequent full runs passed. No quiz code changed.
+
+A read-only run of the new FindProof against the saved snapshots returns the historical attachment offsets 7069130..7072321 for 81163 and 7104711..7110618 for 81165. The four successful comparison deliveries retain their previously stored proof offsets. These parser results do not alter terminal status or override saved deadlines.

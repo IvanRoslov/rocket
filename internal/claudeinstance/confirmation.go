@@ -177,5 +177,13 @@ func FindProof(ctx context.Context, s Snapshot) (Proof, bool, error) {
 		}
 		offset = end
 	}
+	// A repeated removal makes this consumption history ambiguous even when
+	// it follows an already matched attachment. Do not hide later consumption
+	// merely because its correlation key has become non-unique.
+	for _, removals := range midturn {
+		if removals > 1 {
+			return Proof{}, false, nil
+		}
+	}
 	return proof, matches == 1, nil
 }

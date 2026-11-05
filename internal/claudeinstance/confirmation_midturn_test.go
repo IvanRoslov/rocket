@@ -18,7 +18,7 @@ func midturnRecords(s Snapshot) (map[string]any, map[string]any) {
 }
 
 func TestMidturnConsumptionProof(t *testing.T) {
-	for _, name := range []string{"valid", "missing removal", "enqueue only", "wrong reason", "foreign removal", "wrong removal text", "missing command", "wrong command", "wrong delivery", "duplicate removal", "reversed records", "foreign attachment", "missing uuid", "wrong attachment type", "wrong prompt", "wrong mode", "not meta", "not peer", "wrong wire", "missing wire", "wrong address", "missing reply", "wrong role", "missing render", "extra render", "wrong render", "wrong reminder", "missing reminder", "incomplete", "duplicate attachment", "ordinary plus attachment", "metadata only", "before boundary"} {
+	for _, name := range []string{"valid", "encoded reply", "missing removal", "enqueue only", "wrong reason", "foreign removal", "wrong removal text", "missing command", "wrong command", "wrong delivery", "duplicate removal", "repeated consumption", "removal after attachment", "reversed records", "foreign attachment", "missing uuid", "wrong attachment type", "wrong prompt", "wrong mode", "not meta", "not peer", "wrong wire", "missing wire", "wrong address", "missing reply", "wrong role", "missing render", "extra render", "wrong render", "wrong reminder", "missing reminder", "incomplete", "duplicate attachment", "ordinary plus attachment", "metadata only", "before boundary"} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "journal.jsonl")
 			if err := os.WriteFile(path, nil, 0600); err != nil {
@@ -30,6 +30,9 @@ func TestMidturnConsumptionProof(t *testing.T) {
 			a := record["attachment"].(map[string]any)
 			origin := a["origin"].(map[string]any)
 			switch name {
+			case "encoded reply":
+				s.ReplyPath = "/tmp/synthetic reply%.sock"
+				origin["from"] = "uds:/tmp/synthetic%20reply%25.sock"
 			case "enqueue only":
 				removal["operation"] = "enqueue"
 			case "wrong reason":
@@ -108,7 +111,10 @@ func TestMidturnConsumptionProof(t *testing.T) {
 				appendJSON(record)
 			}
 			end := int64(len(data))
-			if name == "duplicate attachment" {
+			if name == "repeated consumption" || name == "removal after attachment" {
+				appendJSON(removal)
+			}
+			if name == "duplicate attachment" || name == "repeated consumption" {
 				record["uuid"] = "duplicate"
 				appendJSON(record)
 			}
@@ -125,7 +131,7 @@ func TestMidturnConsumptionProof(t *testing.T) {
 				s.Boundary, _ = PinJournal(s.Target)
 			}
 			p, found, err := FindProof(context.Background(), s)
-			if err != nil || found != (name == "valid") {
+			if err != nil || found != (name == "valid" || name == "encoded reply") {
 				t.Fatalf("found=%v proof=%+v err=%v", found, p, err)
 			}
 			if found && p != (Proof{RecordID: "consumed", Offset: start, End: end}) {
