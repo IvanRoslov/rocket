@@ -255,10 +255,19 @@ details p {
   background: var(--bg);
 }
 .work-description {
-  padding-bottom: 18px;
+  padding-bottom: 8px;
 }
-.work-description > p {
-  color: var(--text-2);
+.work-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.creative-app .work-heading h1 {
+  margin-bottom: 8px;
+}
+.work-description .eyebrow {
+  margin-bottom: 6px;
 }
 .work-description details {
   background: var(--surface-2);
@@ -269,14 +278,13 @@ details p {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 18px;
+  margin: 0 0 8px;
   font-size: 12px;
   color: var(--text-3);
 }
 .progress progress {
   height: 5px;
-  flex: 1;
-  max-width: 180px;
+  width: 100px;
   accent-color: var(--accent);
 }
 .review-actions {
@@ -298,7 +306,7 @@ details p {
   margin-right: 0;
 }
 .view-tabs {
-  margin: 20px 0 24px;
+  margin: 12px 0 20px;
 }
 .artifacts > .heading {
   margin-bottom: 20px;

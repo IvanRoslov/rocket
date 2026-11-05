@@ -189,6 +189,9 @@ function workspaceFixture(status = "awaiting_approval") {
       const scope = new URL(request.url).searchParams;
       return HttpResponse.json(scope.get("item_id") === "5" ? [artifact] : []);
     }),
+    http.get("/v1/creative/runs/7/sessions", () => HttpResponse.json([
+      { id: "creative-7", tmux_name: "creative-7", kind: "orchestrator", agent: "codex", state: "running" },
+    ])),
     http.get("/v1/creative/artifacts/9", () => HttpResponse.json({ artifact, versions })),
     http.get("/v1/creative/previews", () => HttpResponse.json([])),
     http.get("/v1/creative/previews/setup", () => HttpResponse.json({ configured: false, allowed_ports: [] })),
@@ -244,6 +247,10 @@ it("retains an older selected version and draft through tabs and keeps the draft
   expect(screen.getByRole("img", { name: "scene-11.png" })).toBeVisible();
   await user.click(screen.getByRole("tab", { name: "Questions & discussion" }));
   expect(screen.getByLabelText("Message or question")).toHaveValue("Keep this framing");
+  const sessions = screen.getByRole("region", { name: "Run sessions" });
+  expect(within(sessions).getByRole("link", { name: /term/ })).toHaveAttribute("href", "/term/creative-7");
+  expect(within(sessions).getByRole("link", { name: /chat/ })).toHaveAttribute("href", "/chat/creative-7");
+  expect(within(sessions).getByRole("button", { name: "Copy attach command for creative-7" })).toBeEnabled();
   await user.click(screen.getByRole("button", { name: /1. Scenes/ }));
   expect(window.location.search).toBe("?project=film&run=7&stage=4");
   expect(screen.getByText(/Draft stays with Opening \/ Scenes \/ Opening scene/)).toBeVisible();
@@ -263,4 +270,25 @@ it("opens and restores submitted versions explicitly without approving on tab ch
   await waitFor(() => expect(screen.getByLabelText("Scene image version")).toHaveValue("12"));
   expect(screen.getByRole("button", { name: "Approve shown results" })).toBeEnabled();
   expect(actions).toEqual([]);
+});
+
+it("keeps heading and progress compact while full work details remain available", async () => {
+  workspaceFixture();
+  open();
+  const user = userEvent.setup();
+  expect(await screen.findByRole("heading", { name: "Opening scene" })).toBeVisible();
+  expect(screen.getByRole("progressbar")).toHaveAttribute("value", "80");
+  const details = screen.getByText("Work details").closest("details");
+  expect(details).not.toHaveAttribute("open");
+  expect(screen.getByText("Plan the opening scene")).not.toBeVisible();
+  await user.click(screen.getByText("Work details"));
+  expect(details).toHaveAttribute("open");
+  expect(screen.getByText("Plan the opening scene")).toBeVisible();
+  expect(screen.getByText("Scene image", { selector: "p" })).toBeVisible();
+  expect(screen.getByText("Ready for a look")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "OpeningReady for your review" }));
+  expect(await screen.findByRole("heading", { name: "Opening" })).toBeVisible();
+  const brief = screen.getAllByText("Creative brief").map((s) => s.closest("details")).filter(Boolean);
+  expect(brief).toHaveLength(2);
+  brief.forEach((d) => expect(d).not.toHaveAttribute("open"));
 });

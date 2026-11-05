@@ -379,12 +379,13 @@ function Workspace({
             <WorkDescription stage={stage} item={item} />
             {!work && (
               <>
-                <span className="eyebrow">Creative brief</span>
                 <h1>{run.name}</h1>
-                <p className="prose">{run.brief}</p>
+                <details className="run-brief">
+                  <summary>Creative brief</summary>
+                  <p className="prose">{run.brief}</p>
+                </details>
               </>
             )}
-
             <div className="view-tabs">
               <Tabs
                 label="Workspace"
@@ -394,7 +395,9 @@ function Workspace({
                   { id: "preview", label: "Landing preview" },
                 ]}
                 activeId={tab}
-                onChange={(id) => setTab(id as "discussion" | "results" | "preview")}
+                onChange={(id) =>
+                  setTab(id as "discussion" | "results" | "preview")
+                }
               />
             </div>
             <div hidden={tab !== "discussion"}>
@@ -419,19 +422,19 @@ function Workspace({
               />
             </div>
             <div hidden={tab !== "results"}>
-            {work && (
-              <ReviewActions
-                scope={scope}
-                work={work}
-                canProgress={!!canProgress}
-                shown={shown}
-                ready={ready && tab === "results"}
-                onShowReview={() => {
-                  setTab("results");
-                  setReset((n) => n + 1);
-                }}
-              />
-            )}
+              {work && (
+                <ReviewActions
+                  scope={scope}
+                  work={work}
+                  canProgress={!!canProgress}
+                  shown={shown}
+                  ready={ready && tab === "results"}
+                  onShowReview={() => {
+                    setTab("results");
+                    setReset((n) => n + 1);
+                  }}
+                />
+              )}
               <Artifacts
                 key={`${scopeKey}:${reset}`}
                 scope={scope}
