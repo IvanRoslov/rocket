@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/IvanRoslov/rocket/internal/auth"
+	"github.com/IvanRoslov/rocket/internal/store"
 )
 
 func TestCreativeArtifactViewSelectedVersionAndIsolation(t *testing.T) {
@@ -172,5 +173,26 @@ func TestCreativeArtifactViewExpiryAndListenerBoundary(t *testing.T) {
 	d.Previews.SetUnavailable("listener stopped")
 	if got := artifactRequest(h, "GET", path, "", "", nil); got.Code != 503 {
 		t.Fatalf("stopped %d", got.Code)
+	}
+}
+
+func TestCreativeArtifactViewRejectsCrossProjectAgent(t *testing.T) {
+	d, run, stage := creativeArtifactDeps(t)
+	d.Cfg.PreviewPort = 4480
+	d.Cfg.PreviewPublicURL = "https://preview.example.net"
+	h := NewHandler(d)
+	p := decodePublication(t, artifactRequest(h, "POST", creativePublishPath(run, stage, "Page", "result", "page.html"), "text/html", "", strings.NewReader("<h1>Hi</h1>")))
+	addMsgTestSession(t, d, "worker", "running")
+	if err := d.Store.AddProject(store.Project{ID: "other", Name: "Other", MainRepo: "r"}); err != nil {
+		t.Fatal(err)
+	}
+	sess, _ := d.Store.GetSession("worker")
+	sess.ProjectID = "other"
+	if err := d.Store.UpdateSession(sess); err != nil {
+		t.Fatal(err)
+	}
+	w := artifactRequest(h, "GET", "/v1/creative/artifact-versions/"+itoa(p.Version.ID)+"/view", "", "worker", nil)
+	if w.Code != 403 {
+		t.Fatalf("cross-project %d %s", w.Code, w.Body)
 	}
 }
