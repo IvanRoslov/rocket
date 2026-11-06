@@ -16,7 +16,7 @@ Upload sources in their intended run/stage/item context. Text up to 1 MiB is dis
 
 Discussion automatically includes the selected context and displayed artifact versions. A draft keeps its original target and versions when selection changes; discard it to begin a draft in the new context. Question replies and answers preserve the question's original context. A deliberate Go option or written Go reply uses the existing question/message flow; stage approval is separate. The orchestrator must describe exact paid calls and cost basis and wait for the human's explicit Go. The dashboard adds no payment execution or technical spending gate.
 
-Launch the creative orchestrator using an existing enabled model profile, or restore its existing session. Landing preview uses the preview service's availability and access URL for both its sandboxed iframe and separate-tab link. When preview setup or its local server is missing, the service's actionable message is shown. See [creative-previews.md](creative-previews.md) for the required separate, browser-reachable private preview hostname and operator setup. Preview registrations expire on daemon restart; an orchestrator must register and start a new preview to restore access.
+Launch the creative orchestrator using an existing enabled model profile, or restore its existing session. The workspace has Questions & discussion and Artifacts tabs. Exact HTML artifact links still use the isolated viewing service; there is no Landing preview tab. See [creative-previews.md](creative-previews.md) for viewing configuration and operator setup.
 
 ## Shared presentation
 

@@ -30,10 +30,10 @@ Files: internal/store/creative_progress.go, creative_types.go; internal/api/crea
 
 Interfaces: CreativeAction.Reason carries trimmed return feedback; action events and queued notifications include reason alongside review_revision and artifact_version_ids.
 
-- [ ] Add store/API/CLI tests rejecting empty/whitespace reject reasons without transition; assert accepted feedback in event and queued payload bound to exact versions/revision.
-- [ ] Run targeted Go tests and observe the new missing validation/payload assertions fail.
-- [ ] Validate reject reason in store and CLI, normalize in API, include reason in existing event before notification. Update old successful reject fixtures with reasons.
-- [ ] Run targeted store/API/CLI tests; commit.
+- [x] Add store/API/CLI tests rejecting empty/whitespace reject reasons without transition; assert accepted feedback in event and queued payload bound to exact versions/revision.
+- [x] Run targeted Go tests and observe the new missing validation/payload assertions fail.
+- [x] Validate reject reason in store and CLI, normalize in API, include reason in existing event before notification. Update old successful reject fixtures with reasons.
+- [x] Run targeted store/API/CLI tests; commit.
 
 ### Task 2: Independent review card
 
@@ -41,16 +41,16 @@ Files: creative-web/src/ReviewActions.tsx and tests, App.tsx and tests, workflow
 
 Interfaces: ReviewActions takes scope, work, canProgress and itemContexts; internally reads existing artifact-versions/:id and artifacts/:id endpoints. Uses existing Media for clicked exact version; no coupling to shown artifact history.
 
-- [ ] Replace obsolete submit tests with card behavior: pending snapshot with newer current version, descendant names, exact viewing, approve, required return, failed draft, duplicates, revision/scope reset, withdrawal/new submit, empty review, start/reopen and no human submit.
-- [ ] Run Vitest card tests and observe failures against old UI contract.
-- [ ] Implement card, bound draft and successful outcome guards; remove submit from UI actions. Integrate above tabs after 6012; remove old Artifacts decision block and obsolete reset callback.
-- [ ] Update integration tests: card visible before tabs, approval works from discussion, history browsing does not change exact review. Run frontend tests/build; commit.
+- [x] Replace obsolete submit tests with card behavior: pending snapshot with newer current version, descendant names, exact viewing, approve, required return, failed draft, duplicates, revision/scope reset, withdrawal/new submit, empty review, start/reopen and no human submit.
+- [x] Run Vitest card tests and observe failures against old UI contract.
+- [x] Implement card, bound draft and successful outcome guards; remove submit from UI actions. Integrate above tabs after 6012; remove old Artifacts decision block and obsolete reset callback.
+- [x] Update integration tests: card visible before tabs, approval works from discussion, history browsing does not change exact review. Run frontend tests/build; commit.
 
 ### Task 3: Agent contract and final verification
 
 Files: internal/prompts/templates/creative-rules.md, creative-orchestrator.md, internal/prompts/creative_test.go; docs/creative-agents.md, creative-core-api.md and creative-dashboard.md as relevant.
 
-- [ ] Add prompt regression requiring exact-version submission and no separate stage-approval question; run and observe missing instruction failure.
-- [ ] Update Creative-only instructions and API/UI docs; run prompt tests.
-- [ ] Run relevant Go suite/build, frontend full tests/build, inspect diff for scope and check git diff --check.
+- [x] Add prompt regression requiring exact-version submission and no separate stage-approval question; run and observe missing instruction failure.
+- [x] Update Creative-only instructions and API/UI docs; run prompt tests.
+- [x] Run relevant Go suite/build, frontend full tests/build, inspect diff for scope and check git diff --check.
 - [ ] Commit; push branch and open one PR referencing creative-work and task 6013. Notify orchestrator with URL and validation. Respond to CI/review until merged.
