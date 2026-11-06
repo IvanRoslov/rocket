@@ -106,3 +106,18 @@ func TestSharedTransportPreservesOrdinaryPrompt(t *testing.T) {
 		t.Fatal("ordinary orchestrator rendered instructions changed")
 	}
 }
+
+func TestCreativePromptsUseSingleFormalReview(t *testing.T) {
+	vars := Vars{"session_id": "creative-1", "parent_id": "orch", "project_name": "Project", "worktree_path": "/tmp/work", "allowed_repos": "main", "creative_context": "run=4", "run_snapshot": "snapshot", "tools_home": "/tmp/rocket", "brief": "Make scene"}
+	for _, role := range []string{"creative-orchestrator", "creative-worker"} {
+		prompt, err := Render("", role, vars)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"Do not ask a separate question to approve", "review card", "exact immutable version IDs", "Return feedback"} {
+			if !strings.Contains(prompt, want) {
+				t.Errorf("%s missing formal review contract: %s", role, want)
+			}
+		}
+	}
+}

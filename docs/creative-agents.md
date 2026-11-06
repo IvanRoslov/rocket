@@ -130,3 +130,17 @@ Interactive previews use the existing session/workspace: discover setup/allowed
 ports, register context first, then launch the server with the returned base path.
 See the preview CLI's setup/register/list commands. No extra agent runtime, live
 daemon restart, external deployment or paid generation is part of installation.
+
+## Formal review
+
+The orchestrator publishes results and submits their exact immutable versions with
+`rocket creative stage action RUN STAGE submit --artifact-version VERSION` (or
+item action). Submission creates the existing pending revision and displays its
+review card above the workspace tabs. Do not ask a separate approval question for
+the same stage/item, ask the human to submit results, or treat an ordinary chat
+answer as a pipeline transition. Paid Go and clarifications remain questions.
+The human approves or returns the submitted revision from that card. Return
+feedback is required and arrives through the existing contextual notification
+with the decision, revision and versions; revise results before submitting again.
+Automatic stages retain their saved behavior. Workers coordinate publication and
+submission with their orchestrator and never approve on behalf of the human.
