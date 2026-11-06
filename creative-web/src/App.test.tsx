@@ -193,8 +193,6 @@ function workspaceFixture(status = "awaiting_approval") {
       { id: "creative-7", tmux_name: "creative-7", kind: "orchestrator", agent: "codex", state: "running" },
     ])),
     http.get("/v1/creative/artifacts/9", () => HttpResponse.json({ artifact, versions })),
-    http.get("/v1/creative/previews", () => HttpResponse.json([])),
-    http.get("/v1/creative/previews/setup", () => HttpResponse.json({ configured: false, allowed_ports: [] })),
     http.post("/v1/creative/runs/7/stages/4/items/5/actions", async ({ request }) => {
       actions.push(await request.json());
       return HttpResponse.json({});
@@ -214,6 +212,9 @@ it("defaults to central shared discussion tabs and requires visible artifacts fo
   const user = userEvent.setup();
   const tabs = await screen.findByRole("tablist", { name: "Workspace" });
   expect(tabs).toHaveClass("tabs");
+  expect(within(tabs).getAllByRole("tab")).toHaveLength(2);
+  expect(within(tabs).queryByRole("tab", { name: "Landing preview" })).not.toBeInTheDocument();
+  expect(screen.queryByTitle("Interactive landing preview")).not.toBeInTheDocument();
   expect(within(tabs).getByRole("tab", { name: "Questions & discussion" })).toHaveAttribute("aria-selected", "true");
   await waitFor(() => expect(screen.getByLabelText("Question")).toBeEnabled());
   expect(screen.getByRole("heading", { name: "Discussion" })).toBeVisible();
@@ -222,8 +223,8 @@ it("defaults to central shared discussion tabs and requires visible artifacts fo
   await user.click(within(tabs).getByRole("tab", { name: "Artifacts" }));
   expect(await screen.findByRole("img", { name: "scene-12.png" })).toBeVisible();
   await waitFor(() => expect(screen.getByRole("button", { name: "Approve shown results" })).toBeEnabled());
-  await user.click(within(tabs).getByRole("tab", { name: "Landing preview" }));
-  expect(await screen.findByRole("heading", { name: "Interactive landing preview" })).toBeVisible();
+  await user.click(within(tabs).getByRole("tab", { name: "Questions & discussion" }));
+  expect(screen.getByRole("heading", { name: "Discussion" })).toBeVisible();
   expect(screen.queryByRole("button", { name: "Approve shown results" })).not.toBeInTheDocument();
   await user.click(within(tabs).getByRole("tab", { name: "Artifacts" }));
   await user.click(screen.getByRole("button", { name: "Approve shown results" }));
@@ -240,8 +241,6 @@ it("retains an older selected version and draft through tabs and keeps the draft
   await user.click(screen.getByRole("tab", { name: "Questions & discussion" }));
   await waitFor(() => expect(screen.getByText(/About Opening \/ Scenes \/ Opening scene \/ Scene image version 1/)).toBeVisible());
   await user.type(screen.getByLabelText("Question"), "Keep this framing");
-  await user.click(screen.getByRole("tab", { name: "Landing preview" }));
-  await screen.findByRole("heading", { name: "Interactive landing preview" });
   await user.click(screen.getByRole("tab", { name: "Artifacts" }));
   expect(screen.getByLabelText("Scene image version")).toHaveValue("11");
   expect(screen.getByRole("img", { name: "scene-11.png" })).toBeVisible();
@@ -299,7 +298,7 @@ it("keeps the session rail outside central content and visible on every workspac
   const user = userEvent.setup();
   const rail = await screen.findByRole("complementary", { name: "Run sessions" });
   expect(screen.getByRole("main")).not.toContainElement(rail);
-  for (const tab of ["Artifacts", "Landing preview", "Questions & discussion"]) {
+  for (const tab of ["Artifacts", "Questions & discussion"]) {
     await user.click(screen.getByRole("tab", { name: tab }));
     expect(rail).toBeVisible();
     expect(within(rail).getByRole("link", { name: /term/ })).toHaveAttribute("href", "/term/creative-7");
