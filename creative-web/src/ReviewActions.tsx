@@ -1,181 +1,124 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "../../web/src/components/Button";
-import { api, actionPath, useCommand } from "./api";
-import type { Scope, ShownVersion, Work } from "./types";
+import { api, actionPath, base, useCommand } from "./api";
+import type { ArtifactDetail, ArtifactVersion, Scope, Work } from "./types";
 import { actionsFor } from "./workflow";
 import { ErrorNotice } from "./ui";
-export function ReviewActions({
-  scope,
-  work,
-  canProgress,
-  shown,
-  ready,
-  onShowReview,
-}: {
+import { Media } from "./Artifacts";
+
+type Props = {
   scope: Scope;
   work: Work;
   canProgress: boolean;
-  shown: ShownVersion[];
-  ready: boolean;
-  onShowReview: () => void;
-}) {
+  itemContexts?: { id: number; name: string }[];
+};
+
+// A new scope or submitted revision must never inherit a return draft or outcome.
+export function ReviewActions(props: Props) {
+  const { scope, work } = props;
+  return <ReviewCard key={`${scope.run_id}:${scope.stage_id}:${scope.item_id}:${work.review_revision}`} {...props} />;
+}
+
+function ReviewCard({ scope, work, canProgress, itemContexts = [] }: Props) {
   const command = useCommand();
   const inFlight = useRef(false);
-  const [confirmation, setConfirmation] = useState<{
-    key: string;
-    versions: ShownVersion[];
-  } | null>(null);
-  const resultIDs = shown
-    .filter((s) => s.artifact.kind === "result")
-    .map((s) => s.version.id);
-  const review = work.artifact_version_ids ?? [];
-  const shownIDs = shown.map((s) => s.version.id);
-  const bound =
-    ready &&
-    review.every((id) => shownIDs.includes(id)) &&
-    resultIDs.every((id) => review.includes(id));
-  // The confirmation is valid only for the exact scope, state and displayed set.
-  const confirmationKey = JSON.stringify([
-    scope, work.id, work.name, work.status, work.review_revision,
-    review, ready, canProgress, shown,
-  ]);
-  useEffect(() => {
-    setConfirmation(null);
-  }, [confirmationKey]);
-  const pendingConfirmation =
-    confirmation?.key === confirmationKey ? confirmation : null;
-  async function execute(body: object) {
-    if (inFlight.current) return;
+  const [returning, setReturning] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const [outcome, setOutcome] = useState<{ action: string; reason?: string }>();
+  const reviewing = work.status === "awaiting_approval" && !outcome;
+  const kind = scope.item_id ? "item" : "stage";
+  async function execute(action: string) {
+    if (inFlight.current || (outcome && ["approve", "reject"].includes(action)) || (action === "reject" && !feedback.trim())) return;
     inFlight.current = true;
-    setConfirmation(null);
+    const reason = action === "reject" ? feedback.trim() : undefined;
     try {
-      // mutateAsync includes useCommand's awaited query invalidation.
-      await command.mutateAsync(() => api.post(actionPath(scope), body));
+      await command.mutateAsync(async () => {
+        await api.post(actionPath(scope), {
+          action,
+          ...(["approve", "reject"].includes(action) ? { review_revision: work.review_revision } : {}),
+          ...(reason ? { reason } : {}),
+        });
+        // Record the committed response before query refresh; a stale cached
+        // snapshot must not make the same decision available again.
+        if (action === "approve" || action === "reject") setOutcome({ action, reason });
+        else setOutcome(undefined);
+      });
     } catch {
-      // useCommand exposes the failure through ErrorNotice; never retry a transition.
+      // The mutation exposes errors; keep the draft for an intentional retry.
     } finally {
       inFlight.current = false;
     }
   }
-  const reviewing = work.status === "awaiting_approval";
   const labels: Record<string, string> = {
-    start: "Start work",
-    submit: "Submit shown results",
-    approve: "Approve shown results",
-    reject: "Request changes",
-    reopen: "Reopen for rework",
+    start: "Start work", approve: `Approve ${kind}`, reject: "Return for changes", reopen: "Reopen for rework",
   };
   return (
-    <section className="review-actions">
+    <section className="review-actions" aria-label={`Review ${work.name}`}>
+      <h2>{reviewing ? `Review ${kind}: ${work.name}` : work.name}</h2>
+      {work.review_revision > 0 && <p>Revision {work.review_revision}</p>}
+      {outcome ? (
+        <div role="status">
+          <p>Revision {work.review_revision} {outcome.action === "approve" ? "approved." : "returned for changes."}</p>
+          {outcome.reason && <p className="prose">{outcome.reason}</p>}
+        </div>
+      ) : !reviewing && (
+        <p>{work.status === "completed" ? "Completed. Reopen for rework to revise these results." : work.status === "in_progress" ? "Work is in progress. No review is awaiting a decision." : "Work has not started."}</p>
+      )}
       {reviewing && (
         <>
-          <h2>Review submitted results</h2>
-          <p>Approval applies to this submitted set:</p>
-          {review.length === 0 ? (
-            <p>No artifacts were submitted with this review.</p>
-          ) : (
-            <ul>
-              {review.map((id) => {
-                const entry = shown.find((s) => s.version.id === id);
-                return (
-                  <li key={id}>
-                    {entry
-                      ? `${entry.item_name ? `${entry.item_name} / ` : ""}${entry.artifact.name} · version ${entry.version.version_number}`
-                      : "Submitted artifact — load its version to inspect"}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {!bound && (
-            <>
-              <p>
-                Return to the submitted versions before approving or requesting
-                changes.
-              </p>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={onShowReview}>Show submitted versions</Button
-              >
-            </>
+          <p>Review these submitted results:</p>
+          {work.artifact_version_ids.length === 0 ? <p>No artifacts were submitted with this review.</p> : (
+            <ul>{work.artifact_version_ids.map((id) => <SubmittedArtifact key={id} id={id} itemContexts={itemContexts} />)}</ul>
           )}
         </>
       )}
-      {work.status === "completed" && (
-        <p>
-          Reopen this {scope.item_id ? "item" : "stage"} to revise it. Later
-          stages and their results are preserved. This work will need approval
-          again according to its saved process.
-        </p>
-      )}
       <div className="row">
-        {actionsFor(work.status, canProgress).map((action) => (
-          <Button
-            variant={action === "approve" ? "primary" : "secondary"}
-            size="sm"
-            key={action}
-            disabled={
-              command.isPending ||
-              (["approve", "reject"].includes(action) && !bound) ||
-              (action === "submit" && !ready)
-            }
+        {actionsFor(work.status, canProgress).filter((action) => !outcome || !["approve", "reject"].includes(action)).map((action) => (
+          <Button key={action} variant={action === "approve" ? "primary" : "secondary"} size="sm"
+            disabled={command.isPending}
             onClick={(event) => {
               if (event.detail > 1 || inFlight.current) return;
-              if (action === "submit") {
-                setConfirmation({
-                  key: confirmationKey,
-                  versions: shown.filter((s) => s.artifact.kind === "result"),
-                });
-                return;
-              }
-              void execute(
-                ["approve", "reject"].includes(action)
-                  ? { action, review_revision: work.review_revision }
-                  : { action },
-              );
-            }}
-          >
+              if (action === "reject") setReturning(true);
+              else void execute(action);
+            }}>
             {labels[action]}
           </Button>
         ))}
       </div>
-      {pendingConfirmation && (
-        <div role="dialog" aria-modal="false" aria-label="Confirm submission">
-          <h2>Submit {scope.item_id ? "item" : "stage"}: {work.name}?</h2>
-          <p>Submit these exact shown result versions:</p>
-          {pendingConfirmation.versions.length === 0 ? (
-            <p>No result versions are shown. Submit an empty result set?</p>
-          ) : (
-            <ul>
-              {pendingConfirmation.versions.map((entry) => (
-                <li key={entry.version.id}>
-                  {entry.item_name ? `${entry.item_name} / ` : ""}
-                  {entry.artifact.name} · version {entry.version.version_number} · ID {entry.version.id}
-                </li>
-              ))}
-            </ul>
-          )}
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={command.isPending}
-            onClick={(event) => {
-              if (event.detail > 1 || inFlight.current || !ready) return;
-              void execute({
-                action: "submit",
-                artifact_version_ids: pendingConfirmation.versions.map((s) => s.version.id),
-              });
-            }}
-          >
-            Confirm submission
-          </Button>
-          <Button variant="secondary" size="sm" onClick={() => setConfirmation(null)}>
-            Cancel
-          </Button>
-        </div>
+      {reviewing && returning && (
+        <form className="return-feedback" onSubmit={(event) => { event.preventDefault(); void execute("reject"); }}>
+          <label>What to fix<textarea required rows={4} value={feedback} disabled={command.isPending} onChange={(event) => setFeedback(event.target.value)} /></label>
+          <div className="row">
+            <Button type="submit" variant="primary" size="sm" disabled={command.isPending || !feedback.trim()}>Send feedback and return</Button>
+            <Button type="button" variant="secondary" size="sm" disabled={command.isPending} onClick={() => setReturning(false)}>Cancel</Button>
+          </div>
+        </form>
       )}
       <ErrorNotice error={command.error} />
     </section>
+  );
+}
+
+function SubmittedArtifact({ id, itemContexts }: { id: number; itemContexts: { id: number; name: string }[] }) {
+  const [open, setOpen] = useState(false);
+  const version = useQuery({ queryKey: ["creative", "artifact-version", id], queryFn: () => api.get<ArtifactVersion>(`${base}/artifact-versions/${id}`) });
+  const detail = useQuery({ queryKey: ["creative", "artifact", version.data?.artifact_id], enabled: !!version.data, queryFn: () => api.get<ArtifactDetail>(`${base}/artifacts/${version.data!.artifact_id}`) });
+  const v = version.data, artifact = detail.data?.artifact;
+  const item = itemContexts.find((item) => item.id === artifact?.item_id);
+  const html = v && /^text\/html(;|$)/.test(v.mime);
+  return (
+    <li>
+      {v && artifact ? <>
+        <a href={html ? `${base}/artifact-versions/${id}/view` : v.content_url}
+          target={html ? "_blank" : undefined} rel={html ? "noopener noreferrer" : undefined}
+          onClick={html ? undefined : (event) => { event.preventDefault(); setOpen(!open); }}
+          aria-expanded={html ? undefined : open}>
+          {item ? `${item.name} / ` : ""}{artifact.name} · version {v.version_number}
+        </a>
+        {open && <Media key={id} version={v} />}
+      </> : <span>Loading submitted artifact {id}…</span>}
+      <ErrorNotice error={version.error ?? detail.error} />
+    </li>
   );
 }

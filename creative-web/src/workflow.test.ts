@@ -31,6 +31,6 @@ describe("saved creative process", () => {
     expect(actionsFor("completed", false)).toEqual(["reopen"]);
     expect(actionsFor("pending", false)).toEqual([]);
     expect(actionsFor("pending", true)).toEqual(["start"]);
-    expect(actionsFor("in_progress", true)).toEqual(["submit"]);
+    expect(actionsFor("in_progress", true)).toEqual([]);
   });
 });
