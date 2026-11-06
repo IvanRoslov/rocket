@@ -50,7 +50,7 @@ func TestCreativeLifecycleDecisionQueueExactSnapshot(t *testing.T) {
 	if err != nil || len(ids) != 0 {
 		t.Fatalf("premature message %v %v", ids, err)
 	}
-	creativeRequest(t, d, "POST", path, `{"action":"reject","review_revision":1}`, "", 200)
+	creativeRequest(t, d, "POST", path, `{"action":"reject","review_revision":1,"reason":"Fix ending"}`, "", 200)
 	// A new current orchestrator receives only subsequent decisions, no replay.
 	addTestSession(t, d, "replacement", "orchestrator", "p")
 	if err = d.Store.BindCreativeSession("replacement", store.CreativeBinding{RunID: r.ID}); err != nil {
@@ -222,7 +222,7 @@ func TestCreativeLifecycleItemWithdrawThenDecisions(t *testing.T) {
 	creativeRequest(t, d, "POST", path, submit, "orch", 200)
 	creativeRequest(t, d, "POST", path, `{"action":"withdraw","review_revision":2,"reason":"Wrong run"}`, "other-orch", 403)
 	creativeRequest(t, d, "POST", path, `{"action":"withdraw","review_revision":1,"reason":"Stale"}`, "orch", 409)
-	creativeRequest(t, d, "POST", path, `{"action":"reject","review_revision":2}`, "", 200)
+	creativeRequest(t, d, "POST", path, `{"action":"reject","review_revision":2,"reason":"Fix ending"}`, "", 200)
 	creativeRequest(t, d, "POST", path, submit, "orch", 200)
 	creativeRequest(t, d, "POST", path, `{"action":"approve","review_revision":3}`, "", 200)
 	b := store.CreativeBinding{RunID: r.ID, StageID: stage, ItemID: item.ID}
@@ -260,4 +260,29 @@ func TestCreativeLifecycleMissingOrchestratorObservableWithoutReplay(t *testing.
 	if err != nil || len(ids) != 0 {
 		t.Fatalf("replayed history %v %v", ids, err)
 	}
+}
+
+func TestCreativeReturnRequiresFeedbackAndQueuesExactDecision(t *testing.T) {
+	d, r, path, version := lifecycleSetup(t)
+	for _, body := range []string{`{"action":"reject","review_revision":1}`, `{"action":"reject","review_revision":1,"reason":"  \n "}`} {
+		creativeRequest(t, d, "POST", path, body, "", 400)
+		current, err := d.Store.GetCreativeRun(r.ID)
+		if err != nil || current.Stages[0].Status != "awaiting_approval" {
+			t.Fatalf("invalid return changed state: %+v %v", current, err)
+		}
+	}
+	creativeRequest(t, d, "POST", path, `{"action":"reject","review_revision":1,"reason":"  Fix the ending  "}`, "", 200)
+	event := lifecycleEvent(t, d, "reject")
+	if event.Data["reason"] != "Fix the ending" {
+		t.Fatalf("feedback not persisted: %+v", event.Data)
+	}
+	ids, err := d.Store.ListCreativeDiscussionIDs("message", store.CreativeBinding{RunID: r.ID, StageID: r.Stages[0].ID})
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("notifications %v %v", ids, err)
+	}
+	message, err := d.Store.GetMessage(ids[0])
+	if err != nil || !strings.Contains(message.Body, `"reason":"Fix the ending"`) || !strings.Contains(message.Body, `"review_revision":1`) || !strings.Contains(message.Body, fmt.Sprintf(`"artifact_version_ids":[%d]`, version)) {
+		t.Fatalf("wrong delivered snapshot: %+v %v", message, err)
+	}
+	creativeRequest(t, d, "POST", path, `{"action":"reject","review_revision":1,"reason":"Again"}`, "", 409)
 }

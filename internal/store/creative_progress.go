@@ -238,6 +238,9 @@ func (s *Store) applyCreativeAction(runID, stageID, itemID int64, action Creativ
 	if (action.Action == "approve" || action.Action == "reject" || action.Action == "reopen") && !human {
 		return CreativeRun{}, ErrCreativeForbidden
 	}
+	if action.Action == "reject" && strings.TrimSpace(action.Reason) == "" {
+		return CreativeRun{}, creativeInvalid("return feedback is required")
+	}
 	tx, err := s.creativeWrite(runID)
 	if err != nil {
 		return CreativeRun{}, err

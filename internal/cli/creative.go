@@ -153,8 +153,8 @@ func creativeActionCommand(open creativeConnection, item bool) *cobra.Command {
 		if (action == "approve" || action == "reject" || action == "withdraw") && revision <= 0 {
 			return &usageError{message: "--review-revision from the displayed review is required"}
 		}
-		if action == "withdraw" && strings.TrimSpace(reason) == "" {
-			return &usageError{message: "--reason is required for withdraw"}
+		if (action == "withdraw" || action == "reject") && strings.TrimSpace(reason) == "" {
+			return &usageError{message: "--reason is required for " + action}
 		}
 		if action != "submit" && len(versions) > 0 {
 			return &usageError{message: "--artifact-version is only valid for submit"}
@@ -166,7 +166,7 @@ func creativeActionCommand(open creativeConnection, item bool) *cobra.Command {
 		}
 		return creativeCall(cmd, open, "POST", creativeTargetPath(a[:n])+"/actions", store.CreativeAction{Action: action, ReviewRevision: revision, ArtifactVersionIDs: versions, Reason: strings.TrimSpace(reason)})
 	}}
-	cmd.Flags().StringVar(&reason, "reason", "", "Required explanation for withdrawing a pending review")
+	cmd.Flags().StringVar(&reason, "reason", "", "Required feedback for reject or explanation for withdraw")
 	cmd.Flags().Int64Var(&revision, "review-revision", 0, "Displayed revision required for approve/reject/withdraw")
 	cmd.Flags().Int64SliceVar(&versions, "artifact-version", nil, "Immutable version IDs to submit for review (repeat or comma separate)")
 	return cmd
