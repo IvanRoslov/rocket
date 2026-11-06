@@ -27,6 +27,13 @@ function ReviewCard({ scope, work, canProgress, itemContexts = [] }: Props) {
   const [feedback, setFeedback] = useState("");
   const [outcome, setOutcome] = useState<{ action: string; reason?: string }>();
   const reviewing = work.status === "awaiting_approval" && !outcome;
+  // Reopening elsewhere keeps the revision but changes the current state.
+  // Keep the local outcome while a stale pending snapshot refreshes, then only
+  // display it when it still describes the server's state.
+  const visibleOutcome = outcome && (
+    work.status === "awaiting_approval" ||
+    work.status === (outcome.action === "approve" ? "completed" : "in_progress")
+  ) ? outcome : undefined;
   const kind = scope.item_id ? "item" : "stage";
   async function execute(action: string) {
     if (inFlight.current || (outcome && ["approve", "reject"].includes(action)) || (action === "reject" && !feedback.trim())) return;
@@ -57,10 +64,10 @@ function ReviewCard({ scope, work, canProgress, itemContexts = [] }: Props) {
     <section className="review-actions" aria-label={`Review ${work.name}`}>
       <h2>{reviewing ? `Review ${kind}: ${work.name}` : work.name}</h2>
       {work.review_revision > 0 && <p>Revision {work.review_revision}</p>}
-      {outcome ? (
+      {visibleOutcome ? (
         <div role="status">
-          <p>Revision {work.review_revision} {outcome.action === "approve" ? "approved." : "returned for changes."}</p>
-          {outcome.reason && <p className="prose">{outcome.reason}</p>}
+          <p>Revision {work.review_revision} {visibleOutcome.action === "approve" ? "approved." : "returned for changes."}</p>
+          {visibleOutcome.reason && <p className="prose">{visibleOutcome.reason}</p>}
         </div>
       ) : !reviewing && (
         <p>{work.status === "completed" ? "Completed. Reopen for rework to revise these results." : work.status === "in_progress" ? "Work is in progress. No review is awaiting a decision." : "Work has not started."}</p>

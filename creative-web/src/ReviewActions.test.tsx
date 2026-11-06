@@ -130,3 +130,14 @@ it("shows all submitted versions of one artifact and handles an empty review", a
   await userEvent.click(screen.getByRole("button", { name: "Approve stage" }));
   await waitFor(() => expect(requests).toEqual([{ action: "approve", review_revision: 4 }]));
 });
+
+it("shows current in-progress state if approved work is reopened elsewhere without a new revision", async () => {
+  const view = open();
+  await userEvent.click(screen.getByRole("button", { name: "Approve stage" }));
+  await screen.findByText(/Revision 3 approved/);
+  view.update({ work: { ...work, status: "completed" } });
+  view.update({ work: { ...work, status: "in_progress" } });
+  expect(screen.getByText(/Work is in progress. No review is awaiting a decision/)).toBeVisible();
+  expect(screen.queryByText(/Revision 3 approved/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Approve|Return|Submit/ })).not.toBeInTheDocument();
+});
