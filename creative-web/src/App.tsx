@@ -13,7 +13,6 @@ import { ReviewActions } from "./ReviewActions";
 import { Empty, ErrorNotice } from "./ui";
 import { Discussion } from "./Discussion";
 import { CreativeSessionRail } from "./SessionRail";
-import { Preview } from "./Preview";
 interface Selection {
   project?: string;
   run?: number;
@@ -342,7 +341,7 @@ function Workspace({
     ready: boolean;
   }>({ key: "", shown: [], ready: false });
   const [reset, setReset] = useState(0);
-  const [tab, setTab] = useState<"discussion" | "results" | "preview">("discussion");
+  const [tab, setTab] = useState<"discussion" | "results">("discussion");
   const onShown = useCallback(
     (shown: ShownVersion[], ready: boolean) =>
       setArtifactState((prev) => {
@@ -393,11 +392,10 @@ function Workspace({
                 items={[
                   { id: "discussion", label: "Questions & discussion" },
                   { id: "results", label: "Artifacts" },
-                  { id: "preview", label: "Landing preview" },
                 ]}
                 activeId={tab}
                 onChange={(id) =>
-                  setTab(id as "discussion" | "results" | "preview")
+                  setTab(id as "discussion" | "results")
                 }
               />
             </div>
@@ -449,7 +447,6 @@ function Workspace({
                 onShown={onShown}
               />
             </div>
-            {tab === "preview" && <Preview scope={scope} />}
             {stage && <ItemEditor key={stage.id} scope={scope} stage={stage} />}
           </>
         )}
