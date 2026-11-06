@@ -193,7 +193,7 @@ export function Artifacts({
         <div className="row">
           <p className="muted">
             {browseAll
-              ? "Browsing all published artifacts. Approval requires the submitted set."
+              ? "Browsing all published artifacts. The review card keeps the submitted set."
               : "Showing submitted results and sources."}
           </p>
           <Button

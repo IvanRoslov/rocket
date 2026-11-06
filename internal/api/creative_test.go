@@ -149,7 +149,7 @@ func TestCreativeActionEventsCommittedContextAndAttribution(t *testing.T) {
 	publication := decodePublication(t, artifactRequest(NewHandler(d), "POST", creativePublishPath(run.ID, run.Stages[0].ID, "Plan result", "result", "plan.txt"), "text/plain", "orch", strings.NewReader("plan")))
 	submit := fmt.Sprintf(`{"action":"submit","artifact_version_ids":[%d]}`, publication.Version.ID)
 	creativeRequest(t, d, "POST", base+"/actions", submit, "orch", 200)
-	creativeRequest(t, d, "POST", base+"/actions", `{"action":"reject","review_revision":1}`, "", 200)
+	creativeRequest(t, d, "POST", base+"/actions", `{"action":"reject","review_revision":1,"reason":"Fix ending"}`, "", 200)
 	creativeRequest(t, d, "POST", base+"/actions", submit, "", 200) // Deliberate same-version resubmission.
 	creativeRequest(t, d, "POST", base+"/actions", `{"action":"approve","review_revision":2}`, "", 200)
 	creativeRequest(t, d, "POST", base+"/actions", `{"action":"reopen"}`, "", 200)
@@ -230,7 +230,7 @@ func TestCreativeItemActionEventsAndFailures(t *testing.T) {
 		{`{"action":"submit"}`, "orch", 200},
 		{`{"action":"reject","review_revision":1}`, "orch", 403},
 		{`{"action":"approve","review_revision":9}`, "", 409},
-		{`{"action":"reject","review_revision":1}`, "", 200},
+		{`{"action":"reject","review_revision":1,"reason":"Fix ending"}`, "", 200},
 		{`{"action":"submit"}`, "orch", 200},
 		{`{"action":"approve","review_revision":2}`, "", 200},
 		{`{"action":"reopen"}`, "", 200},

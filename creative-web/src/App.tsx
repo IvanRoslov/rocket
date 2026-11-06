@@ -340,7 +340,6 @@ function Workspace({
     shown: ShownVersion[];
     ready: boolean;
   }>({ key: "", shown: [], ready: false });
-  const [reset, setReset] = useState(0);
   const [tab, setTab] = useState<"discussion" | "results">("discussion");
   const onShown = useCallback(
     (shown: ShownVersion[], ready: boolean) =>
@@ -386,6 +385,10 @@ function Workspace({
                 </details>
               </>
             )}
+            {work && (
+              <ReviewActions scope={scope} work={work} canProgress={!!canProgress}
+                itemContexts={stage && !item ? stage.items : []} />
+            )}
             <div className="view-tabs">
               <Tabs
                 label="Workspace"
@@ -421,21 +424,8 @@ function Workspace({
               />
             </div>
             <div hidden={tab !== "results"}>
-              {work && (
-                <ReviewActions
-                  scope={scope}
-                  work={work}
-                  canProgress={!!canProgress}
-                  shown={shown}
-                  ready={ready && tab === "results"}
-                  onShowReview={() => {
-                    setTab("results");
-                    setReset((n) => n + 1);
-                  }}
-                />
-              )}
               <Artifacts
-                key={`${scopeKey}:${reset}`}
+                key={scopeKey}
                 scope={scope}
                 itemContexts={stage && !item ? stage.items : []}
                 reviewing={work?.status === "awaiting_approval"}

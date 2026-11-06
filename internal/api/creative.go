@@ -205,6 +205,7 @@ func registerCreativeRoutes(mux *http.ServeMux, d Deps) {
 			if !creativeBody(w, r, &in) {
 				return
 			}
+			in.Reason = strings.TrimSpace(in.Reason)
 			var out store.CreativeRun
 			var err error
 			if in.Action == "withdraw" {
@@ -351,7 +352,7 @@ func publishCreativeAction(d Deps, caller *store.Session, ctx store.CreativeCont
 			"actor_kind": actorKind, "actor_source": actorSource, "actor_session_id": sessionID,
 			"timestamp": time.Now().Unix(),
 		}
-		if action.Action == "withdraw" {
+		if action.Action == "withdraw" || action.Action == "reject" {
 			data["reason"] = action.Reason
 		}
 		notifyCreativeAction(d, run, store.CreativeBinding{RunID: run.ID, StageID: stage.ID, ItemID: ctx.ItemID, ArtifactVersionIDs: versions}, action, data)

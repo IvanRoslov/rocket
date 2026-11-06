@@ -14,7 +14,7 @@ export function actionsFor(status: Status, canProgress: boolean): string[] {
   if (status === "completed") return ["reopen"];
   if (!canProgress) return [];
   if (status === "awaiting_approval") return ["approve", "reject"];
-  return status === "pending" ? ["start"] : ["submit"];
+  return status === "pending" ? ["start"] : [];
 }
 export const statusLabel: Record<Status, string> = {
   pending: "Not started",

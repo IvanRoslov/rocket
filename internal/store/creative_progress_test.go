@@ -28,7 +28,7 @@ func creativeFixture(t *testing.T, approval string, repeated bool) (*Store, Crea
 }
 func creativeAct(t *testing.T, s *Store, r CreativeRun, stage, item int64, action string, revision int64) CreativeRun {
 	t.Helper()
-	got, err := s.ApplyCreativeAction(r.ID, stage, item, CreativeAction{Action: action, ReviewRevision: revision}, true)
+	got, err := s.ApplyCreativeAction(r.ID, stage, item, CreativeAction{Action: action, ReviewRevision: revision, Reason: "Fix ending"}, true)
 	if err != nil {
 		t.Fatalf("%s: %v", action, err)
 	}
@@ -312,5 +312,33 @@ func creativeVersionFixture(t *testing.T, s *Store, artifactID, versionID, runID
 	_, err = s.db.Exec(`INSERT INTO creative_artifact_versions(id,artifact_id,version_number,filename,mime,size,sha256,storage_key,author_session_id,created_at) VALUES(?,?,?,'result.txt','text/plain',1,? ,?,'',1)`, versionID, artifactID, versionID, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", fmt.Sprintf("version-%d", versionID))
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCreativeReturnRequiresNonblankReason(t *testing.T) {
+	for _, mode := range []string{"stage", "item"} {
+		t.Run(mode, func(t *testing.T) {
+			s, r := creativeFixture(t, mode, mode == "item")
+			stage, item := r.Stages[0].ID, int64(0)
+			r = creativeAct(t, s, r, stage, 0, "start", 0)
+			if mode == "item" {
+				created, err := s.CreateCreativeItem(r.ID, stage, CreativeItemInput{Name: "Scene"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				item = created.ID
+				r = creativeAct(t, s, r, stage, item, "start", 0)
+			}
+			r = creativeAct(t, s, r, stage, item, "submit", 0)
+			for _, reason := range []string{"", " \n "} {
+				_, err := s.ApplyCreativeAction(r.ID, stage, item, CreativeAction{Action: "reject", ReviewRevision: 1, Reason: reason}, true)
+				if !errors.Is(err, ErrCreativeInvalid) {
+					t.Fatalf("blank feedback accepted: %v", err)
+				}
+			}
+			if _, err := s.ApplyCreativeAction(r.ID, stage, item, CreativeAction{Action: "reject", ReviewRevision: 1, Reason: "Fix ending"}, true); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

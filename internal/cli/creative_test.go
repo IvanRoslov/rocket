@@ -93,3 +93,17 @@ func TestCreativeCLIWithdrawRequiresReasonAndRevision(t *testing.T) {
 		}
 	}
 }
+
+func TestCreativeCLIReturnRequiresFeedbackBeforeConnecting(t *testing.T) {
+	for _, target := range [][]string{{"stage", "action", "1", "2", "reject"}, {"item", "action", "1", "2", "3", "reject"}} {
+		for _, reason := range []string{"", " \n "} {
+			cmd := creativeCommands(func() (*client.Client, error) { t.Fatal("connected without return feedback"); return nil, nil })
+			cmd.SetArgs(append(target, "--review-revision", "1", "--reason", reason))
+			cmd.SetOut(new(bytes.Buffer))
+			cmd.SetErr(new(bytes.Buffer))
+			if err := cmd.Execute(); err == nil {
+				t.Fatal("accepted blank return feedback")
+			}
+		}
+	}
+}

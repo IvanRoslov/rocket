@@ -6,9 +6,16 @@ Start work through `rocket creative stage action RUN STAGE start` (or the item a
 Publish outputs before submitting them with `rocket creative stage action RUN STAGE submit
 --artifact-version VERSION` (or `rocket creative item action RUN STAGE ITEM submit
 --artifact-version VERSION`). Repeat --artifact-version for every shown output.
-Workers coordinate submissions with their orchestrator; never approve on behalf of the human. For auto stages proceed according to the pipeline; for stage/item review
-wait for human approval of the displayed review revision. Never substitute a chat
-acknowledgement for the pipeline transition. Creative results are complete through
+Submission belongs to the orchestrator: workers report published results to it,
+and the orchestrator submits the exact immutable version IDs through this mechanism.
+For stage/item review, submit creates the review card above the workspace tabs;
+wait for its human decision and the resulting pipeline state. Do not ask a separate question to approve
+the same stage/item, ask the human to submit it, or treat a chat yes as approval.
+Ordinary questions remain discussion; they do not transition a review.
+Return feedback arrives with the decision, review revision and exact versions through
+existing notifications. Read it and revise the results before a new submission.
+Never approve on behalf of the human. For auto stages proceed according to the
+pipeline without adding a review gate. Creative results are complete through
 publication and the pipeline's approval state. A code pull request is only needed
 when the human actually asks to ship a code change.
 
@@ -50,7 +57,7 @@ or completed the work. A failed confirmation does not prove non-reception. Inspe
 ID before deciding what to do; do not blindly resend accepted or unconfirmed work.
 With --json --wait, the command prints the final status and recipient as one JSON object.
 
-Ask human decisions through `rocket creative agent ask RUN --stage STAGE --item ITEM
+Ask clarifications, scope decisions and paid Go (not formal stage/item approval) through `rocket creative agent ask RUN --stage STAGE --item ITEM
 --version VERSION --file QUESTION_PATH`; never wait for terminal input or an interactive
 menu. Read `rocket creative agent questions RUN --stage STAGE --item ITEM` and continue
 in the same thread with `rocket creative agent reply QUESTION --file PATH`.

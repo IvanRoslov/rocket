@@ -192,6 +192,7 @@ function workspaceFixture(status = "awaiting_approval") {
     http.get("/v1/creative/runs/7/sessions", () => HttpResponse.json([
       { id: "creative-7", tmux_name: "creative-7", kind: "orchestrator", agent: "codex", state: "running" },
     ])),
+    http.get("/v1/creative/artifact-versions/:id", ({ params }) => HttpResponse.json(versions.find((v) => v.id === Number(params.id)))),
     http.get("/v1/creative/artifacts/9", () => HttpResponse.json({ artifact, versions })),
     http.post("/v1/creative/runs/7/stages/4/items/5/actions", async ({ request }) => {
       actions.push(await request.json());
@@ -206,30 +207,20 @@ function workspaceFixture(status = "awaiting_approval") {
   return { actions, messages };
 }
 
-it("defaults to central shared discussion tabs and requires visible artifacts for result approval", async () => {
+it("shows the sole review card above tabs and approves from discussion", async () => {
   const { actions } = workspaceFixture();
   open();
   const user = userEvent.setup();
   const tabs = await screen.findByRole("tablist", { name: "Workspace" });
-  expect(tabs).toHaveClass("tabs");
   expect(within(tabs).getAllByRole("tab")).toHaveLength(2);
-  expect(within(tabs).queryByRole("tab", { name: "Landing preview" })).not.toBeInTheDocument();
-  expect(screen.queryByTitle("Interactive landing preview")).not.toBeInTheDocument();
+  const card = screen.getByRole("region", { name: "Review Opening scene" });
+  expect(card.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(within(tabs).getByRole("tab", { name: "Questions & discussion" })).toHaveAttribute("aria-selected", "true");
-  await waitFor(() => expect(screen.getByLabelText("Question")).toBeEnabled());
-  expect(screen.getByRole("heading", { name: "Discussion" })).toBeVisible();
-  expect(screen.queryByRole("button", { name: "Approve shown results" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("heading", { name: "Sources & results" })).not.toBeInTheDocument();
-  await user.click(within(tabs).getByRole("tab", { name: "Artifacts" }));
-  expect(await screen.findByRole("img", { name: "scene-12.png" })).toBeVisible();
-  await waitFor(() => expect(screen.getByRole("button", { name: "Approve shown results" })).toBeEnabled());
-  await user.click(within(tabs).getByRole("tab", { name: "Questions & discussion" }));
-  expect(screen.getByRole("heading", { name: "Discussion" })).toBeVisible();
-  expect(screen.queryByRole("button", { name: "Approve shown results" })).not.toBeInTheDocument();
-  await user.click(within(tabs).getByRole("tab", { name: "Artifacts" }));
-  await user.click(screen.getByRole("button", { name: "Approve shown results" }));
+  expect(await within(card).findByRole("link", { name: "Scene image · version 2" })).toBeVisible();
+  expect(screen.getAllByRole("button", { name: "Approve item" })).toHaveLength(1);
+  await user.click(screen.getByRole("button", { name: "Approve item" }));
   await waitFor(() => expect(actions).toEqual([{ action: "approve", review_revision: 3 }]));
-  expect(window.location.search).toBe("?project=film&run=7&stage=4&item=5");
+  expect(screen.queryByRole("button", { name: "Approve item" })).not.toBeInTheDocument();
 });
 
 it("retains an older selected version and draft through tabs and keeps the draft bound on scope navigation", async () => {
@@ -257,18 +248,20 @@ it("retains an older selected version and draft through tabs and keeps the draft
   await waitFor(() => expect(messages).toEqual([{ stage_id: 4, item_id: 5, artifact_version_ids: [11], body: "Keep this framing" }]));
 });
 
-it("opens and restores submitted versions explicitly without approving on tab changes", async () => {
+it("keeps the submitted set independent of browsing history and tab changes", async () => {
   const { actions } = workspaceFixture();
   open();
   const user = userEvent.setup();
   await user.click(await screen.findByRole("tab", { name: "Artifacts" }));
   await user.selectOptions(await screen.findByLabelText("Scene image version"), "11");
-  expect(screen.getByRole("button", { name: "Approve shown results" })).toBeDisabled();
-  await user.click(screen.getByRole("button", { name: "Show submitted versions" }));
-  expect(screen.getByRole("tab", { name: "Artifacts" })).toHaveAttribute("aria-selected", "true");
-  await waitFor(() => expect(screen.getByLabelText("Scene image version")).toHaveValue("12"));
-  expect(screen.getByRole("button", { name: "Approve shown results" })).toBeEnabled();
+  const card = screen.getByRole("region", { name: "Review Opening scene" });
+  await user.click(await within(card).findByRole("link", { name: "Scene image · version 2" }));
+  expect(within(card).getByRole("img")).toHaveAttribute("src", "/content/12");
+  expect(screen.getByLabelText("Scene image version")).toHaveValue("11");
+  expect(screen.getByRole("button", { name: "Approve item" })).toBeEnabled();
+  await user.click(screen.getByRole("tab", { name: "Questions & discussion" }));
   expect(actions).toEqual([]);
+  expect(screen.getByRole("button", { name: "Approve item" })).toBeEnabled();
 });
 
 it("keeps heading and progress compact while full work details remain available", async () => {
