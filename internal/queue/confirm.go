@@ -88,7 +88,9 @@ func (q *Queue) confirmLoop(ctx context.Context) {
 				continue
 			}
 			switch e.Type {
-			case "session.restored":
+			case "session.restored", "agent.session_started":
+				// A new launch of the recipient: messages accepted by the
+				// previous process can no longer be proven by it.
 				st.restored[e.SessionID] = true
 			case "session.activity_changed", "session.state_changed":
 			default:

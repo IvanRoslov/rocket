@@ -54,6 +54,13 @@ func (m *Manager) StartAgent(ctx context.Context, a store.Agent, requestedProfil
 	command := a.Command
 	agentName := m.agentAdapter(a)
 	var prof LaunchProfile
+	spec := agent.LaunchSpec{
+		SessionID: a.ID, Kind: AgentSessionKind, ProjectID: a.ProjectID,
+		WorktreePath: a.Dir, SocketPath: m.cfg.SocketPath(),
+	}
+	// ag is the adapter rocket launches through a profile; nil for a
+	// registered command, which runs verbatim.
+	var ag agent.Agent
 
 	profileName := requestedProfile
 	if profileName == "" {
@@ -71,23 +78,14 @@ func (m *Manager) StartAgent(ctx context.Context, a store.Agent, requestedProfil
 			return store.Session{}, validationErr("profile_disabled",
 				"profile is disabled: "+profileName+"; choose another with --profile")
 		}
-		ag, err := agent.Get(p.Agent)
+		ag, err = agent.Get(p.Agent)
 		if err != nil {
 			return store.Session{}, validationErr("agent_unknown", "unknown agent: "+p.Agent)
 		}
 		if err := ag.Available(); err != nil {
 			return store.Session{}, validationErr("agent_unavailable", "agent unavailable: "+err.Error())
 		}
-		spec := agent.LaunchSpec{
-			SessionID: a.ID, Kind: AgentSessionKind, ProjectID: a.ProjectID,
-			WorktreePath: a.Dir, SocketPath: m.cfg.SocketPath(), Model: p.Model, Effort: p.Effort,
-		}
-		argv, err := launchArgs(ag, spec)
-		if err != nil {
-			return store.Session{}, err
-		}
-		command = shellJoin(argv)
-		env = mergeEnv(env, ag.Env(spec))
+		spec.Model, spec.Effort = p.Model, p.Effort
 		agentName = p.Agent
 		prof = LaunchProfile{Name: p.Name, Model: p.Model, Effort: p.Effort}
 		if requestedProfile != "" {
@@ -97,6 +95,29 @@ func (m *Manager) StartAgent(ctx context.Context, a store.Agent, requestedProfil
 			}
 		}
 	}
+
+	// The row exists (spawning) before any launch preparation: the delivery
+	// binding below references it, and a fresh row per start drops whatever
+	// channel a previous launch — possibly on another harness — left behind.
+	sess, err := m.upsertAgentSession(a, agentName, prof, "spawning")
+	if err != nil {
+		return store.Session{}, err
+	}
+	if err := m.prepareAgentDelivery(ag, agentName, &spec, &sess); err != nil {
+		m.markErrored(a.ID, err)
+		return store.Session{}, err
+	}
+	if ag != nil {
+		argv, err := launchArgs(ag, spec)
+		if err != nil {
+			m.markErrored(a.ID, err)
+			return store.Session{}, err
+		}
+		command = shellJoin(argv)
+		env = mergeEnv(env, ag.Env(spec))
+	} else if spec.ClaudeLaunchGeneration != "" {
+		env["ROCKET_CLAUDE_LAUNCH"] = spec.ClaudeLaunchGeneration
+	}
 	m.injectToken(env)
 
 	if _, err := m.rt.Create(ctx, runtime.CreateSpec{
@@ -105,15 +126,41 @@ func (m *Manager) StartAgent(ctx context.Context, a store.Agent, requestedProfil
 		Command: command,
 		Env:     env,
 	}); err != nil {
+		m.markErrored(a.ID, err)
 		return store.Session{}, err
 	}
 
-	sess, err := m.upsertAgentSession(a, agentName, prof)
-	if err != nil {
+	m.captureClaudeLaunch(ctx, spec)
+	sess.State = "running"
+	if err := m.st.UpdateSession(sess); err != nil {
 		return store.Session{}, err
 	}
+	m.bus.Publish("session.state_changed", a.ID, map[string]any{"from": "spawning", "to": "running"})
 	m.bus.Publish("agent.session_started", a.ID, map[string]any{"dir": a.Dir})
 	return sess, nil
+}
+
+// prepareAgentDelivery gives an agent launch the same delivery preparation a
+// spawned session gets, whichever harness runs it: a native channel (Pi) for
+// a profile launch, and the exact Claude launch binding for any Claude Code
+// launch — profile or registered command. Without the binding the monitor
+// cannot attribute the pane's Claude process, its activity stays unknown and
+// every queued message waits out queue_timeout.
+//
+// A registered command runs verbatim, so only the env-carried Claude binding
+// applies to it; a native channel needs launch arguments rocket does not own.
+func (m *Manager) prepareAgentDelivery(ag agent.Agent, agentName string, spec *agent.LaunchSpec, sess *store.Session) error {
+	if ag != nil {
+		if err := m.prepareNativeLaunch(ag, spec, sess); err != nil {
+			return err
+		}
+		return m.prepareClaudeLaunch(ag, spec, sess)
+	}
+	detected, err := agent.Get(agentName)
+	if err != nil {
+		return nil // unknown CLI: nothing rocket can bind
+	}
+	return m.prepareClaudeLaunch(detected, spec, sess)
 }
 
 // StopAgent kills an agent's tmux session and marks its session row done. The
@@ -173,7 +220,7 @@ func (m *Manager) AdoptAgentSession(a store.Agent) (sess store.Session, fresh bo
 		}
 		return existing, false, nil
 	}
-	adopted, err := m.upsertAgentSession(a, m.agentAdapter(a), LaunchProfile{})
+	adopted, err := m.upsertAgentSession(a, m.agentAdapter(a), LaunchProfile{}, "running")
 	return adopted, err == nil, err
 }
 
@@ -220,7 +267,7 @@ func (m *Manager) agentAdapter(a store.Agent) string {
 //
 // WorktreePath is the agent's own directory: it is not a rocket worktree, but
 // it is where the queue writes large-message files the agent then reads.
-func (m *Manager) upsertAgentSession(a store.Agent, agentName string, prof LaunchProfile) (store.Session, error) {
+func (m *Manager) upsertAgentSession(a store.Agent, agentName string, prof LaunchProfile, state string) (store.Session, error) {
 	sess := store.Session{
 		ID:           a.ID,
 		Kind:         AgentSessionKind,
@@ -229,7 +276,7 @@ func (m *Manager) upsertAgentSession(a store.Agent, agentName string, prof Launc
 		Agent:        agentName,
 		WorktreePath: a.Dir,
 		TmuxName:     a.ID,
-		State:        "running",
+		State:        state,
 		Profile:      prof.Name,
 		Model:        prof.Model,
 		Effort:       prof.Effort,
@@ -240,7 +287,7 @@ func (m *Manager) upsertAgentSession(a store.Agent, agentName string, prof Launc
 		if err := m.st.UpdateSession(sess); err != nil {
 			return store.Session{}, err
 		}
-		m.bus.Publish("session.state_changed", a.ID, map[string]any{"to": "running"})
+		m.bus.Publish("session.state_changed", a.ID, map[string]any{"to": state})
 		return sess, nil
 	}
 	if err != nil {

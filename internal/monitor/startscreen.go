@@ -61,13 +61,14 @@ func (m *Monitor) startState(sessionID string, launchedAt int64) *startScreenSta
 }
 
 // sessionLaunchedAt is when sess's current agent process was launched: the
-// latest session.restored event (Restore relaunches the agent in the same
-// worktree and publishes it), else created_at. The sessions table has no
+// latest launch event (store.LaunchEventTypes — Restore relaunches a session
+// in its worktree; a persistent agent reuses one row across every start),
+// else created_at. The sessions table has no
 // launch column; the event log is indexed by session, so this is one cheap
 // lookup per sweep.
 func (m *Monitor) sessionLaunchedAt(sess store.Session) int64 {
 	launched := sess.CreatedAt
-	ts, ok, err := m.st.LastSessionEventTS(sess.ID, "session.restored")
+	ts, ok, err := m.st.LastLaunchTS(sess.ID)
 	if err != nil {
 		slog.Warn("monitor: read last restore", "session", sess.ID, "error", err)
 	}

@@ -67,6 +67,29 @@ func TestActivityReceivesLaunchSince(t *testing.T) {
 	}
 }
 
+// A persistent agent keeps one session row across starts, so its launch is
+// the latest agent.session_started: a restart on Kimi/Codex/Pi must not read
+// the previous run's journal in the same dir as its own.
+func TestActivityAgentRestartMovesLaunchSince(t *testing.T) {
+	rt := &fakeRuntime{names: []string{"cto"}}
+	m, st, _ := testMonitor(t, rt, &fakeProber{onlyShell: map[string]bool{}}, map[string]*fakeAgent{})
+	ag := &refAgent{fakeAgent: fakeAgent{state: activity.Idle, ts: time.Now()}}
+	m.resolveAgent = func(string) (agent.Agent, error) { return ag, nil }
+	seedSession(t, st, store.Session{ID: "cto", Kind: "agent", Agent: "kimi-code", TmuxName: "cto"})
+	sess, err := st.GetSession("cto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := sess.CreatedAt + 500
+	if _, err := st.AppendEvent(store.Event{Type: "agent.session_started", SessionID: "cto", TS: started}); err != nil {
+		t.Fatal(err)
+	}
+	m.sweep(context.Background())
+	if got := ag.lastRef(); !got.Since.Equal(time.Unix(started, 0)) {
+		t.Fatalf("Since = %v, want agent start %d", got.Since, started)
+	}
+}
+
 // kimiStartupAgent is startupAgent speaking the Kimi pane dialect.
 type kimiStartupAgent struct{ *startupAgent }
 
