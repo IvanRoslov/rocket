@@ -167,7 +167,7 @@ func (q *Queue) beforeFirstTurn(ctx context.Context, sess store.Session) bool {
 	}
 	ref := agent.ActivityRef{SessionID: sess.ID, WorktreePath: sess.WorktreePath}
 	launched := sess.CreatedAt
-	if ts, found, err := q.st.LastSessionEventTS(sess.ID, "session.restored"); err == nil && found && ts > launched {
+	if ts, found, err := q.st.LastLaunchTS(sess.ID); err == nil && found && ts > launched {
 		launched = ts
 	}
 	if launched > 0 {

@@ -157,6 +157,28 @@ func (s *Store) LastSessionEventTS(sessionID, typ string) (int64, bool, error) {
 	return ts, true, nil
 }
 
+// LaunchEventTypes are the events that start a new agent launch on an
+// existing session row: a restore relaunches a worker/orchestrator in its
+// worktree, and a persistent agent keeps one row across every start.
+var LaunchEventTypes = []string{"session.restored", "agent.session_started"}
+
+// LastLaunchTS returns the unix time of sessionID's newest launch event
+// (LaunchEventTypes), or found=false when the session was never relaunched.
+func (s *Store) LastLaunchTS(sessionID string) (int64, bool, error) {
+	var ts int64
+	found := false
+	for _, typ := range LaunchEventTypes {
+		t, ok, err := s.LastSessionEventTS(sessionID, typ)
+		if err != nil {
+			return 0, false, err
+		}
+		if ok && (!found || t > ts) {
+			ts, found = t, true
+		}
+	}
+	return ts, found, nil
+}
+
 // LastSessionEventData returns the data of the newest event of type typ for
 // sessionID, and whether there is one (same index walk as
 // LastSessionEventTS).

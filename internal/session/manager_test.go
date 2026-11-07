@@ -40,6 +40,7 @@ type fakeRuntime struct {
 	sentKeys  []sentKey
 	sendErr   error
 	onCreate  func()
+	createErr error
 
 	// captureOut, when set, is what Capture returns (default "fake
 	// output"); captureErr fails it; captureLines records each requested
@@ -57,6 +58,9 @@ func (f *fakeRuntime) Create(ctx context.Context, spec runtime.CreateSpec) (runt
 	defer f.mu.Unlock()
 	if f.onCreate != nil {
 		f.onCreate()
+	}
+	if f.createErr != nil {
+		return runtime.Handle{}, f.createErr
 	}
 	f.created = append(f.created, spec)
 	if f.aliveMap == nil {
