@@ -4,19 +4,29 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"github.com/IvanRoslov/rocket/internal/activity"
 	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/claudeinstance"
 	"io"
+	"io/fs"
 	"os"
 	"time"
 )
+
+// errNoJournal reports that the exact journal does not exist yet: Claude
+// creates it on the root's first turn. It is still no signal on its own.
+var errNoJournal = fmt.Errorf("%w: journal not created yet", agent.ErrNoSignal)
 
 // claudeJournalActivity reads lifecycle metadata only from the exact verified
 // UUID journal. The adapter's newest-transcript UI selection is not authority
 // for another root's readiness or API-error block.
 func claudeJournalActivity(ctx context.Context, id claudeinstance.Identity) (activity.State, time.Time, error) {
 	info, e := os.Lstat(id.JournalPath)
+	if errors.Is(e, fs.ErrNotExist) {
+		return "", time.Time{}, errNoJournal
+	}
 	if e != nil || !info.Mode().IsRegular() {
 		return "", time.Time{}, agent.ErrNoSignal
 	}

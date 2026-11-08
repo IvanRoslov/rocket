@@ -387,3 +387,44 @@ func TestClaudeRestoreDuringProbeCannotExitReplacement(t *testing.T) {
 		t.Fatalf("old Dead probe applied to replacement: activity=%s binding=%+v", got.Activity, bound)
 	}
 }
+
+// A persistent agent starts Claude without a prompt: until its first turn the
+// exact journal does not exist, so activity stayed unknown and the queue held
+// every message forever — the first message is what would have created the
+// journal (incident: cto after `rocket agent start`, 2026-11-08). Claude's own
+// registry entry for the exact verified root saying "idle" is the proof that
+// the composer is free; any other status, or no proof, stays unknown.
+func TestClaudeFreshRootWithoutJournalIsReadyOnlyWhenRegistryIdle(t *testing.T) {
+	for _, tc := range []struct {
+		status string
+		want   []string
+	}{
+		{"idle", []string{"ready", "idle"}},
+		{"busy", []string{""}},
+		{"", []string{""}},
+	} {
+		t.Run("status="+tc.status, func(t *testing.T) {
+			m, st, _, _ := claudeMonitorFixture(t)
+			_, id, _ := st.GetClaudeLaunch("s")
+			os.Remove(id.JournalPath)
+			path := filepath.Join(m.claudeSessionsDir, "11.json")
+			var cc socketmsg.Session
+			raw, _ := os.ReadFile(path)
+			json.Unmarshal(raw, &cc)
+			cc.Status = tc.status
+			raw, _ = json.Marshal(cc)
+			os.WriteFile(path, raw, 0600)
+			st.UpdateSessionActivity("s", "", 0)
+
+			sess, _ := st.GetSession("s")
+			m.pollSession(context.Background(), sess, map[string]bool{"s": true}, true)
+			got, _ := st.GetSession("s")
+			for _, w := range tc.want {
+				if got.Activity == w {
+					return
+				}
+			}
+			t.Fatalf("activity = %q, want one of %q", got.Activity, tc.want)
+		})
+	}
+}

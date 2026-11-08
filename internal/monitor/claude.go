@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"errors"
 	"github.com/IvanRoslov/rocket/internal/activity"
 	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/claudeinstance"
@@ -32,6 +33,9 @@ func (a claudeObservation) same(b claudeObservation) bool {
 type claudeResolution struct {
 	claudeinstance.Resolution
 	observation claudeObservation
+	// registryIdle: Claude's own registry entry for the exact resolved root
+	// (same pid and session UUID) reports an idle composer.
+	registryIdle bool
 }
 
 func (m *Monitor) currentClaude(ctx context.Context, id string) (claudeObservation, error) {
@@ -95,7 +99,16 @@ func (m *Monitor) resolveClaude(ctx context.Context, sess store.Session) claudeR
 	if expected == nil || !observation.same(claudeObservation{*expected, l.BindingRevision, event}) {
 		return unknown("binding_changed")
 	}
-	return claudeResolution{r, observation}
+	res := claudeResolution{Resolution: r, observation: observation}
+	if r.State == claudeinstance.Verified {
+		for _, c := range all {
+			if c.PID == r.Identity.PID && c.SessionID == r.Identity.ClaudeSessionID {
+				res.registryIdle = c.Status == "idle"
+				break
+			}
+		}
+	}
+	return res
 }
 func (m *Monitor) PushClaudeUpdate(ctx context.Context, sessionID string, state activity.State, event claudeinstance.HookEvent) {
 	sess, e := m.st.GetSession(sessionID)
@@ -170,6 +183,14 @@ func (m *Monitor) pollClaudeSession(ctx context.Context, sess store.Session, a a
 		return
 	}
 	state, ts, e := claudeJournalActivity(ctx, r.Identity)
+	if errors.Is(e, errNoJournal) && r.State == claudeinstance.Verified && r.registryIdle {
+		// A root launched without a prompt (a persistent agent) has no journal
+		// until its first turn, and that turn is the first queued message:
+		// without this the queue waits on unknown activity forever. Claude's
+		// registry saying idle for this exact root is the proof of a free
+		// composer; no other missing-journal case becomes authority.
+		state, ts, e = activity.Ready, r.Identity.ProcessStart, nil
+	}
 	if e != nil {
 		if sess.Activity != "blocked" && sess.Activity != "waiting_input" {
 			m.applyClaude(ctx, sess, r.observation, "", time.Now(), "claude-journal-uncertain")
