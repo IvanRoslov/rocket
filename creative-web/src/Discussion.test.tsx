@@ -8,13 +8,13 @@ import { Discussion } from "./Discussion";
 import { CreativeSessionRail } from "./SessionRail";
 const posted: unknown[] = [];
 const server = setupServer(
-  http.get("/v1/creative/runs/7/messages", () => HttpResponse.json([])),
+  http.get("/v1/creative/runs/7/feed", () => HttpResponse.json([])),
   http.get("/v1/creative/runs/7/questions", () => HttpResponse.json([])),
   http.get("/v1/creative/runs/7/sessions", () =>
     HttpResponse.json([{ id: "creative-7", tmux_name: "creative-7", kind: "orchestrator", agent: "codex", state: "running" }]),
   ),
   http.get("/v1/model-profiles", () => HttpResponse.json({ profiles: [] })),
-  http.post("/v1/creative/runs/7/questions", async ({ request }) => {
+  http.post("/v1/creative/runs/7/feed", async ({ request }) => {
     posted.push(await request.json());
     return HttpResponse.json({ id: 1 });
   }),
@@ -45,14 +45,14 @@ it("keeps a draft bound to the stage and artifact version originally shown when 
   );
   const user = userEvent.setup();
   await user.type(
-    screen.getByLabelText("Question"),
+    screen.getByLabelText("Message"),
     "Make the opening warmer",
   );
   view.rerender(tree(5, 12, "Film / Edit · Final cut version 2"));
   expect(
     screen.getByText(/Draft stays with Film \/ Scenes \/ Opening/),
   ).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Open question" }));
+  await user.click(screen.getByRole("button", { name: "Send message" }));
   await waitFor(() =>
     expect(posted).toEqual([
       {
@@ -102,6 +102,7 @@ it("uses the existing human question answer action for an explicit Go choice", a
       />
     </QueryClientProvider>,
   );
+  await userEvent.click(screen.getByText("Old questions"));
   await userEvent.click(await screen.findByRole("button", { name: "Go" }));
   await waitFor(() => expect(answers).toEqual([{ choose: 1 }]));
 });
@@ -237,7 +238,9 @@ function renderThreads() {
       <Discussion context={{ run_id: 7, stage_id: stage, label: `Stage ${stage}`, artifact_version_ids: [] }} orchestrator="creative-7" ready />
     </QueryClientProvider>
   );
-  return { ...render(tree()), tree, client };
+  const view = render(tree());
+  screen.getByText("Old questions").click();
+  return { ...view, tree, client };
 }
 it("shows newest open questions first and resolved threads collapsed with their complete history", async () => {
   server.use(http.get("/v1/creative/runs/7/questions", () => HttpResponse.json([
@@ -350,7 +353,7 @@ it("keeps newer reply text when an earlier submission finishes after navigating 
   expect(box).toHaveValue("Newer unsent clarification");
 });
 
-it("removes central messages while preserving contextual question creation", async () => {
+it("uses a feed message composer and removes human question creation", async () => {
   let reads = 0;
   server.use(http.get("/v1/creative/runs/7/messages", () => {
     reads++;
@@ -362,7 +365,8 @@ it("removes central messages while preserving contextual question creation", asy
   expect(screen.queryByRole("heading", { name: "Messages" })).not.toBeInTheDocument();
   expect(screen.queryByText("Hidden feed message")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Send as")).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Send message" })).not.toBeInTheDocument();
-  expect(screen.getByLabelText("Question")).toBeEnabled();
-  expect(screen.getByRole("button", { name: "Open question" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "Open question" })).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Message")).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
 });

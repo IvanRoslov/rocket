@@ -128,3 +128,30 @@ export interface CreativeQuestion {
   artifact_version_ids: number[];
   messages: { id: number; author: string; body: string; created_at: number }[];
 }
+
+export type FeedDecision = "go" | "revise" | "deny";
+export interface FeedEntry {
+  id: number;
+  run_id: number;
+  stage_id: number;
+  item_id: number;
+  kind: "message" | "proposal";
+  author: "human" | "orchestrator";
+  author_session_id: string;
+  body: string;
+  artifact_version_ids: number[];
+  created_at: number;
+  card: null | {
+    status: "pending" | "decided" | "replaced";
+    decision: "" | FeedDecision;
+    decided_at: number;
+    replaces_entry_id: number;
+    replaced_by_entry_id: number;
+  };
+}
+export interface FeedUnread {
+  run_id: number;
+  total: number;
+  run_feed: number;
+  stages: { stage_id: number; unread: number }[];
+}
