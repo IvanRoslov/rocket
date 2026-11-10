@@ -16,6 +16,7 @@ func newCreativeAgentCmd() *cobra.Command {
 func creativeAgentCommands(open creativeConnection) *cobra.Command {
 	root := &cobra.Command{Use: "agent", Short: "Creative sessions and contextual discussion"}
 	root.AddCommand(creativeCloseCommand(open))
+	root.AddCommand(creativeFeedCommand(open))
 	for _, action := range []string{"launch", "spawn", "sessions", "send", "messages", "ask", "questions", "reply", "answer"} {
 		var stage, item int64
 		var versions []int64
@@ -24,6 +25,19 @@ func creativeAgentCommands(open creativeConnection) *cobra.Command {
 		var choose int
 		var dispute, wait bool
 		cmd := &cobra.Command{Use: action + " ID", Args: creativeArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+			if action == "ask" {
+				workerCommand := fmt.Sprintf("rocket creative agent send %s", args[0])
+				if stage > 0 {
+					workerCommand += fmt.Sprintf(" --stage %d", stage)
+				} else {
+					workerCommand += " --stage STAGE"
+				}
+				if item > 0 {
+					workerCommand += fmt.Sprintf(" --item %d", item)
+				}
+				return fmt.Errorf("new Creative questions are retired; use rocket creative agent feed post %s --body 'Your message'; paid proposals: rocket creative agent feed propose %s --body 'Exact calls and cost'; workers: %s --body 'Your question' (include your assigned --item when applicable)", args[0], args[0], workerCommand)
+			}
+
 			if stage < 0 || item < 0 || item != 0 && stage == 0 {
 				return &usageError{message: "item requires a positive stage; IDs cannot be negative"}
 			}

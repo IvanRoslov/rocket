@@ -540,6 +540,9 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnReq) (store.Session, error
 		return store.Session{}, err
 	}
 	m.bus.Publish("session.state_changed", id, map[string]any{"from": "spawning", "to": "running"})
+	if req.creative != nil && kind == "orchestrator" {
+		m.deliverCreativeFeed(req.creative.RunID)
+	}
 	if queuedFirst && m.wake != nil {
 		m.wake(id)
 	}
@@ -1144,6 +1147,9 @@ func (m *Manager) Restore(ctx context.Context, id string, opts RestoreOpts) erro
 		return err
 	}
 	m.bus.Publish("session.restored", id, nil)
+	if creativeErr == nil && sess.Kind == "orchestrator" {
+		m.deliverCreativeFeed(creative.RunID)
+	}
 	if queuedFirst && m.wake != nil {
 		m.wake(id)
 	}

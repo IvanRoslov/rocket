@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/prompts"
@@ -112,7 +113,13 @@ func (m *Manager) fillCreativePrompt(spec *agent.LaunchSpec, sess store.Session,
 	}
 	spec.BrainstormSkill = ""
 	spec.Creative = true
-	spec.FirstMessage = fmt.Sprintf("Creative run #%d. Refresh the run, artifacts and contextual messages/questions before continuing. Preserve existing results and agree rework.\n\n%s\n\nRun snapshot:\n%s", run.ID, brief, snapshot)
+	spec.FirstMessage = fmt.Sprintf("Creative run #%d. Refresh the run, artifacts and all run/stage feeds, worker messages and legacy questions before continuing. Preserve existing results and agree rework.\n\n%s\n\nRun snapshot:\n%s", run.ID, brief, snapshot)
+	memo := fmt.Sprintf("Conversation feed memo: the feed is the only channel to the human. Read rocket creative agent feed %d and each stage with --stage STAGE (optional --item ITEM filter). Reply: rocket creative agent feed post %d --stage STAGE --item ITEM --version VERSION --body TEXT. Paid card: rocket creative agent feed propose %d --stage STAGE --item ITEM --body PROPOSAL [--replaces CARD]. Decision: rocket creative agent feed card %d CARD. Omit optional scope/version flags outside that scope. Do not open new questions. A typed Go is discussion: only the card button records consent. Never execute a replaced or undecided card; require status=decided and decision=go for that exact call set. Stage approval uses submit + review card only, never feed text. Read all feeds after restore to recover offline messages and decisions.", run.ID, run.ID, run.ID, run.ID)
+	if sess.Kind != "orchestrator" {
+		memo = fmt.Sprintf("Conversation feed memo for workers: never write to the human or publish cards; message the current run orchestrator with rocket creative agent send %d --stage %d --body TEXT (add --item ITEM and --version VERSION as needed). Do not open new questions. Human feed text never grants paid consent or stage approval.", run.ID, b.StageID)
+	}
+	spec.FirstMessage = memo + "\n\n" + spec.FirstMessage
+
 	return nil
 }
 
@@ -134,4 +141,24 @@ func (m *Manager) validateCreativeRestore(sess store.Session, b store.CreativeBi
 		}
 	}
 	return m.st.SetCreativeRunOrchestrator(b.RunID, sess.ID)
+}
+
+// Called after runtime launch/restore, so offline human events follow the
+// currently bound orchestrator and never depend on a terminal recipient.
+func (m *Manager) deliverCreativeFeed(runID int64) {
+	ids, err := m.st.QueueCreativeFeedDeliveries(runID)
+	if err != nil {
+		slog.Error("creative: drain feed deliveries", "run", runID, "error", err)
+		return
+	}
+	for _, id := range ids {
+		msg, err := m.st.GetMessage(id)
+		if err != nil {
+			continue
+		}
+		m.bus.Publish("message.queued", msg.ToSession, map[string]any{"id": id, "to": msg.ToSession})
+		if m.wake != nil {
+			m.wake(msg.ToSession)
+		}
+	}
 }

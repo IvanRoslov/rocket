@@ -292,6 +292,27 @@ type creativeDiscussionRequest struct {
 }
 
 func handleCreativeDiscussionPost(w http.ResponseWriter, r *http.Request, d Deps, caller *store.Session, kind string) {
+	if kind == "questions" {
+		runID, ok := creativeID(w, r.PathValue("run"), false)
+		if !ok {
+			return
+		}
+		if !creativeFeedAccess(w, d, caller, runID, false) {
+			return
+		}
+		hint := fmt.Sprintf("use rocket creative agent feed post %d --body 'Your message'; paid proposals use rocket creative agent feed propose %d --body 'Exact calls and cost'", runID, runID)
+		if caller != nil && caller.Kind == "worker" {
+			own, err := d.Store.GetCreativeSessionContext(caller.ID)
+			if err != nil {
+				creativeError(w, err)
+				return
+			}
+			hint = "message the orchestrator with " + creativeFeedWorkerHint(own)
+		}
+		writeErr(w, 409, "creative_questions_retired", "new Creative questions are retired; "+hint)
+		return
+	}
+
 	runID, ok := creativeID(w, r.PathValue("run"), false)
 	if !ok {
 		return
@@ -350,38 +371,8 @@ func handleCreativeDiscussionPost(w http.ResponseWriter, r *http.Request, d Deps
 		writeJSON(w, 201, resp)
 		return
 	}
-	id, err := d.Store.AddCreativeQuestion(store.Question{AskedBy: callerAuthor(caller), Title: in.Title, Body: in.Body, Options: in.Options}, b)
-	if err != nil {
-		creativeError(w, err)
-		return
-	}
-	participants := []string{store.ParticipantHuman, callerParticipant(caller)}
-	if c.OrchestratorSessionID != "" {
-		participants = append(participants, c.OrchestratorSessionID)
-	}
-	if err := d.Store.AddParticipants(id, participants...); err != nil {
-		creativeError(w, err)
-		return
-	}
-	if err := d.Store.AttentionOnOpen(id, callerParticipant(caller), nil, participants); err != nil {
-		creativeError(w, err)
-		return
-	}
-	delivered := in.Body
-	for i, option := range in.Options {
-		delivered += fmt.Sprintf("\n%d. %s", i+1, option)
-	}
-	if err := creativeQuestionFanOut(d, id, b, callerParticipant(caller), delivered); err != nil {
-		creativeError(w, err)
-		return
-	}
-	resp, err := creativeQuestionView(d, caller, id)
-	if err != nil {
-		creativeError(w, err)
-		return
-	}
-	writeJSON(w, 201, resp)
 }
+
 func creativeQuestionFanOut(d Deps, id int64, b store.CreativeBinding, author, body string) error {
 
 	context, err := d.Store.ResolveCreativeContext(b.RunID, b.StageID, b.ItemID)
