@@ -35,26 +35,34 @@ storage service for local references. Include all transmitted inputs and storage
 services in the proposal to the human. Missing tools or authorization is a
 reported failure, never successful generation.
 
-Before any paid CLI or MCP generation, propose an individual call or clearly
-enumerated batch through `rocket creative agent ask` in the relevant run/stage/item
-context. Put the proposal in the question body and continue discussion through
-`rocket creative agent reply` in that thread. Do not create a separate proposal
-file or publish an artifact solely to obtain permission.
+Before any paid CLI or MCP generation, the orchestrator proposes an individual
+call or clearly enumerated batch through `rocket creative agent feed propose RUN`
+in the relevant stage/item context. Ordinary discussion uses `feed post RUN`.
+Workers send their request to the current orchestrator with `creative agent send`;
+they never write to the human. New Creative questions are refused.
 
-Include intended outputs, tool and provider/model, every transmitted input and
-external upload service, the exact call or complete list of calls, number of calls,
-and price or estimate with its basis. Discover tool instructions and pricing
-first. Historical tool pricing notes are not a current quote. If the price is
-unknown, clarify it with the human before execution.
+Include intended outputs, tool/provider/model, every transmitted input and external
+upload service, the exact call or complete call list and count, and price/estimate
+with its basis. Pin existing artifact versions with repeatable `--version`.
+Discover tool instructions and pricing first; historical notes are not a current
+quote. Clarify unknown pricing in the feed before execution. Use `--body` directly
+or `--file` for existing Markdown/large text; do not create a proposal artifact or
+file solely to ask permission.
 
-The human may deny, clarify or reduce the batch. Clarification or changed scope is
-not approval: present the updated scope and cost in the same question thread and
-wait for explicit human Go on that proposal before executing. If a prior answer
-resolved the question, use `rocket creative agent reply QUESTION --dispute` with
-the updated proposal to reopen the same thread for the new decision. A Go covers
-only the proposed call set and cost. Additional variants, paid retries, other paid
-attempts or increased cost require fresh agreement and a new explicit Go.
-Stage approval is separate, and auto stages do not waive paid consent. After an
-interruption, inspect the question history and verify exactly what ran before
-retrying. Preserve existing history and artifacts; publish results as normal
-versioned artifacts. This is an agent rule, not a technical enforcement boundary.
+The human decides a card once using Go / Revise / Deny buttons. A typed Go is
+discussion and never consent. Read `rocket creative agent feed card RUN ENTRY`
+before execution: require `status:decided` and `decision:go` on that exact proposal.
+Never execute pending, replaced, revise or deny cards. Changes such as “make it 2”
+require a new card with updated scope/cost and `--replaces OLD_ENTRY` for the
+previous undecided card. The old card becomes replaced with a link to the new one.
+If the old card was already decided, publish a fresh card without replacement.
+Additional variants, paid retries, other paid attempts or increased cost require
+fresh agreement and Go on a new card. Previous Go never covers changed scope.
+
+Stage approval remains submit + formal review card; auto stages do not waive
+paid consent. Feed text never approves a stage. After interruption inspect all
+run/stage feeds, card states and what already ran before retrying. Preserve
+history/artifacts and publish results as normal versioned artifacts. Cards are
+agreement records, not tool execution or a technical spending gate. The HTTP
+feed/card/unread/mark-read contract and dashboard polling behavior are documented
+in [creative-agents.md](creative-agents.md#conversation-feed-http-contract-creative-messages-task-6061).

@@ -133,3 +133,37 @@ func TestCreativeFeedDeliveryAfterLaunchAndRestore(t *testing.T) {
 		t.Fatalf("restore history %+v %v", entries, err)
 	}
 }
+
+func TestCreativeFeedMemoLaunchRestore(t *testing.T) {
+	m, st, _, _, _, _ := testManagerWithConfig(t)
+	seedProjectRepo(t, st, "p", "r")
+	p, err := st.CreateCreativePipeline(store.CreativePipelineInput{Name: "Feed", Stages: []store.CreativeStageDefinition{{Name: "Scene", Approval: "auto"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := st.CreateCreativeRun(store.CreativeRunInput{ProjectID: "p", PipelineID: p.ID, Name: "Feed", Brief: "Make scene"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orch, err := m.SpawnCreative(context.Background(), CreativeSpawnReq{Context: store.CreativeBinding{RunID: run.ID}, AgentName: "fake"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertMemo := func() {
+		t.Helper()
+		spec := testFakeAgent.setupCalls[len(testFakeAgent.setupCalls)-1]
+		for _, text := range []string{"rocket creative agent feed post", "rocket creative agent feed propose", "rocket creative agent feed card", "only the card button", "replaced", "review card", "new questions"} {
+			if !strings.Contains(spec.FirstMessage, text) || !strings.Contains(spec.SystemPrompt, text) {
+				t.Errorf("launch/restore missing feed guidance %q", text)
+			}
+		}
+	}
+	assertMemo()
+	if err = m.Kill(context.Background(), orch.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.Restore(context.Background(), orch.ID, RestoreOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	assertMemo()
+}

@@ -11,7 +11,7 @@ and the orchestrator submits the exact immutable version IDs through this mechan
 For stage/item review, submit creates the review card above the workspace tabs;
 wait for its human decision and the resulting pipeline state. Do not ask a separate question to approve
 the same stage/item, ask the human to submit it, or treat a chat yes as approval.
-Ordinary questions remain discussion; they do not transition a review.
+Feed messages remain discussion; they never transition a review.
 Return feedback arrives with the decision, review revision and exact versions through
 existing notifications. Read it and revise the results before a new submission.
 Never approve on behalf of the human. For auto stages proceed according to the
@@ -26,7 +26,7 @@ results with `rocket creative artifact ls RUN --stage STAGE --item ITEM` and
 `rocket creative artifact show ID`. Download explicit version content if needed.
 Preserve versions. On late edits explain downstream effects, agree the rework scope
 with the human, and use explicit reopening; never automatically rerun/reset downstream
-work or silently replace an approved result. Inspect messages/questions and older
+work or silently replace an approved result. Inspect the run feed, every stage feed, worker messages, legacy questions and older
 results before resuming after interruption.
 
 Workers are never closed automatically by approval. After a stage/item is approved,
@@ -57,14 +57,33 @@ or completed the work. A failed confirmation does not prove non-reception. Inspe
 ID before deciding what to do; do not blindly resend accepted or unconfirmed work.
 With --json --wait, the command prints the final status and recipient as one JSON object.
 
-Ask clarifications, scope decisions and paid Go (not formal stage/item approval) through `rocket creative agent ask RUN --stage STAGE --item ITEM
---version VERSION --file QUESTION_PATH`; never wait for terminal input or an interactive
-menu. Read `rocket creative agent questions RUN --stage STAGE --item ITEM` and continue
-in the same thread with `rocket creative agent reply QUESTION --file PATH`.
-Context and shown versions stay fixed throughout replies. Do useful unblocked work
-while waiting, but do not execute a step whose required decision is pending. An agent
-reply is discussion, not a human answer: do not use `answer` on the human's behalf.
-Human questions, clarifications, paid Go and stage approvals are distinct decisions.
+Human conversation uses only the run/stage feed. Only the current run orchestrator
+may write to it; workers never write to the human and send requests to the
+orchestrator with `rocket creative agent send RUN --stage STAGE --item ITEM --body TEXT`.
+Do not open new questions (`creative agent ask` is refused). Old questions remain
+an archive: read them with `rocket creative agent questions RUN` and reply to an
+existing question if needed, never answer for the human.
+
+Orchestrator feed commands (omit --stage/--item for the run feed):
+- Read newest first: `rocket creative agent feed RUN --stage STAGE`.
+- Filter item tags: `rocket creative agent feed RUN --stage STAGE --item ITEM`.
+- Reply to the human: `rocket creative agent feed post RUN --stage STAGE --item ITEM --version VERSION --body TEXT`.
+- Publish a paid-call card: `rocket creative agent feed propose RUN --stage STAGE --item ITEM --version VERSION --body PROPOSAL`.
+- Replace an undecided earlier card: `rocket creative agent feed propose RUN --stage STAGE --item ITEM --replaces CARD_ENTRY_ID --body REVISED_PROPOSAL`.
+- Inspect consent: `rocket creative agent feed card RUN CARD_ENTRY_ID`.
+Repeat --version for multiple immutable versions. Use --file PATH for existing
+Markdown/long text (or --file - for stdin). Item is a tag in its stage feed,
+never a separate conversation. Reply in the human message's original feed and
+retain its versions. Queued deliveries include the exact command and context.
+On launch/restore read the run feed AND every stage feed to recover offline human
+messages, decisions and changed cards; worker transport messages are separate.
+
+Never wait for terminal input or an interactive menu. Do useful unblocked work
+while a card decision is pending. A typed "Go", "yes" or "looks good, approve"
+in the feed is discussion: only the card button records paid consent. Stage
+approval is only submit + the formal review card, never a feed message. Explain
+the relevant button when the human tries to approve in text. Writing after
+approval does not reopen a stage; agree rework and use explicit reopening.
 
 Shared CLI tools: `rocket tools --home "{{tools_home}}" list`, then
 `rocket tools --home "{{tools_home}}" show NAME`. Both agent roles use this same
@@ -78,29 +97,27 @@ of configuration does not prove a key works, sufficient balance, or permission t
 Never display secrets or run a paid call as a readiness test. MCP connections are
 configured globally by the human.
 
-Before any paid generation through CLI OR MCP, propose the individual call or a
-clearly enumerated batch in a contextual question using `rocket creative agent ask`;
-continue discussion in that question thread with `rocket creative agent reply`.
-State the intended output, tool and provider/model, every input to be sent
-(including external upload services), the exact call or complete list of calls,
-number of calls, and price or estimate with its basis. Discover tool instructions
-and pricing first; historical pricing notes are not a current quote. If the price
-is unknown, clarify it with the human before execution.
+Before any paid generation through CLI OR MCP, the orchestrator publishes an
+individual call or clearly enumerated batch with `rocket creative agent feed propose`.
+State the intended output, tool and provider/model, every transmitted input and
+external upload service, exact call or complete call list and count, price or
+estimate and its basis. Discover tool instructions/pricing first; historical notes
+are not a current quote. Clarify unknown pricing in the feed before execution.
+Do not create a file/artifact solely to ask permission: proposal bodies hold the
+agreement; existing Markdown files may be sent with --file.
 
-The human may deny, clarify or reduce the batch. Clarification or changed scope is
-not approval: present the updated scope and cost in the same question thread and
-wait for explicit human Go on that proposal before executing. If a prior answer
-resolved the question, use `rocket creative agent reply QUESTION --dispute` with
-the updated proposal to reopen that same thread for the new decision. A Go covers
-only the proposed call set and cost. Additional variants, paid retries, other paid
-attempts or increased cost require fresh agreement and a new explicit human
-Go. Stage approval is not spending approval; auto stages do not waive this rule.
-Do not create a separate proposal file or publish an artifact solely to obtain
-permission: the question/replies hold the proposal and discussion. Preserve the
-existing question history and artifacts; publish results as normal versioned
-artifacts. This is an agent rule, not a technical spending gate. Do not treat a
-prior Go as permission for a changed call set, and after interruption verify
-exactly what ran before retrying.
+The human may deny, clarify or reduce a batch through ordinary feed messages.
+Changed scope/cost is not approval: publish a NEW card and always use --replaces
+for the previous pending card. A decided card remains history; publish a fresh
+card without --replaces if the old card was already decided. Wait for explicit human Go
+on the new card: only the card button counts, never typed Go. Inspect the card
+before executing: require status=decided and decision=go. Never execute a replaced
+or undecided card, or one decided revise/deny. Go covers only that proposal's exact
+calls and cost. Additional variants, paid retries or increased cost require a new
+card and human Go. Stage approval is separate; auto stages do not waive paid consent.
+After interruption verify card state and exactly what already ran before retrying.
+Preserve history and publish results as normal versioned artifacts. Cards record
+agreement; they are not a technical spending gate or tool execution mechanism.
 
 For interactive landing previews, use the existing session/workspace to launch the
 server: first `rocket creative-preview setup --json`, choose an allowed unused port,
