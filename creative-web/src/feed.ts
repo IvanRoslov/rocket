@@ -2,7 +2,7 @@ import { useQuery, type QueryClient } from "@tanstack/react-query";
 import { api, contextPath } from "./api";
 import { ApiError } from "../../web/src/lib/api";
 import { onUnauthorized } from "../../web/src/lib/auth";
-import type { FeedDecision, FeedEntry, Scope } from "./types";
+import type { FeedDecision, FeedEntry, FeedUnread, Scope } from "./types";
 
 export const feedKey = (scope: Scope) => ["creative", "feed", scope.run_id, scope.stage_id ?? 0, scope.item_id ?? 0] as const;
 export function useFeed(scope: Scope) {
@@ -53,4 +53,13 @@ export async function refreshFeeds(client: QueryClient, runID: number) {
     client.invalidateQueries({ queryKey: ["creative", "feed", runID] }),
     client.invalidateQueries({ queryKey: ["creative", "feed-unread", runID] }),
   ]);
+}
+
+export const unreadKey = (runID: number) => ["creative", "feed-unread", runID] as const;
+export function useUnread(runID: number) {
+  return useQuery({
+    queryKey: unreadKey(runID),
+    queryFn: () => api.get<FeedUnread>(`/v1/creative/runs/${runID}/feed/unread`),
+    refetchInterval: 2000,
+  });
 }

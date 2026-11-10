@@ -602,3 +602,67 @@ details p {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* Conversation follows the selected stage; item names are tags within it. */
+.conversation-entries {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 24px;
+  display: grid;
+  gap: 12px;
+}
+.feed-entry {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  padding: 16px;
+  overflow-wrap: anywhere;
+  scroll-margin: 24px;
+}
+.feed-entry:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.feed-entry--pending {
+  border-color: var(--accent);
+  background: var(--accent-selected-bg);
+  border-left-width: 4px;
+}
+.feed-entry--replaced {
+  background: var(--surface-2);
+}
+.feed-entry__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.feed-entry__meta strong { color: var(--text); }
+.feed-item-tag, .feed-entry__pending-label {
+  padding: 3px 8px;
+  border-radius: var(--radius-btn-sm);
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+.feed-entry__pending-label { color: var(--accent); font-weight: 600; }
+.feed-entry__actions, .feed-entry__decision, .feed-entry__replacement { margin-top: 16px; }
+.feed-entry__decision { font-size: 12px; color: var(--text-2); }
+.discussion .feed-filter { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.discussion .feed-filter input { width: auto; margin: 0; }
+.question-archive { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 24px; }
+.question-archive > summary { cursor: pointer; font-size: 13px; color: var(--text-2); }
+.feed-unread {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: white;
+  font: 600 11px var(--font-mono);
+}

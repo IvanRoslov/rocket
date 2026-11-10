@@ -2,16 +2,18 @@ import { Button } from "../../web/src/components/Button";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api, base, useCommand } from "./api";
+import { FeedReadMarker } from "./FeedReadMarker";
 import { FeedEntryView } from "./FeedEntry";
 import { QuestionArchive } from "./QuestionArchive";
 import { cacheFeedEntry, useFeed } from "./feed";
 import type { Context, FeedEntry, Item } from "./types";
 import { Empty, ErrorNotice } from "./ui";
 
-export function Discussion({ context, ready, items = [], onNavigate }: {
+export function Discussion({ context, ready, items = [], onNavigate, active = true }: {
   context: Context;
   orchestrator: string;
   ready: boolean;
+  active?: boolean;
   items?: Pick<Item, "id" | "name">[];
   onNavigate?: (stage?: number, item?: number) => void;
 }) {
@@ -76,6 +78,8 @@ export function Discussion({ context, ready, items = [], onNavigate }: {
         <h3>Newest first</h3>
         {context.item_id && <label className="feed-filter"><input type="checkbox" checked={onlyItem} onChange={(e) => setFilteredSelection(e.target.checked ? selectionKey : undefined)} />Only this item</label>}
         <ErrorNotice error={feed.error} />
+        <FeedReadMarker key={`${selectionKey}:${onlyItem}`} scope={feedScope} active={active}
+          loaded={feed.data !== undefined} through={sorted[0]?.id ?? 0} updatedAt={feed.dataUpdatedAt} />
         {feed.isPending && <p>Loading conversation…</p>}
         {feed.data?.length === 0 && <Empty>No messages in this feed.</Empty>}
         <ol className="conversation-entries" aria-label="Conversation entries">

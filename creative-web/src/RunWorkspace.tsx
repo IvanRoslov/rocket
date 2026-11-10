@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api, base, useCommand } from "./api";
 import type { Item, Run, Scope, Stage, Status } from "./types";
 import { statusLabel } from "./workflow";
+import { useUnread } from "./feed";
 import { ErrorNotice } from "./ui";
 const dotState: Record<Status, DotState> = {
   pending: "idle",
@@ -20,6 +21,7 @@ export function ProcessRail({
   scope: Scope;
   onSelect: (stage?: number, item?: number) => void;
 }) {
+  const unread = useUnread(run.id);
   return (
     <aside className="process">
       <span className="eyebrow">Saved process · {run.pipeline_name}</span>
@@ -31,8 +33,10 @@ export function ProcessRail({
         onClick={() => onSelect()}
       >
         <strong>{run.name}</strong>
+        <UnreadBadge count={unread.data?.total ?? 0} />
         <span>{statusLabel[run.status]}</span>
       </Button>
+      <ErrorNotice error={unread.error} />
       <details>
         <summary>Creative brief</summary>
         <p className="prose">{run.brief}</p>
@@ -53,6 +57,7 @@ export function ProcessRail({
                 </strong>
                 <small>{statusLabel[stage.status]}</small>
               </span>
+              <UnreadBadge count={unread.data?.stages.find(s => s.stage_id === stage.id)?.unread ?? 0} />
             </Button>
             {scope.stage_id === stage.id &&
               stage.items.map((item) => (
@@ -76,6 +81,9 @@ export function ProcessRail({
       </ol>
     </aside>
   );
+}
+function UnreadBadge({ count }: { count: number }) {
+  return count > 0 ? <span className="feed-unread" aria-label={`${count} unread messages`}>{count}</span> : null;
 }
 export function WorkDescription({
   stage,

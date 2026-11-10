@@ -7,6 +7,8 @@ import { afterAll, afterEach, beforeAll, expect, it } from "vitest";
 import { App } from "./App";
 const created: unknown[] = [];
 const server = setupServer(
+  http.get("/v1/creative/runs/:run/feed/unread", ({ params }) => HttpResponse.json({ run_id: Number(params.run), total: 0, run_feed: 0, stages: [] })),
+  http.post("/v1/creative/runs/:run/feed/read", async ({ request }) => HttpResponse.json(await request.json())),
   http.get("/v1/projects", () =>
     HttpResponse.json([
       { id: "film", name: "Film" },

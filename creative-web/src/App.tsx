@@ -423,6 +423,7 @@ function Workspace({
                 items={stage?.items}
                 onNavigate={onSelect}
                 ready={ready}
+                active={tab === "discussion"}
               />
             </div>
             <div hidden={tab !== "results"}>
