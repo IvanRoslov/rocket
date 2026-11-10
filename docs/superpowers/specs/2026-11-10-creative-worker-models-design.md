@@ -1,0 +1,9 @@
+Design / fixed API contract for #6059 (creative-improvement)
+
+Reuse modelpolicy.Allowed/ResolveWorker with a run-owned allowed_profiles list, persisted before SpawnCreative. No new policy engine; orchestrator profile and restore unchanged. CLI: rocket creative models RUN [--allow a,b | --clear], launch also accepts --allow. Add migration, API/store/spawn/models tests, prompt and both requested docs. No departures from brief.
+
+- Every creative run response adds `"allowed_profiles": ["profile-name"]`; unrestricted is always `[]`, including existing runs.
+- `POST /v1/creative/runs/{run}/sessions` accepts optional `"allowed_profiles": ["profile-name"]` alongside existing launch fields. Omission preserves current list; `[]` clears; null treated as omission. Validated and persisted before session starts. Own orchestrator profile is unrestricted.
+- `PUT /v1/creative/runs/{run}/models` replaces the entire list. Body: `{"allowed_profiles":["profile-name"]}` (required non-null array; `[]` clears). Success 200: `{"allowed_profiles":["profile-name"]}`. Read current list through GET /v1/creative/runs/{run}.
+- Replace errors: 403 `human_only` for any agent session; 400 `profile_not_found` for unknown profile(s), list unchanged; 400 `bad_request` for malformed JSON/missing/null field; 400 `creative_invalid` for invalid run ID; 404 `creative_not_found` for absent run; 500 `internal_error` for storage errors. Standard error envelope used throughout. Disabled registered names may be saved, as for dev allowlists; enabled/profile policy determines spawn availability.
+- Workers specifying allowed_profiles are rejected (403 human_only), preventing list widening. Worker spawn policy refusals use existing modelpolicy HTTP errors (`profile_not_allowed` with allowed list, `no_profiles_allowed`, etc.), create nothing.

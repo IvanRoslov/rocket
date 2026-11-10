@@ -78,6 +78,7 @@ type creativePipelineRequest struct {
 }
 
 func registerCreativeRoutes(mux *http.ServeMux, d Deps) {
+	registerCreativeModelRoutes(mux, d)
 	mux.HandleFunc("GET /v1/creative/pipelines", creativeRoute(d, func(w http.ResponseWriter, r *http.Request, _ *store.Session) {
 		out, err := d.Store.ListCreativePipelines()
 		if err != nil {

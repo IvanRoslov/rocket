@@ -106,3 +106,52 @@ Reject requires a nonblank `reason` in the JSON body; the CLI requires `--reason
 After a successful human approve/reject, the server enqueues a contextual message to the run orchestrator from the committed review snapshot. It includes run/stage/item, decision, revision, immutable artifact version IDs, server timestamp and available actor attribution. No-session requests remain explicitly unattributed; no personal identity is inferred. Approval includes a reminder to verify durable publications and explicitly close relevant workers; approval itself never closes them.
 
 The action event records `notification_status` (`queued`, `recorded` for a withdrawal FYI, or `failed`), the message/question ID when available, and failure details. Queued does not mean delivered: existing message status and delivery events track delivery/consumption/failure. Notification persistence failure is logged and recorded on the action event without rolling back the committed action or returning a misleading transition failure. This is the existing post-commit integration: a process crash between transition commit and notification/event persistence can leave a notification absent; event-store failure is logged by the existing bus. No historical replay or automatic notification retry is added. Existing queued messages retain their usual delivery retries.
+
+## Worker model profile allowlist
+
+Every run response includes `allowed_profiles`, an array of model profile names;
+`[]` means every enabled profile. Existing runs default to `[]`. The setting is
+per run and does not change pipeline templates, running workers or the
+orchestrator's own profile. Restore keeps the session's stored profile.
+
+Read it with `GET /v1/creative/runs/{run}`. Humans replace the entire list with:
+
+```http
+PUT /v1/creative/runs/1/models
+Content-Type: application/json
+
+{"allowed_profiles":["cheap","deep"]}
+```
+
+Success: `200 {"allowed_profiles":["cheap","deep"]}`. Send `[]` to clear.
+Any agent session receives `403 human_only`. Unknown names return
+`400 profile_not_found` without modifying the list. Missing/null fields,
+malformed JSON and non-array values return `400 bad_request`; invalid IDs return
+`400 creative_invalid`, absent runs `404 creative_not_found`, and storage failures
+`500 internal_error`, using the standard Rocket error envelope. Registered disabled
+names are accepted but do not appear among available worker profiles.
+
+Human launch `POST /v1/creative/runs/{run}/sessions` additionally accepts optional
+`allowed_profiles` alongside `profile`, `agent`, and `prompt`. Omission/null keeps
+the current list; `[]` clears. Names are validated and saved before the orchestrator
+starts. Agents cannot set the field, including on the worker spawn endpoint.
+
+Worker spawn uses the same policy as development workers: explicit profiles must
+be allowed; agent-only selects the first allowed profile of that agent; no selection
+uses the default worker profile if allowed, otherwise the first allowed profile.
+Profiles are ordered by registry position then name and must be enabled.
+Refusals return `400 profile_not_allowed` with `allowed: ...` in the error message,
+or `400 no_profiles_allowed` when no enabled profile survives, and create nothing.
+`GET /v1/model-profiles/available` (used by `rocket models ls` inside sessions)
+returns this run's allowed profiles for creative orchestrators and workers.
+
+```sh
+rocket creative models 1
+rocket creative models 1 --allow cheap,deep
+rocket creative models 1 --clear
+rocket creative agent launch 1 --profile orchestrator-profile --allow cheap,deep
+```
+
+The view prints the run JSON including `allowed_profiles`; mutations print
+`{"allowed_profiles":[...]}`. `--allow ""` clears, and omitting `--allow` at launch
+preserves the existing list. `--allow` and `--clear` are mutually exclusive.

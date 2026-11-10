@@ -34,6 +34,7 @@ type CreativeRunInput struct {
 type CreativeRun struct {
 	ID int64 `json:"id"`
 	CreativeRunInput
+	AllowedProfiles       []string        `json:"allowed_profiles"`
 	PipelineName          string          `json:"pipeline_name"`
 	OrchestratorSessionID string          `json:"orchestrator_session_id"`
 	Status                string          `json:"status"`

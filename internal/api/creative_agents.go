@@ -124,13 +124,14 @@ func creativeAgentAccess(w http.ResponseWriter, d Deps, caller *store.Session, b
 }
 
 type creativeLaunchRequest struct {
-	StageID int64  `json:"stage_id"`
-	ItemID  int64  `json:"item_id"`
-	Repo    string `json:"repo"`
-	Name    string `json:"name"`
-	Prompt  string `json:"prompt"`
-	Profile string `json:"profile"`
-	Agent   string `json:"agent"`
+	AllowedProfiles *[]string `json:"allowed_profiles"`
+	StageID         int64     `json:"stage_id"`
+	ItemID          int64     `json:"item_id"`
+	Repo            string    `json:"repo"`
+	Name            string    `json:"name"`
+	Prompt          string    `json:"prompt"`
+	Profile         string    `json:"profile"`
+	Agent           string    `json:"agent"`
 }
 
 func handleCreativeLaunch(w http.ResponseWriter, r *http.Request, d Deps, caller *store.Session, worker bool) {
@@ -141,6 +142,11 @@ func handleCreativeLaunch(w http.ResponseWriter, r *http.Request, d Deps, caller
 	var in creativeLaunchRequest
 	if !creativeBody(w, r, &in) {
 		return
+	}
+	if in.AllowedProfiles != nil {
+		if requireHuman(w, r, d) || !validateCreativeAllowedProfiles(w, d, *in.AllowedProfiles) {
+			return
+		}
 	}
 	b := store.CreativeBinding{RunID: runID, StageID: in.StageID, ItemID: in.ItemID}
 	c, err := d.Store.ResolveCreativeContext(b.RunID, b.StageID, b.ItemID)
@@ -169,6 +175,12 @@ func handleCreativeLaunch(w http.ResponseWriter, r *http.Request, d Deps, caller
 	}
 	var profile store.ModelProfile
 	if worker {
+		run, loadErr := d.Store.GetCreativeRun(runID)
+		if loadErr != nil {
+			creativeError(w, loadErr)
+			return
+		}
+		inputs.TaskAllowed = run.AllowedProfiles
 		profile, err = modelpolicy.ResolveWorker(inputs, in.Profile, in.Agent)
 	} else {
 		var found bool
@@ -179,6 +191,12 @@ func handleCreativeLaunch(w http.ResponseWriter, r *http.Request, d Deps, caller
 	}
 	if writePolicyErr(w, err) {
 		return
+	}
+	if !worker && in.AllowedProfiles != nil {
+		if err := d.Store.SetCreativeRunAllowedProfiles(runID, *in.AllowedProfiles); err != nil {
+			creativeError(w, err)
+			return
+		}
 	}
 	sess, err := d.Manager.SpawnCreative(r.Context(), session.CreativeSpawnReq{Context: b, ParentID: parent, Repo: in.Repo, Name: in.Name, Prompt: in.Prompt, AgentName: profile.Agent, Profile: session.LaunchProfile{Name: profile.Name, Model: profile.Model, Effort: profile.Effort}})
 	if err != nil {

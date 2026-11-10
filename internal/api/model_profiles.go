@@ -95,7 +95,8 @@ func handleListModelProfiles(w http.ResponseWriter, d Deps) {
 // handleAvailableModelProfiles serves the profiles the caller may spawn a
 // worker with: Allowed(feature task) for a session that belongs to a task
 // (an orchestrator's own task; a worker's parent feature task), every
-// enabled profile otherwise. "default" is what a spawn without --profile
+// enabled profile otherwise. Creative sessions use their run's allowlist.
+// "default" is what a spawn without --profile
 // gets.
 func handleAvailableModelProfiles(w http.ResponseWriter, r *http.Request, d Deps) {
 	caller, err := callerSession(r, d.Store)
@@ -113,6 +114,21 @@ func handleAvailableModelProfiles(w http.ResponseWriter, r *http.Request, d Deps
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
+	}
+	if caller != nil {
+		binding, err := d.Store.GetCreativeSessionContext(caller.ID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			creativeError(w, err)
+			return
+		}
+		if err == nil {
+			run, err := d.Store.GetCreativeRun(binding.RunID)
+			if err != nil {
+				creativeError(w, err)
+				return
+			}
+			in.TaskAllowed = run.AllowedProfiles
+		}
 	}
 	allowed := modelpolicy.Allowed(in)
 	out := make([]availableProfileResponse, 0, len(allowed))

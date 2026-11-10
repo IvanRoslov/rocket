@@ -40,7 +40,7 @@ func creativeCommands(open creativeConnection) *cobra.Command {
 	items.AddCommand(&cobra.Command{Use: "rm <run> <stage> <item>", Args: creativeArgs(3), RunE: func(cmd *cobra.Command, a []string) error {
 		return creativeCall(cmd, open, "DELETE", creativeTargetPath(a), nil)
 	}})
-	root.AddCommand(pipelines, runs, stages, items)
+	root.AddCommand(pipelines, runs, stages, items, creativeModelsCommand(open))
 	return root
 }
 func creativeArgs(n int) cobra.PositionalArgs {
@@ -224,4 +224,27 @@ func creativeOrchestratorCommand(open creativeConnection) *cobra.Command {
 	}, RunE: func(cmd *cobra.Command, a []string) error {
 		return creativeCall(cmd, open, "PUT", creativeTargetPath(a[:1])+"/orchestrator", map[string]string{"session_id": a[1]})
 	}}
+}
+
+// creativeModelsCommand follows task models flags while retaining Creative JSON output.
+func creativeModelsCommand(open creativeConnection) *cobra.Command {
+	var allow string
+	var clear bool
+	cmd := &cobra.Command{Use: "models <run>", Short: "View worker profiles; --allow/--clear replace the list (human only)", Args: creativeArgs(1), RunE: func(cmd *cobra.Command, a []string) error {
+		if clear && cmd.Flags().Changed("allow") {
+			return &usageError{message: "use --allow or --clear, not both"}
+		}
+		path := creativeTargetPath(a)
+		if clear || cmd.Flags().Changed("allow") {
+			names := []string{}
+			if !clear {
+				names = parseProfileList(allow)
+			}
+			return creativeCall(cmd, open, "PUT", path+"/models", map[string]any{"allowed_profiles": names})
+		}
+		return creativeCall(cmd, open, "GET", path, nil)
+	}}
+	cmd.Flags().StringVar(&allow, "allow", "", "Allow only these worker profiles (comma separated)")
+	cmd.Flags().BoolVar(&clear, "clear", false, "Allow all enabled worker profiles")
+	return cmd
 }
