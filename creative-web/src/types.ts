@@ -48,6 +48,7 @@ export interface Run {
   brief: string;
   status: Status;
   orchestrator_session_id: string;
+  allowed_profiles?: string[];
   stages: Stage[];
 }
 export interface Scope {

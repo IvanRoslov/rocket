@@ -441,7 +441,7 @@ function Workspace({
           </>
         )}
       </main>
-      <CreativeSessionRail key={run.id} runID={run.id} orchestrator={run.orchestrator_session_id} />
+      <CreativeSessionRail key={run.id} runID={run.id} orchestrator={run.orchestrator_session_id} allowedProfiles={run.allowed_profiles} />
     </div>
   );
 }

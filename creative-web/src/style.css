@@ -560,3 +560,45 @@ details p {
   border-radius: var(--radius-btn-sm);
   margin-bottom: 12px;
 }
+
+.creative-worker-models {
+  margin: 16px 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.creative-worker-models ul {
+  padding-left: 18px;
+}
+.creative-worker-profiles {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 12px 0;
+}
+.creative-worker-profiles legend {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+.creative-worker-profiles .check {
+  align-items: flex-start;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+.creative-worker-profiles input {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.creative-worker-profiles__hint {
+  font-size: 12px;
+  color: var(--text-3);
+  margin: 8px 0 0;
+}
+.creative-worker-models__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

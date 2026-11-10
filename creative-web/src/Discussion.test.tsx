@@ -136,7 +136,7 @@ it("launches the dedicated creative orchestrator with an existing enabled profil
   await userEvent.click(
     screen.getByRole("button", { name: "Start creative orchestrator" }),
   );
-  await waitFor(() => expect(launches).toEqual([{ profile: "director" }]));
+  await waitFor(() => expect(launches).toEqual([{ profile: "director", allowed_profiles: [] }]));
 });
 
 const accessSessions = [
