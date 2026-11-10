@@ -421,6 +421,7 @@ function Workspace({
                 }}
                 orchestrator={run.orchestrator_session_id}
                 items={stage?.items}
+                onNavigate={onSelect}
                 ready={ready}
               />
             </div>

@@ -1,19 +1,19 @@
 import { Button } from "../../web/src/components/Button";
-import { Markdown } from "../../web/src/components/Markdown";
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, base, useCommand } from "./api";
-import { BoundVersions } from "./BoundVersions";
+import { FeedEntryView } from "./FeedEntry";
 import { QuestionArchive } from "./QuestionArchive";
 import { cacheFeedEntry, useFeed } from "./feed";
 import type { Context, FeedEntry, Item } from "./types";
 import { Empty, ErrorNotice } from "./ui";
 
-export function Discussion({ context, ready, items = [] }: {
+export function Discussion({ context, ready, items = [], onNavigate }: {
   context: Context;
   orchestrator: string;
   ready: boolean;
   items?: Pick<Item, "id" | "name">[];
+  onNavigate?: (stage?: number, item?: number) => void;
 }) {
   const selectionKey = `${context.run_id}:${context.stage_id ?? 0}:${context.item_id ?? 0}`;
   const [filteredSelection, setFilteredSelection] = useState<string>();
@@ -30,6 +30,21 @@ export function Discussion({ context, ready, items = [] }: {
     setBody("");
     setDraftContext(undefined);
     command.reset();
+  }
+  const [jump, setJump] = useState<FeedEntry>();
+  useEffect(() => {
+    if (!jump || jump.run_id !== context.run_id || (jump.stage_id || 0) !== (context.stage_id || 0)) return;
+    const element = document.getElementById(`feed-entry-${jump.id}`);
+    if (element) {
+      element.scrollIntoView?.({ block: "center" });
+      element.focus({ preventScroll: true });
+      setJump(undefined);
+    }
+  }, [jump, context.run_id, context.stage_id, feed.data]);
+  function jumpTo(successor: FeedEntry) {
+    setFilteredSelection(undefined);
+    setJump(successor);
+    onNavigate?.(successor.stage_id || undefined, successor.item_id || undefined);
   }
   const sorted = [...(feed.data ?? [])].sort((a, b) => b.id - a.id);
   return (
@@ -64,13 +79,7 @@ export function Discussion({ context, ready, items = [] }: {
         {feed.isPending && <p>Loading conversation…</p>}
         {feed.data?.length === 0 && <Empty>No messages in this feed.</Empty>}
         <ol className="conversation-entries" aria-label="Conversation entries">
-          {sorted.map(entry => <li key={entry.id}><article id={`feed-entry-${entry.id}`} aria-label={`Message ${entry.id}`}>
-            <header className="feed-entry__meta"><strong>{entry.author === "human" ? "You" : "Orchestrator"}</strong><time dateTime={new Date(entry.created_at * 1000).toISOString()}>{new Date(entry.created_at * 1000).toLocaleString()}</time>
-              {!!entry.item_id && <span className="feed-item-tag">{items.find(item => item.id === entry.item_id)?.name ?? `Item ${entry.item_id}`}</span>}
-            </header>
-            <Markdown compact>{entry.body}</Markdown>
-            <BoundVersions ids={entry.artifact_version_ids} />
-          </article></li>)}
+          {sorted.map(entry => <li key={entry.id}><FeedEntryView entry={entry} items={items} onJump={jumpTo} /></li>)}
         </ol>
       </div>
       <QuestionArchive context={context} />
