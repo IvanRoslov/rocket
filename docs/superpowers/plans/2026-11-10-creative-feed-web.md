@@ -59,4 +59,6 @@
 - [x] Exercise exact-contract browser mocks: stage conversation, pending card, Go result, replaced successor, badge appearing/clearing, archive; inspect screenshots and attach to PR.
 - [x] Update dashboard documentation and plan/ledger outcomes.
 - [x] Run make test and make build; inspect results and git diff --check.
-- [ ] Whole-branch review (clean), push feature branch and open PR referencing creative-messages/task 6063, core dependency and verification evidence.
+- [x] Whole-branch review (clean), push feature branch and open PR referencing creative-messages/task 6063, core dependency and verification evidence.
+
+Delivery: [PR 209](https://github.com/IvanRoslov/rocket/pull/209). All implementation/verification steps above are complete. Merge remains dependent on feed-core; rebase on main after core lands.
