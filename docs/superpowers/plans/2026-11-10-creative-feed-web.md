@@ -61,4 +61,4 @@
 - [x] Run make test and make build; inspect results and git diff --check.
 - [x] Whole-branch review (clean), push feature branch and open PR referencing creative-messages/task 6063, core dependency and verification evidence.
 
-Delivery: [PR 209](https://github.com/IvanRoslov/rocket/pull/209). All implementation/verification steps above are complete. Merge remains dependent on feed-core; rebase on main after core lands.
+Delivery: [PR 209](https://github.com/IvanRoslov/rocket/pull/209). All implementation/verification steps above are complete. Core PR #210 is merged; PR #209 has been rebased on main (30a0251), with the duplicate contract commit dropped automatically. Full post-rebase verification is recorded in the PR.
