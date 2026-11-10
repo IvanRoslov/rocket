@@ -118,3 +118,22 @@ func TestCreativeFeedHTTPContractAndPermissions(t *testing.T) {
 		t.Fatal("feed changed pipeline state")
 	}
 }
+
+func TestCreativeFeedWorkerRefusalHasExecutableScope(t *testing.T) {
+	d, run, stage := creativeArtifactDeps(t)
+	d.Queue = nil
+	if err := d.Store.AddSession(store.Session{ID: "worker-hint", Kind: "worker", ProjectID: "p", RepoID: "r", Agent: "fake", State: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Store.BindCreativeSession("worker-hint", store.CreativeBinding{RunID: run, StageID: stage}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(d)
+	for _, suffix := range []string{"feed", "questions"} {
+		w := artifactRequest(h, "POST", fmt.Sprintf("/v1/creative/runs/%d/%s", run, suffix), "application/json", "worker-hint", strings.NewReader(`{"body":"question"}`))
+		want := fmt.Sprintf("rocket creative agent send %d --stage %d", run, stage)
+		if !strings.Contains(w.Body.String(), want) {
+			t.Fatalf("worker hint loses assigned scope; want %s: %s", want, w.Body.String())
+		}
+	}
+}

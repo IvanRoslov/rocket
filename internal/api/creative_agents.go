@@ -302,7 +302,12 @@ func handleCreativeDiscussionPost(w http.ResponseWriter, r *http.Request, d Deps
 		}
 		hint := fmt.Sprintf("use rocket creative agent feed post %d --body 'Your message'; paid proposals use rocket creative agent feed propose %d --body 'Exact calls and cost'", runID, runID)
 		if caller != nil && caller.Kind == "worker" {
-			hint = fmt.Sprintf("message the orchestrator with rocket creative agent send %d --body 'Your question'", runID)
+			own, err := d.Store.GetCreativeSessionContext(caller.ID)
+			if err != nil {
+				creativeError(w, err)
+				return
+			}
+			hint = "message the orchestrator with " + creativeFeedWorkerHint(own)
 		}
 		writeErr(w, 409, "creative_questions_retired", "new Creative questions are retired; "+hint)
 		return

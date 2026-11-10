@@ -59,7 +59,7 @@ func creativeFeedAccess(w http.ResponseWriter, d Deps, caller *store.Session, ru
 		return false
 	}
 	if caller.Kind != "orchestrator" || run.OrchestratorSessionID != caller.ID {
-		writeErr(w, 403, "creative_feed_forbidden", fmt.Sprintf("only the current run orchestrator writes to the human; message it with rocket creative agent send %d --body 'Your message'", runID))
+		writeErr(w, 403, "creative_feed_forbidden", "only the current run orchestrator writes to the human; message it with "+creativeFeedWorkerHint(own))
 		return false
 	}
 	return true
@@ -213,4 +213,15 @@ func drainCreativeFeed(d Deps, runID int64) {
 			wakeCreativeMessage(d, id, m.ToSession)
 		}
 	}
+}
+
+func creativeFeedWorkerHint(b store.CreativeBinding) string {
+	cmd := fmt.Sprintf("rocket creative agent send %d", b.RunID)
+	if b.StageID != 0 {
+		cmd += fmt.Sprintf(" --stage %d", b.StageID)
+	}
+	if b.ItemID != 0 {
+		cmd += fmt.Sprintf(" --item %d", b.ItemID)
+	}
+	return cmd + " --body 'Your message'"
 }
