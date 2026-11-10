@@ -1,6 +1,6 @@
 # Creative Feed Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Deliver task 6062's durable per-run/stage human-orchestrator feeds.
 **Architecture:** Separate SQLite feed entries/cursors and durable delivery outbox;
@@ -30,13 +30,13 @@ migrations/0033_creative_feed.sql.
 ListCreativeFeed, GetCreativeFeedCard, DecideCreativeFeedCard,
 CreativeFeedUnread, MarkCreativeFeedRead, QueueCreativeFeedDeliveries.
 
-- [ ] Write store tests for ordering, item tags/filter, version scope, one-time
+- [x] Write store tests for ordering, item tags/filter, version scope, one-time
   decisions/replacement (including races), unread/reset/stale cursor, offline
   delivery and exact reply command.
-- [ ] Run `go test ./internal/store -run CreativeFeed -count=1`; observe missing behavior.
-- [ ] Implement schema and transactional conditional card updates, cursor and
+- [x] Run `go test ./internal/store -run CreativeFeed -count=1`; observe missing behavior.
+- [x] Implement schema and transactional conditional card updates, cursor and
   outbox, enqueue events transactionally with entries/decisions.
-- [ ] Rerun focused store tests and commit.
+- [x] Rerun focused store tests and commit.
 
 ### Task 2: HTTP and session integration
 
@@ -45,13 +45,13 @@ creative.go route registration, internal/session/creative.go and tests.
 **Interfaces:** Exact published HTTP contract; QueueCreativeFeedDeliveries(runID)
 called on mutation and launch/restore; no state transition from feed writes.
 
-- [ ] Write API tests for contract, own orchestrator/human/worker/foreign access,
+- [x] Write API tests for contract, own orchestrator/human/worker/foreign access,
   empty body, card conflicts, unread and retired ask; session tests for offline
   event recovery after launch/restore.
-- [ ] Run `go test ./internal/api ./internal/session -run 'CreativeFeed|Creative.*Question' -count=1`.
-- [ ] Implement handlers using store APIs; refuse new questions with commands;
+- [x] Run `go test ./internal/api ./internal/session -run 'CreativeFeed|Creative.*Question' -count=1`.
+- [x] Implement handlers using store APIs; refuse new questions with commands;
   drain durable deliveries on successful launch/restore and mutation.
-- [ ] Run focused tests, update legacy question creation tests to seed archives
+- [x] Run focused tests, update legacy question creation tests to seed archives
   directly instead of creating new questions through retired API, commit.
 
 ### Task 3: Agent CLI and memos
@@ -63,20 +63,20 @@ internal/prompts/creative_test.go, internal/session/creative.go, docs/creative-*
 `feed post RUN --body/--file [--version]`, `feed propose RUN [--replaces]`,
 `feed card RUN ENTRY`; JSON responses use store types.
 
-- [ ] Add CLI tests for routes/body/file/version/replacement flags and help;
+- [x] Add CLI tests for routes/body/file/version/replacement flags and help;
   prompt tests require feed memo and forbidden behavior in launch/restore.
-- [ ] Run focused CLI/prompt/session tests to see missing commands/memos.
-- [ ] Implement commands and standard-context memo; replace question-based paid
+- [x] Run focused CLI/prompt/session tests to see missing commands/memos.
+- [x] Implement commands and standard-context memo; replace question-based paid
   Go docs/rules; keep legacy archive reply/answer commands and worker sends.
-- [ ] Run focused suites and commit.
+- [x] Run focused suites and commit.
 
 ### Task 4: Verification and delivery
 
-- [ ] Run `make test`; diagnose failures with systematic-debugging and rerun
+- [x] Run `make test`; diagnose failures with systematic-debugging and rerun
   affected tests after changes. Run Go vet/build checks appropriate to core.
-- [ ] Build isolated binary inside this worktree, start isolated daemon with
+- [x] Build isolated binary inside this worktree, start isolated daemon with
   temporary home/socket, launch real creative orchestrator with standard context,
   walk scenarios 1–4 without paid calls; preserve transcript and clean test runtime.
-- [ ] Review diff against acceptance and contract, record verification evidence.
+- [x] Review diff against acceptance and contract, record verification evidence.
 - [ ] Push and create single PR referencing creative-messages and tasks 6061/6062;
   send PR URL and completion state to orchestrator. Address review until merged.
