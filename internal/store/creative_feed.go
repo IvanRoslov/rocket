@@ -89,7 +89,7 @@ func (s *Store) AddCreativeFeedEntry(e CreativeFeedEntry, replaces int64) (Creat
 	if (e.Kind != "message" && e.Kind != "proposal") || (e.Author != "human" && e.Author != "orchestrator") || (e.Kind == "proposal" && e.Author != "orchestrator") || (replaces != 0 && e.Kind != "proposal") || replaces < 0 {
 		return e, creativeInvalid("invalid feed author, kind or replacement")
 	}
-	if _, err := s.ValidateCreativeBinding(e.Binding()); err != nil {
+	if err := s.validateCreativeFeedBinding(e.Binding()); err != nil {
 		return e, err
 	}
 	if e.ArtifactVersionIDs == nil {
@@ -140,7 +140,7 @@ func (s *Store) AddCreativeFeedEntry(e CreativeFeedEntry, replaces int64) (Creat
 	return e, tx.Commit()
 }
 func (s *Store) ListCreativeFeed(b CreativeBinding) ([]CreativeFeedEntry, error) {
-	if _, err := s.ValidateCreativeBinding(b); err != nil {
+	if err := s.validateCreativeFeedBinding(b); err != nil {
 		return nil, err
 	}
 	rows, err := s.db.Query(`SELECT `+feedColumns+` FROM creative_feed_entries WHERE run_id=? AND COALESCE(stage_id,0)=? AND (?=0 OR item_id=?) ORDER BY id DESC`, b.RunID, b.StageID, b.ItemID, b.ItemID)
@@ -243,7 +243,7 @@ func (s *Store) MarkCreativeFeedRead(b CreativeBinding, through int64) (int64, e
 	if b.ItemID != 0 || through < 0 {
 		return 0, creativeInvalid("mark read selects a run/stage feed and a nonnegative entry ID")
 	}
-	if _, err := s.ValidateCreativeBinding(b); err != nil {
+	if err := s.validateCreativeFeedBinding(b); err != nil {
 		return 0, err
 	}
 	tx, err := s.db.Begin()
@@ -334,4 +334,18 @@ func (s *Store) QueueCreativeFeedDeliveries(runID int64) ([]int64, error) {
 		ids = append(ids, id)
 	}
 	return ids, tx.Commit()
+}
+
+// Feed HTTP distinguishes an absent run (404) from an invalid scope/version
+// within an existing run (400). Preserve that boundary without changing the
+// older worker-message/artifact APIs' validation semantics.
+func (s *Store) validateCreativeFeedBinding(b CreativeBinding) error {
+	if _, err := s.ResolveCreativeContext(b.RunID, 0, 0); err != nil {
+		return err
+	}
+	_, err := s.ValidateCreativeBinding(b)
+	if errors.Is(err, ErrNotFound) {
+		return creativeInvalid("scope or artifact version does not belong to this run; inspect rocket creative run show RUN and rocket creative artifact ls RUN")
+	}
+	return err
 }

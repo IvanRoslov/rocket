@@ -64,3 +64,13 @@ func TestCreativeFeedCLIRefusesAskAndInvalidScope(t *testing.T) {
 		}
 	}
 }
+
+func TestCreativeFeedAskHintKeepsWorkerScope(t *testing.T) {
+	cmd := creativeAgentCommands(func() (*client.Client, error) { t.Fatal("retired ask reached server"); return nil, nil })
+	cmd.SetOut(new(bytes.Buffer))
+	cmd.SetArgs([]string{"ask", "7", "--stage", "9", "--item", "12", "--body", "question"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "rocket creative agent send 7 --stage 9 --item 12") {
+		t.Fatalf("worker hint drops assigned scope: %v", err)
+	}
+}

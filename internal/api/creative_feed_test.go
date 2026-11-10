@@ -137,3 +137,86 @@ func TestCreativeFeedWorkerRefusalHasExecutableScope(t *testing.T) {
 		}
 	}
 }
+
+func TestCreativeFeedWritesAfterApprovalDoNotChangePipeline(t *testing.T) {
+	d, run, path, version := lifecycleSetup(t)
+	d.Queue = nil
+	creativeRequest(t, d, "POST", path, `{"action":"approve","review_revision":1}`, "", 200)
+	h := NewHandler(d)
+	for _, actor := range []string{"", "orch"} {
+		body := fmt.Sprintf(`{"stage_id":%d,"artifact_version_ids":[%d],"body":"looks good, approve; later discussion"}`, run.Stages[0].ID, version)
+		w := artifactRequest(h, "POST", fmt.Sprintf("/v1/creative/runs/%d/feed", run.ID), "application/json", actor, strings.NewReader(body))
+		if w.Code != 201 {
+			t.Fatalf("approved feed rejected %d %s", w.Code, w.Body.String())
+		}
+	}
+	got, err := d.Store.GetCreativeRun(run.ID)
+	if err != nil || got.Stages[0].Status != "completed" || got.Stages[0].ReviewRevision != 1 {
+		t.Fatalf("feed changed approved state %+v %v", got, err)
+	}
+}
+
+func TestCreativeFeedDeliveryPinsImmutableVersions(t *testing.T) {
+	d, run, stage := creativeArtifactDeps(t)
+	d.Queue = nil
+	if err := d.Store.AddSession(store.Session{ID: "version-orch", Kind: "orchestrator", ProjectID: "p", RepoID: "r", Agent: "fake", State: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Store.BindCreativeSession("version-orch", store.CreativeBinding{RunID: run}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Store.SetCreativeRunOrchestrator(run, "version-orch"); err != nil {
+		t.Fatal(err)
+	}
+	publication := store.CreativeArtifactPublication{RunID: run, StageID: stage, Name: "Text", Kind: "result", Filename: "text.md", MIME: "text/markdown", Size: 1, SHA256: strings.Repeat("a", 64), StorageKey: "v1"}
+	_, v1, err := d.Store.PublishCreativeArtifact(publication)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(d)
+	path := fmt.Sprintf("/v1/creative/runs/%d/feed", run)
+	w := artifactRequest(h, "POST", path, "application/json", "", strings.NewReader(fmt.Sprintf(`{"stage_id":%d,"body":"Discuss version 1","artifact_version_ids":[%d]}`, stage, v1.ID)))
+	if w.Code != 201 {
+		t.Fatalf("post %d %s", w.Code, w.Body.String())
+	}
+	publication.StorageKey = "v2"
+	_, v2, err := d.Store.PublishCreativeArtifact(publication)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v1.ID == v2.ID {
+		t.Fatal("fixture reused version")
+	}
+	w = artifactRequest(h, "GET", path+fmt.Sprintf("?stage_id=%d", stage), "", "", nil)
+	var entries []store.CreativeFeedEntry
+	if err = json.Unmarshal(w.Body.Bytes(), &entries); err != nil || len(entries) != 1 || len(entries[0].ArtifactVersionIDs) != 1 || entries[0].ArtifactVersionIDs[0] != v1.ID {
+		t.Fatalf("version drift: %s %v", w.Body.String(), err)
+	}
+	messages, err := d.Store.ListMessages("version-orch", 0)
+	if err != nil || len(messages) != 1 || !strings.Contains(messages[0].Body, fmt.Sprintf("--version %d --body 'Your reply'", v1.ID)) {
+		t.Fatalf("delivery lost pinned version %+v %v", messages, err)
+	}
+}
+
+func TestCreativeFeedInvalidScopeAndVersionStatusContract(t *testing.T) {
+	d, run, _ := creativeArtifactDeps(t)
+	d.Queue = nil
+	h := NewHandler(d)
+	base := fmt.Sprintf("/v1/creative/runs/%d/feed", run)
+	for _, tc := range []struct {
+		method, path, body string
+		want               int
+	}{
+		{"POST", base, `{"body":"bad version","artifact_version_ids":[999999999]}`, 400},
+		{"POST", base, `{"body":"bad stage","stage_id":999999999}`, 400},
+		{"GET", base + "?stage_id=999999999", "", 400},
+		{"POST", base + "/read", `{"stage_id":999999999,"through_entry_id":0}`, 400},
+		{"POST", "/v1/creative/runs/999999999/feed", `{"body":"absent run"}`, 404},
+		{"GET", base + "/cards/999999999", "", 404},
+	} {
+		w := artifactRequest(h, tc.method, tc.path, "application/json", "", strings.NewReader(tc.body))
+		if w.Code != tc.want {
+			t.Errorf("%s %s: %d want %d: %s", tc.method, tc.path, w.Code, tc.want, w.Body.String())
+		}
+	}
+}
