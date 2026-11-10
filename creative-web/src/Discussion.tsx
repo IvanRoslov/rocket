@@ -1,246 +1,92 @@
 import { Button } from "../../web/src/components/Button";
-import { useState, type Dispatch, type SetStateAction } from "react";
-import { QuestionThreadView } from "../../web/src/components/QuestionThreadView";
-import { isHuman } from "../../web/src/lib/participants";
-import { questionTitle } from "../../web/src/lib/thread";
-import "../../web/src/screens/task/QuestionsTab.css";
-import { useQueries, useQuery } from "@tanstack/react-query";
-import { api, base, contextPath, useCommand } from "./api";
-import type {
-  ArtifactDetail,
-  ArtifactVersion,
-  Context,
-  CreativeQuestion,
-} from "./types";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { api, base, useCommand } from "./api";
+import { FeedReadMarker } from "./FeedReadMarker";
+import { FeedEntryView } from "./FeedEntry";
+import { QuestionArchive } from "./QuestionArchive";
+import { cacheFeedEntry, useFeed } from "./feed";
+import type { Context, FeedEntry, Item } from "./types";
 import { Empty, ErrorNotice } from "./ui";
-function BoundVersions({ ids }: { ids: number[] }) {
-  const versions = useQueries({
-    queries: ids.map((id) => ({
-      queryKey: ["creative", "version", id],
-      queryFn: () =>
-        api.get<ArtifactVersion>(`${base}/artifact-versions/${id}`),
-    })),
-  });
-  const artifacts = useQueries({
-    queries: versions.map((v) => ({
-      queryKey: ["creative", "artifact", v.data?.artifact_id],
-      queryFn: () =>
-        api.get<ArtifactDetail>(`${base}/artifacts/${v.data?.artifact_id}`),
-      enabled: !!v.data,
-    })),
-  });
-  if (!ids.length) return null;
-  return (
-    <ul className="bound-versions" aria-label="Referenced artifact versions">
-      {versions.map((q, i) => (
-        <li key={ids[i]}>
-          {q.data ? (
-            <a
-              href={q.data.content_url}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {artifacts[i].data?.artifact.name ?? q.data.filename} · version{" "}
-              {q.data.version_number}
-            </a>
-          ) : q.error ? (
-            "Referenced version is unavailable"
-          ) : (
-            "Loading referenced version…"
-          )}
-        </li>
-      ))}
-    </ul>
-  );
-}
-export function Discussion({
-  context,
-  ready,
-}: {
+
+export function Discussion({ context, ready, items = [], onNavigate, active = true }: {
   context: Context;
   orchestrator: string;
   ready: boolean;
+  active?: boolean;
+  items?: Pick<Item, "id" | "name">[];
+  onNavigate?: (stage?: number, item?: number) => void;
 }) {
-  const questions = useQuery({
-    queryKey: [
-      "creative",
-      "questions",
-      context.run_id,
-      context.stage_id,
-      context.item_id,
-    ],
-    queryFn: () =>
-      api.get<CreativeQuestion[]>(contextPath(context, "questions")),
-  });
+  const selectionKey = `${context.run_id}:${context.stage_id ?? 0}:${context.item_id ?? 0}`;
+  const [filteredSelection, setFilteredSelection] = useState<string>();
+  const onlyItem = !!context.item_id && filteredSelection === selectionKey;
+  const feedScope = { run_id: context.run_id, stage_id: context.stage_id, ...(onlyItem ? { item_id: context.item_id } : {}) };
+  const feed = useFeed(feedScope);
   const [body, setBody] = useState("");
   const [draftContext, setDraftContext] = useState<Context>();
-  const [replies, setReplies] = useState<Record<number, string>>({});
   const command = useCommand();
+  const client = useQueryClient();
   const target = draftContext ?? context;
   const changed = JSON.stringify(target) !== JSON.stringify(context);
   function reset() {
     setBody("");
     setDraftContext(undefined);
+    command.reset();
   }
-  const sorted = [...(questions.data ?? [])].sort(
-    (a, b) => (b.asked_at ?? b.id) - (a.asked_at ?? a.id) || b.id - a.id,
-  );
-  const open = sorted.filter((q) => q.status === "open");
-  const resolved = sorted.filter((q) => q.status !== "open");
-  const draft = (id: number) => ({
-    body: replies[id] ?? "",
-    setBody: ((value) => setReplies((prev) => ({
-      ...prev,
-      [id]: typeof value === "function" ? value(prev[id] ?? "") : value,
-    }))) as Dispatch<SetStateAction<string>>,
-  });
+  const [jump, setJump] = useState<FeedEntry>();
+  useEffect(() => {
+    if (!jump || jump.run_id !== context.run_id || (jump.stage_id || 0) !== (context.stage_id || 0)) return;
+    const element = document.getElementById(`feed-entry-${jump.id}`);
+    if (element) {
+      element.scrollIntoView?.({ block: "center" });
+      element.focus({ preventScroll: true });
+      setJump(undefined);
+    }
+  }, [jump, context.run_id, context.stage_id, feed.data]);
+  function jumpTo(successor: FeedEntry) {
+    setFilteredSelection(undefined);
+    setJump(successor);
+    onNavigate?.(successor.stage_id || undefined, successor.item_id || undefined);
+  }
+  const sorted = [...(feed.data ?? [])].sort((a, b) => b.id - a.id);
   return (
     <section className="discussion">
-      <div className="heading">
-        <div>
-          <span className="eyebrow">Creative orchestrator</span>
-          <h2>Discussion</h2>
-        </div>
-      </div>
+      <div className="heading"><div><span className="eyebrow">Creative orchestrator</span><h2>Conversation</h2></div></div>
       <p className="context-label">{context.label}</p>
-      <ErrorNotice error={questions.error} />
-      <div className="discussion-feed">
-        <h3>Questions & decisions</h3>
-        {questions.isPending && <p>Loading questions…</p>}
-        {questions.data?.length === 0 && (
-          <Empty>No questions in this context.</Empty>
-        )}
-        <div className="questions-tab">
-          {open.map((q) => <Question key={q.id} question={q} draft={draft(q.id)} />)}
-          {resolved.length > 0 && <div className="questions-tab__resolved-label">Resolved</div>}
-          {resolved.map((q) => <ResolvedQuestion key={q.id} question={q} />)}
-        </div>
-      </div>
-      <form
-        className="composer question-thread__form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const { run_id, stage_id, item_id, artifact_version_ids } = target;
-          const payload = {
-            ...(stage_id ? { stage_id } : {}),
-            ...(item_id ? { item_id } : {}),
-            artifact_version_ids,
-            body,
-          };
-          command.mutate(
-            () =>
-              api.post(
-                `${base}/runs/${run_id}/questions`,
-                payload,
-              ),
-            { onSuccess: reset },
-          );
-        }}
-      >
-        <p className="draft-context">
-          {changed
-            ? `Draft stays with ${target.label}`
-            : `About ${target.label}`}
-        </p>
-        <label>
-          Question
-          <textarea
-            rows={4}
-            value={body}
-            onChange={(e) => {
-              if (!draftContext)
-                setDraftContext({
-                  ...context,
-                  artifact_version_ids: [...context.artifact_version_ids],
-                });
-              setBody(e.target.value);
-            }}
-            placeholder="Ask about the selected work and versions; include timecodes if helpful."
-            disabled={command.isPending || (!ready && !draftContext)}
-          />
-        </label>
+      <form className="composer question-thread__form" onSubmit={(e) => {
+        e.preventDefault();
+        const { run_id, stage_id, item_id, artifact_version_ids } = target;
+        command.mutate(async () => {
+          const entry = await api.post<FeedEntry>(`${base}/runs/${run_id}/feed`, {
+          ...(stage_id ? { stage_id } : {}), ...(item_id ? { item_id } : {}), artifact_version_ids, body,
+          });
+          await cacheFeedEntry(client, entry);
+        }, { onSuccess: reset });
+      }}>
+        <p className="draft-context">{changed ? `Draft stays with ${target.label}` : `About ${target.label}`}</p>
+        <label>Message<textarea rows={4} value={body} onChange={(e) => {
+          if (!draftContext) setDraftContext({ ...context, artifact_version_ids: [...context.artifact_version_ids] });
+          setBody(e.target.value);
+        }} placeholder="Write to the orchestrator about the selected work and versions." disabled={command.isPending || (!ready && !draftContext)} /></label>
         <div className="row">
-          <button
-            className="question-thread__answer"
-            type="submit"
-            disabled={
-              !body.trim() ||
-              command.isPending
-            }
-          >
-            Open question
-          </button>
-          {body && (
-            <Button
-              variant="secondary"
-              size="sm"
-              type="button"
-              onClick={reset}
-            >
-              Discard draft
-            </Button>
-          )}
+          <Button variant="primary" size="sm" type="submit" disabled={!body.trim() || command.isPending}>Send message</Button>
+          {body && <Button variant="secondary" size="sm" type="button" onClick={reset} disabled={command.isPending}>Discard draft</Button>}
         </div>
         <ErrorNotice error={command.error} />
       </form>
+      <div className="discussion-feed">
+        <h3>Newest first</h3>
+        {context.item_id && <label className="feed-filter"><input type="checkbox" checked={onlyItem} onChange={(e) => setFilteredSelection(e.target.checked ? selectionKey : undefined)} />Only this item</label>}
+        <ErrorNotice error={feed.error} />
+        <FeedReadMarker key={`${selectionKey}:${onlyItem}`} scope={feedScope} active={active}
+          loaded={feed.data !== undefined} through={sorted[0]?.id ?? 0} updatedAt={feed.dataUpdatedAt} />
+        {feed.isPending && <p>Loading conversation…</p>}
+        {feed.data?.length === 0 && <Empty>No messages in this feed.</Empty>}
+        <ol className="conversation-entries" aria-label="Conversation entries">
+          {sorted.map(entry => <li key={entry.id}><FeedEntryView entry={entry} items={items} onJump={jumpTo} /></li>)}
+        </ol>
+      </div>
+      <QuestionArchive context={context} />
     </section>
-  );
-}
-function Question({ question: q, draft, readOnly = false }: {
-  question: CreativeQuestion;
-  draft?: { body: string; setBody: Dispatch<SetStateAction<string>> };
-  readOnly?: boolean;
-}) {
-  const command = useCommand();
-  function send(action: "reply" | "answer", payload: unknown) {
-    const submittedDraft = draft?.body;
-    // Per-call mutate callbacks are skipped after a scope change unmounts the
-    // thread. Promise completion still clears its owned draft after delivery.
-    void command.mutateAsync(() => api.post(`/v1/questions/${q.id}/${action}`, payload)).then(
-      () => draft?.setBody((current) => current === submittedDraft ? "" : current),
-      () => { /* The mutation renders the error and keeps the draft for retry. */ },
-    );
-  }
-  return (
-    <div>
-      <QuestionThreadView
-        ordinal={q.ordinal ?? q.id}
-        localRef={q.local_ref || `creative/Q${q.id}`}
-        title={q.title}
-        body={q.body}
-        brief={q.brief}
-        messages={q.messages ?? []}
-        turnLabel={readOnly ? "Resolved" : q.your_turn ? "Your reply needed" : "Open"}
-        turnWarn={!readOnly && q.your_turn}
-        askerLabel={isHuman(q.asked_by) ? "you asked" : `${q.asked_by} asked`}
-        options={q.options}
-        stale={q.stale}
-        busy={command.isPending}
-        draft={draft}
-        readOnly={readOnly}
-        onClarify={(body) => send("reply", { body })}
-        onAnswer={(body) => send("answer", { body })}
-        onChoose={(choose) => send("answer", { choose })}
-        onDismiss={() => send("answer", { dismiss: true })}
-      >
-        <BoundVersions ids={q.artifact_version_ids ?? []} />
-      </QuestionThreadView>
-      <ErrorNotice error={command.error} />
-    </div>
-  );
-}
-function ResolvedQuestion({ question: q }: { question: CreativeQuestion }) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <div className="questions-tab__resolved">
-      <button type="button" className="questions-tab__resolved-row" aria-expanded={expanded}
-        onClick={() => setExpanded((value) => !value)}>
-        <span className="questions-tab__resolved-tag">{q.local_ref || `creative/Q${q.id}`}</span>
-        <span className="questions-tab__resolved-badge">{q.resolution || "resolved"}</span>
-        <span className="questions-tab__resolved-text">{questionTitle(q)}</span>
-        <span className="questions-tab__resolved-chevron">{expanded ? "▴" : "▾"}</span>
-      </button>
-      {expanded && <Question question={q} readOnly />}
-    </div>
   );
 }

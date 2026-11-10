@@ -393,7 +393,7 @@ function Workspace({
               <Tabs
                 label="Workspace"
                 items={[
-                  { id: "discussion", label: "Questions & discussion" },
+                  { id: "discussion", label: "Conversation" },
                   { id: "results", label: "Artifacts" },
                 ]}
                 activeId={tab}
@@ -420,7 +420,10 @@ function Workspace({
                   artifact_version_ids: shown.map((s) => s.version.id),
                 }}
                 orchestrator={run.orchestrator_session_id}
+                items={stage?.items}
+                onNavigate={onSelect}
                 ready={ready}
+                active={tab === "discussion"}
               />
             </div>
             <div hidden={tab !== "results"}>
