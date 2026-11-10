@@ -1,6 +1,6 @@
 # Creative Feed Web Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Deliver creative-messages task 6063: conversation feeds, proposal decisions, unread counts and old question archive.
 
@@ -29,34 +29,34 @@
 **Files:** create src/QuestionArchive.tsx, src/feed.ts (under creative-web); modify Discussion.tsx, types.ts, Discussion.test.tsx, App.test.tsx.
 **Interfaces:** Discussion consumes Context, optional stage item names, active visibility and navigation callback; feedKey(scope) identifies run/stage/optional item filter; useFeed(scope) returns polled FeedEntry[]; archive consumes exact Context.
 
-- [ ] Add failing component tests for composer-before-feed, descending IDs, metadata/versions, run/stage/item-filter scope, draft freeze/discard/failure, archived question replies/answers and no Open question. Update existing integration expectations to messages.
-- [ ] Run focused tests and confirm missing feed behavior fails.
-- [ ] Implement entry types, polled feed query, composer and exact-scope collapsed archive; retain existing reply implementation.
-- [ ] Run focused tests until green; commit independently.
+- [x] Add failing component tests for composer-before-feed, descending IDs, metadata/versions, run/stage/item-filter scope, draft freeze/discard/failure, archived question replies/answers and no Open question. Update existing integration expectations to messages.
+- [x] Run focused tests and confirm missing feed behavior fails.
+- [x] Implement entry types, polled feed query, composer and exact-scope collapsed archive; retain existing reply implementation.
+- [x] Run focused tests until green; commit independently.
 
 ### Task 2: Proposal cards
 
 **Files:** create creative-web/src/FeedEntry.tsx; modify feed.ts, Discussion.tsx, Discussion.test.tsx.
 **Interfaces:** decideCard(runID, entryID, decision) returns entry; conflict error carries authoritative entry. FeedEntryView accepts entry, item display names and successor navigation callback. Update cached feed variants by entry ID.
 
-- [ ] Add failing tests for Go/Revise/Deny, pending highlight, decided time/no actions, replaced navigation across feeds/filter, immediate 409 entry update while refetch fails, and local errors.
-- [ ] Confirm RED, implement cards and local decision HTTP envelope handling with shared authentication behavior.
-- [ ] Run focused tests GREEN; commit.
+- [x] Add failing tests for Go/Revise/Deny, pending highlight, decided time/no actions, replaced navigation across feeds/filter, immediate 409 entry update while refetch fails, and local errors.
+- [x] Confirm RED, implement cards and local decision HTTP envelope handling with shared authentication behavior.
+- [x] Run focused tests GREEN; commit.
 
 ### Task 3: Unread and integration
 
 **Files:** modify feed.ts, Discussion.tsx, RunWorkspace.tsx, App.tsx, style.css; add creative-web/src/FeedReadMarker.tsx and unread tests.
 **Interfaces:** useUnread(runID) returns run total/stage counts; FeedReadMarker consumes visible, loaded feed scope, highest displayed ID and data update timestamp. Only unread invalidates after read, avoiding feed refetch loops.
 
-- [ ] Write failing tests for badge appearance/clearing, stage/run isolation, filtered read ID, empty feed zero, hidden discussion, navigation during pending fetch, poll refresh and error recovery.
-- [ ] Confirm RED; implement marker lifecycle, rail badges, active visibility and workspace item names/navigation.
-- [ ] Run complete creative suite and TypeScript build GREEN; commit.
+- [x] Write failing tests for badge appearance/clearing, stage/run isolation, filtered read ID, empty feed zero, hidden discussion, navigation during pending fetch, poll refresh and error recovery.
+- [x] Confirm RED; implement marker lifecycle, rail badges, active visibility and workspace item names/navigation.
+- [x] Run complete creative suite and TypeScript build GREEN; commit.
 
 ### Task 4: Browser, documentation and delivery
 
 **Files:** docs/creative-dashboard.md; browser fixture/check and screenshots under creative-web browser validation directory.
 
-- [ ] Exercise exact-contract browser mocks: stage conversation, pending card, Go result, replaced successor, badge appearing/clearing, archive; inspect screenshots and attach to PR.
-- [ ] Update dashboard documentation and plan/ledger outcomes.
-- [ ] Run make test and make build; inspect results and git diff --check.
-- [ ] Whole-branch review, fix acceptance defects with regression tests, push feature branch and open PR referencing creative-messages/task 6063, core dependency and verification evidence.
+- [x] Exercise exact-contract browser mocks: stage conversation, pending card, Go result, replaced successor, badge appearing/clearing, archive; inspect screenshots and attach to PR.
+- [x] Update dashboard documentation and plan/ledger outcomes.
+- [x] Run make test and make build; inspect results and git diff --check.
+- [ ] Whole-branch review (clean), push feature branch and open PR referencing creative-messages/task 6063, core dependency and verification evidence.
