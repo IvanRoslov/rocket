@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/IvanRoslov/rocket/internal/agent"
 	"github.com/IvanRoslov/rocket/internal/prompts"
@@ -134,4 +135,24 @@ func (m *Manager) validateCreativeRestore(sess store.Session, b store.CreativeBi
 		}
 	}
 	return m.st.SetCreativeRunOrchestrator(b.RunID, sess.ID)
+}
+
+// Called after runtime launch/restore, so offline human events follow the
+// currently bound orchestrator and never depend on a terminal recipient.
+func (m *Manager) deliverCreativeFeed(runID int64) {
+	ids, err := m.st.QueueCreativeFeedDeliveries(runID)
+	if err != nil {
+		slog.Error("creative: drain feed deliveries", "run", runID, "error", err)
+		return
+	}
+	for _, id := range ids {
+		msg, err := m.st.GetMessage(id)
+		if err != nil {
+			continue
+		}
+		m.bus.Publish("message.queued", msg.ToSession, map[string]any{"id": id, "to": msg.ToSession})
+		if m.wake != nil {
+			m.wake(msg.ToSession)
+		}
+	}
 }

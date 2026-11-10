@@ -89,3 +89,47 @@ func TestCreativeRestoreDoesNotDuplicateCurrentOrchestrator(t *testing.T) {
 		t.Fatal("restored superseded orchestrator alongside current one")
 	}
 }
+
+func TestCreativeFeedDeliveryAfterLaunchAndRestore(t *testing.T) {
+	m, st, _, _, _, _ := testManagerWithConfig(t)
+	seedProjectRepo(t, st, "p", "r")
+	p, err := st.CreateCreativePipeline(store.CreativePipelineInput{Name: "Feed", Stages: []store.CreativeStageDefinition{{Name: "Scene", Approval: "auto"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := st.CreateCreativeRun(store.CreativeRunInput{ProjectID: "p", PipelineID: p.ID, Name: "Feed", Brief: "Make scene"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	add := func(body string) {
+		t.Helper()
+		_, err := st.AddCreativeFeedEntry(store.CreativeFeedEntry{RunID: run.ID, StageID: run.Stages[0].ID, Kind: "message", Author: "human", Body: body}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("before launch")
+	orch, err := m.SpawnCreative(context.Background(), CreativeSpawnReq{Context: store.CreativeBinding{RunID: run.ID}, AgentName: "fake"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages, err := st.ListMessages(orch.ID, 0)
+	if err != nil || len(messages) != 1 || !strings.Contains(messages[0].Body, "before launch") {
+		t.Fatalf("launch lost feed %+v %v", messages, err)
+	}
+	if err = m.Kill(context.Background(), orch.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	add("while stopped")
+	if err = m.Restore(context.Background(), orch.ID, RestoreOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	messages, err = st.ListMessages(orch.ID, 0)
+	if err != nil || len(messages) != 2 || !strings.Contains(messages[1].Body, "while stopped") {
+		t.Fatalf("restore lost feed %+v %v", messages, err)
+	}
+	entries, err := st.ListCreativeFeed(store.CreativeBinding{RunID: run.ID, StageID: run.Stages[0].ID})
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("restore history %+v %v", entries, err)
+	}
+}

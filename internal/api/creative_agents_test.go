@@ -46,15 +46,18 @@ func TestCreativeAgentLaunchAndContextualDiscussion(t *testing.T) {
 	if msg.CreativeContext.StageID != run.Stages[0].ID || !strings.Contains(msg.Body, "Review this scene") {
 		t.Fatalf("message %+v", msg)
 	}
-	resp = postJSONWithHeader(t, base+"/questions", orch.ID, map[string]any{"stage_id": run.Stages[0].ID, "body": "Paid proposal: exact calls and cost basis", "options": []string{"Go", "Revise"}})
-	if resp.StatusCode != 201 {
-		t.Fatalf("ask %d", resp.StatusCode)
+	// Existing questions are an archive: seed a pre-upgrade question, then
+	// exercise unchanged reply/answer and delivery behavior.
+	qid, err := d.Store.AddCreativeQuestion(store.Question{AskedBy: orch.ID, Body: "Paid proposal: exact calls and cost basis", Options: []string{"Go", "Revise"}}, store.CreativeBinding{RunID: run.ID, StageID: run.Stages[0].ID})
+	if err != nil {
+		t.Fatal(err)
 	}
-	var q creativeQuestionResponse
-	json.NewDecoder(resp.Body).Decode(&q)
-	resp.Body.Close()
-	if q.TaskID != 0 || q.CreativeContext.StageID != run.Stages[0].ID {
-		t.Fatalf("question %+v", q)
+	if err := d.Store.AddParticipants(qid, store.ParticipantHuman, orch.ID); err != nil {
+		t.Fatal(err)
+	}
+	q, err := creativeQuestionView(d, nil, qid)
+	if err != nil {
+		t.Fatal(err)
 	}
 	resp = postJSONWithHeader(t, fmt.Sprintf("%s/v1/questions/%d/answer", srv.URL, q.ID), orch.ID, map[string]any{"body": "Go"})
 	resp.Body.Close()
@@ -103,14 +106,19 @@ func TestCreativeQuestionSurvivesOrchestratorReplacement(t *testing.T) {
 	srv := httptest.NewServer(NewHandler(d))
 	defer srv.Close()
 	base := fmt.Sprintf("%s/v1/creative/runs/%d", srv.URL, run.ID)
-	// Human can record a decision before the run has a live session.
-	resp := postJSONWithHeader(t, base+"/questions", "", map[string]any{"body": "Which scene?"})
-	if resp.StatusCode != 201 {
-		t.Fatalf("ask %d", resp.StatusCode)
+	// A pre-upgrade question remains readable without a live session.
+	qid, err := d.Store.AddCreativeQuestion(store.Question{Body: "Which scene?"}, store.CreativeBinding{RunID: run.ID})
+	if err != nil {
+		t.Fatal(err)
 	}
-	var q creativeQuestionResponse
-	json.NewDecoder(resp.Body).Decode(&q)
-	resp.Body.Close()
+	if err := d.Store.AddParticipants(qid, store.ParticipantHuman); err != nil {
+		t.Fatal(err)
+	}
+	q, err := creativeQuestionView(d, nil, qid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resp *http.Response
 	resp = postJSONWithHeader(t, base+"/sessions", "", map[string]any{"agent": "fake"})
 	if resp.StatusCode != 201 {
 		t.Fatalf("launch %d", resp.StatusCode)
