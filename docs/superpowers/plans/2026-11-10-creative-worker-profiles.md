@@ -42,5 +42,9 @@
 **Files:** modify docs/creative-dashboard.md.
 
 - [x] Document launch selection, empty semantics, editing, disabled saved entries and future-spawn effect.
-- [ ] Rebase after backend merges, inspect real handlers and exercise API contract tests; run project checks appropriate to frontend changes and git diff --check.
-- [ ] Review whole diff, commit docs, push branch and open one PR referencing creative-improvement. Report URL and integration dependency to orchestrator.
+- [x] Rebase after backend merges, inspect real handlers and exercise API contract tests; run project checks appropriate to frontend changes and git diff --check.
+- [x] Review whole diff, commit docs, push branch and open one PR referencing creative-improvement. Report URL and integration dependency to orchestrator.
+
+## Integration verification
+
+Rebased onto main commit 3abebb7 (backend PR #208). Creative-web: 65/65 tests pass; production build passes. Real handler tests pass via `go test ./internal/api -run TestCreativeModels -count=1 -v`: replacement/clearing and error preservation, launch persistence before runtime creation, worker restrictions, invalid launches and human-only enforcement. Source inspection confirms registered disabled names remain valid in replacement requests and empty run lists serialize as arrays. No frontend contract changes were required.
