@@ -31,16 +31,16 @@
 
 **Interfaces:** CreativeSessionRail accepts allowedProfiles?: string[] with [] fallback. WorkerProfiles receives profiles, picked, onChange, disabled. Run adds allowed_profiles?: string[] for compatibility with existing fixtures.
 
-- [ ] Add failing SessionRail API-boundary tests: selected launch sends profile and allowed_profiles; launch failure keeps choices; edit/save replaces full list and reflects server state; failure/refetch keeps draft; disabled saved profile removable; clear sends []; registry pending/error blocks edit.
-- [ ] Run npm test --prefix creative-web -- src/SessionRail.test.tsx; confirm failures reflect missing UI.
-- [ ] Add shared checkbox group, launch draft and existing-run summary/editor, API calls using supplied contract, run prop wiring and scoped styles.
-- [ ] Run focused tests, then npm test --prefix creative-web and npm run build --prefix creative-web; expect all pass.
-- [ ] Commit implementation and tests.
+- [x] Add failing SessionRail API-boundary tests: selected launch sends profile and allowed_profiles; launch failure keeps choices; edit/save replaces full list and reflects server state; failure/refetch keeps draft; disabled saved profile removable; clear sends []; registry pending/error blocks edit.
+- [x] Run npm test --prefix creative-web -- src/SessionRail.test.tsx; confirm failures reflect missing UI.
+- [x] Add shared checkbox group, launch draft and existing-run summary/editor, API calls using supplied contract, run prop wiring and scoped styles.
+- [x] Run focused tests, then npm test --prefix creative-web and npm run build --prefix creative-web; expect all pass.
+- [x] Commit implementation and tests.
 
 ### Task 2: Documentation and final verification
 
 **Files:** modify docs/creative-dashboard.md.
 
-- [ ] Document launch selection, empty semantics, editing, disabled saved entries and future-spawn effect.
+- [x] Document launch selection, empty semantics, editing, disabled saved entries and future-spawn effect.
 - [ ] Rebase after backend merges, inspect real handlers and exercise API contract tests; run project checks appropriate to frontend changes and git diff --check.
 - [ ] Review whole diff, commit docs, push branch and open one PR referencing creative-improvement. Report URL and integration dependency to orchestrator.
