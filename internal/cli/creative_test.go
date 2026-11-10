@@ -21,6 +21,9 @@ func TestCreativeCLIRequests(t *testing.T) {
 		method, path string
 		body         map[string]any
 	}{
+		{[]string{"models", "3"}, "GET", "/v1/creative/runs/3", nil},
+		{[]string{"models", "3", "--allow", "cheap, deep"}, "PUT", "/v1/creative/runs/3/models", map[string]any{"allowed_profiles": []any{"cheap", "deep"}}},
+		{[]string{"models", "3", "--clear"}, "PUT", "/v1/creative/runs/3/models", map[string]any{"allowed_profiles": []any{}}},
 		{[]string{"pipeline", "ls"}, "GET", "/v1/creative/pipelines", nil},
 		{[]string{"pipeline", "ls", "--project", "old-project"}, "GET", "/v1/creative/pipelines", nil},
 		{[]string{"pipeline", "update", "3", "--file", file}, "PUT", "/v1/creative/pipelines/3", map[string]any{"name": "Video"}},
@@ -71,7 +74,7 @@ func TestCreativeCLIRequests(t *testing.T) {
 	}
 }
 func TestCreativeCLIRejectsInvalidInputBeforeConnecting(t *testing.T) {
-	for _, args := range [][]string{{"pipeline", "create"}, {"run", "show", "../shutdown"}, {"stage", "action", "1", "2", "approve"}, {"item", "progress", "1", "2", "3", "--progress", "101"}} {
+	for _, args := range [][]string{{"models", "3", "--allow", "cheap", "--clear"}, {"models", "-1"}, {"pipeline", "create"}, {"run", "show", "../shutdown"}, {"stage", "action", "1", "2", "approve"}, {"item", "progress", "1", "2", "3", "--progress", "101"}} {
 		cmd := creativeCommands(func() (*client.Client, error) { t.Fatal("connected with invalid input"); return nil, nil })
 		cmd.SetArgs(args)
 		cmd.SetOut(new(bytes.Buffer))

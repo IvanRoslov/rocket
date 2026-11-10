@@ -18,6 +18,8 @@ func TestCreativeAgentCLIContextAndReplies(t *testing.T) {
 		key   string
 		value any
 	}{
+		{[]string{"launch", "4", "--allow", "cheap,deep"}, "/v1/creative/runs/4/sessions", "allowed_profiles", []any{"cheap", "deep"}},
+		{[]string{"launch", "4", "--allow", ""}, "/v1/creative/runs/4/sessions", "allowed_profiles", []any{}},
 		{[]string{"send", "4", "--stage", "5", "--item", "6", "--version", "7", "--body", "hello"}, "/v1/creative/runs/4/messages", "artifact_version_ids", []any{float64(7)}},
 		{[]string{"spawn", "4", "--stage", "5", "--name", "scene", "--body", "make scene"}, "/v1/creative/runs/4/workers", "prompt", "make scene"},
 		{[]string{"reply", "9", "--body", "noted"}, "/v1/questions/9/reply", "body", "noted"},

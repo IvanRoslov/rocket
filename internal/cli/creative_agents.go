@@ -19,7 +19,7 @@ func creativeAgentCommands(open creativeConnection) *cobra.Command {
 	for _, action := range []string{"launch", "spawn", "sessions", "send", "messages", "ask", "questions", "reply", "answer"} {
 		var stage, item int64
 		var versions []int64
-		var body, file, profile, agentName, repo, name, to, title string
+		var body, file, profile, agentName, repo, name, to, title, allow string
 		var options []string
 		var choose int
 		var dispute, wait bool
@@ -51,6 +51,9 @@ func creativeAgentCommands(open creativeConnection) *cobra.Command {
 				in = map[string]any{"prompt": text, "profile": profile, "agent": agentName}
 				if action == "launch" {
 					path += "/sessions"
+					if cmd.Flags().Changed("allow") {
+						in["allowed_profiles"] = parseProfileList(allow)
+					}
 				} else {
 					if stage == 0 || name == "" || text == "" {
 						return &usageError{message: "spawn requires --stage, --name and --body or --file"}
@@ -132,6 +135,9 @@ func creativeAgentCommands(open creativeConnection) *cobra.Command {
 		if action == "launch" || action == "spawn" {
 			cmd.Flags().StringVar(&profile, "profile", "", "Existing model profile")
 			cmd.Flags().StringVar(&agentName, "agent", "", "Agent runtime")
+		}
+		if action == "launch" {
+			cmd.Flags().StringVar(&allow, "allow", "", "Set run worker profiles before launch (comma separated; empty clears)")
 		}
 		if action == "spawn" {
 			cmd.Flags().StringVar(&repo, "repo", "", "Project main/linked repository")

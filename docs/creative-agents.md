@@ -3,7 +3,7 @@
 Create a pipeline/run with `rocket creative`, then launch its dedicated session:
 
 ```sh
-rocket creative agent launch RUN --profile PROFILE
+rocket creative agent launch RUN --profile PROFILE [--allow cheap,deep]
 rocket creative agent sessions RUN
 ```
 
@@ -13,6 +13,36 @@ have no development task. The run snapshot (pipeline, ordered stages/items,
 expected artifacts, review/approval mode and prior progress) is supplied at launch
 and restore. Prompts tell agents to refresh artifacts/messages/questions and
 preserve completed results. Existing development prompts and launch paths remain.
+
+The human can restrict worker profiles per run:
+
+```sh
+rocket creative models RUN                        # view the run and allowed_profiles
+rocket creative models RUN --allow cheap,deep      # replace the whole list
+rocket creative models RUN --clear                 # all enabled profiles
+rocket creative agent launch RUN --profile PROFILE --allow cheap,deep
+```
+
+`allowed_profiles: []` means all enabled profiles, including on existing runs.
+Omitting `--allow` at launch preserves the current list; `--allow ""` clears it.
+The list is validated and saved before the orchestrator starts, so its first
+`rocket models ls` sees the restriction. Only humans edit it; any agent session,
+including the run orchestrator, receives `403 human_only`. Unknown names return
+`400 profile_not_found` without changing the list. Registered disabled profiles
+can be listed but are never offered for new workers.
+
+Before each spawn the orchestrator runs `rocket models ls`, chooses a profile
+suited to the assignment from the returned list, and passes `--profile PROFILE`.
+Both creative orchestrator and worker sessions see the run's currently allowed,
+enabled profiles. Explicit profiles outside the list fail with
+`profile_not_allowed: allowed: ...`; an agent alone picks its first allowed profile;
+no selection uses the default worker profile if allowed, otherwise the first
+allowed profile. Ordering follows registry position, then name. If no enabled
+profile remains, spawn returns `no_profiles_allowed`. Refused spawns create no
+sessions or workspaces. Clearing the list restores unrestricted enabled selection.
+The restriction applies to new workers: the orchestrator's own profile is
+unrestricted, existing workers continue, and restore uses each session's saved
+profile snapshot.
 
 Only the live run orchestrator spawns workers:
 
@@ -102,7 +132,10 @@ Question history remains intact throughout discussion.
 
 HTTP contracts (snake_case, existing authentication):
 
-- POST `/v1/creative/runs/{run}/sessions`: `{profile?,agent?,prompt?}`, human launch.
+- POST `/v1/creative/runs/{run}/sessions`: `{profile?,agent?,prompt?,allowed_profiles?}`, human launch.
+- PUT `/v1/creative/runs/{run}/models`: `{"allowed_profiles":["cheap","deep"]}`,
+  human-only full replacement; `[]` clears. Returns `200 {"allowed_profiles":[...]}`.
+  Read via GET `/v1/creative/runs/{run}`; omission/null is invalid for replacement.
 - POST `/v1/creative/runs/{run}/workers`: `{stage_id,item_id?,repo?,name,prompt,profile?,agent?}`, orchestrator-only.
 - POST `/v1/creative/runs/{run}/workers/{session}/close`: current run orchestrator
   only, own-run/project worker target; no body or cleanup/cascade options. Returns
