@@ -298,3 +298,34 @@ it("keeps the session rail outside central content and visible on every workspac
     expect(within(rail).getByRole("button", { name: /Copy attach/ })).toBeEnabled();
   }
 });
+
+it("uses saved run worker profiles and isolates unsaved edits when switching runs", async () => {
+  const run = (id: number, allowed_profiles: string[]) => ({
+    id, project_id: "film", pipeline_id: 3, pipeline_name: "Film process",
+    name: `Run ${id}`, brief: "A short film", stages: [], status: "in_progress",
+    orchestrator_session_id: `creative-${id}`, allowed_profiles,
+  });
+  server.use(
+    http.get("/v1/creative/runs", () => HttpResponse.json([run(7, ["writer"]), run(8, [])])),
+    http.get("/v1/creative/runs/7", () => HttpResponse.json(run(7, ["writer"]))),
+    http.get("/v1/creative/runs/8", () => HttpResponse.json(run(8, []))),
+    http.get("/v1/model-profiles", () => HttpResponse.json({ profiles: [
+      { name: "writer", model: "model-w", enabled: true },
+    ] })),
+    http.get("/v1/creative/runs/8/:resource", () => HttpResponse.json([])),
+  );
+  window.history.replaceState({}, "", "/creative/?project=film&run=7");
+  open();
+  const summary = await screen.findByRole("region", { name: "Worker profiles" });
+  expect(within(summary).getByText("writer")).toBeVisible();
+  await userEvent.click(await screen.findByRole("button", { name: "Edit worker profiles" }));
+  await userEvent.click(screen.getByRole("checkbox", { name: /writer/ }));
+  await userEvent.selectOptions(screen.getByLabelText("Creative work"), "8");
+  expect(await screen.findByRole("heading", { name: "Run 8" })).toBeVisible();
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(screen.getByText("all profiles")).toBeVisible();
+  await userEvent.selectOptions(screen.getByLabelText("Creative work"), "7");
+  expect(await screen.findByRole("heading", { name: "Run 7" })).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "Edit worker profiles" }));
+  expect(screen.getByRole("checkbox", { name: /writer/ })).toBeChecked();
+});

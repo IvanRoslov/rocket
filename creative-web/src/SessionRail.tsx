@@ -7,8 +7,13 @@ import "../../web/src/screens/task/SessionRail.css";
 import { api, base, useCommand } from "./api";
 import type { CreativeSession } from "./types";
 import { ErrorNotice } from "./ui";
+import { WorkerProfiles, type ModelProfile } from "./WorkerProfiles";
 
-export function CreativeSessionRail({ runID, orchestrator }: { runID: number; orchestrator: string }) {
+export function CreativeSessionRail({ runID, orchestrator, allowedProfiles = [] }: {
+  runID: number;
+  orchestrator: string;
+  allowedProfiles?: string[];
+}) {
   const sessions = useQuery({
     queryKey: ["creative", "sessions", runID],
     queryFn: () =>
@@ -18,11 +23,22 @@ export function CreativeSessionRail({ runID, orchestrator }: { runID: number; or
     queryKey: ["creative", "profiles"],
     queryFn: () =>
       api.get<{
-        profiles: { name: string; enabled: boolean; model: string }[];
+        profiles: ModelProfile[];
       }>("/v1/model-profiles"),
   });
   const [profile, setProfile] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
+  const [editing, setEditing] = useState(false);
   const command = useCommand();
+  const update = useCommand();
+  const registry = profiles.data?.profiles ?? [];
+  const enabledProfiles = registry.filter((p) => p.enabled);
+  const editableProfiles = registry.filter((p) => p.enabled || allowedProfiles.includes(p.name));
+  function startEdit() {
+    setPicked(allowedProfiles.filter((name) => registry.some((p) => p.name === name)));
+    update.reset();
+    setEditing(true);
+  }
   const session = sessions.data?.find((s) => s.id === orchestrator);
   const active = session && ["running", "spawning"].includes(session.state);
   // Keep recoverable errored workers, but omit closed sessions from the rail.
@@ -44,6 +60,7 @@ export function CreativeSessionRail({ runID, orchestrator }: { runID: number; or
             Model profile
             <select
               value={profile}
+              disabled={command.isPending || !profiles.isSuccess}
               onChange={(e) => setProfile(e.target.value)}
             >
               <option value="">Configured default</option>
@@ -56,15 +73,17 @@ export function CreativeSessionRail({ runID, orchestrator }: { runID: number; or
                 ))}
             </select>
           </label>
+          <WorkerProfiles profiles={enabledProfiles} picked={picked} onChange={setPicked}
+            disabled={command.isPending || !profiles.isSuccess} />
           <Button
             variant="secondary"
             size="sm"
-            disabled={command.isPending}
+            disabled={command.isPending || profiles.isPending}
             onClick={() =>
               command.mutate(() =>
                 api.post(
                   `${base}/runs/${runID}/sessions`,
-                  profile ? { profile } : {},
+                  { ...(profile ? { profile } : {}), allowed_profiles: picked },
                 ),
               )
             }
@@ -88,6 +107,33 @@ export function CreativeSessionRail({ runID, orchestrator }: { runID: number; or
           Restore creative orchestrator
         </Button>
       ) : null}
+      {orchestrator && (
+        <section className="creative-worker-models" aria-label="Worker profiles">
+          <h3>Worker profiles</h3>
+          {allowedProfiles.length === 0 ? <p>all profiles</p> : (
+            <ul>{allowedProfiles.map((name) => <li key={name}>{name}</li>)}</ul>
+          )}
+          {editing ? (
+            <>
+              <WorkerProfiles profiles={editableProfiles} picked={picked} onChange={setPicked}
+                disabled={update.isPending} />
+              <ErrorNotice error={update.error} />
+              <div className="creative-worker-models__actions">
+                <Button variant="secondary" size="sm" disabled={update.isPending}
+                  onClick={() => update.mutate(
+                    () => api.put(`${base}/runs/${runID}/models`, { allowed_profiles: picked }),
+                    { onSuccess: () => setEditing(false) },
+                  )}>Save worker profiles</Button>
+                <Button variant="secondary" size="sm" disabled={update.isPending}
+                  onClick={() => { setEditing(false); update.reset(); }}>Cancel</Button>
+              </div>
+            </>
+          ) : (
+            <Button variant="secondary" size="sm" disabled={!profiles.isSuccess}
+              onClick={startEdit}>Edit worker profiles</Button>
+          )}
+        </section>
+      )}
       <ErrorNotice error={sessions.error ?? profiles.error ?? command.error} />
       {sessions.data && (
         <section className="creative-sessions" aria-label="Run sessions">

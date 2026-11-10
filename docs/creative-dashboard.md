@@ -16,7 +16,7 @@ Upload sources in their intended run/stage/item context. Text up to 1 MiB is dis
 
 Discussion automatically includes the selected context and displayed artifact versions. A draft keeps its original target and versions when selection changes; discard it to begin a draft in the new context. Question replies and answers preserve the question's original context. A deliberate Go option or written Go reply uses the existing question/message flow; stage approval is separate. The orchestrator must describe exact paid calls and cost basis and wait for the human's explicit Go. The dashboard adds no payment execution or technical spending gate.
 
-Launch the creative orchestrator using an existing enabled model profile, or restore its existing session. The workspace has Questions & discussion and Artifacts tabs. Exact HTML artifact links still use the isolated viewing service; there is no Landing preview tab. See [creative-previews.md](creative-previews.md) for viewing configuration and operator setup.
+Launch the creative orchestrator using an existing enabled model profile, or restore its existing session. At launch, select the models allowed for workers with the profile checkboxes (profile name and model); nothing is checked by default. An empty list means “all profiles”, with the registry’s enabled profiles available for worker selection. The run’s Sessions rail shows the saved worker-profile list. Use Edit worker profiles to replace the full list and Save worker profiles to apply it to future worker spawns; existing workers keep their models. Saved profiles that are now disabled globally remain visible in the editor so they can be unchecked. Cancel discards edits. Launch or save errors appear in place and keep the checkbox draft for retry. The workspace has Questions & discussion and Artifacts tabs. Exact HTML artifact links still use the isolated viewing service; there is no Landing preview tab. See [creative-previews.md](creative-previews.md) for viewing configuration and operator setup.
 
 ## Shared presentation
 
@@ -38,4 +38,4 @@ The UI consumes the core, assets, agents and preview implementations for feature
 
 ## Validation limits
 
-Component/API-boundary checks and production builds were verified. Browser visual behavior was not validated because the browser host was unavailable. Real creative cases are reserved for human acceptance; this work ran no paid calls, live generation, end-to-end demo projects or daemon restart.
+Component/API-boundary checks and production builds were verified. The worker-profile launch/edit flow was also exercised in a desktop browser with mocked API responses, including a visual check of the session rail. Real creative cases are reserved for human acceptance; this work ran no paid calls, live generation, end-to-end demo projects or daemon restart.
