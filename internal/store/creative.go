@@ -159,9 +159,16 @@ func (s *Store) CreateCreativeRun(in CreativeRunInput) (CreativeRun, error) {
 }
 func getCreativeRun(q creativeReader, id int64) (CreativeRun, error) {
 	var r CreativeRun
-	err := q.QueryRow(`SELECT id,project_id,pipeline_id,pipeline_name,name,brief,COALESCE(orchestrator_session_id,''),created_at,updated_at FROM creative_runs WHERE id=?`, id).Scan(&r.ID, &r.ProjectID, &r.PipelineID, &r.PipelineName, &r.Name, &r.Brief, &r.OrchestratorSessionID, &r.CreatedAt, &r.UpdatedAt)
+	var allowed string
+	err := q.QueryRow(`SELECT id,project_id,pipeline_id,pipeline_name,name,brief,COALESCE(orchestrator_session_id,''),created_at,updated_at,allowed_profiles FROM creative_runs WHERE id=?`, id).Scan(&r.ID, &r.ProjectID, &r.PipelineID, &r.PipelineName, &r.Name, &r.Brief, &r.OrchestratorSessionID, &r.CreatedAt, &r.UpdatedAt, &allowed)
 	if err != nil {
 		return r, creativeNotFound(err)
+	}
+	if err := json.Unmarshal([]byte(allowed), &r.AllowedProfiles); err != nil {
+		return r, fmt.Errorf("decode creative allowed profiles: %w", err)
+	}
+	if r.AllowedProfiles == nil {
+		r.AllowedProfiles = []string{}
 	}
 	ids, err := creativeIDs(q, `SELECT id FROM creative_stages WHERE run_id=? ORDER BY position`, id)
 	if err != nil {
@@ -323,4 +330,21 @@ func (s *Store) creativeWrite(runID int64) (*sql.Tx, error) {
 		return nil, err
 	}
 	return tx, nil
+}
+
+// SetCreativeRunAllowedProfiles replaces a run's worker allowlist. Empty means
+// all enabled profiles. The API validates names against the model registry.
+func (s *Store) SetCreativeRunAllowedProfiles(runID int64, names []string) error {
+	if names == nil {
+		names = []string{}
+	}
+	value, err := json.Marshal(names)
+	if err != nil {
+		return err
+	}
+	res, err := s.db.Exec(`UPDATE creative_runs SET allowed_profiles=?, updated_at=? WHERE id=?`, string(value), time.Now().Unix(), runID)
+	if err != nil {
+		return err
+	}
+	return checkRowsAffected(res)
 }

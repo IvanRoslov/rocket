@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -62,7 +63,13 @@ func TestMigrateCreativeGlobalCatalog(t *testing.T) {
 	tables := []string{"messages", "creative_runs", "creative_stages", "creative_items", "creative_artifacts", "creative_artifact_versions", "creative_session_contexts", "creative_discussion_contexts", "sessions", "questions", "question_messages"}
 	dump := func(db *sql.DB, table string) string {
 		t.Helper()
-		rows, err := db.Query(`SELECT * FROM ` + table + ` ORDER BY rowid`)
+		columnsToRead := "*"
+		if table == "creative_runs" {
+			// Compare every pre-upgrade column; later additive migrations may
+			// introduce new columns with their own independently checked defaults.
+			columnsToRead = "id,project_id,pipeline_id,pipeline_name,name,brief,orchestrator_session_id,created_at,updated_at"
+		}
+		rows, err := db.Query(`SELECT ` + columnsToRead + ` FROM ` + table + ` ORDER BY rowid`)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -108,6 +115,10 @@ func TestMigrateCreativeGlobalCatalog(t *testing.T) {
 		if got := dump(s.db, table); got != before[table] {
 			t.Errorf("%s changed:\nbefore %s\nafter %s", table, before[table], got)
 		}
+	}
+	run, err := s.GetCreativeRun(17)
+	if err != nil || run.AllowedProfiles == nil || len(run.AllowedProfiles) != 0 {
+		t.Fatalf("migrated run allowlist: %v %v", run.AllowedProfiles, err)
 	}
 	// Column removal must also remove the project FK without changing run FKs.
 	var schema string
@@ -165,4 +176,30 @@ func TestMigrateCreativeGlobalCatalog(t *testing.T) {
 			t.Errorf("%s changed on reopen", table)
 		}
 	}
+	if err := s.SetCreativeRunAllowedProfiles(17, []string{"cheap", "deep"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	run, err = s.GetCreativeRun(17)
+	if err != nil || !reflect.DeepEqual(run.AllowedProfiles, []string{"cheap", "deep"}) {
+		t.Fatalf("reopened allowlist: %v %v", run.AllowedProfiles, err)
+	}
+	if err := s.SetCreativeRunAllowedProfiles(17, nil); err != nil {
+		t.Fatal(err)
+	}
+	run, err = s.GetCreativeRun(17)
+	if err != nil || run.AllowedProfiles == nil || len(run.AllowedProfiles) != 0 {
+		t.Fatalf("clear: %v %v", run.AllowedProfiles, err)
+	}
+	if err := s.SetCreativeRunAllowedProfiles(9999, nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing run: %v", err)
+	}
+
 }
