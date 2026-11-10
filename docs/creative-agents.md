@@ -177,3 +177,107 @@ feedback is required and arrives through the existing contextual notification
 with the decision, revision and versions; revise results before submitting again.
 Automatic stages retain their saved behavior. Workers coordinate publication and
 submission with their orchestrator and never approve on behalf of the human.
+
+## Conversation feed HTTP contract (creative-messages, task 6061)
+
+This contract is the boundary for the feed web implementation. Existing session
+messages remain orchestrator/worker transport; feeds are separate durable records.
+All endpoints use existing authentication and snake_case JSON. IDs are integers;
+times are Unix seconds. A feed is selected by run and optional `stage_id` (omitted
+or zero means the run feed). An `item_id` requires its owning stage and is a tag
+or read filter, never a separate feed. Stage reads include all item tags unless
+filtered. Version IDs must belong to the selected scope (a stage may reference
+its items). Writing never changes pipeline/review state, even after approval.
+
+| Method and path | Request | Success |
+| --- | --- | --- |
+| GET `/v1/creative/runs/{run}/feed` | Query: `stage_id?`, `item_id?` | `200` entry array, newest first by ID; no pagination in this contract |
+| POST `/v1/creative/runs/{run}/feed` | `{stage_id?,item_id?,body,artifact_version_ids?}` | `201` created message entry |
+| POST `/v1/creative/runs/{run}/feed/cards` | `{stage_id?,item_id?,body,artifact_version_ids?,replaces_entry_id?}` | `201` created proposal entry; orchestrator only |
+| GET `/v1/creative/runs/{run}/feed/cards/{entry}` | No body | `200` proposal entry, including current decision/replacement |
+| POST `/v1/creative/runs/{run}/feed/cards/{entry}/decision` | `{"decision":"go"}` (`go`, `revise`, `deny`) | `200` updated entry; human only |
+| GET `/v1/creative/runs/{run}/feed/unread` | No body | `200` unread summary below |
+| POST `/v1/creative/runs/{run}/feed/read` | `{stage_id?,through_entry_id}` | `200 {"stage_id":0,"through_entry_id":42}`; human only |
+
+An entry always has this shape (zero scope IDs and empty arrays are explicit):
+
+```json
+{
+  "id": 42,
+  "run_id": 7,
+  "stage_id": 9,
+  "item_id": 12,
+  "kind": "proposal",
+  "author": "orchestrator",
+  "author_session_id": "creative-7-orch",
+  "body": "Generate two images; tool/provider/model ...; inputs/upload services ...; 2 calls: ...; estimate $0.20 based on ...",
+  "artifact_version_ids": [101],
+  "created_at": 1794340000,
+  "card": {
+    "status": "pending",
+    "decision": "",
+    "decided_at": 0,
+    "replaces_entry_id": 0,
+    "replaced_by_entry_id": 0
+  }
+}
+```
+
+Messages have `kind:"message"` and `card:null`. `author` is `human` or
+`orchestrator`; human entries have `author_session_id:""`. Display names for
+stage/item tags come from the existing run snapshot. Proposal content is immutable
+Markdown in `body`, following the paid-call content rules (outputs, tool/provider/
+model, inputs and upload services, complete calls/count, price and estimate basis,
+with pinned versions). The API checks nonblank body and valid version scope;
+semantic completeness is an agent rule, not provider execution validation.
+
+Card status is `pending`, `decided`, or `replaced`. `decision` is empty until
+decided, then `go`, `revise`, or `deny`; `decided_at` is zero until decided.
+Publishing a replacement atomically changes the earlier pending card to
+`replaced` and records both links. Replacement may cross feeds within the same
+run; item/stage ownership still applies. Decided/replaced cards cannot be replaced
+or decided again. A conflict returns HTTP `409` with
+`{"error":{"code":"creative_card_conflict","message":"...current state and command hint..."},"entry":{...current entry...}}`.
+The web replaces its stale card with `entry` and refetches the feed after a
+replacement. Only a card decision records paid consent; typing Go does not.
+
+Unread summary:
+
+```json
+{
+  "run_id": 7,
+  "total": 3,
+  "run_feed": 1,
+  "stages": [{"stage_id":9,"unread":2}]
+}
+```
+
+`stages` contains every run stage, including zero counts. Count only orchestrator
+messages and proposal entries, once per entry. Human messages, decisions and
+replacement state changes do not add unread. A stage count includes all its items.
+GET never marks read. On opening a feed, POST read with the highest displayed
+entry ID (or zero for empty). Read markers only advance; concurrent later entries
+remain unread. An item-filtered view marks the containing stage feed read through
+that ID. `through_entry_id` must be zero or an entry in that run/feed.
+
+The web polls feed and unread every 2 seconds while a run is open and refetches
+after successful mutations; mutation responses permit immediate local insertion.
+Polling also recovers missed updates after reconnect and updates replaced cards.
+No new event subscription is required. Pending cards can be highlighted directly
+from the returned full entry array. Existing question archive uses the existing
+GET questions endpoint with its existing exact stage/item scope; replies/answers
+remain unchanged. New POST questions (including `creative agent ask`) returns
+`409 creative_questions_retired` with feed command hints.
+
+Human callers may read/write any feed. Agents can read their own run; only its
+currently bound orchestrator can post messages/cards. Workers receive
+`403 creative_feed_forbidden` with `rocket creative agent send RUN ...` guidance;
+foreign-run agents receive 403 with guidance to their own run. Human-only actions
+return `403 human_only` for agents. Empty body returns `400 empty_body`; invalid
+scope/version/request returns 400; absent run/card returns 404. Errors otherwise
+use the existing `{"error":{"code":"...","message":"..."}}` shape.
+
+Human messages and decisions persist even without an active orchestrator. They
+are queued to an available run orchestrator through existing delivery transport;
+feed reads after restore remain authoritative. Every delivery names the
+run/stage/item, versions, entry/card ID and an exact reply command in that feed.
