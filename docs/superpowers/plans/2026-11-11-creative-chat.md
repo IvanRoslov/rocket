@@ -38,7 +38,7 @@
 - [x] Run full frontend suite, tsc, make creative-web-build and make test; expect pass.
 - [x] Capture stage/item/run before and after in both themes and narrow width using mocked HTTP fixtures with 12 versions; inspect screenshots.
 - [x] Update docs, commit, request independent review and fix material findings with regression tests.
-- [ ] Push branch and open single PR to main referencing creative-messages with screenshot links.
+- [x] Push branch and open single PR to main referencing creative-messages with screenshot links.
 
 ## Verification record
 
@@ -47,3 +47,5 @@
 - Playwright capture/acceptance check passed without console errors.
 - Independent review: fixed initial unread readiness and asynchronous attachment anchoring with RED to GREEN regressions. A real browser resize check additionally caught a queued duplicate scroll event race; its regression also ran RED to GREEN.
 - No API changes. No deferred material review findings.
+
+Delivered as PR #213: https://github.com/IvanRoslov/rocket/pull/213. GitHub reports MERGEABLE; no CI checks are configured/reported for this PR.
