@@ -156,7 +156,7 @@ func (s *Store) PublishCreativeArtifact(p CreativeArtifactPublication) (Creative
 	if p.ArtifactID == 0 && (p.Name == "" || len(p.Name) > 512 || (p.Kind != "source" && p.Kind != "result")) {
 		return fail(fmt.Errorf("%w: artifact needs name and source/result kind", ErrCreativeInvalid))
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.creativeWrite(p.RunID)
 	if err != nil {
 		return fail(err)
 	}
@@ -212,7 +212,16 @@ func (s *Store) PublishCreativeArtifact(p CreativeArtifactPublication) (Creative
 }
 
 func (s *Store) SetCreativeArtifactCurrent(artifactID, versionID int64) error {
-	res, err := s.db.Exec(`UPDATE creative_artifacts SET current_version_id=? WHERE id=? AND EXISTS(SELECT 1 FROM creative_artifact_versions WHERE id=? AND artifact_id=?)`, versionID, artifactID, versionID, artifactID)
+	a, err := s.GetCreativeArtifact(artifactID)
+	if err != nil {
+		return err
+	}
+	tx, err := s.creativeWrite(a.RunID)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE creative_artifacts SET current_version_id=? WHERE id=? AND EXISTS(SELECT 1 FROM creative_artifact_versions WHERE id=? AND artifact_id=?)`, versionID, artifactID, versionID, artifactID)
 	if err != nil {
 		return err
 	}
@@ -223,5 +232,5 @@ func (s *Store) SetCreativeArtifactCurrent(artifactID, versionID int64) error {
 	if n == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit()
 }

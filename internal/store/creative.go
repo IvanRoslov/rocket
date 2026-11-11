@@ -160,7 +160,7 @@ func (s *Store) CreateCreativeRun(in CreativeRunInput) (CreativeRun, error) {
 func getCreativeRun(q creativeReader, id int64) (CreativeRun, error) {
 	var r CreativeRun
 	var allowed string
-	err := q.QueryRow(`SELECT id,project_id,pipeline_id,pipeline_name,name,brief,COALESCE(orchestrator_session_id,''),created_at,updated_at,allowed_profiles FROM creative_runs WHERE id=?`, id).Scan(&r.ID, &r.ProjectID, &r.PipelineID, &r.PipelineName, &r.Name, &r.Brief, &r.OrchestratorSessionID, &r.CreatedAt, &r.UpdatedAt, &allowed)
+	err := q.QueryRow(`SELECT id,project_id,pipeline_id,pipeline_name,name,brief,COALESCE(orchestrator_session_id,''),created_at,updated_at,allowed_profiles,closure_state,acceptance_requested_at,accepted_at,closure_error FROM creative_runs WHERE id=?`, id).Scan(&r.ID, &r.ProjectID, &r.PipelineID, &r.PipelineName, &r.Name, &r.Brief, &r.OrchestratorSessionID, &r.CreatedAt, &r.UpdatedAt, &allowed, &r.ClosureState, &r.AcceptanceRequestedAt, &r.AcceptedAt, &r.ClosureError)
 	if err != nil {
 		return r, creativeNotFound(err)
 	}
@@ -329,6 +329,10 @@ func (s *Store) creativeWrite(runID int64) (*sql.Tx, error) {
 		tx.Rollback()
 		return nil, err
 	}
+	if err := checkCreativeMutable(tx, runID); err != nil {
+		tx.Rollback()
+		return nil, err
+	}
 	return tx, nil
 }
 
@@ -342,9 +346,17 @@ func (s *Store) SetCreativeRunAllowedProfiles(runID int64, names []string) error
 	if err != nil {
 		return err
 	}
-	res, err := s.db.Exec(`UPDATE creative_runs SET allowed_profiles=?, updated_at=? WHERE id=?`, string(value), time.Now().Unix(), runID)
+	tx, err := s.creativeWrite(runID)
 	if err != nil {
 		return err
 	}
-	return checkRowsAffected(res)
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE creative_runs SET allowed_profiles=?, updated_at=? WHERE id=?`, string(value), time.Now().Unix(), runID)
+	if err != nil {
+		return err
+	}
+	if err = checkRowsAffected(res); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

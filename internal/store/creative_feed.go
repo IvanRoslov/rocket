@@ -100,7 +100,7 @@ func (s *Store) AddCreativeFeedEntry(e CreativeFeedEntry, replaces int64) (Creat
 	if e.Kind == "proposal" {
 		status = "pending"
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.creativeWrite(e.RunID)
 	if err != nil {
 		return e, err
 	}
@@ -162,7 +162,7 @@ func (s *Store) DecideCreativeFeedCard(runID, id int64, decision string) (Creati
 	if decision != "go" && decision != "revise" && decision != "deny" {
 		return CreativeFeedEntry{}, creativeInvalid("decision must be go, revise or deny")
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.creativeWrite(runID)
 	if err != nil {
 		return CreativeFeedEntry{}, err
 	}
@@ -273,7 +273,7 @@ func (s *Store) MarkCreativeFeedRead(b CreativeBinding, through int64) (int64, e
 // on restore/replacement. Accepted or attempted deliveries are never blindly sent
 // again: feed history is authoritative after transport uncertainty.
 func (s *Store) QueueCreativeFeedDeliveries(runID int64) ([]int64, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.creativeWrite(runID)
 	if err != nil {
 		return nil, err
 	}

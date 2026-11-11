@@ -39,8 +39,16 @@ func (s *Store) BindCreativeSession(id string, b CreativeBinding) error {
 	if sess.ProjectID != c.ProjectID || sess.TaskID != 0 || sess.SubtaskID != 0 {
 		return creativeInvalid("creative session must belong to the run project and have no development task")
 	}
-	_, err = s.db.Exec(`INSERT INTO creative_session_contexts(session_id,run_id,stage_id,item_id) VALUES(?,?,?,?)`, id, b.RunID, nullIfZero(b.StageID), nullIfZero(b.ItemID))
-	return err
+	tx, err := s.creativeWrite(b.RunID)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.Exec(`INSERT INTO creative_session_contexts(session_id,run_id,stage_id,item_id) VALUES(?,?,?,?)`, id, b.RunID, nullIfZero(b.StageID), nullIfZero(b.ItemID))
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 func (s *Store) GetCreativeSessionContext(id string) (CreativeBinding, error) {
 	var b CreativeBinding
@@ -116,7 +124,7 @@ func (s *Store) AddCreativeMessage(m Message, b CreativeBinding) (int64, error) 
 	if _, err := s.ValidateCreativeBinding(b); err != nil {
 		return 0, err
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.creativeWrite(b.RunID)
 	if err != nil {
 		return 0, err
 	}
@@ -141,7 +149,7 @@ func (s *Store) AddCreativeQuestion(q Question, b CreativeBinding) (int64, error
 	if q.Title == "" {
 		q.Title = DeriveTitle(q.Body)
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.creativeWrite(b.RunID)
 	if err != nil {
 		return 0, err
 	}
