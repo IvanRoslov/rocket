@@ -15,7 +15,7 @@ Task 6073 / subtask 6074, gate 331, spec v1 and plan v1. The orchestrator accept
 
 ## Commands
 
-- `go test -p 2 ./...` — passed after final runtime error-classification fix.
+- `go test ./...` and `go test -p 2 ./...` — passed after final runtime error-classification fix.
 - `go test -race ./internal/api -run CreativeAcceptance -count=1` — passed, including partial-stop and session-state-save retry cases.
 - `go test ./internal/runtime -run TmuxClosureProof -count=1` — RED for swallowed silent/permission failures, then GREEN; uses an isolated fake tmux executable through the real command adapter.
 - `npm test --prefix creative-web` — 95 tests / 13 files passed.
