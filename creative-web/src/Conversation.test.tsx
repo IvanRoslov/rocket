@@ -97,9 +97,15 @@ it("opens old questions from the chat header and returns to the retained chat dr
   ])));
   open(4);
   const box = screen.getByLabelText("Message");
-  expect(box).toHaveAttribute("rows", "1");
+  expect(box).toHaveAttribute("rows", "4");
   expect(screen.queryByText("Message", { selector: "label" })).not.toBeInTheDocument();
+  const send = screen.getByRole("button", { name: "Send message" });
+  const actions = send.parentElement!;
+  expect(actions.lastElementChild).toBe(send);
+  expect(send.previousElementSibling).toHaveTextContent("⌘ / Ctrl + Enter");
   await userEvent.type(box, "Keep this chat draft");
+  expect(actions.lastElementChild).toBe(send);
+  expect(send.previousElementSibling).toHaveTextContent("⌘ / Ctrl + Enter");
   const toggle = screen.getByRole("button", { name: "Old questions" });
   expect(toggle.closest("header")).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "Chat history" })).toBeVisible();

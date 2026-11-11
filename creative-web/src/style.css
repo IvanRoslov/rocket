@@ -696,13 +696,14 @@ details p {
 .chat-archive .question-archive { margin: 8px 0 0; border: 0; padding: 0; }
 .chat-archive-toggle { border: 0; background: none; color: var(--accent); font: 12px var(--font-ui); cursor: pointer; padding: 4px 0; }
 .chat-heading .chat-archive-toggle { margin-left: auto; }
-.composer-actions { margin-top: 6px; gap: 6px; }
+.composer-actions { margin-top: 8px; gap: 6px; justify-content: flex-end; }
+.composer-actions > button, .composer-actions > small { flex-shrink: 0; }
 .composer-context { flex: 1; min-width: 100px; margin: 0; font-size: 11px; color: var(--text-2); overflow-wrap: anywhere; }
 .feed-entry .markdown, .feed-entry .markdown pre, .feed-entry .markdown code { overflow-wrap: anywhere; word-break: break-word; }
 .feed-entry .markdown pre code { white-space: pre-wrap; }
 .feed-entry .markdown pre { white-space: pre-wrap; overflow-x: hidden; max-width: 100%; }
 .chat-window { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.chat-heading { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; flex-shrink: 0; }
+.chat-heading { padding: 14px 18px; background: var(--surface-3); border-bottom: 2px solid var(--border-hover); display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; flex-shrink: 0; }
 .creative-app .chat-heading h2 { font-size: 15px; margin: 0; }
 .chat-heading > span { color: var(--text-2); font-size: 12px; }
 .chat-heading .feed-filter { margin: 0 0 0 auto; }
@@ -710,14 +711,17 @@ details p {
 .chat-pending span { color: var(--accent); }
 .chat-history-wrap { position: relative; flex: 1; min-height: 0; }
 .chat-history { height: 100%; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; overflow-anchor: none; scrollbar-gutter: stable; padding: 0 18px; background: var(--surface-2); }
-.conversation-entries { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 12px 0 20px; }
+.conversation-entries { display: flex; flex-direction: column; gap: 16px; margin: 0; padding: 16px 0 20px; }
 .conversation-entries > li { min-width: 0; }
 .chat-date { text-align: center; color: var(--text-3); font-size: 11px; margin: 6px 0 16px; }
-.feed-entry { max-width: 92%; width: fit-content; padding: 12px 14px; border-radius: 14px 14px 14px 3px; background: var(--surface); }
+.feed-entry { max-width: 92%; width: fit-content; padding: 12px 14px; border-radius: 14px 14px 14px 3px; background: var(--surface); border-color: var(--border-hover); box-shadow: 0 2px 4px #0000000a; }
 .feed-entry--human { margin-left: auto; border-radius: 14px 14px 3px 14px; background: var(--accent-selected-bg); border-color: var(--accent-selected-border); }
-.feed-entry--pending { border: 2px solid var(--accent); border-left-width: 4px; }
+.feed-entry--pending { border: 2px solid var(--accent); border-left-width: 4px; background: var(--accent-selected-bg); }
+.feed-entry--decided, .feed-entry--replaced { border-left: 4px solid var(--accent-selected-border); }
 .feed-entry--replaced { opacity: .8; }
-.feed-entry__meta { margin-bottom: 6px; gap: 5px 10px; font-size: 11px; }
+.feed-entry__meta { margin-bottom: 8px; gap: 5px 10px; font-size: 12px; color: var(--text-2); }
+.feed-entry__meta strong { font-weight: 700; }
+.feed-entry--human .feed-entry__meta strong { color: var(--accent-text); }
 .feed-entry .markdown > :last-child { margin-bottom: 0; }
 .feed-entry .markdown { font-size: 13px; }
 .feed-entry__actions { margin-top: 12px; }
@@ -727,7 +731,7 @@ details p {
 .chat-context summary { cursor: pointer; overflow-wrap: anywhere; }
 .composer .chat-context { margin: 0; max-height: 96px; overflow: auto; }
 
-.discussion .composer textarea { display: block; min-height: 38px; max-height: 104px; padding: 7px 10px; margin: 0; line-height: 22px; resize: none; }
+.discussion .composer textarea { display: block; min-height: 104px; max-height: 192px; padding: 7px 10px; margin: 0; line-height: 22px; resize: none; }
 .composer small { color: var(--text-3); font-size: 10px; }
 .chat-attachments { display: grid; gap: 7px; margin-top: 10px; min-width: 0; }
 .chat-attachment__card { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 7px; background: var(--surface-2); text-decoration: none; color: var(--text); }
@@ -765,7 +769,7 @@ details p {
   .chat-heading { padding: 12px; }
   .chat-history { padding: 0 10px; }
   .discussion .composer { padding: 10px 12px; }
-  .composer small { display: none; }
+  .composer-context { flex-basis: 100%; }
   .feed-entry { max-width: 96%; }
   .creative-app .topbar { flex-wrap: wrap; height: auto; }
   .chat-pending span { display: none; }
