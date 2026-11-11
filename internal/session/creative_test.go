@@ -157,6 +157,11 @@ func TestCreativeFeedMemoLaunchRestore(t *testing.T) {
 				t.Errorf("launch/restore missing feed guidance %q", text)
 			}
 		}
+		for _, text := range []string{"Report results with every discussed published version attached to the same feed message", "Identify each attachment and its item", "Attach intermediate/service files only when the human should look at them"} {
+			if !strings.Contains(spec.FirstMessage, text) {
+				t.Errorf("launch/restore memo missing result attachment guidance %q", text)
+			}
+		}
 	}
 	assertMemo()
 	if err = m.Kill(context.Background(), orch.ID, false); err != nil {

@@ -162,3 +162,24 @@ func TestCreativePromptsUseSingleFormalReview(t *testing.T) {
 		}
 	}
 }
+
+func TestCreativeOrchestratorAttachesPublishedResults(t *testing.T) {
+	vars := Vars{"session_id": "creative-1", "parent_id": "orch", "project_name": "Project", "worktree_path": "/tmp/work", "allowed_repos": "main", "creative_context": "run=4", "run_snapshot": "snapshot", "tools_home": "/tmp/rocket", "brief": "Report published results"}
+	prompt, err := Render("", "creative-orchestrator", vars)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt = strings.Join(strings.Fields(prompt), " ")
+	for _, want := range []string{
+		"When reporting results (new versions, fixes or options to choose from), attach every published version you discuss to that same feed message with --version",
+		"State briefly what each attachment is and which item it belongs to",
+		"A result message without attachments violates this rule",
+		"Attach intermediate/service files only when the human should look at them",
+		"Report published results with attachments in the same feed message; follow the result-attachment rule below",
+		"Repeat --version for multiple immutable versions",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("missing result attachment guidance %q", want)
+		}
+	}
+}
