@@ -40,6 +40,10 @@ export interface Stage extends Work, StageDefinition {
   items: Item[];
 }
 export interface Run {
+  closure_state?: "open" | "closing" | "accepted";
+  acceptance_requested_at?: number;
+  accepted_at?: number;
+  closure_error?: string;
   id: number;
   project_id: string;
   pipeline_id: number;

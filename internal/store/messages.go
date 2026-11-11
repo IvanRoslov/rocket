@@ -105,7 +105,7 @@ func (s *Store) ListMessages(sessionID string, limit int) ([]Message, error) {
 func (s *Store) NextQueuedMessage(to string) (Message, bool, error) {
 	row := s.db.QueryRow(
 		`SELECT id, from_session, to_session, body, status, attempts, created_at, delivered_at, reason, inject_at, `+effectiveClaudeTransport+`, delivery_proof_at, delivery_proof_text
-		 FROM messages WHERE to_session = ? AND status = 'queued' ORDER BY id LIMIT 1`, to,
+		 FROM messages WHERE to_session = ? AND status = 'queued' AND NOT EXISTS (SELECT 1 FROM creative_session_contexts c JOIN creative_runs r ON r.id=c.run_id WHERE c.session_id=messages.to_session AND r.closure_state<>'open') ORDER BY id LIMIT 1`, to,
 	)
 	m, err := scanMessage(row)
 	if errors.Is(err, ErrNotFound) {
@@ -130,7 +130,7 @@ func (s *Store) NextQueuedMessage(to string) (Message, bool, error) {
 // message that should have stayed failed.
 func (s *Store) ClaimMessage(id int64) (bool, error) {
 	res, err := s.db.Exec(
-		`UPDATE messages SET status = 'delivering' WHERE id = ? AND status = 'queued'`, id,
+		`UPDATE messages SET status = 'delivering' WHERE id = ? AND status = 'queued' AND NOT EXISTS (SELECT 1 FROM creative_session_contexts c JOIN creative_runs r ON r.id=c.run_id WHERE c.session_id=messages.to_session AND r.closure_state<>'open')`, id,
 	)
 	if err != nil {
 		return false, fmt.Errorf("claim message: %w", err)
@@ -144,7 +144,7 @@ func (s *Store) ClaimMessage(id int64) (bool, error) {
 
 func (s *Store) ClaimNativeMessage(id int64, transport string, injectAt int64) (bool, error) {
 	res, err := s.db.Exec(
-		`UPDATE messages SET status = 'delivering', delivery_transport = ?, inject_at = ? WHERE id = ? AND status = 'queued'`,
+		`UPDATE messages SET status = 'delivering', delivery_transport = ?, inject_at = ? WHERE id = ? AND status = 'queued' AND NOT EXISTS (SELECT 1 FROM creative_session_contexts c JOIN creative_runs r ON r.id=c.run_id WHERE c.session_id=messages.to_session AND r.closure_state<>'open')`,
 		transport, injectAt, id,
 	)
 	if err != nil {
@@ -419,6 +419,8 @@ func (s *Store) PurgeOld(before int64) error {
 	const purgeMessages = `
 		DELETE FROM messages
 		WHERE created_at < ?
+ AND NOT EXISTS (SELECT 1 FROM creative_discussion_contexts c WHERE c.message_id=messages.id)
+ AND NOT EXISTS (SELECT 1 FROM creative_session_contexts c WHERE c.session_id=messages.to_session OR c.session_id=messages.from_session)
  AND id NOT IN (SELECT id FROM rocket_claude_retention)
 		  AND NOT (delivery_transport = 'pi-uds-v1' AND status IN ('accepted','delivering'))
 		  AND NOT (delivery_proof_at > 0 AND EXISTS (
@@ -433,7 +435,7 @@ func (s *Store) PurgeOld(before int64) error {
 	}
 	defer tx.Rollback()
 	// Acquire the main writer before reading correlation history.
-	if _, err = tx.Exec(`DELETE FROM events WHERE ts < ?`, before); err != nil {
+	if _, err = tx.Exec(`DELETE FROM events WHERE ts < ? AND type NOT LIKE 'creative.%' AND NOT EXISTS (SELECT 1 FROM creative_session_contexts c WHERE c.session_id=events.session_id)`, before); err != nil {
 		return fmt.Errorf("purge events: %w", err)
 	}
 	if err = protectClaudeHistory(tx); err != nil {

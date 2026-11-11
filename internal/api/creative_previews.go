@@ -63,6 +63,14 @@ func registerCreativePreviewRoutes(mux *http.ServeMux, d Deps) {
 		if !ok {
 			return
 		}
+		if err := d.Store.CheckCreativeRunMutable(c.RunID); err != nil {
+			if errors.Is(err, store.ErrCreativeConflict) {
+				writeJSON(w, 200, []preview.Access{})
+				return
+			}
+			creativeError(w, err)
+			return
+		}
 		writeJSON(w, http.StatusOK, d.Previews.List(r.Context(), c))
 	})
 	mux.HandleFunc("DELETE /v1/creative/previews/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -85,6 +93,12 @@ func resolvePreviewContext(w http.ResponseWriter, r *http.Request, d Deps, in pr
 	caller, err := callerSession(r, d.Store)
 	if writeCallerErr(w, err) {
 		return preview.Context{}, false
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		if err := d.Store.CheckCreativeRunMutable(in.RunID); err != nil {
+			creativeError(w, err)
+			return preview.Context{}, false
+		}
 	}
 	c, err := d.Store.ResolveCreativeContext(in.RunID, in.StageID, in.ItemID)
 	if err != nil {

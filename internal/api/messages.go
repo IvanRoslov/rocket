@@ -78,6 +78,9 @@ func handlePostMessage(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 
+	if !creativeSessionWriteAllowed(w, d, req.To) || (req.From != "" && !creativeSessionWriteAllowed(w, d, req.From)) {
+		return
+	}
 	if req.Body == "" {
 		writeErr(w, http.StatusBadRequest, "empty_body", "body must not be empty")
 		return

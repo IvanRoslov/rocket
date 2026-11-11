@@ -12,7 +12,8 @@ const decisions: Record<FeedDecision, string> = { go: "Go", revise: "Revise", de
 function EntryTime({ value }: { value: number }) {
   return <time dateTime={new Date(value * 1000).toISOString()}>{new Date(value * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false })}</time>;
 }
-export function FeedEntryView({ entry, items, onJump, contextLabel = "Run" }: {
+export function FeedEntryView({ entry, items, onJump, contextLabel = "Run", readOnly = false }: {
+  readOnly?: boolean;
   entry: FeedEntry;
   contextLabel?: string;
   items: Pick<Item, "id" | "name">[];
@@ -51,7 +52,7 @@ export function FeedEntryView({ entry, items, onJump, contextLabel = "Run" }: {
       </header>
       <Markdown compact>{entry.body}</Markdown>
       {entry.author === "human" ? <ChatContext label={items.find(item => item.id === entry.item_id)?.name ?? contextLabel} ids={entry.artifact_version_ids} /> : <AttachmentCards ids={entry.artifact_version_ids} items={items} />}
-      {card?.status === "pending" && <div className="row feed-entry__actions">
+      {!readOnly && card?.status === "pending" && <div className="row feed-entry__actions">
         {(Object.keys(decisions) as FeedDecision[]).map(value => <Button key={value} variant={value === "go" ? "primary" : "secondary"} size="sm"
           disabled={decision.isPending} onClick={() => decision.mutate(value)}>{decisions[value]}</Button>)}
       </div>}

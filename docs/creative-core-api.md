@@ -30,6 +30,16 @@ Create a run with `POST /v1/creative/runs`:
 
 `GET /v1/creative/runs[?project_id=...]` returns an array of runs. `GET /v1/creative/runs/{run}` returns the run, copied `pipeline_name`, ordered `stages` and their ordered `items`. Every stage/item has `status`, integer `progress` (0–100), `progress_note`, `review_revision`, and `artifact_version_ids`. Positions are zero-based and IDs remain stable. Run status derives from its stages: pending before work, in_progress during work/between stages, awaiting_approval for the first unfinished stage's review, and completed when all stages complete. Per-item pending approvals remain visible on the item itself.
 
+## Final human acceptance and archive (release 1)
+
+Stage-derived `status=completed` is **not** final acceptance. Runs also expose `closure_state` (`open`, `closing`, `accepted`), `acceptance_requested_at`, `accepted_at` (Unix seconds; zero until archived), and `closure_error`. Existing runs migrate to `open`, including stage-completed runs. The run list still returns all runs; the UI filters accepted runs into project-scoped Completed works.
+
+`POST /v1/creative/runs/{run}/accept` is human-only under the existing authenticated transport/caller convention. The UI sends `{}`. All stages must be completed. The server records the decision and freezes work in `closing`, stops only sessions bound to this run without deleting workspaces/publications, verifies runtime absence, saves stopped session states and then records `accepted`. Repeated or concurrent requests are safe. A stop, verification or save failure returns an error and keeps incomplete closure visible; retry the same endpoint intentionally. A closing run stays frozen until closure succeeds.
+
+Closing/accepted work rejects stage/item rework and edits, artifact publication/current-version changes, new feed entries and card decisions, discussion writes, model changes, agent launch/restore and interactive session controls. Published content/downloads, immutable versions, feeds, decisions and direct run links remain readable; feed read receipts remain available. Interactive preview access closes; isolated published HTML views and file downloads remain available. Creative discussion messages and events are retained during normal transport housekeeping.
+
+The existing UI offers Accept all work on completed runs, including from the last stage; it keeps the selected work after success. Completed works opens accepted work for the selected project. Archives cannot be reopened. No global overview, navigation replacement or live service deployment is part of release 1.
+
 ## Items, progress and approval
 
 Under `/v1/creative/runs/{run}/stages/{stage}`:

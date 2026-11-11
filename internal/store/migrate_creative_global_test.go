@@ -57,9 +57,11 @@ func TestMigrateCreativeGlobalCatalog(t *testing.T) {
 	exec(`INSERT INTO questions(id,body,title,asked_at) VALUES(57,'Review clip','Review clip',60)`)
 	exec(`INSERT INTO creative_discussion_contexts VALUES(NULL,57,17,27,37,'[47]')`)
 	exec(`INSERT INTO question_messages(question_id,author,kind,body,created_at) VALUES(57,'human','reply','Keep the opening',61)`)
-	if _, err := old.AddCreativeMessage(Message{ToSession: "creative-upgrade", Body: "Review this exact version"}, CreativeBinding{RunID: 17, StageID: 27, ItemID: 37, ArtifactVersionIDs: []int64{47}}); err != nil {
-		t.Fatal(err)
-	}
+	// Seed historical rows with historical SQL: current write APIs require
+	// the current schema, which Open has deliberately not migrated yet.
+	exec(`INSERT INTO messages(id,to_session,body,status,created_at) VALUES(67,'creative-upgrade','Review this exact version','queued',62)`)
+	exec(`INSERT INTO creative_discussion_contexts VALUES(67,NULL,17,27,37,'[47]')`)
+
 	tables := []string{"messages", "creative_runs", "creative_stages", "creative_items", "creative_artifacts", "creative_artifact_versions", "creative_session_contexts", "creative_discussion_contexts", "sessions", "questions", "question_messages"}
 	dump := func(db *sql.DB, table string) string {
 		t.Helper()
@@ -119,6 +121,9 @@ func TestMigrateCreativeGlobalCatalog(t *testing.T) {
 	run, err := s.GetCreativeRun(17)
 	if err != nil || run.AllowedProfiles == nil || len(run.AllowedProfiles) != 0 {
 		t.Fatalf("migrated run allowlist: %v %v", run.AllowedProfiles, err)
+	}
+	if run.ClosureState != "open" || run.AcceptedAt != 0 || run.AcceptanceRequestedAt != 0 {
+		t.Fatalf("upgrade silently accepted work: %+v", run)
 	}
 	// Column removal must also remove the project FK without changing run FKs.
 	var schema string

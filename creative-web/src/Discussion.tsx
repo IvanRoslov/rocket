@@ -10,8 +10,9 @@ import { cacheFeedEntry, useFeed, useUnread } from "./feed";
 import type { Context, FeedEntry, Item } from "./types";
 import { Empty, ErrorNotice } from "./ui";
 
-export function Discussion({ context, ready, items = [], onNavigate, active = true, stageName }: {
+export function Discussion({ context, ready, items = [], onNavigate, active = true, stageName, readOnly = false }: {
   context: Context;
+  readOnly?: boolean;
   stageName?: string;
   orchestrator: string;
   ready: boolean;
@@ -94,7 +95,7 @@ export function Discussion({ context, ready, items = [], onNavigate, active = tr
                 const newDay = !index || date.toDateString() !== new Date(sorted[index - 1].created_at * 1000).toDateString();
                 return <li key={entry.id}>
                   {newDay && <div className="chat-date">{date.toDateString() === new Date().toDateString() ? "Today" : date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}</div>}
-                  <FeedEntryView entry={entry} items={items} contextLabel={context.stage_id ? stageLabel : "Run"} onJump={jumpTo} />
+                  <FeedEntryView readOnly={readOnly} entry={entry} items={items} contextLabel={context.stage_id ? stageLabel : "Run"} onJump={jumpTo} />
                 </li>;
               })}
             </ol>
@@ -102,9 +103,9 @@ export function Discussion({ context, ready, items = [], onNavigate, active = tr
         </div>
         <div className="chat-archive" hidden={!archiveOpen}>
           <button type="button" className="chat-archive-toggle" onClick={() => setArchiveOpen(false)}>Back to chat</button>
-          <QuestionArchive context={context} />
+          <QuestionArchive context={context} readOnly={readOnly} />
         </div>
-        <form hidden={archiveOpen} className="composer question-thread__form" onSubmit={(e) => {
+        {!readOnly && <form hidden={archiveOpen} className="composer question-thread__form" onSubmit={(e) => {
           e.preventDefault();
           if (!body.trim() || command.isPending || (!ready && !draftContext)) return;
           const { run_id, stage_id, item_id } = target;
@@ -130,7 +131,7 @@ export function Discussion({ context, ready, items = [], onNavigate, active = tr
             <Button variant="primary" size="sm" type="submit" disabled={!body.trim() || command.isPending || (!ready && !draftContext)}>Send message</Button>
           </div>
           <ErrorNotice error={command.error} />
-        </form>
+        </form>}
       </div>
     </section>
   );

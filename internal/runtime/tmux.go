@@ -996,7 +996,7 @@ func (t *tmuxRuntime) AttachCommand(h Handle) []string {
 func (t *tmuxRuntime) List(ctx context.Context) ([]string, error) {
 	out, stderr, err := runTmux(ctx, "list-sessions", "-F", "#{session_name}")
 	if err != nil {
-		if isNoServerError(stderr) || (strings.TrimSpace(out) == "" && strings.TrimSpace(stderr) == "") {
+		if isNoServerError(stderr) {
 			return []string{}, nil
 		}
 		return nil, fmt.Errorf("list sessions: %w", err)
@@ -1012,7 +1012,10 @@ func (t *tmuxRuntime) List(ctx context.Context) ([]string, error) {
 
 func isNoServerError(stderr string) bool {
 	s := strings.ToLower(stderr)
-	return strings.Contains(s, "no server running") || strings.Contains(s, "error connecting")
+	// Only positive evidence of an absent server is safe. Permission errors,
+	// cancelled commands and empty diagnostics cannot prove agents stopped.
+	return strings.Contains(s, "no server running") ||
+		(strings.Contains(s, "error connecting") && (strings.Contains(s, "(no such file or directory)") || strings.Contains(s, "(connection refused)")))
 }
 
 // LooksLikeQuizWidget reports whether a pane tail is showing Claude Code's

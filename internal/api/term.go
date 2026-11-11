@@ -274,6 +274,11 @@ func handleSessionTerm(w http.ResponseWriter, r *http.Request, d Deps, claims *t
 		if err != nil {
 			return
 		}
+		// Re-check existing websocket connections after a closure freeze.
+		if err := d.Store.CheckCreativeSessionMutable(id); err != nil {
+			conn.Close(websocket.StatusPolicyViolation, "Creative work is read-only")
+			return
+		}
 		switch typ {
 		case websocket.MessageBinary:
 			if !readonly {

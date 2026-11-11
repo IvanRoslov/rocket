@@ -130,6 +130,15 @@ var artifactViewPage = template.Must(template.New("artifact-view").Parse(`<!doct
 func creativePreviewHandler(d Deps) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/a/") {
+			if strings.HasPrefix(r.URL.Path, "/p/") {
+				id := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/p/"), "/", 2)[0]
+				if access, err := d.Previews.Lookup(id); err == nil {
+					if err = d.Store.CheckCreativeRunMutable(access.RunID); err != nil {
+						http.Error(w, "Interactive preview is closed. Published results remain available in the work archive.", http.StatusGone)
+						return
+					}
+				}
+			}
 			d.Previews.ServeHTTP(w, r)
 			return
 		}

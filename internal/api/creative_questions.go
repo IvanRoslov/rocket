@@ -19,6 +19,10 @@ func handleCreativeQuestionEntry(w http.ResponseWriter, r *http.Request, d Deps,
 		creativeError(w, err)
 		return true
 	}
+	if err := d.Store.CheckCreativeRunMutable(b.RunID); err != nil {
+		creativeError(w, err)
+		return true
+	}
 	caller, err := callerSession(r, d.Store)
 	if writeCallerErr(w, err) {
 		return true

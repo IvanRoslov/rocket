@@ -13,6 +13,7 @@ import { ReviewActions } from "./ReviewActions";
 import { Empty, ErrorNotice } from "./ui";
 import { Discussion } from "./Discussion";
 import { CreativeSessionRail } from "./SessionRail";
+import { FinalAcceptance } from "./FinalAcceptance";
 interface Selection {
   project?: string;
   run?: number;
@@ -35,7 +36,7 @@ function readSelection(): Selection {
 }
 export function App() {
   const [selection, setSelection] = useState(readSelection);
-  const [view, setView] = useState<"work" | "pipelines" | "new">("work");
+  const [view, setView] = useState<"work" | "pipelines" | "new" | "archive" | "active">("work");
   useEffect(() => {
     const pop = () => {
       setSelection(readSelection());
@@ -74,6 +75,8 @@ export function App() {
       api.get<Run[]>(`${base}/runs?project_id=${encodeURIComponent(project)}`),
     enabled: !!project,
   });
+  const activeRuns = runs.data?.filter(r => r.closure_state !== "accepted");
+  const archives = runs.data?.filter(r => r.closure_state === "accepted");
   const selectedRun = run.data?.project_id === project ? run.data : undefined;
   return (
     <div className="creative-app">
@@ -101,17 +104,17 @@ export function App() {
         <label className="top-select">
           Creative work
           <select
-            value={selection.run ?? ""}
+            value={selectedRun?.closure_state === "accepted" ? "" : selection.run ?? ""}
             onChange={(e) =>
               select({ project, run: Number(e.target.value) || undefined })
             }
           >
             <option value="">Choose work</option>
-            {selectedRun &&
+            {selectedRun && selectedRun.closure_state !== "accepted" &&
               !runs.data?.some((r) => r.id === selectedRun.id) && (
                 <option value={selectedRun.id}>{selectedRun.name}</option>
               )}
-            {runs.data?.map((r) => (
+            {activeRuns?.map((r) => (
               <option key={r.id} value={r.id}>
                 {r.name}
               </option>
@@ -119,6 +122,8 @@ export function App() {
           </select>
         </label>
         <div className="top-actions">
+          <Button variant="secondary" size="sm" onClick={() => setView("active")}>Active works</Button>
+          <Button variant="secondary" size="sm" onClick={() => setView("archive")}>Completed works</Button>
           <Button
             variant="primary"
             size="sm"
@@ -167,6 +172,20 @@ export function App() {
           onCreated={(r) => select({ project, run: r.id })}
           onPipelines={() => setView("pipelines")}
         />
+      ) : view === "archive" || view === "active" ? (
+        <main className="welcome">
+          <h1>{view === "archive" ? "Completed works" : "Active works"}</h1>
+          <p>{view === "archive" ? "Permanently accepted work for this project. History and published results remain available." : "Work awaiting final acceptance for this project."}</p>
+          <div className="run-grid">
+            {(view === "archive" ? archives : activeRuns)?.map(r => (
+              <Button variant="secondary" size="sm" className="run-card" key={r.id} onClick={() => select({ project, run: r.id })}>
+                <strong>{r.name}</strong><span>{r.pipeline_name}</span>
+                <small>{r.closure_state === "accepted" ? "Accepted · read-only archive" : r.closure_state === "closing" ? "Closure incomplete · retry available" : r.status.replaceAll("_", " ")}</small>
+              </Button>
+            ))}
+          </div>
+          {(view === "archive" ? archives : activeRuns)?.length === 0 && <Empty>{view === "archive" ? "No accepted work yet." : "No active work."}</Empty>}
+        </main>
       ) : selectedRun ? (
         <Workspace
           run={selectedRun}
@@ -184,7 +203,7 @@ export function App() {
             <p>Loading work…</p>
           ) : (
             <div className="run-grid">
-              {runs.data?.map((r) => (
+              {activeRuns?.map((r) => (
                 <Button
                   variant="secondary"
                   size="sm"
@@ -326,6 +345,7 @@ function Workspace({
   selection: Selection;
   onSelect: (stage?: number, item?: number) => void;
 }) {
+  const readOnly = run.closure_state === "closing" || run.closure_state === "accepted";
   const stage = run.stages.find((s) => s.id === selection.stage),
     item = stage?.items.find((i) => i.id === selection.item);
   const invalid = (!!selection.stage && !stage) || (!!selection.item && !item);
@@ -364,6 +384,7 @@ function Workspace({
     <div className="workspace">
       <ProcessRail run={run} scope={scope} onSelect={onSelect} />
       <main className="results">
+        <FinalAcceptance key={run.id} run={run} />
         {invalid ? (
           <>
             <ErrorNotice error="This stage or item is not part of the selected work." />
@@ -385,7 +406,7 @@ function Workspace({
                 </details>
               </>
             )}
-            {stage && <ItemEditor key={stage.id} scope={scope} stage={stage} />}
+            {!readOnly && stage && <ItemEditor key={stage.id} scope={scope} stage={stage} />}
             <div className="view-tabs">
               <Tabs
                 label="Workspace"
@@ -401,6 +422,7 @@ function Workspace({
             </div>
             <div className="conversation-panel" hidden={tab !== "discussion"}>
               <Discussion
+                readOnly={readOnly}
                 stageName={stage?.name}
                 context={{
                   ...scope,
@@ -422,6 +444,7 @@ function Workspace({
             </div>
             <div className="artifacts-panel" hidden={tab !== "results"}>
               <Artifacts
+                readOnly={readOnly}
                 key={scopeKey}
                 scope={scope}
                 itemContexts={stage && !item ? stage.items : []}
@@ -438,9 +461,9 @@ function Workspace({
         )}
       </main>
       <aside className="workspace-sidebar" aria-label="Review and sessions">
-        {!invalid && work && <ReviewActions scope={scope} work={work} canProgress={!!canProgress}
+        {!readOnly && !invalid && work && <ReviewActions scope={scope} work={work} canProgress={!!canProgress}
           itemContexts={stage && !item ? stage.items : []} />}
-        <CreativeSessionRail key={run.id} runID={run.id} orchestrator={run.orchestrator_session_id} allowedProfiles={run.allowed_profiles} />
+        <CreativeSessionRail readOnly={readOnly} key={run.id} runID={run.id} orchestrator={run.orchestrator_session_id} allowedProfiles={run.allowed_profiles} />
       </aside>
     </div>
   );

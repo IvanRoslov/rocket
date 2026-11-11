@@ -38,6 +38,10 @@ type CreativeRun struct {
 	PipelineName          string          `json:"pipeline_name"`
 	OrchestratorSessionID string          `json:"orchestrator_session_id"`
 	Status                string          `json:"status"`
+	ClosureState          string          `json:"closure_state"`
+	AcceptanceRequestedAt int64           `json:"acceptance_requested_at"`
+	AcceptedAt            int64           `json:"accepted_at"`
+	ClosureError          string          `json:"closure_error"`
 	Stages                []CreativeStage `json:"stages"`
 	CreatedAt             int64           `json:"created_at"`
 	UpdatedAt             int64           `json:"updated_at"`
