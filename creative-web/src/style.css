@@ -137,21 +137,6 @@ details p {
   align-items: center;
   gap: 9px;
 }
-.creative-app .top-select {
-  margin: 0;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  white-space: nowrap;
-}
-.top-select select {
-  width: auto;
-  max-width: 200px;
-  padding: 6px 8px;
-  font-size: 13px;
-  background: var(--surface);
-}
 .top-actions {
   display: flex;
   gap: 8px;
@@ -785,3 +770,22 @@ details p {
 .final-acceptance h2 { margin-top: 0; }
 .final-acceptance p { line-height: 1.5; }
 .final-acceptance.accepted { border-color: var(--ok, #398365); }
+
+/* Global overview and run context share the existing Creative surface tokens. */
+.current-work { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.current-work span { color: var(--text-3); font-size: 12px; }
+.current-work strong, .current-work span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.creative-app .topbar { min-height: 60px; height: auto; padding-block: 10px; flex-wrap: wrap; }
+.overview { width: 100%; box-sizing: border-box; overflow: auto; }
+.overview .run-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); }
+.overview .run-card { min-width: 0; position: relative; }
+.overview .run-card strong, .overview .run-card span, .overview .run-card small { overflow-wrap: anywhere; white-space: normal; }
+.overview .run-project { color: var(--text-2); }
+.overview .run-card .feed-unread { color: white; }
+.overview .unread-state { font-size: 12px; color: var(--text-3); }
+@media (max-width: 600px) {
+  .creative-app .topbar { gap: 10px; padding: 10px 12px; }
+  .current-work { flex: 1 1 100%; }
+  .overview { margin: 0 auto; padding: 24px 16px; }
+  .overview .run-grid { gap: 12px; }
+}
