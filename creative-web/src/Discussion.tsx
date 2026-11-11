@@ -7,7 +7,7 @@ import { FeedEntryView } from "./FeedEntry";
 import { ChatContext } from "./ChatContext";
 import { ChatHistory, scrollToEntry } from "./ChatHistory";
 import { QuestionArchive } from "./QuestionArchive";
-import { cacheFeedEntry, useFeed } from "./feed";
+import { cacheFeedEntry, useFeed, useUnread } from "./feed";
 import type { Context, FeedEntry, Item } from "./types";
 import { Empty, ErrorNotice } from "./ui";
 
@@ -25,6 +25,8 @@ export function Discussion({ context, ready, items = [], onNavigate, active = tr
   const onlyItem = !!context.item_id && filteredSelection === selectionKey;
   const feedScope = { run_id: context.run_id, stage_id: context.stage_id, ...(onlyItem ? { item_id: context.item_id } : {}) };
   const feed = useFeed(feedScope);
+  const unread = useUnread(context.run_id);
+  const unreadCount = context.stage_id ? unread.data?.stages.find(stage => stage.stage_id === context.stage_id)?.unread : unread.data?.run_feed;
   const [body, setBody] = useState("");
   const [draftContext, setDraftContext] = useState<Context>();
   const command = useCommand();
@@ -70,7 +72,7 @@ export function Discussion({ context, ready, items = [], onNavigate, active = tr
   }, [selectionKey, active, ready]);
   const stageLabel = stageName ?? context.label.split(" / ")[1] ?? context.label;
   const itemLabel = items.find(item => item.id === context.item_id)?.name;
-  const targetLabel = target.label.split(" · ")[0];
+  const targetLabel = changed ? target.label.split(" · ")[0] : target.label.split(" / ").at(-1) ?? target.label;
   return (
     <section className="discussion">
       <div className="chat-window" ref={windowRef}>
@@ -85,8 +87,8 @@ export function Discussion({ context, ready, items = [], onNavigate, active = tr
         }}>Awaiting decision: {pending.length} <span>View proposal ↓</span></button>}
         <ErrorNotice error={feed.error} />
         <FeedReadMarker key={`read:${selectionKey}:${onlyItem}`} scope={feedScope} active={active}
-          loaded={feed.data !== undefined} through={sorted.at(-1)?.id ?? 0} updatedAt={feed.dataUpdatedAt} />
-        <ChatHistory key={`history:${selectionKey}:${onlyItem}`} entries={sorted} scope={feedScope} active={active}>
+          loaded={feed.data !== undefined && !unread.isPending} through={sorted.at(-1)?.id ?? 0} updatedAt={feed.dataUpdatedAt} />
+        <ChatHistory key={`history:${selectionKey}:${onlyItem}`} entries={sorted} scope={feedScope} active={active} unreadReady={!unread.isPending} unreadCount={onlyItem ? 0 : unreadCount}>
           {feed.isPending && <p>Loading conversation…</p>}
           {feed.data?.length === 0 && <Empty>No messages in this feed.</Empty>}
           <ol className="conversation-entries" aria-label="Conversation entries">

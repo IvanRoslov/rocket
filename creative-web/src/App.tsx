@@ -411,7 +411,6 @@ function Workspace({
                     run.name,
                     stage?.name,
                     item?.name,
-
                   ]
                     .filter(Boolean)
                     .join(" / "),

@@ -12,6 +12,7 @@ const entry = (id: number, item_id = 0, author = "orchestrator") => ({
   artifact_version_ids: [], created_at: 1794340000 + id, card: null,
 });
 const server = setupServer(
+  http.get("/v1/creative/runs/:run/feed/unread", () => HttpResponse.json({ run_id: 7, total: 0, run_feed: 0, stages: [] })),
   http.post("/v1/creative/runs/:run/feed/read", async ({ request }) => HttpResponse.json(await request.json())),
   http.get("/v1/creative/runs/7/feed", () => HttpResponse.json([])),
   http.get("/v1/creative/runs/7/questions", () => HttpResponse.json([])),

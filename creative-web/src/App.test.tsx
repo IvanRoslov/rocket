@@ -232,7 +232,7 @@ it("retains an older selected version and draft through tabs and keeps the draft
   await user.click(await screen.findByRole("tab", { name: "Artifacts" }));
   await user.selectOptions(await screen.findByLabelText("Scene image version"), "11");
   await user.click(screen.getByRole("tab", { name: "Conversation" }));
-  await waitFor(() => expect(screen.getByText(/About: Opening \/ Scenes \/ Opening scene · 1 versions/)).toBeVisible());
+  await waitFor(() => expect(screen.getByText(/About: Opening scene · 1 versions/)).toBeVisible());
   await user.type(screen.getByLabelText("Message"), "Keep this framing");
   await user.click(screen.getByRole("tab", { name: "Artifacts" }));
   expect(screen.getByLabelText("Scene image version")).toHaveValue("11");

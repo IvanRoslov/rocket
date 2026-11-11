@@ -670,7 +670,7 @@ details p {
 .run-heading > .feed-unread { color: white; }
 
 /* A bounded messenger: only history scrolls as messages arrive. */
-.discussion { padding: 0; overflow: hidden; }
+.discussion { padding: 0; overflow: hidden; color: var(--text); }
 .chat-window { height: var(--chat-height, calc(100dvh - 460px)); display: flex; flex-direction: column; min-height: 0; }
 .chat-heading { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; flex-shrink: 0; }
 .creative-app .chat-heading h2 { font-size: 15px; margin: 0; }
