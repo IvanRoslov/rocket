@@ -13,6 +13,37 @@ Local tools can live under `<ROCKET_HOME>/tools/` or at another stable path;
 they do not depend on a particular source repository or Rocket binary.
 Existing local files and registrations remain yours to maintain.
 
+## Live Creative rules
+
+`<ROCKET_HOME>/tools/rules.md` (default `~/.rocket/tools/rules.md`) is a
+user-owned, free-form text file for rules about which tool, provider or model
+to use for each job. It uses the same Rocket home as the tools catalog. Rocket
+does not ship or create this file; a missing or empty file means there are no
+rules, and agents proceed as before without a blocker.
+
+Both Creative orchestrators and workers read the current file at the start of
+work, after a restore, and again before every tool, provider or model choice.
+This includes writing a worker brief that names a tool or model and preparing
+a paid-generation proposal. Agents read the live file rather than a copy
+captured at launch, so the human can change rules through an agent without a
+Rocket release.
+
+The human's direct instruction in the current run takes priority, followed by
+the rules file, then the agent's own judgement. A one-off instruction does not
+change the file. Rules never replace paid-generation Go or stage approval.
+When a rule cannot be followed because a tool is not registered, authorization
+is unavailable or a model is unavailable, agents report a blocker or ask; they
+never silently substitute another tool or model. Workers communicate through
+the orchestrator.
+
+Any agent may edit the file only when the human directly asks to change a rule,
+never on its own initiative. If the request could mean either a one-off
+exception or a new rule, the agent asks. It preserves the other rules and tells
+the human that the change applies to all runs. Rocket does not enforce these
+rules; following them is an agent responsibility.
+
+## Registering and using tools
+
 Register a CLI with `rocket tools register renderer.yaml`; replacement requires
 `--update`. Use `--home PATH` to select a different Rocket home for catalog
 commands. For example:
