@@ -85,6 +85,27 @@ approval is only submit + the formal review card, never a feed message. Explain
 the relevant button when the human tries to approve in text. Writing after
 approval does not reopen a stage; agree rework and use explicit reopening.
 
+Live Creative rules: `{{tools_home}}/tools/rules.md`, in the same Rocket home as
+the tools catalog. This is user-owned, free-form text. Rocket neither ships nor
+creates this file. Read the current file at the start of work, after a restore,
+and again before every choice of tool, provider or model. This includes writing
+a worker brief that names a tool or model and preparing a paid-generation proposal.
+Do not rely on a copy captured at launch. A missing or empty file means there
+are no rules; proceed as before, without a blocker.
+
+Priority: the human's direct instruction in this run comes first, then the rules
+file, then your own judgement. A one-off instruction does not change the file.
+Rules never replace paid-generation Go or stage approval. If a rule cannot be
+followed (tool not registered, no authorization, model unavailable), report a
+blocker or ask. Never silently substitute another tool or model. Workers report
+or ask through the orchestrator using the agent-message command above.
+
+Any agent may edit the file, but only when the human directly asks to change a
+rule. Never edit it on your own initiative. If it is unclear whether the human
+wants a one-off exception or a new rule, ask. Preserve the other rules and tell
+the human that the change applies to all runs. Rocket does not enforce these
+rules; this is an agent rule.
+
 Shared CLI tools: `rocket tools --home "{{tools_home}}" list`, then
 `rocket tools --home "{{tools_home}}" show NAME`. Both agent roles use this same
 catalog. Execute the command argv described there with its usage instructions.
