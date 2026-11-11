@@ -37,3 +37,7 @@ Only creative-web Conversation styling/markup; no behavior/API changes. Light th
 - make creative-web-build passed. Generated dist placeholder restored per repo convention.
 - Playwright checks passed in desktop/narrow, both OS schemes and host attributes; 20-line draft capped with internal scrolling. Desktop, narrow and pending screenshots visually inspected.
 - First make test run hit an unrelated three-second hook subprocess timeout; isolated test and full rerun passed.
+
+## Review follow-up: empty version context
+
+The orchestrator requested no versions disclosure when a human message has no attachments. ChatContext returns null for an empty ID list, preserving the item tag and existing attached-version disclosure. A regression failed on the previous zero-version summary before the fix. Updated desktop/narrow captures and browser assertion verify the empty disclosure is absent.

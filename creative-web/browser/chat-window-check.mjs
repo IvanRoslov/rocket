@@ -135,6 +135,7 @@ export async function captureChatWindow(page, phase = 'before', { reviewing = fa
               orchestrator: style('.feed-entry--orchestrator:not(.feed-entry--pending)').backgroundColor,
               human: style('.feed-entry--human').backgroundColor,
               pendingBorder: style('.feed-entry--pending').borderLeftWidth,
+              emptyDisclosure: [...document.querySelectorAll('.chat-context summary')].some(el => el.textContent.includes('· 0 versions')),
               inputHeight: input.getBoundingClientRect().height,
               last: send === send.parentElement.lastElementChild,
               hint: send.previousElementSibling.textContent,
@@ -145,7 +146,7 @@ export async function captureChatWindow(page, phase = 'before', { reviewing = fa
           });
           if (visual.count < 8 || visual.header === visual.orchestrator || visual.header === visual.pane ||
               visual.human === visual.orchestrator || visual.pane === visual.orchestrator ||
-              visual.pendingBorder !== '4px' || visual.inputHeight < 104 || !visual.last ||
+              visual.emptyDisclosure || visual.pendingBorder !== '4px' || visual.inputHeight < 104 || !visual.last ||
               !visual.hint.includes('Ctrl + Enter') || Math.abs(visual.sendRight - visual.inputRight) > 2 ||
               visual.gaps.some(gap => gap < 12)) throw new Error(`Chat polish: ${JSON.stringify(visual)}`);
           if (colorScheme === 'light') {

@@ -51,6 +51,15 @@ it("puts chronological bubbles above the bottom composer and collapses human con
   await userEvent.click(within(cards[2]).getByText(/About: Opening scene/));
   expect(await screen.findByRole("link", { name: "Storyboard · version 2" })).toHaveAttribute("href", "/content/101");
 });
+it("omits the versions disclosure on human messages without attached versions", async () => {
+  server.use(http.get("/v1/creative/runs/7/feed", () => HttpResponse.json([entry(6, 5, "human")])));
+  open(4);
+  const message = await screen.findByRole("article", { name: "Message 6" });
+  expect(within(message).getByText("Opening scene")).toBeVisible();
+  expect(within(message).getByText("Message 6")).toBeVisible();
+  expect(within(message).queryByText(/About:|versions/)).not.toBeInTheDocument();
+  expect(message.querySelector("details")).not.toBeInTheDocument();
+});
 it("reads a run feed, a whole stage for an item, then the explicit item filter; archive keeps exact item scope", async () => {
   const reads: string[] = [], archives: string[] = [], writes: unknown[] = [];
   server.use(
