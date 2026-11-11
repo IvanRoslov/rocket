@@ -73,11 +73,11 @@ function open() {
     </QueryClientProvider>,
   );
 }
-it("creates work with the chosen pipeline and brief, then clears run scope on project switch", async () => {
+it("creates work with the chosen project, pipeline and brief, then returns to All works", async () => {
   open();
   const user = userEvent.setup();
-  await screen.findByRole("option", { name: "Film" });
   await user.click(screen.getByRole("button", { name: "New work" }));
+  await user.selectOptions(await screen.findByLabelText("Project"), "film");
   await user.type(screen.getByLabelText("Work name"), "Opening");
   await user.type(screen.getByLabelText("Creative brief"), "A short film");
   await user.selectOptions(screen.getByLabelText("Pipeline"), "3");
@@ -95,11 +95,9 @@ it("creates work with the chosen pipeline and brief, then clears run scope on pr
   expect(
     await screen.findByRole("heading", { name: "Opening" }),
   ).toBeInTheDocument();
-  await user.selectOptions(screen.getByLabelText("Project"), "other");
-  expect(
-    screen.queryByRole("heading", { name: "Opening" }),
-  ).not.toBeInTheDocument();
-  expect(window.location.search).toBe("?project=other");
+  await user.click(screen.getByRole("button", { name: "All works" }));
+  expect(await screen.findByRole("heading", { name: "Active works" })).toBeVisible();
+  expect(window.location.search).toBe("");
 });
 
 it("opens and edits the shared catalog without any projects", async () => {
@@ -143,7 +141,7 @@ it("creates a template without any projects", async () => {
   }));
 });
 
-it("keeps the catalog and unsaved editor draft when switching projects", async () => {
+it("keeps the catalog global and its unsaved editor draft while editing", async () => {
   const hints: (string | null)[] = [];
   server.use(http.get("/v1/creative/pipelines", ({ request }) => {
     hints.push(new URL(request.url).searchParams.get("project_id"));
@@ -151,11 +149,9 @@ it("keeps the catalog and unsaved editor draft when switching projects", async (
   }));
   open();
   const user = userEvent.setup();
-  await screen.findByRole("option", { name: "Film" });
   await user.click(screen.getByRole("button", { name: "Pipelines" }));
   await user.click(await screen.findByRole("button", { name: "Film process" }));
   await user.type(screen.getByLabelText("Pipeline name"), " draft");
-  await user.selectOptions(screen.getByLabelText("Project"), "other");
   expect(screen.getByLabelText("Pipeline name")).toHaveValue("Film process draft");
   expect(screen.getByRole("button", { name: "Film process" })).toBeInTheDocument();
   expect(hints.length).toBeGreaterThan(0);
@@ -326,11 +322,13 @@ it("uses saved run worker profiles and isolates unsaved edits when switching run
   expect(within(summary).getByText("writer")).toBeVisible();
   await userEvent.click(await screen.findByRole("button", { name: "Edit worker profiles" }));
   await userEvent.click(screen.getByRole("checkbox", { name: /writer/ }));
-  await userEvent.selectOptions(screen.getByLabelText("Creative work"), "8");
+  await userEvent.click(screen.getByRole("button", { name: "All works" }));
+  await userEvent.click(await screen.findByRole("button", { name: /Run 8/ }));
   expect(await screen.findByRole("heading", { name: "Run 8" })).toBeVisible();
   expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   expect(screen.getByText("all profiles")).toBeVisible();
-  await userEvent.selectOptions(screen.getByLabelText("Creative work"), "7");
+  await userEvent.click(screen.getByRole("button", { name: "All works" }));
+  await userEvent.click(await screen.findByRole("button", { name: /Run 7/ }));
   expect(await screen.findByRole("heading", { name: "Run 7" })).toBeVisible();
   await userEvent.click(screen.getByRole("button", { name: "Edit worker profiles" }));
   expect(screen.getByRole("checkbox", { name: /writer/ })).toBeChecked();
@@ -362,8 +360,9 @@ it("offers final human acceptance on the last stage and retains its selected rea
   expect(screen.queryByRole("textbox", { name: "Message" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("tab", { name: "Artifacts" }));
   expect(screen.queryByRole("button", { name: "Upload source" })).not.toBeInTheDocument();
-  expect(within(screen.getByLabelText("Creative work")).queryByRole("option", { name: "Opening" })).not.toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Completed works" }));
+  await user.click(screen.getByRole("button", { name: "All works" }));
+  expect(screen.queryByRole("button", { name: /Opening/ })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("tab", { name: "Completed" }));
   expect(await screen.findByRole("heading", { name: "Completed works" })).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: /Opening/ }));
   expect(await screen.findByText(/Work accepted/)).toBeInTheDocument();
@@ -383,7 +382,8 @@ it("keeps incomplete closure visible with an intentional retry after failure", a
   await user.click(await screen.findByRole("button", { name: "Accept all work" }));
   expect(await screen.findByText(/Closure incomplete/)).toBeInTheDocument();
   expect(screen.queryByText(/Work accepted/)).not.toBeInTheDocument();
-  expect(within(screen.getByLabelText("Creative work")).getByRole("option", { name: "Opening" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "All works" }));
+  await user.click(await screen.findByRole("button", { name: /Opening.*Closure incomplete/ }));
   await user.click(await screen.findByRole("button", { name: "Retry closure" }));
   expect(await screen.findByText(/Work accepted/)).toBeInTheDocument();
 });
@@ -393,6 +393,6 @@ it("opens an accepted direct link after reload and excludes it from active cards
   window.history.replaceState({}, "", "/creative/runs/7");
   open();
   expect(await screen.findByText(/Work accepted/)).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "Active works" }));
+  await userEvent.click(screen.getByRole("button", { name: "All works" }));
   expect(screen.queryByRole("button", { name: /Opening/ })).not.toBeInTheDocument();
 });

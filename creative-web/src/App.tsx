@@ -14,7 +14,10 @@ import { Empty, ErrorNotice } from "./ui";
 import { Discussion } from "./Discussion";
 import { CreativeSessionRail } from "./SessionRail";
 import { FinalAcceptance } from "./FinalAcceptance";
+import { Overview } from "./Overview";
+type View = "work" | "active" | "completed" | "pipelines" | "new";
 interface Selection {
+  view?: View;
   project?: string;
   run?: number;
   stage?: number;
@@ -27,7 +30,9 @@ function readSelection(): Selection {
     return Number.isSafeInteger(n) && n > 0 ? n : undefined;
   };
   const deep = window.location.pathname.match(/^\/creative\/runs\/(\d+)\/?$/);
+  const view = p.get("view");
   return {
+    view: ["active", "completed", "pipelines", "new"].includes(view ?? "") ? view as View : undefined,
     project: p.get("project") || undefined,
     run: number("run") ?? (deep ? Number(deep[1]) : undefined),
     stage: number("stage"),
@@ -36,23 +41,19 @@ function readSelection(): Selection {
 }
 export function App() {
   const [selection, setSelection] = useState(readSelection);
-  const [view, setView] = useState<"work" | "pipelines" | "new" | "archive" | "active">("work");
+  const view = selection.view ?? (selection.run ? "work" : "active");
   useEffect(() => {
-    const pop = () => {
-      setSelection(readSelection());
-      setView("work");
-    };
+    const pop = () => setSelection(readSelection());
     window.addEventListener("popstate", pop);
     return () => window.removeEventListener("popstate", pop);
   }, []);
   function select(next: Selection) {
     const p = new URLSearchParams();
     Object.entries(next).forEach(([k, v]) => {
-      if (v) p.set(k, String(v));
+      if (v && !(k === "view" && (v === "work" || v === "active"))) p.set(k, String(v));
     });
     window.history.pushState({}, "", `/creative/${p.size ? `?${p}` : ""}`);
     setSelection(next);
-    if (view !== "pipelines") setView("work");
   }
   const projects = useQuery({
     queryKey: ["creative", "projects"],
@@ -63,185 +64,78 @@ export function App() {
     queryFn: () => api.get<Run>(`${base}/runs/${selection.run}`),
     enabled: !!selection.run,
   });
-  const project =
-    selection.project ?? run.data?.project_id ?? projects.data?.[0]?.id ?? "";
   const pipelines = useQuery({
     queryKey: ["creative", "pipelines"],
     queryFn: () => api.get<Pipeline[]>(`${base}/pipelines`),
   });
+  const overview = view === "active" || view === "completed";
   const runs = useQuery({
-    queryKey: ["creative", "runs", project],
-    queryFn: () =>
-      api.get<Run[]>(`${base}/runs?project_id=${encodeURIComponent(project)}`),
-    enabled: !!project,
+    queryKey: ["creative", "runs"],
+    queryFn: () => api.get<Run[]>(`${base}/runs`),
+    enabled: overview,
+    refetchInterval: overview ? 2000 : false,
   });
-  const activeRuns = runs.data?.filter(r => r.closure_state !== "accepted");
-  const archives = runs.data?.filter(r => r.closure_state === "accepted");
-  const selectedRun = run.data?.project_id === project ? run.data : undefined;
+  const selectedRun = run.data;
+  const projectName = (id: string) => projects.data?.find(p => p.id === id)?.name ?? id;
+  const allWorks = () => select({});
+  const returnToWork = () => select(selection.run ? { project: selectedRun?.project_id, run: selection.run, stage: selection.stage, item: selection.item } : {});
   return (
     <div className="creative-app">
       <header className="topbar">
-        <a className="brand" href="/creative/">
-          <RocketBrand />
-        </a>
+        <a className="brand" href="/creative/"><RocketBrand /></a>
         <Badge tone="indigo">Creative</Badge>
-        <label className="top-select">
-          Project
-          <select
-            value={project}
-            onChange={(e) => select({ project: e.target.value })}
-          >
-            <option value="" disabled>
-              Select project
-            </option>
-            {projects.data?.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="top-select">
-          Creative work
-          <select
-            value={selectedRun?.closure_state === "accepted" ? "" : selection.run ?? ""}
-            onChange={(e) =>
-              select({ project, run: Number(e.target.value) || undefined })
-            }
-          >
-            <option value="">Choose work</option>
-            {selectedRun && selectedRun.closure_state !== "accepted" &&
-              !runs.data?.some((r) => r.id === selectedRun.id) && (
-                <option value={selectedRun.id}>{selectedRun.name}</option>
-              )}
-            {activeRuns?.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        {!overview && <Button variant="secondary" size="sm" onClick={allWorks}>All works</Button>}
+        {selectedRun && !overview && <div className="current-work" aria-label="Current work">
+          <span>{projectName(selectedRun.project_id)}</span><strong>{selectedRun.name}</strong>
+        </div>}
         <div className="top-actions">
-          <Button variant="secondary" size="sm" onClick={() => setView("active")}>Active works</Button>
-          <Button variant="secondary" size="sm" onClick={() => setView("archive")}>Completed works</Button>
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={!project}
-            onClick={() => setView("new")}
-          >
-            New work
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            aria-pressed={view === "pipelines"}
-            onClick={() => setView("pipelines")}
-          >
-            Pipelines
-          </Button>
-          <a href="/" target="_blank" rel="noopener noreferrer">
-            Development ↗
-          </a>
+          <Button variant="primary" size="sm" onClick={() => select({
+            view: "new", ...(view === "work" && selectedRun ? { project: selectedRun.project_id, run: selectedRun.id } : {}),
+          })}>New work</Button>
+          <Button variant="secondary" size="sm" aria-pressed={view === "pipelines"}
+            onClick={() => select({ ...selection, view: "pipelines" })}>Pipelines</Button>
+          <a href="/" target="_blank" rel="noopener noreferrer">Development ↗</a>
         </div>
       </header>
-      <ErrorNotice
-        error={projects.error ?? pipelines.error ?? runs.error ?? run.error}
-      />
+      <ErrorNotice error={projects.error ?? pipelines.error} />
       {view === "pipelines" ? (
-        <Pipelines
-          pipelines={pipelines.data ?? []}
-          onClose={() => setView("work")}
-        />
-      ) : projects.isPending ? (
-        <main>
-          <Empty>Loading projects…</Empty>
-        </main>
-      ) : projects.data?.length === 0 ? (
-        <main>
-          <h1>Your creative workspace</h1>
-          <p>Create a Rocket project to begin.</p>
-          <a href="/projects/new">Create project</a>
-        </main>
+        <Pipelines pipelines={pipelines.data ?? []} onClose={returnToWork} />
+      ) : overview ? (
+        <Overview runs={runs} projects={projects.data ?? []} completed={view === "completed"}
+          onView={(completed) => select(completed ? { view: "completed" } : {})}
+          onOpen={(r) => select({ project: r.project_id, run: r.id })} />
       ) : view === "new" ? (
-        <NewWork
-          key={project}
-          project={project}
-          pipelines={pipelines.data ?? []}
-          onCancel={() => setView("work")}
-          onCreated={(r) => select({ project, run: r.id })}
-          onPipelines={() => setView("pipelines")}
-        />
-      ) : view === "archive" || view === "active" ? (
-        <main className="welcome">
-          <h1>{view === "archive" ? "Completed works" : "Active works"}</h1>
-          <p>{view === "archive" ? "Permanently accepted work for this project. History and published results remain available." : "Work awaiting final acceptance for this project."}</p>
-          <div className="run-grid">
-            {(view === "archive" ? archives : activeRuns)?.map(r => (
-              <Button variant="secondary" size="sm" className="run-card" key={r.id} onClick={() => select({ project, run: r.id })}>
-                <strong>{r.name}</strong><span>{r.pipeline_name}</span>
-                <small>{r.closure_state === "accepted" ? "Accepted · read-only archive" : r.closure_state === "closing" ? "Closure incomplete · retry available" : r.status.replaceAll("_", " ")}</small>
-              </Button>
-            ))}
-          </div>
-          {(view === "archive" ? archives : activeRuns)?.length === 0 && <Empty>{view === "archive" ? "No accepted work yet." : "No active work."}</Empty>}
-        </main>
+        projects.isPending || (!!selection.run && run.isPending) ? <main><Empty>Loading projects…</Empty></main> :
+        projects.data?.length === 0 ? <main><h1>Your creative workspace</h1><p>Create a Rocket project to begin.</p><a href="/projects/new">Create project</a></main> :
+        <NewWork key={`${selection.run ?? "overview"}:${selectedRun?.project_id ?? ""}`}
+          project={selection.run ? selectedRun?.project_id ?? "" : ""}
+          projects={projects.data ?? []} pipelines={pipelines.data ?? []}
+          onCancel={returnToWork}
+          onCreated={(r) => select({ project: r.project_id, run: r.id })}
+          onPipelines={() => select({ ...selection, view: "pipelines" })} />
       ) : selectedRun ? (
-        <Workspace
-          run={selectedRun}
-          selection={selection}
-          onSelect={(stage, item) =>
-            select({ project, run: selectedRun.id, stage, item })
-          }
-        />
-      ) : (
-        <main className="welcome">
-          <span className="eyebrow">Creative work</span>
-          <h1>Make room for the next idea.</h1>
-          <p>Choose existing work or start with a brief and a pipeline.</p>
-          {run.isPending && selection.run ? (
-            <p>Loading work…</p>
-          ) : (
-            <div className="run-grid">
-              {activeRuns?.map((r) => (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="run-card"
-                  key={r.id}
-                  onClick={() => select({ project, run: r.id })}
-                >
-                  <strong>{r.name}</strong>
-                  <span>{r.pipeline_name}</span>
-                  <small>{r.status.replaceAll("_", " ")}</small>
-                </Button>
-              ))}
-            </div>
-          )}
-          {!pipelines.isPending && pipelines.data?.length === 0 && (
-            <p>
-              No pipelines yet. Open Pipelines to define your first creative
-              process.
-            </p>
-          )}
-        </main>
-      )}
+        <Workspace key={selectedRun.id} run={selectedRun} selection={selection}
+          onSelect={(stage, item) => select({ project: selectedRun.project_id, run: selectedRun.id, stage, item })} />
+      ) : <main>{run.isPending ? <Empty>Loading work…</Empty> : <ErrorNotice error={run.error} />}</main>}
     </div>
   );
 }
 function NewWork({
-  project,
+  project: initialProject,
+  projects,
   pipelines,
   onCancel,
   onCreated,
   onPipelines,
 }: {
   project: string;
+  projects: { id: string; name: string }[];
   pipelines: Pipeline[];
   onCancel: () => void;
   onCreated: (run: Run) => void;
   onPipelines: () => void;
 }) {
+  const [project, setProject] = useState(initialProject);
   const [name, setName] = useState(""),
     [brief, setBrief] = useState(""),
     [pipeline, setPipeline] = useState("");
@@ -253,6 +147,7 @@ function NewWork({
       <form
         onSubmit={(e) => {
           e.preventDefault();
+          if (!project || !pipeline) return;
           command.mutate(() =>
             api
               .post<Run>(`${base}/runs`, {
@@ -265,6 +160,13 @@ function NewWork({
           );
         }}
       >
+        <label>
+          Project
+          <select required value={project} onChange={(e) => setProject(e.target.value)}>
+            <option value="" disabled>Choose project</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </label>
         <label>
           Work name
           <input
@@ -318,7 +220,7 @@ function NewWork({
             variant="primary"
             size="sm"
             type="submit"
-            disabled={!pipeline || command.isPending}
+            disabled={!project || !pipeline || command.isPending}
           >
             Create work
           </Button>
