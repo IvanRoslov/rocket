@@ -27,3 +27,11 @@ The browser check emulates both dark and light OS color schemes, with unset, dar
 The browser check also verifies that polling preserves the draft and the scroll position, a height change above the visible message preserves its screen position, clicking the pill follows the latest, incoming messages follow the bottom, pending navigation works, the composer fits the viewport, and Ctrl+Enter keeps the original stage/item target and sends no automatic version references. Historical messages still carry twelve references in this fixture.
 
 To reproduce, serve this worktree with `npm run dev --prefix creative-web -- --host 127.0.0.1 --port 5177`, import `captureChatWindow` from `creative-web/browser/chat-window-check.mjs` into a Playwright runner, and call `captureChatWindow(page, "after")`. Call `captureChatWindow(page, "after", { reviewing: true })` as well to capture the pending-review layout. The before set was captured before the messenger implementation.
+
+## Composer and message polish (task 6072, spec v9)
+
+[Desktop, 1440×900](polish-stage-light.png) and [narrow, 390×844](polish-stage-light-narrow.png) show the tinted, bordered header, contrasting message pane, white orchestrator and indigo human bubbles, stronger metadata, and a decided proposal with its own accent edge. The stage fixture contains nine mixed entries, including pending and replaced proposals. [Pending proposal](after-pending-proposal.png) shows the accent border and decision actions.
+
+The composer starts at four rows (104px), grows to 192px, then scrolls internally. About stays left; the keyboard hint precedes the rightmost Send button, including while Discard draft is present. On narrow screens the context wraps above the actions. The browser check asserts message spacing, distinct surfaces, composer geometry, the long-draft cap, and the existing draft/scroll/keyboard behavior in the light dashboard under both OS color schemes. Run the same captureChatWindow(page, "after") workflow above to reproduce the polish captures.
+
+Human messages without attached versions omit the context disclosure entirely. The polish captures show those compact messages; messages with attachments retain their collapsible version references.

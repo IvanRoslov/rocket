@@ -43,7 +43,7 @@ export function Discussion({ context, ready, items = [], onNavigate, active = tr
     const input = inputRef.current;
     if (!input) return;
     input.style.height = "auto";
-    input.style.height = `${Math.min(input.scrollHeight, 104)}px`;
+    input.style.height = `${Math.min(input.scrollHeight, 192)}px`;
   }, [body, active, archiveOpen]);
   const [jump, setJump] = useState<FeedEntry>();
   const windowRef = useRef<HTMLDivElement>(null);
@@ -115,7 +115,7 @@ export function Discussion({ context, ready, items = [], onNavigate, active = tr
             await cacheFeedEntry(client, entry);
           }, { onSuccess: reset });
         }}>
-          <textarea className="chat-input" aria-label="Message" ref={inputRef} rows={1} value={body} onChange={(e) => {
+          <textarea className="chat-input" aria-label="Message" ref={inputRef} rows={4} value={body} onChange={(e) => {
             if (!draftContext) setDraftContext({ ...context, artifact_version_ids: [...context.artifact_version_ids] });
             setBody(e.target.value);
           }} onKeyDown={(e) => {
@@ -125,9 +125,9 @@ export function Discussion({ context, ready, items = [], onNavigate, active = tr
           }} placeholder="Write to the orchestrator…" disabled={command.isPending || (!ready && !draftContext)} />
           <div className="row composer-actions">
             <p className="composer-context">{changed ? `Draft stays with ${targetLabel}` : `About: ${targetLabel}`}</p>
-            <Button variant="primary" size="sm" type="submit" disabled={!body.trim() || command.isPending || (!ready && !draftContext)}>Send message</Button>
             {body && <Button variant="secondary" size="sm" type="button" onClick={reset} disabled={command.isPending}>Discard draft</Button>}
             <small>⌘ / Ctrl + Enter</small>
+            <Button variant="primary" size="sm" type="submit" disabled={!body.trim() || command.isPending || (!ready && !draftContext)}>Send message</Button>
           </div>
           <ErrorNotice error={command.error} />
         </form>
