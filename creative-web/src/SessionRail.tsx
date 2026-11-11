@@ -9,7 +9,8 @@ import type { CreativeSession } from "./types";
 import { ErrorNotice } from "./ui";
 import { WorkerProfiles, type ModelProfile } from "./WorkerProfiles";
 
-export function CreativeSessionRail({ runID, orchestrator, allowedProfiles = [] }: {
+export function CreativeSessionRail({ runID, orchestrator, allowedProfiles = [], readOnly = false }: {
+  readOnly?: boolean;
   runID: number;
   orchestrator: string;
   allowedProfiles?: string[];
@@ -46,6 +47,13 @@ export function CreativeSessionRail({ runID, orchestrator, allowedProfiles = [] 
   const workers = sessions.data?.filter(
     (s) => s.kind === "worker" && s.state !== "killed" && s.state !== "done",
   ) ?? [];
+  if (readOnly) return (
+    <aside className="session-rail creative-session-rail" aria-label="Run sessions">
+      <h2>Sessions</h2><p>Work closed for changes.</p>
+      <ErrorNotice error={sessions.error} />
+      <ul>{sessions.data?.map(s => <li key={s.id}>{s.id} · {s.state}</li>)}</ul>
+    </aside>
+  );
   return (
     <aside className="session-rail creative-session-rail" aria-label="Run sessions">
       <div className="heading">

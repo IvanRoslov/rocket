@@ -107,7 +107,9 @@ export function Artifacts({
   reviewing = false,
   itemContexts = [],
   onShown,
+  readOnly = false,
 }: {
+  readOnly?: boolean;
   scope: Scope;
   reviewIDs?: number[];
   reviewing?: boolean;
@@ -277,7 +279,7 @@ export function Artifacts({
                     maximumFractionDigits: 2,
                   }).format(version.size / 1e6)}
                 </span>
-                {!current && (
+                {!readOnly && !current && (
                   <Button
                     variant="secondary"
                     size="sm"
@@ -300,7 +302,7 @@ export function Artifacts({
           );
         });
       })}
-      <form
+      {!readOnly && <form
         className="upload"
         onSubmit={(e) => {
           e.preventDefault();
@@ -342,7 +344,7 @@ export function Artifacts({
         >
           {command.isPending ? "Uploading…" : "Upload source"}
         </Button>
-      </form>
+      </form>}
       <ErrorNotice error={command.error} />
     </section>
   );

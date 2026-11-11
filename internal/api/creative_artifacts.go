@@ -178,6 +178,8 @@ func creativeArtifactError(w http.ResponseWriter, err error) bool {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		writeErr(w, 404, "creative_artifact_not_found", "creative context, artifact or version not found")
+	case errors.Is(err, store.ErrCreativeConflict):
+		writeErr(w, 409, "creative_conflict", err.Error())
 	case errors.Is(err, store.ErrCreativeInvalid):
 		writeErr(w, 400, "invalid_creative_artifact", err.Error())
 	default:
@@ -186,6 +188,10 @@ func creativeArtifactError(w http.ResponseWriter, err error) bool {
 	return true
 }
 func creativeArtifactWriter(w http.ResponseWriter, r *http.Request, d Deps, ctx store.CreativeContext) (string, bool) {
+	if err := d.Store.CheckCreativeRunMutable(ctx.RunID); err != nil {
+		creativeError(w, err)
+		return "", false
+	}
 	caller, err := callerSession(r, d.Store)
 	if writeCallerErr(w, err) {
 		return "", false

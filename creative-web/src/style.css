@@ -774,3 +774,13 @@ details p {
   .creative-app .topbar { flex-wrap: wrap; height: auto; }
   .chat-pending span { display: none; }
 }
+
+.final-acceptance {
+  border: 1px solid var(--color-accent, #7465e8);
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 20px;
+}
+.final-acceptance h2 { margin-top: 0; }
+.final-acceptance p { line-height: 1.5; }
+.final-acceptance.accepted { border-color: #398365; }

@@ -9,7 +9,7 @@ import type { Context, CreativeQuestion } from "./types";
 import { BoundVersions } from "./BoundVersions";
 import { Empty, ErrorNotice } from "./ui";
 
-export function QuestionArchive({ context }: { context: Context }) {
+export function QuestionArchive({ context, readOnly = false }: { context: Context; readOnly?: boolean }) {
   const questions = useQuery({
     queryKey: ["creative", "questions", context.run_id, context.stage_id, context.item_id],
     queryFn: () => api.get<CreativeQuestion[]>(contextPath(context, "questions")),
@@ -31,7 +31,7 @@ export function QuestionArchive({ context }: { context: Context }) {
       {questions.isPending && <p>Loading questions…</p>}
       {questions.data?.length === 0 && <Empty>No questions in this context.</Empty>}
       <div className="questions-tab">
-        {sorted.filter(q => q.status === "open").map(q => <Question key={q.id} question={q} draft={draft(q.id)} />)}
+        {sorted.filter(q => q.status === "open").map(q => <Question readOnly={readOnly} key={q.id} question={q} draft={draft(q.id)} />)}
         {sorted.some(q => q.status !== "open") && <div className="questions-tab__resolved-label">Resolved</div>}
         {sorted.filter(q => q.status !== "open").map(q => <ResolvedQuestion key={q.id} question={q} />)}
       </div>
@@ -62,7 +62,7 @@ function Question({ question: q, draft, readOnly = false }: {
         body={q.body}
         brief={q.brief}
         messages={q.messages ?? []}
-        turnLabel={readOnly ? "Resolved" : q.your_turn ? "Your reply needed" : "Open"}
+        turnLabel={readOnly ? (q.status === "open" ? "Archived" : "Resolved") : q.your_turn ? "Your reply needed" : "Open"}
         turnWarn={!readOnly && q.your_turn}
         askerLabel={isHuman(q.asked_by) ? "you asked" : `${q.asked_by} asked`}
         options={q.options}

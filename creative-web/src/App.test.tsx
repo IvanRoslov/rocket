@@ -335,3 +335,64 @@ it("uses saved run worker profiles and isolates unsaved edits when switching run
   await userEvent.click(screen.getByRole("button", { name: "Edit worker profiles" }));
   expect(screen.getByRole("checkbox", { name: /writer/ })).toBeChecked();
 });
+
+function completedFixture(state: "open" | "closing" | "accepted" = "open", error = "") {
+  return {
+    id: 7, project_id: "film", pipeline_id: 3, pipeline_name: "Film process", name: "Opening", brief: "Saved film", status: "completed",
+    closure_state: state, accepted_at: state === "accepted" ? 123 : 0, closure_error: error, orchestrator_session_id: "",
+    stages: [{ id: 11, run_id: 7, position: 0, name: "Draft", description: "Saved scene", expected_artifacts: "Clip", repeated: false, approval: "stage", status: "completed", progress: 100, progress_note: "", review_revision: 1, artifact_version_ids: [], items: [] }],
+  };
+}
+it("offers final human acceptance on the last stage and retains its selected readable archive", async () => {
+  let run = completedFixture();
+  server.use(
+    http.get("/v1/creative/runs/7", () => HttpResponse.json(run)),
+    http.get("/v1/creative/runs", () => HttpResponse.json([run])),
+    http.post("/v1/creative/runs/7/accept", () => { run = completedFixture("accepted"); return HttpResponse.json(run); }),
+  );
+  window.history.replaceState({}, "", "/creative/?project=film&run=7&stage=11");
+  open();
+  const user = userEvent.setup();
+  const accept = await screen.findByRole("button", { name: "Accept all work" });
+  expect(screen.getByText(/permanently closes/i)).toBeInTheDocument();
+  await user.click(accept);
+  expect(await screen.findByText(/Work accepted/)).toBeInTheDocument();
+  expect(window.location.search).toContain("stage=11");
+  expect(screen.queryByRole("button", { name: /Reopen|Restore creative|Start creative/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("textbox", { name: "Message" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("tab", { name: "Artifacts" }));
+  expect(screen.queryByRole("button", { name: "Upload source" })).not.toBeInTheDocument();
+  expect(within(screen.getByLabelText("Creative work")).queryByRole("option", { name: "Opening" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Completed works" }));
+  expect(await screen.findByRole("heading", { name: "Completed works" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: /Opening/ }));
+  expect(await screen.findByText(/Work accepted/)).toBeInTheDocument();
+});
+it("keeps incomplete closure visible with an intentional retry after failure", async () => {
+  let run = completedFixture(); let attempts = 0;
+  server.use(
+    http.get("/v1/creative/runs/7", () => HttpResponse.json(run)),
+    http.get("/v1/creative/runs", () => HttpResponse.json([run])),
+    http.post("/v1/creative/runs/7/accept", () => {
+      if (++attempts === 1) { run = completedFixture("closing", "Could not stop worker"); return HttpResponse.json({ error: { code: "internal_error", message: "Could not stop worker" } }, { status: 500 }); }
+      run = completedFixture("accepted"); return HttpResponse.json(run);
+    }),
+  );
+  window.history.replaceState({}, "", "/creative/?project=film&run=7");
+  open(); const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Accept all work" }));
+  expect(await screen.findByText(/Closure incomplete/)).toBeInTheDocument();
+  expect(screen.queryByText(/Work accepted/)).not.toBeInTheDocument();
+  expect(within(screen.getByLabelText("Creative work")).getByRole("option", { name: "Opening" })).toBeInTheDocument();
+  await user.click(await screen.findByRole("button", { name: "Retry closure" }));
+  expect(await screen.findByText(/Work accepted/)).toBeInTheDocument();
+});
+it("opens an accepted direct link after reload and excludes it from active cards", async () => {
+  const run = completedFixture("accepted");
+  server.use(http.get("/v1/creative/runs/7", () => HttpResponse.json(run)), http.get("/v1/creative/runs", () => HttpResponse.json([run])));
+  window.history.replaceState({}, "", "/creative/runs/7");
+  open();
+  expect(await screen.findByText(/Work accepted/)).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Active works" }));
+  expect(screen.queryByRole("button", { name: /Opening/ })).not.toBeInTheDocument();
+});

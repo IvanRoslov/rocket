@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/IvanRoslov/rocket/internal/preview"
 	"github.com/IvanRoslov/rocket/internal/runtime"
 	"github.com/IvanRoslov/rocket/internal/session"
 	"github.com/IvanRoslov/rocket/internal/store"
@@ -182,4 +183,65 @@ func creativeCall(h http.Handler, method, path, caller, body string) *httptest.R
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	return w
+}
+
+// A runtime returning nil without actually stopping must never produce an archive.
+type lingeringAcceptanceRuntime struct{ *acceptanceRuntime }
+
+func (r lingeringAcceptanceRuntime) Destroy(context.Context, runtime.Handle) error { return nil }
+func TestCreativeAcceptanceRequiresRuntimeAbsence(t *testing.T) {
+	d, r, rt, ws := acceptanceFixture(t)
+	finishStages(t, d, r)
+	d.Manager = session.NewManager(d.Store, d.Bus, lingeringAcceptanceRuntime{rt}, ws, d.Cfg)
+	rec := creativeCall(NewHandler(d), "POST", fmt.Sprintf("/v1/creative/runs/%d/accept", r.ID), "", "{}")
+	if rec.Code < 400 {
+		t.Fatal("destroy acknowledgment incorrectly proves stopped")
+	}
+	got, _ := d.Store.GetCreativeRun(r.ID)
+	if got.ClosureState != "closing" {
+		t.Fatalf("hidden incomplete closure: %+v", got)
+	}
+}
+func TestCreativeAcceptanceRejectsPreviewMutation(t *testing.T) {
+	d, r, _, _ := acceptanceFixture(t)
+	finishStages(t, d, r)
+	creativeRequest(t, d, "POST", fmt.Sprintf("/v1/creative/runs/%d/accept", r.ID), "{}", "", 200)
+	creativeRequest(t, d, "POST", "/v1/creative/previews", fmt.Sprintf(`{"run_id":%d,"port":3000}`, r.ID), "", 409)
+}
+
+func TestCreativeAcceptanceDisablesExistingInteractivePreview(t *testing.T) {
+	d, r, _, _ := acceptanceFixture(t)
+	d.Cfg.PreviewPort = 4480
+	d.Cfg.PreviewPublicURL = "https://preview.example.net"
+	d.Cfg.PreviewPorts = []int{5100}
+	initializePreviews(&d)
+	a, err := d.Previews.Register(preview.Context{RunID: r.ID}, 5100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finishStages(t, d, r)
+	creativeRequest(t, d, "POST", fmt.Sprintf("/v1/creative/runs/%d/accept", r.ID), "{}", "", 200)
+	rec := creativeCall(creativePreviewHandler(d), "POST", a.BasePath, "", "change")
+	if rec.Code != 410 {
+		t.Fatalf("interactive preview still routed: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreativeAcceptanceRetainsDownloadsAndRejectsArtifactChanges(t *testing.T) {
+	d, r, _, _ := acceptanceFixture(t)
+	h := NewHandler(d)
+	p := decodePublication(t, artifactRequest(h, "POST", creativePublishPath(r.ID, r.Stages[0].ID, "Final film", "result", "film.mp4"), "video/mp4", "", strings.NewReader("retained-film")))
+	finishStages(t, d, r)
+	creativeRequest(t, d, "POST", fmt.Sprintf("/v1/creative/runs/%d/accept", r.ID), "{}", "", 200)
+	for _, path := range []string{p.Version.ContentURL, p.Version.DownloadURL} {
+		rec := creativeCall(h, "GET", path, "", "")
+		if rec.Code != 200 || rec.Body.String() != "retained-film" {
+			t.Fatalf("retained file %s: %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+	creativeRequest(t, d, "PUT", fmt.Sprintf("/v1/creative/artifacts/%d/current", p.Artifact.ID), fmt.Sprintf(`{"version_id":%d}`, p.Version.ID), "", 409)
+	rec := artifactRequest(h, "POST", fmt.Sprintf("/v1/creative/artifacts/%d/versions?filename=late.mp4", p.Artifact.ID), "video/mp4", "", strings.NewReader("late"))
+	if rec.Code != 409 {
+		t.Fatalf("late artifact: %d %s", rec.Code, rec.Body.String())
+	}
 }
