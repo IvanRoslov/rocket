@@ -8,6 +8,7 @@ import { Discussion } from "./Discussion";
 import { CreativeSessionRail } from "./SessionRail";
 const posted: unknown[] = [];
 const server = setupServer(
+  http.get("/v1/creative/runs/:run/feed/unread", () => HttpResponse.json({ run_id: 7, total: 0, run_feed: 0, stages: [] })),
   http.post("/v1/creative/runs/:run/feed/read", async ({ request }) => HttpResponse.json(await request.json())),
   http.get("/v1/creative/runs/7/feed", () => HttpResponse.json([])),
   http.get("/v1/creative/runs/7/questions", () => HttpResponse.json([])),

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
@@ -12,6 +12,7 @@ const entry = (id: number, item_id = 0, author = "orchestrator") => ({
   artifact_version_ids: [], created_at: 1794340000 + id, card: null,
 });
 const server = setupServer(
+  http.get("/v1/creative/runs/:run/feed/unread", () => HttpResponse.json({ run_id: 7, total: 0, run_feed: 0, stages: [] })),
   http.post("/v1/creative/runs/:run/feed/read", async ({ request }) => HttpResponse.json(await request.json())),
   http.get("/v1/creative/runs/7/feed", () => HttpResponse.json([])),
   http.get("/v1/creative/runs/7/questions", () => HttpResponse.json([])),
@@ -29,7 +30,7 @@ function open(stage?: number, item?: number) {
   );
   return { ...render(tree()), tree, client };
 }
-it("puts the composer above newest-first entries with author, time, item display name and pinned version links", async () => {
+it("puts chronological bubbles above the bottom composer and collapses human context", async () => {
   server.use(
     http.get("/v1/creative/runs/7/feed", () => HttpResponse.json([
       entry(3), { ...entry(5, 5, "human"), artifact_version_ids: [101] }, entry(4, 6),
@@ -40,12 +41,14 @@ it("puts the composer above newest-first entries with author, time, item display
   open(4);
   const list = await screen.findByRole("list", { name: "Conversation entries" });
   const cards = await within(list).findAllByRole("article");
-  expect(cards.map((c) => within(c).getByText(/Message \d/).textContent)).toEqual(["Message 5", "Message 4", "Message 3"]);
-  expect(screen.getByLabelText("Message").compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(within(cards[0]).getByText("You")).toBeVisible();
+  expect(cards.map((c) => within(c).getByText(/Message \d/).textContent)).toEqual(["Message 3", "Message 4", "Message 5"]);
+  expect(screen.getByLabelText("Message").compareDocumentPosition(list) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  expect(within(cards[2]).getByText("You")).toBeVisible();
   expect(within(cards[1]).getByText("Orchestrator")).toBeVisible();
-  expect(within(cards[0]).getByText("Opening scene")).toBeVisible();
-  expect(cards[0].querySelector("time")).toHaveAttribute("dateTime", new Date(1794340005 * 1000).toISOString());
+  expect(within(cards[2]).getByText(/About: Opening scene/)).toBeVisible();
+  expect(cards[2].querySelector("time")).toHaveAttribute("dateTime", new Date(1794340005 * 1000).toISOString());
+  expect(screen.queryByRole("link", { name: "Storyboard · version 2" })).not.toBeInTheDocument();
+  await userEvent.click(within(cards[2]).getByText(/About: Opening scene/));
   expect(await screen.findByRole("link", { name: "Storyboard · version 2" })).toHaveAttribute("href", "/content/101");
 });
 it("reads a run feed, a whole stage for an item, then the explicit item filter; archive keeps exact item scope", async () => {
@@ -114,4 +117,31 @@ it("inserts a sent message immediately even if the following feed refresh fails"
   await userEvent.click(screen.getByRole("button", { name: "Send message" }));
   expect(await screen.findByText("Saved while offline", { selector: ".markdown p" })).toBeVisible();
   await waitFor(() => expect(screen.getByLabelText("Message")).toHaveValue(""));
+});
+
+it("preserves scroll and draft on polling above the bottom and offers the new-message pill", async () => {
+  server.use(http.get("/v1/creative/runs/7/feed", () => HttpResponse.json([entry(3), entry(4)])));
+  const view = open(4);
+  await screen.findByRole("article", { name: "Message 4" });
+  const scroll = screen.getByRole("region", { name: "Chat history" });
+  Object.defineProperties(scroll, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, value: 200 } });
+  scroll.scrollTop = 100;
+  fireEvent.scroll(scroll);
+  await userEvent.type(screen.getByLabelText("Message"), "A draft");
+  act(() => view.client.setQueryData(["creative", "feed", 7, 4, 0], [entry(5), entry(4), entry(3)]));
+  expect(scroll.scrollTop).toBe(100);
+  expect(screen.getByLabelText("Message")).toHaveValue("A draft");
+  await userEvent.click(await screen.findByRole("button", { name: "1 new ↓" }));
+  expect(scroll.scrollTop).toBe(1000);
+  expect(screen.queryByRole("button", { name: /new ↓/ })).not.toBeInTheDocument();
+  act(() => view.client.setQueryData(["creative", "feed", 7, 4, 0], [entry(6), entry(5), entry(4), entry(3)]));
+  await waitFor(() => expect(scroll.scrollTop).toBe(1000));
+});
+it.each(["Control", "Meta"])("sends with %s+Enter and retains the attachment target", async (modifier) => {
+  const writes: unknown[] = [];
+  server.use(http.post("/v1/creative/runs/7/feed", async ({ request }) => { writes.push(await request.json()); return HttpResponse.json(entry(10, 5, "human")); }));
+  open(4, 5);
+  await userEvent.type(screen.getByLabelText("Message"), "Send by keyboard");
+  await userEvent.keyboard(`{${modifier}>}{Enter}{/${modifier}}`);
+  await waitFor(() => expect(writes).toEqual([{ stage_id: 4, item_id: 5, artifact_version_ids: [101], body: "Send by keyboard" }]));
 });

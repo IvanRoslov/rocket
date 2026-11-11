@@ -404,16 +404,13 @@ function Workspace({
             </div>
             <div hidden={tab !== "discussion"}>
               <Discussion
+                stageName={stage?.name}
                 context={{
                   ...scope,
                   label: [
                     run.name,
                     stage?.name,
                     item?.name,
-                    ...shown.map(
-                      (s) =>
-                        `${s.item_name ? `${s.item_name} / ` : ""}${s.artifact.name} version ${s.version.version_number}`,
-                    ),
                   ]
                     .filter(Boolean)
                     .join(" / "),
