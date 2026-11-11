@@ -2,17 +2,19 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "../../web/src/components/Button";
 import { Markdown } from "../../web/src/components/Markdown";
 import { api } from "./api";
-import { BoundVersions } from "./BoundVersions";
+import { ChatContext } from "./ChatContext";
+import { AttachmentCards } from "./AttachmentCards";
 import { cacheFeedEntry, cardPath, CardConflict, decideCard, refreshFeeds } from "./feed";
 import type { FeedDecision, FeedEntry, Item } from "./types";
 import { ErrorNotice } from "./ui";
 
 const decisions: Record<FeedDecision, string> = { go: "Go", revise: "Revise", deny: "Deny" };
 function EntryTime({ value }: { value: number }) {
-  return <time dateTime={new Date(value * 1000).toISOString()}>{new Date(value * 1000).toLocaleString()}</time>;
+  return <time dateTime={new Date(value * 1000).toISOString()}>{new Date(value * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false })}</time>;
 }
-export function FeedEntryView({ entry, items, onJump }: {
+export function FeedEntryView({ entry, items, onJump, contextLabel = "Run" }: {
   entry: FeedEntry;
+  contextLabel?: string;
   items: Pick<Item, "id" | "name">[];
   onJump: (successor: FeedEntry) => void;
 }) {
@@ -39,7 +41,7 @@ export function FeedEntryView({ entry, items, onJump }: {
   const card = entry.card;
   return (
     <article id={`feed-entry-${entry.id}`} tabIndex={-1}
-      className={`feed-entry${card ? ` feed-entry--${card.status}` : ""}`}
+      className={`feed-entry feed-entry--${entry.author}${card ? ` feed-entry--${card.status}` : ""}`}
       aria-label={`${card ? "Proposal" : "Message"} ${entry.id}`}>
       <header className="feed-entry__meta">
         <strong>{entry.author === "human" ? "You" : "Orchestrator"}</strong>
@@ -48,7 +50,7 @@ export function FeedEntryView({ entry, items, onJump }: {
         {card?.status === "pending" && <span className="feed-entry__pending-label">Awaiting your decision</span>}
       </header>
       <Markdown compact>{entry.body}</Markdown>
-      <BoundVersions ids={entry.artifact_version_ids} />
+      {entry.author === "human" ? <ChatContext label={items.find(item => item.id === entry.item_id)?.name ?? contextLabel} ids={entry.artifact_version_ids} /> : <AttachmentCards ids={entry.artifact_version_ids} items={items} />}
       {card?.status === "pending" && <div className="row feed-entry__actions">
         {(Object.keys(decisions) as FeedDecision[]).map(value => <Button key={value} variant={value === "go" ? "primary" : "secondary"} size="sm"
           disabled={decision.isPending} onClick={() => decision.mutate(value)}>{decisions[value]}</Button>)}
