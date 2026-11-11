@@ -23,6 +23,10 @@ export async function captureChatWindow(page, phase = 'before', { reviewing = fa
     message(104, 'Keep the framing, but make the light warmer.', { item: 5, author: 'human', versions }),
     proposal(103, '### Two opening images\nGenerate **2 images** with the configured image tool / Example provider / Model A.\n\nInputs: Storyboard version 2 below, uploaded to the provider only.\n\nCalls: opening-wide, opening-detail (2 calls). **Estimate: $0.20**, based on $0.10 per image. Wait for Go.', { replaces_entry_id: 102 }),
     proposal(102, 'Four opening images — original estimate $0.40. Superseded by the two-image proposal.', { status: 'replaced', replaced_by_entry_id: 103 }),
+    message(100, 'Yes, keep a little rain.', { author: 'human' }),
+    { ...proposal(98, 'Open on the empty station, then cut to the reunion.', { status: 'decided', decision: 'go', decided_at: now + 98 * 60 }), artifact_version_ids: [] },
+    message(97, 'Let the reunion feel quiet.', { author: 'human' }),
+    message(96, 'I will start with a restrained storyboard.'),
     message(101, 'The scene outline is ready. Shall we keep the rain in the opening?', { item: 5 }),
   ];
   const markers = new Map();
@@ -119,6 +123,42 @@ export async function captureChatWindow(page, phase = 'before', { reviewing = fa
         }
         await page.waitForTimeout(500);
         if (phase === 'after' && scope === 'stage') {
+          const visual = await page.evaluate(() => {
+            const style = selector => getComputedStyle(document.querySelector(selector));
+            const send = document.querySelector('.composer-actions button[type="submit"]');
+            const input = document.querySelector('.chat-input');
+            const bubbles = [...document.querySelectorAll('.feed-entry')];
+            return {
+              count: bubbles.length,
+              header: style('.chat-heading').backgroundColor,
+              pane: style('.chat-history').backgroundColor,
+              orchestrator: style('.feed-entry--orchestrator:not(.feed-entry--pending)').backgroundColor,
+              human: style('.feed-entry--human').backgroundColor,
+              pendingBorder: style('.feed-entry--pending').borderLeftWidth,
+              inputHeight: input.getBoundingClientRect().height,
+              last: send === send.parentElement.lastElementChild,
+              hint: send.previousElementSibling.textContent,
+              sendRight: send.getBoundingClientRect().right,
+              inputRight: input.getBoundingClientRect().right,
+              gaps: bubbles.slice(1).map((bubble, i) => bubble.getBoundingClientRect().top - bubbles[i].getBoundingClientRect().bottom),
+            };
+          });
+          if (visual.count < 8 || visual.header === visual.orchestrator || visual.header === visual.pane ||
+              visual.human === visual.orchestrator || visual.pane === visual.orchestrator ||
+              visual.pendingBorder !== '4px' || visual.inputHeight < 104 || !visual.last ||
+              !visual.hint.includes('Ctrl + Enter') || Math.abs(visual.sendRight - visual.inputRight) > 2 ||
+              visual.gaps.some(gap => gap < 12)) throw new Error(`Chat polish: ${JSON.stringify(visual)}`);
+          if (colorScheme === 'light') {
+            await page.locator('.chat-window').scrollIntoViewIfNeeded();
+            const history = page.locator('.chat-history');
+            const previousTop = await history.evaluate(el => el.scrollTop);
+            await history.evaluate((el, top) => { el.scrollTop = top; }, narrow ? 100 : 0);
+            await page.screenshot({ path: `${screenshots}polish-stage-light${narrow ? '-narrow' : ''}.png` });
+            await history.evaluate((el, top) => { el.scrollTop = top; }, previousTop);
+            await page.evaluate(() => window.scrollTo(0, 0));
+          }
+        }
+        if (phase === 'after' && scope === 'stage') {
           const layout = await page.evaluate(() => {
             const rect = selector => {
               const r = document.querySelector(selector).getBoundingClientRect();
@@ -163,12 +203,16 @@ export async function captureChatWindow(page, phase = 'before', { reviewing = fa
     await page.waitForTimeout(500);
     await history.evaluate(el => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')); });
     const singleLineHeight = (await input.boundingBox()).height;
+    if (singleLineHeight < 104) throw new Error('Composer must start at four rows');
     await input.fill('First line\nSecond line\nThird line\nFourth line\nFifth line');
     const grownHeight = (await input.boundingBox()).height;
-    if (grownHeight <= singleLineHeight || grownHeight > 104) throw new Error('Composer must grow to a bounded few lines');
+    if (grownHeight <= singleLineHeight || grownHeight > 192) throw new Error('Composer must grow to a bounded few lines');
     await page.waitForTimeout(150);
     const growthGap = await history.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight);
     if (growthGap > 2) throw new Error(`Growing composer hid latest message by ${growthGap}px`);
+    await input.fill(Array.from({ length: 20 }, (_, i) => `Draft line ${i + 1}`).join('\n'));
+    const capped = await input.evaluate(el => ({ height: el.getBoundingClientRect().height, scroll: el.scrollHeight, client: el.clientHeight }));
+    if (capped.height > 192 || capped.scroll <= capped.client) throw new Error('Long draft must scroll within the composer cap');
     await input.fill('A draft that survives polling');
     await page.getByRole('button', { name: 'Old questions', exact: true }).click();
     await page.getByRole('region', { name: 'Old questions archive' }).waitFor();
@@ -204,7 +248,7 @@ export async function captureChatWindow(page, phase = 'before', { reviewing = fa
     await page.waitForTimeout(100);
     if (await history.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight) > 2) throw new Error('Did not follow bottom');
     await page.getByRole('button', { name: /Awaiting decision:/ }).click();
-    await page.getByRole('button', { name: 'Go', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Go', exact: true }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: `${screenshots}after-pending-proposal.png` });
     await page.getByRole('textbox', { name: 'Message', exact: true }).press('Control+Enter');
     await page.waitForFunction(() => document.querySelector('textarea')?.value === '');
