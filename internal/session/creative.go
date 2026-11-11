@@ -44,6 +44,9 @@ func (m *Manager) SpawnCreative(ctx context.Context, in CreativeSpawnReq) (store
 
 // Called under the normal manager launch lock, preventing duplicate run launches.
 func (m *Manager) validateCreativeSpawn(req SpawnReq) error {
+	if err := m.st.CheckCreativeRunMutable(req.creative.RunID); err != nil {
+		return err
+	}
 	c, err := m.st.ResolveCreativeContext(req.creative.RunID, req.creative.StageID, req.creative.ItemID)
 	if err != nil {
 		return err
@@ -124,6 +127,9 @@ func (m *Manager) fillCreativePrompt(spec *agent.LaunchSpec, sess store.Session,
 }
 
 func (m *Manager) validateCreativeRestore(sess store.Session, b store.CreativeBinding) error {
+	if err := m.st.CheckCreativeRunMutable(b.RunID); err != nil {
+		return err
+	}
 	c, err := m.st.ResolveCreativeContext(b.RunID, b.StageID, b.ItemID)
 	if err != nil {
 		return err

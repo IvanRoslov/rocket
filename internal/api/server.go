@@ -139,7 +139,7 @@ func NewHandler(d Deps) http.Handler {
 	// SPA fallback to index.html for client-side routes.
 	registerStaticRoutes(mux)
 
-	return mux
+	return creativeArchiveBoundary(d, mux)
 }
 
 // Serve listens on both d.Cfg.SocketPath() (a unix socket, mode 0600) and
