@@ -61,9 +61,9 @@ function ReviewCard({ scope, work, canProgress, itemContexts = [] }: Props) {
     start: "Start work", approve: `Approve ${kind}`, reject: "Return for changes", reopen: "Reopen for rework",
   };
   return (
-    <section className="review-actions" aria-label={`Review ${work.name}`}>
-      <h2>{reviewing ? `Review ${kind}: ${work.name}` : work.name}</h2>
-      {work.review_revision > 0 && <p>Revision {work.review_revision}</p>}
+    <section className={`review-actions${reviewing ? " review-actions--pending" : ""}`} aria-label={`Review ${work.name}`}>
+      {reviewing && <h2>{`Review ${kind}: ${work.name}`}</h2>}
+      {reviewing && work.review_revision > 0 && <p>Revision {work.review_revision}</p>}
       {visibleOutcome ? (
         <div role="status">
           <p>Revision {work.review_revision} {visibleOutcome.action === "approve" ? "approved." : "returned for changes."}</p>

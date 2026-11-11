@@ -24,7 +24,7 @@ const server = setupServer(
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
 afterEach(() => server.resetHandlers());
-it("keeps a draft bound to the stage and artifact version originally shown when selection changes", async () => {
+it("keeps a draft bound to the stage originally selected when selection changes", async () => {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -59,7 +59,6 @@ it("keeps a draft bound to the stage and artifact version originally shown when 
     expect(posted).toEqual([
       {
         stage_id: 4,
-        artifact_version_ids: [11],
         body: "Make the opening warmer",
       },
     ]),
@@ -367,6 +366,7 @@ it("uses a feed message composer and removes human question creation", async () 
   expect(screen.queryByRole("heading", { name: "Messages" })).not.toBeInTheDocument();
   expect(screen.queryByText("Hidden feed message")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Send as")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Back to chat" }));
   expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
   expect(screen.queryByRole("button", { name: "Open question" })).not.toBeInTheDocument();
   expect(screen.getByLabelText("Message")).toBeEnabled();

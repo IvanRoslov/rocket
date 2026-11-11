@@ -209,14 +209,18 @@ function workspaceFixture(status = "awaiting_approval") {
   return { actions, messages };
 }
 
-it("shows the sole review card above tabs and approves from discussion", async () => {
+it("shows the sole highlighted review above Sessions in the sidebar and approves from discussion", async () => {
   const { actions } = workspaceFixture();
   open();
   const user = userEvent.setup();
   const tabs = await screen.findByRole("tablist", { name: "Workspace" });
   expect(within(tabs).getAllByRole("tab")).toHaveLength(2);
   const card = screen.getByRole("region", { name: "Review Opening scene" });
-  expect(card.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const sidebar = screen.getByRole("complementary", { name: "Review and sessions" });
+  expect(sidebar).toContainElement(card);
+  expect(screen.getByRole("main")).not.toContainElement(card);
+  expect(card).toHaveClass("review-actions--pending");
+  expect(card.compareDocumentPosition(within(sidebar).getByRole("heading", { name: "Sessions" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(within(tabs).getByRole("tab", { name: "Conversation" })).toHaveAttribute("aria-selected", "true");
   expect(await within(card).findByRole("link", { name: "Scene image · version 2" })).toBeVisible();
   expect(screen.getAllByRole("button", { name: "Approve item" })).toHaveLength(1);
@@ -232,7 +236,7 @@ it("retains an older selected version and draft through tabs and keeps the draft
   await user.click(await screen.findByRole("tab", { name: "Artifacts" }));
   await user.selectOptions(await screen.findByLabelText("Scene image version"), "11");
   await user.click(screen.getByRole("tab", { name: "Conversation" }));
-  await waitFor(() => expect(screen.getByText(/About: Opening scene · 1 versions/)).toBeVisible());
+  await waitFor(() => expect(screen.getByText(/About: Opening scene/)).toBeVisible());
   await user.type(screen.getByLabelText("Message"), "Keep this framing");
   await user.click(screen.getByRole("tab", { name: "Artifacts" }));
   expect(screen.getByLabelText("Scene image version")).toHaveValue("11");
@@ -247,7 +251,7 @@ it("retains an older selected version and draft through tabs and keeps the draft
   expect(window.location.search).toBe("?project=film&run=7&stage=4");
   expect(screen.getByText(/Draft stays with Opening \/ Scenes \/ Opening scene/)).toBeVisible();
   await user.click(screen.getByRole("button", { name: "Send message" }));
-  await waitFor(() => expect(messages).toEqual([{ stage_id: 4, item_id: 5, artifact_version_ids: [11], body: "Keep this framing" }]));
+  await waitFor(() => expect(messages).toEqual([{ stage_id: 4, item_id: 5, body: "Keep this framing" }]));
 });
 
 it("keeps the submitted set independent of browsing history and tab changes", async () => {
