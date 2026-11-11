@@ -1,0 +1,140 @@
+// All API requests are intercepted. Never create/accept real work or contact a daemon.
+export async function runOverviewCheck(page) {
+  const origin = 'http://127.0.0.1:15576';
+  const screenshots = 'docs/screenshots/creative-overview';
+  const stage = { id: 11, run_id: 7, position: 0, name: 'Final edit', description: 'Review the opening.', expected_artifacts: 'Film', repeated: true, approval: 'item', status: 'completed', progress: 100, progress_note: '', review_revision: 1, artifact_version_ids: [], items: [{ id: 21, run_id: 7, stage_id: 11, position: 0, name: 'Opening scene', description: 'A retained scene', expected_artifacts: '', status: 'completed', progress: 100, progress_note: '', review_revision: 1, artifact_version_ids: [] }] };
+  const make = (id, project_id, closure_state = 'open') => ({ id, project_id, name: 'Opening', brief: 'A quiet opening.', pipeline_id: 3, pipeline_name: 'Studio process', status: 'completed', closure_state, closure_error: '', accepted_at: 0, orchestrator_session_id: '', stages: id === 7 ? [stage] : [] });
+  const works = [make(7, 'film'), make(8, 'music'), make(9, 'music', 'accepted'), make(10, 'film', 'closing')];
+  const errors = [], reads = [], writes = [], requests = [];
+  let unread = 2, unreadError = false, listError = false;
+  page.on('pageerror', error => errors.push(error.message));
+  const json = (route, value, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) });
+  await page.unroute('**/v1/**');
+  await page.route('**/v1/**', route => {
+    const req = route.request(), url = new URL(req.url()), path = url.pathname;
+    requests.push(path + url.search);
+    if (path === '/v1/projects') return json(route, [{ id: 'film', name: 'Film studio' }, { id: 'music', name: 'Music studio' }]);
+    if (path === '/v1/creative/pipelines') return json(route, [{ id: 3, name: 'Studio process', stages: [] }]);
+    if (path === '/v1/model-profiles') return json(route, { profiles: [] });
+    if (path === '/v1/creative/runs') {
+      if (req.method() === 'POST') {
+        const body = req.postDataJSON(); writes.push(body); const run = { ...make(12, body.project_id), ...body, status: 'pending', stages: [] }; works.push(run); return json(route, run);
+      }
+      if (url.searchParams.has('project_id')) throw new Error('Global list scoped to a project');
+      return listError ? json(route, { error: { message: 'Works unavailable' } }, 503) : json(route, works);
+    }
+    const match = path.match(/^\/v1\/creative\/runs\/(\d+)(.*)$/);
+    if (match) {
+      const id = Number(match[1]), tail = match[2], work = works.find(r => r.id === id);
+      if (!tail) return json(route, work);
+      if (tail === '/feed/unread') return unreadError ? json(route, { error: { message: 'Unread offline' } }, 503)
+        : json(route, { run_id: id, total: id === 7 ? unread : 0, run_feed: 0, stages: [{ stage_id: 11, unread: id === 7 ? unread : 0 }] });
+      if (tail === '/feed/read') { const body = req.postDataJSON(); reads.push({ run: id, ...body }); if (id === 7 && body.stage_id === 11) unread = 0; return json(route, {}); }
+      if (tail === '/feed') return json(route, id === 7 && url.searchParams.has('stage_id') ? [{ id: 41, run_id: 7, stage_id: 11, item_id: 21, kind: 'message', author: 'orchestrator', author_session_id: '', body: 'The opening scene is ready.', artifact_version_ids: [], created_at: 1794410000, card: null }] : []);
+      if (tail === '/accept') { work.closure_state = 'accepted'; work.accepted_at = 1794410000; return json(route, work); }
+      if (['/sessions', '/questions', '/artifacts'].includes(tail)) return json(route, []);
+    }
+    throw new Error(`Unexpected isolated API request: ${req.method()} ${path}`);
+  });
+  const assert = (condition, text) => { if (!condition) throw new Error(text); };
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`${origin}/creative/`);
+  await page.getByRole('heading', { name: 'Active works', exact: true }).waitFor();
+  const cards = () => page.locator('.run-card');
+  await cards().filter({ hasText: 'Music studio' }).waitFor();
+  assert(await cards().count() === 3, 'Active membership incorrect');
+  assert(await page.getByRole('combobox').count() === 0, 'Native top selectors remain');
+  await cards().first().getByLabel('2 unread messages').waitFor();
+  assert(reads.length === 0, 'Overview marked a feed read');
+  unread = 5;
+  await cards().first().getByLabel('5 unread messages').waitFor();
+  assert(reads.length === 0, 'Polled overview marked read');
+  const badgeColors = await cards().first().getByLabel('5 unread messages').evaluate(el => ({ text: getComputedStyle(el).color, background: getComputedStyle(el).backgroundColor }));
+  assert(badgeColors.text !== badgeColors.background, 'Unread count text is invisible against its badge background');
+  await page.screenshot({ path: `${screenshots}-desktop.png`, fullPage: true });
+  await cards().filter({ hasText: 'Music studio' }).click();
+  await page.getByLabel('Current work').filter({ hasText: 'Music studio' }).waitFor();
+  await page.reload();
+  await page.getByLabel('Current work').filter({ hasText: 'Music studio' }).waitFor();
+  await page.getByRole('button', { name: 'All works', exact: true }).click();
+  await page.getByRole('heading', { name: 'Active works', exact: true }).waitFor();
+  await page.goBack();
+  await page.getByLabel('Current work').filter({ hasText: 'Music studio' }).waitFor();
+  await page.goForward();
+  await page.getByRole('heading', { name: 'Active works', exact: true }).waitFor();
+  await cards().filter({ hasText: 'Film studio' }).first().click();
+  await page.getByRole('button', { name: /1\. Final edit/ }).click();
+  await page.getByRole('button', { name: /Opening scene/ }).click();
+  assert(page.url().includes('stage=11') && page.url().includes('item=21'), 'Item navigation lost scope');
+  await page.reload();
+  await page.getByRole('heading', { name: 'Opening scene', exact: true }).waitFor();
+  await page.getByText('The opening scene is ready.', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'New work', exact: true }).click();
+  assert(page.url().includes('stage=11') && page.url().includes('item=21'), 'New work lost item context');
+  await page.reload();
+  await page.getByRole('heading', { name: 'New creative work' }).waitFor();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.getByRole('heading', { name: 'Opening scene', exact: true }).waitFor();
+  await page.goBack();
+  await page.getByRole('heading', { name: 'New creative work' }).waitFor();
+  await page.goForward();
+  await page.getByRole('heading', { name: 'Opening scene', exact: true }).waitFor();
+  await page.screenshot({ path: `${screenshots}-workspace.png`, fullPage: true });
+  await page.waitForFunction(() => !document.querySelector('.process .feed-unread'));
+  assert(reads.some(r => r.run === 7 && r.stage_id === 11 && r.through_entry_id === 41), 'Actual stage feed not marked read');
+  await page.getByRole('button', { name: 'All works', exact: true }).click();
+  await cards().first().waitFor();
+  assert(await page.locator('.run-card .feed-unread').count() === 0, 'Overview unread did not clear');
+  unreadError = true;
+  await cards().first().getByText('Unread unavailable').waitFor();
+  await cards().first().click();
+  await page.getByRole('heading', { name: 'Opening', exact: true }).waitFor();
+  unreadError = false;
+  await page.getByRole('button', { name: 'New work', exact: true }).click();
+  assert(await page.getByRole('combobox', { name: 'Project', exact: true }).inputValue() === 'film', 'Run context not prefilled');
+  await page.reload();
+  await page.getByRole('heading', { name: 'New creative work' }).waitFor();
+  assert(await page.getByRole('combobox', { name: 'Project', exact: true }).inputValue() === 'film', 'Reload lost new-work context');
+  await page.getByRole('button', { name: 'All works', exact: true }).click();
+  await page.getByRole('button', { name: 'New work', exact: true }).click();
+  assert(await page.getByRole('combobox', { name: 'Project', exact: true }).inputValue() === '', 'Overview silently chose a project');
+  await page.getByLabel('Work name').fill('Music intro');
+  await page.getByLabel('Creative brief').fill('Compose a gentle introduction.');
+  await page.getByRole('combobox', { name: 'Pipeline', exact: true }).selectOption('3');
+  assert(await page.getByRole('button', { name: 'Create work', exact: true }).isDisabled(), 'Blank project allows creation');
+  await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption('music');
+  await page.getByRole('button', { name: 'Create work', exact: true }).click();
+  await page.getByRole('heading', { name: 'Music intro', exact: true }).waitFor();
+  assert(writes[0]?.project_id === 'music', 'Created in wrong project');
+  await page.goto(`${origin}/creative/runs/7?project=music&stage=11&item=21`);
+  await page.getByRole('heading', { name: 'Opening scene', exact: true }).waitFor();
+  assert(await page.getByLabel('Current work').textContent().then(t => t.includes('Film studio')), 'Legacy project overrides actual run project');
+  await page.getByRole('button', { name: 'Accept all work', exact: true }).click();
+  await page.getByText('Work accepted · Permanent archive', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'All works', exact: true }).click();
+  await page.getByRole('heading', { name: 'Active works', exact: true }).waitFor();
+  await cards().filter({ hasText: 'Music intro' }).waitFor();
+  assert(await cards().count() === 3, 'Acceptance did not leave Active');
+  await page.getByRole('tab', { name: 'Completed', exact: true }).click();
+  await page.getByRole('heading', { name: 'Completed works', exact: true }).waitFor();
+  assert(await cards().count() === 2, 'Global Completed membership incorrect');
+  await page.reload();
+  await page.getByRole('heading', { name: 'Completed works', exact: true }).waitFor();
+  await cards().filter({ hasText: 'Film studio' }).click();
+  await page.getByText('Work accepted · Permanent archive', { exact: true }).waitFor();
+  assert(await page.getByRole('textbox', { name: 'Message', exact: true }).count() === 0, 'Archive has writable conversation');
+  await page.getByRole('button', { name: 'All works', exact: true }).click();
+  await page.getByRole('button', { name: 'Pipelines', exact: true }).click();
+  await page.getByRole('heading', { name: 'Pipelines', exact: true }).waitFor();
+  await page.goBack();
+  await page.getByRole('heading', { name: 'Active works', exact: true }).waitFor();
+  assert(await page.getByRole('link', { name: /Development/ }).getAttribute('href') === '/', 'Development unavailable');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: `${screenshots}-mobile.png`, fullPage: true });
+  assert(!await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), 'Overview overflows mobile');
+  listError = true;
+  await page.getByText('Works unavailable', { exact: true }).waitFor();
+  assert(await page.getByText('No active work.', { exact: true }).count() === 0, 'Error pretends empty');
+  assert(errors.length === 0, errors.join('\n'));
+  return { requests: requests.length, reads, writes, errors, active: 3, completed: 2 };
+}

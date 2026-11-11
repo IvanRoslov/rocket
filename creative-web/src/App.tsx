@@ -90,18 +90,18 @@ export function App() {
         </div>}
         <div className="top-actions">
           <Button variant="primary" size="sm" onClick={() => select({
-            view: "new", ...(view === "work" && selectedRun ? { project: selectedRun.project_id, run: selectedRun.id } : {}),
+            view: "new", ...(view === "work" && selectedRun ? { project: selectedRun.project_id, run: selectedRun.id, stage: selection.stage, item: selection.item } : {}),
           })}>New work</Button>
           <Button variant="secondary" size="sm" aria-pressed={view === "pipelines"}
             onClick={() => select({ ...selection, view: "pipelines" })}>Pipelines</Button>
           <a href="/" target="_blank" rel="noopener noreferrer">Development ↗</a>
         </div>
       </header>
-      <ErrorNotice error={projects.error ?? pipelines.error} />
+      <ErrorNotice error={projects.error ?? pipelines.error ?? (selection.run ? run.error : null)} />
       {view === "pipelines" ? (
         <Pipelines pipelines={pipelines.data ?? []} onClose={returnToWork} />
       ) : overview ? (
-        <Overview runs={runs} projects={projects.data ?? []} completed={view === "completed"}
+        <Overview runs={runs} projects={projects.data ?? []} projectsLoaded={projects.isSuccess} completed={view === "completed"}
           onView={(completed) => select(completed ? { view: "completed" } : {})}
           onOpen={(r) => select({ project: r.project_id, run: r.id })} />
       ) : view === "new" ? (
@@ -116,7 +116,7 @@ export function App() {
       ) : selectedRun ? (
         <Workspace key={selectedRun.id} run={selectedRun} selection={selection}
           onSelect={(stage, item) => select({ project: selectedRun.project_id, run: selectedRun.id, stage, item })} />
-      ) : <main>{run.isPending ? <Empty>Loading work…</Empty> : <ErrorNotice error={run.error} />}</main>}
+      ) : <main>{run.isPending && <Empty>Loading work…</Empty>}</main>}
     </div>
   );
 }

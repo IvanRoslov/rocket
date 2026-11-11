@@ -137,21 +137,6 @@ details p {
   align-items: center;
   gap: 9px;
 }
-.creative-app .top-select {
-  margin: 0;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  white-space: nowrap;
-}
-.top-select select {
-  width: auto;
-  max-width: 200px;
-  padding: 6px 8px;
-  font-size: 13px;
-  background: var(--surface);
-}
 .top-actions {
   display: flex;
   gap: 8px;
@@ -796,7 +781,7 @@ details p {
 .overview .run-card { min-width: 0; position: relative; }
 .overview .run-card strong, .overview .run-card span, .overview .run-card small { overflow-wrap: anywhere; white-space: normal; }
 .overview .run-project { color: var(--text-2); }
-.overview .run-card .feed-unread { color: var(--accent); }
+.overview .run-card .feed-unread { color: white; }
 .overview .unread-state { font-size: 12px; color: var(--text-3); }
 @media (max-width: 600px) {
   .creative-app .topbar { gap: 10px; padding: 10px 12px; }

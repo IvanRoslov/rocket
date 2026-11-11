@@ -42,7 +42,8 @@ export async function runFinalAcceptanceCheck(page) {
   await page.getByRole('link', { name: 'Download final.txt' }).waitFor();
   if (await page.getByRole('button', { name: 'Upload source', exact: true }).count()) throw new Error('Archive has upload action');
   await page.screenshot({ path: 'docs/screenshots/creative-final-acceptance-desktop.png', fullPage: true });
-  await page.getByRole('button', { name: 'Completed works', exact: true }).click();
+  await page.getByRole('button', { name: 'All works', exact: true }).click();
+  await page.getByRole('tab', { name: 'Completed', exact: true }).click();
   await page.getByRole('heading', { name: 'Completed works', exact: true }).waitFor();
   await page.getByRole('button', { name: /After the rain/ }).click();
   await page.getByText('Work accepted · Permanent archive', { exact: true }).waitFor();

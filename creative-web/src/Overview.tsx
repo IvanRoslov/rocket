@@ -6,9 +6,10 @@ import { statusLabel } from "./workflow";
 import type { Run } from "./types";
 import { Empty, ErrorNotice } from "./ui";
 
-export function Overview({ runs, projects, completed, onView, onOpen }: {
+export function Overview({ runs, projects, projectsLoaded, completed, onView, onOpen }: {
   runs: UseQueryResult<Run[], Error>;
   projects: { id: string; name: string }[];
+  projectsLoaded: boolean;
   completed: boolean;
   onView: (completed: boolean) => void;
   onOpen: (run: Run) => void;
@@ -29,7 +30,7 @@ export function Overview({ runs, projects, completed, onView, onOpen }: {
       </div>
       {!runs.isError && visible?.length === 0 && <Empty>{completed ? "No accepted work yet." : "No active work."}</Empty>}
     </>}
-    {projects.length === 0 && <p>Create a Rocket project to begin. <a href="/projects/new">Create project</a></p>}
+    {projectsLoaded && projects.length === 0 && <p>Create a Rocket project to begin. <a href="/projects/new">Create project</a></p>}
   </main>;
 }
 function WorkCard({ run, project, onOpen }: { run: Run; project: string; onOpen: () => void }) {

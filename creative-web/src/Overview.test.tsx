@@ -131,3 +131,34 @@ it("initializes creation from an opened run, including a reloaded New work URL",
   expect(await screen.findByRole("heading", { name: "New creative work" })).toBeVisible();
   await waitFor(() => expect(screen.getByLabelText("Project")).toHaveValue("music"));
 });
+it("retains stage/item context through New work reload and Cancel", async () => {
+  const { unmount } = open("/creative/?project=film&run=7&stage=11&item=21");
+  const stage = { id: 11, run_id: 7, position: 0, name: "Draft", description: "", expected_artifacts: "", repeated: true, approval: "item" as const, status: "in_progress" as const, progress: 0, progress_note: "", review_revision: 0, artifact_version_ids: [], items: [{ id: 21, run_id: 7, stage_id: 11, position: 0, name: "Opening scene", description: "", expected_artifacts: "", status: "pending" as const, progress: 0, progress_note: "", review_revision: 0, artifact_version_ids: [] }] };
+  works[0].stages = [stage];
+  await screen.findByRole("heading", { name: "Opening scene" });
+  await userEvent.click(screen.getByRole("button", { name: "New work" }));
+  expect(window.location.search).toContain("stage=11&item=21");
+  const url = window.location.pathname + window.location.search;
+  unmount();
+  open(url); works[0].stages = [stage];
+  await screen.findByRole("heading", { name: "New creative work" });
+  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(await screen.findByRole("heading", { name: "Opening scene" })).toBeVisible();
+  expect(window.location.search).toBe("?project=film&run=7&stage=11&item=21");
+});
+it("shows a failed run refetch even while cached work remains available", async () => {
+  const { client } = open("/creative/?run=7");
+  await screen.findByRole("heading", { name: "Opening" });
+  server.use(http.get("/v1/creative/runs/7", () => HttpResponse.json({ error: { message: "Work no longer available" } }, { status: 404 })));
+  await act(() => client.invalidateQueries({ queryKey: ["creative", "run", 7] }));
+  expect(await screen.findByText("Work no longer available")).toBeVisible();
+});
+it("does not suggest creating a project while the project catalog is still loading", async () => {
+  let release!: () => void;
+  server.use(http.get("/v1/projects", async () => { await new Promise<void>(resolve => { release = resolve; }); return HttpResponse.json([]); }));
+  open();
+  await screen.findAllByRole("button", { name: /Opening.*film/ });
+  expect(screen.queryByRole("link", { name: "Create project" })).not.toBeInTheDocument();
+  await act(async () => release());
+  expect(await screen.findByRole("link", { name: "Create project" })).toBeVisible();
+});
