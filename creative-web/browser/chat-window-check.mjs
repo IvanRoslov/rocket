@@ -84,16 +84,42 @@ export async function captureChatWindow(page, phase = 'before') {
   });
   await page.route('**/mock/opening.svg', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="220"><rect width="400" height="220" fill="#caa47f"/><circle cx="310" cy="55" r="35" fill="#f8dfac"/><path d="M0 220V140L85 85L175 165L260 110L400 200V220" fill="#425959"/></svg>' }));
   entries.push(message(99, 'The run brief is ready. We will build the story scene by scene.', { stage: 0 }));
-  for (const theme of ['light', 'dark']) {
+  for (const colorScheme of ['dark', 'light']) {
+    await page.emulateMedia({ colorScheme });
     for (const narrow of [false, true]) {
       await page.setViewportSize(narrow ? { width: 390, height: 844 } : { width: 1600, height: 1100 });
       for (const scope of ['stage', 'item', 'run']) {
         await page.goto(`http://127.0.0.1:5177/creative/?project=film&run=7${scope === 'run' ? '' : '&stage=4'}${scope === 'item' ? '&item=5' : ''}`);
-        await page.evaluate(theme => document.documentElement.setAttribute('data-theme', theme), theme);
         await page.getByRole('article', { name: scope === 'run' ? 'Message 99' : 'Message 105', exact: true }).waitFor();
+        // A dark OS (or a stale host attribute) must not darken chat alone.
+        for (const theme of [null, 'dark', 'light']) {
+          await page.evaluate(theme => {
+            if (theme === null) document.documentElement.removeAttribute('data-theme');
+            else document.documentElement.setAttribute('data-theme', theme);
+          }, theme);
+          const colors = await page.evaluate(() => {
+            const background = selector => getComputedStyle(document.querySelector(selector)).backgroundColor;
+            const surface = document.createElement('div');
+            surface.style.background = 'var(--surface-2)';
+            document.body.append(surface);
+            const pageHistorySurface = getComputedStyle(surface).backgroundColor;
+            surface.remove();
+            return {
+              page: background('.topbar'),
+              discussion: background('.discussion'),
+              composer: background('.composer'),
+              history: background('.chat-history'),
+              pageHistorySurface,
+            };
+          });
+          if (colors.page !== 'rgb(255, 255, 255)' || colors.pageHistorySurface !== 'rgb(240, 240, 238)' ||
+              colors.discussion !== colors.page || colors.composer !== colors.page || colors.history !== colors.pageHistorySurface) {
+            throw new Error(`Chat must match the light dashboard (${colorScheme} OS, theme=${theme}, ${scope}, narrow=${narrow}): ${JSON.stringify(colors)}`);
+          }
+        }
         await page.waitForTimeout(500);
         if (phase === 'after' && narrow) await page.locator('.chat-window').scrollIntoViewIfNeeded();
-        await page.screenshot({ path: `${screenshots}${phase}-${scope}-${theme}${narrow ? '-narrow' : ''}.png`, fullPage: phase === 'before' });
+        if (colorScheme === 'light') await page.screenshot({ path: `${screenshots}${phase}-${scope}-light${narrow ? '-narrow' : ''}.png`, fullPage: phase === 'before' });
       }
     }
   }
