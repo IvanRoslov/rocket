@@ -731,19 +731,3 @@ details p {
   .creative-app .topbar { flex-wrap: wrap; height: auto; }
   .chat-pending span { display: none; }
 }
-
-/* Conversation follows the host's theme and can be previewed explicitly. */
-:root[data-theme="dark"] .discussion {
-  color-scheme: dark;
-  --surface: #202024; --surface-2: #18181c; --surface-3: #2a2a30; --surface-4: #24242a;
-  --border: #3a3a43; --border-hover: #52525d; --text: #eeeeF2; --text-2: #c3c3ce; --text-3: #a0a0ae;
-  --accent: #a5a0ff; --accent-selected-bg: #302d51; --accent-selected-border: #625da3;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .discussion {
-    color-scheme: dark;
-    --surface: #202024; --surface-2: #18181c; --surface-3: #2a2a30; --surface-4: #24242a;
-    --border: #3a3a43; --border-hover: #52525d; --text: #eeeef2; --text-2: #c3c3ce; --text-3: #a0a0ae;
-    --accent: #a5a0ff; --accent-selected-bg: #302d51; --accent-selected-border: #625da3;
-  }
-}
