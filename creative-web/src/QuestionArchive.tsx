@@ -26,8 +26,7 @@ export function QuestionArchive({ context }: { context: Context }) {
     }))) as Dispatch<SetStateAction<string>>,
   });
   return (
-    <details className="question-archive">
-      <summary>Old questions</summary>
+    <section className="question-archive" aria-label="Old questions archive">
       <ErrorNotice error={questions.error} />
       {questions.isPending && <p>Loading questions…</p>}
       {questions.data?.length === 0 && <Empty>No questions in this context.</Empty>}
@@ -36,7 +35,7 @@ export function QuestionArchive({ context }: { context: Context }) {
         {sorted.some(q => q.status !== "open") && <div className="questions-tab__resolved-label">Resolved</div>}
         {sorted.filter(q => q.status !== "open").map(q => <ResolvedQuestion key={q.id} question={q} />)}
       </div>
-    </details>
+    </section>
   );
 }
 function Question({ question: q, draft, readOnly = false }: {

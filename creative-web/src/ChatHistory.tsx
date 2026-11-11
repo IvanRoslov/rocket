@@ -68,6 +68,8 @@ export function ChatHistory({ entries, active, children, unreadReady = true, unr
       else preserveAnchor();
     });
     observer.observe(content.current);
+    // Composer growth and viewport resizing change the available history space.
+    if (viewport.current) observer.observe(viewport.current);
     return () => observer.disconnect();
   }, [active]);
   return <div className="chat-history-wrap">

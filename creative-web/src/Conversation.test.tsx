@@ -68,11 +68,11 @@ it("reads a run feed, a whole stage for an item, then the explicit item filter; 
   await waitFor(() => expect(reads).toContain("?stage_id=4&item_id=5"));
   await userEvent.type(screen.getByLabelText("Message"), "Change the scene");
   await userEvent.click(screen.getByRole("button", { name: "Send message" }));
-  await waitFor(() => expect(writes).toEqual([{ stage_id: 4, item_id: 5, artifact_version_ids: [101], body: "Change the scene" }]));
+  await waitFor(() => expect(writes).toEqual([{ stage_id: 4, item_id: 5, body: "Change the scene" }]));
   view.rerender(view.tree(4, 6));
   expect(screen.getByRole("checkbox", { name: "Only this item" })).not.toBeChecked();
 });
-it("keeps failed drafts and original item/version target, then discards to compose for the new selection", async () => {
+it("keeps failed drafts and original item target, then discards to compose for the new selection", async () => {
   const writes: unknown[] = [];
   server.use(http.post("/v1/creative/runs/7/feed", async ({ request }) => {
     writes.push(await request.json());
@@ -84,25 +84,33 @@ it("keeps failed drafts and original item/version target, then discards to compo
   await userEvent.click(screen.getByRole("button", { name: "Send message" }));
   await screen.findByText("Could not send");
   expect(screen.getByLabelText("Message")).toHaveValue("Keep my draft");
-  expect(writes).toEqual([{ stage_id: 4, item_id: 5, artifact_version_ids: [101], body: "Keep my draft" }]);
+  expect(writes).toEqual([{ stage_id: 4, item_id: 5, body: "Keep my draft" }]);
   await userEvent.click(screen.getByRole("button", { name: "Discard draft" }));
   expect(screen.getByLabelText("Message")).toHaveValue("");
   await userEvent.type(screen.getByLabelText("Message"), "New target");
   await userEvent.click(screen.getByRole("button", { name: "Send message" }));
-  await waitFor(() => expect(writes[1]).toEqual({ stage_id: 8, artifact_version_ids: [101], body: "New target" }));
+  await waitFor(() => expect(writes[1]).toEqual({ stage_id: 8, body: "New target" }));
 });
-it("keeps old questions collapsed under the feed and never offers human question creation", async () => {
+it("opens old questions from the chat header and returns to the retained chat draft", async () => {
   server.use(http.get("/v1/creative/runs/7/questions", () => HttpResponse.json([
     { id: 21, title: "Old decision", body: "Original proposal", status: "open", options: ["Go"], your_turn: true, asked_by: "creative-7", artifact_version_ids: [], messages: [] },
   ])));
   open(4);
-  const summary = screen.getByText("Old questions");
-  expect(summary.closest("details")).not.toHaveAttribute("open");
-  await waitFor(() => expect(screen.queryByText("Loading questions…")).not.toBeInTheDocument());
-  expect(screen.getByText("Original proposal")).not.toBeVisible();
-  expect(screen.queryByRole("button", { name: "Open question" })).not.toBeInTheDocument();
-  await userEvent.click(summary);
+  const box = screen.getByLabelText("Message");
+  expect(box).toHaveAttribute("rows", "1");
+  expect(screen.queryByText("Message", { selector: "label" })).not.toBeInTheDocument();
+  await userEvent.type(box, "Keep this chat draft");
+  const toggle = screen.getByRole("button", { name: "Old questions" });
+  expect(toggle.closest("header")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "Chat history" })).toBeVisible();
+  await userEvent.click(toggle);
+  expect(screen.getByRole("region", { name: "Old questions archive" })).toBeVisible();
+  expect(screen.queryByRole("region", { name: "Chat history" })).not.toBeInTheDocument();
   expect(await screen.findByRole("button", { name: "Go" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Open question" })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+  expect(screen.getByLabelText("Message")).toHaveValue("Keep this chat draft");
+  expect(screen.getByRole("region", { name: "Chat history" })).toBeVisible();
 });
 
 it("inserts a sent message immediately even if the following feed refresh fails", async () => {
@@ -137,11 +145,26 @@ it("preserves scroll and draft on polling above the bottom and offers the new-me
   act(() => view.client.setQueryData(["creative", "feed", 7, 4, 0], [entry(6), entry(5), entry(4), entry(3)]));
   await waitFor(() => expect(scroll.scrollTop).toBe(1000));
 });
-it.each(["Control", "Meta"])("sends with %s+Enter and retains the attachment target", async (modifier) => {
+it.each(["Control", "Meta"])("sends with %s+Enter and retains the item target", async (modifier) => {
   const writes: unknown[] = [];
   server.use(http.post("/v1/creative/runs/7/feed", async ({ request }) => { writes.push(await request.json()); return HttpResponse.json(entry(10, 5, "human")); }));
   open(4, 5);
   await userEvent.type(screen.getByLabelText("Message"), "Send by keyboard");
   await userEvent.keyboard(`{${modifier}>}{Enter}{/${modifier}}`);
-  await waitFor(() => expect(writes).toEqual([{ stage_id: 4, item_id: 5, artifact_version_ids: [101], body: "Send by keyboard" }]));
+  await waitFor(() => expect(writes).toEqual([{ stage_id: 4, item_id: 5, body: "Send by keyboard" }]));
+});
+
+it("sends a stage message without displayed artifact versions or composer version count", async () => {
+  const writes: unknown[] = [];
+  server.use(http.post("/v1/creative/runs/7/feed", async ({ request }) => {
+    writes.push(await request.json());
+    return HttpResponse.json(entry(11, 0, "human"));
+  }));
+  open(4);
+  const composer = screen.getByRole("button", { name: "Send message" }).closest("form")!;
+  expect(composer).toHaveTextContent("About: Context 4/all");
+  expect(composer).not.toHaveTextContent(/versions/);
+  await userEvent.type(screen.getByLabelText("Message"), "Stage note");
+  await userEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(writes).toEqual([{ stage_id: 4, body: "Stage note" }]));
 });

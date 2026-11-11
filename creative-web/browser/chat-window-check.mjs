@@ -2,24 +2,24 @@
 // Load captureChatWindow(page, phase = 'before') in a Playwright environment while Vite serves
 // this worktree at http://127.0.0.1:5177. All /v1 requests are intercepted;
 // this check never contacts or changes a running Rocket daemon.
-export async function captureChatWindow(page, phase = 'before') {
+export async function captureChatWindow(page, phase = 'before', { reviewing = false } = {}) {
   const { mkdir } = await import('node:fs/promises');
   const screenshots = new URL('../../docs/screenshots/creative-feed/', import.meta.url).pathname;
   await mkdir(screenshots, { recursive: true });
   await page.unroute('**/v1/**');
-  await page.setViewportSize({ width: 1600, height: 1100 });
+  await page.setViewportSize({ width: 1440, height: 900 });
   const now = Math.floor(Date.now() / 1000) - 9000;
   const versions = Array.from({ length: 12 }, (_, i) => 201 + i);
   const work = { description: 'Build a short atmospheric film.', expected_artifacts: 'Storyboard and scene images', status: 'in_progress', progress: 60, progress_note: 'Opening revised', review_revision: 0, artifact_version_ids: [] };
   const items = [5, 6].map((id, i) => ({ ...work, id, run_id: 7, stage_id: 4, position: i, name: i ? 'Finale' : 'Opening scene' }));
   const run = { id: 7, project_id: 'film', pipeline_id: 1, pipeline_name: 'Short film', name: 'After the rain', brief: 'A quiet story about an unexpected reunion.', status: 'in_progress', orchestrator_session_id: 'creative-7', allowed_profiles: [], stages: [
-    { ...work, id: 4, run_id: 7, position: 0, name: 'Scenes', repeated: true, approval: 'item', items },
+    { ...work, id: 4, run_id: 7, position: 0, name: 'Scenes', repeated: true, approval: 'stage', status: reviewing ? 'awaiting_approval' : 'in_progress', review_revision: reviewing ? 3 : 0, artifact_version_ids: reviewing ? versions : [], items },
     { ...work, id: 8, run_id: 7, position: 1, name: 'Edit', repeated: false, approval: 'stage', items: [] },
   ] };
   const message = (id, body, { stage = 4, item = 0, author = 'orchestrator', versions = [] } = {}) => ({ id, run_id: 7, stage_id: stage, item_id: item, kind: 'message', author, author_session_id: author === 'human' ? '' : 'creative-7', body, artifact_version_ids: versions, created_at: now + id * 60, card: null });
   const proposal = (id, body, card) => ({ ...message(id, body, { item: 5, versions }), kind: 'proposal', card: { status: 'pending', decision: '', decided_at: 0, replaces_entry_id: 0, replaced_by_entry_id: 0, ...card } });
   let entries = [
-    message(105, 'I revised the opening with a warmer palette. **Version 2** keeps the framing you liked.', { item: 5, versions }),
+    message(105, `I revised the opening with a warmer palette. **Version 2** keeps the framing you liked.\n\n\`\`\`js\nconst scene = ${'A'.repeat(250)};\n\`\`\``, { item: 5, versions }),
     message(104, 'Keep the framing, but make the light warmer.', { item: 5, author: 'human', versions }),
     proposal(103, '### Two opening images\nGenerate **2 images** with the configured image tool / Example provider / Model A.\n\nInputs: Storyboard version 2 below, uploaded to the provider only.\n\nCalls: opening-wide, opening-detail (2 calls). **Estimate: $0.20**, based on $0.10 per image. Wait for Go.', { replaces_entry_id: 102 }),
     proposal(102, 'Four opening images — original estimate $0.40. Superseded by the two-image proposal.', { status: 'replaced', replaced_by_entry_id: 103 }),
@@ -87,7 +87,7 @@ export async function captureChatWindow(page, phase = 'before') {
   for (const colorScheme of ['dark', 'light']) {
     await page.emulateMedia({ colorScheme });
     for (const narrow of [false, true]) {
-      await page.setViewportSize(narrow ? { width: 390, height: 844 } : { width: 1600, height: 1100 });
+      await page.setViewportSize(narrow ? { width: 390, height: 844 } : { width: 1440, height: 900 });
       for (const scope of ['stage', 'item', 'run']) {
         await page.goto(`http://127.0.0.1:5177/creative/?project=film&run=7${scope === 'run' ? '' : '&stage=4'}${scope === 'item' ? '&item=5' : ''}`);
         await page.getByRole('article', { name: scope === 'run' ? 'Message 99' : 'Message 105', exact: true }).waitFor();
@@ -118,17 +118,62 @@ export async function captureChatWindow(page, phase = 'before') {
           }
         }
         await page.waitForTimeout(500);
+        if (phase === 'after' && scope === 'stage') {
+          const layout = await page.evaluate(() => {
+            const rect = selector => {
+              const r = document.querySelector(selector).getBoundingClientRect();
+              return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, height: r.height };
+            };
+            return {
+              pageHeight: document.documentElement.scrollHeight,
+              review: rect('.review-actions'), main: rect('.results'), chat: rect('.chat-window'),
+              sessions: rect('.session-rail'),
+              pending: document.querySelector('.review-actions').classList.contains('review-actions--pending'),
+              codeWraps: !!document.querySelector('.feed-entry pre') && [...document.querySelectorAll('.feed-entry pre')].every(el => el.scrollWidth <= el.clientWidth),
+            };
+          });
+          if (!layout.codeWraps) throw new Error('Long code must wrap inside bubbles');
+          if (layout.pending !== reviewing) throw new Error('Review highlight does not match pending state');
+          if (reviewing) {
+            const approve = await page.getByRole('button', { name: 'Approve stage', exact: true }).boundingBox();
+            if (!approve || approve.y < layout.review.y || approve.y + approve.height > layout.review.bottom) throw new Error('Review decision must remain visible with many submitted versions');
+          }
+          if (narrow) {
+            if (layout.review.y < 0 || layout.review.bottom > 844 || layout.review.bottom > layout.chat.y) throw new Error('Narrow review must be visible above chat');
+          } else if (layout.pageHeight > 900 || layout.review.x < layout.main.right || layout.review.y < 0 ||
+                     layout.review.bottom > 900 || layout.sessions.y < layout.review.bottom || layout.chat.bottom > 900 || layout.chat.height < 640) {
+            throw new Error(`Conversation must fill desktop viewport beside visible review: ${JSON.stringify(layout)}`);
+          }
+          if (colorScheme === 'light') {
+            await page.evaluate(() => window.scrollTo(0, 0));
+            await page.screenshot({ path: `${screenshots}stage-review-${reviewing ? 'pending' : 'idle'}-light${narrow ? '-narrow' : ''}.png`, fullPage: narrow });
+          }
+        }
         if (phase === 'after' && narrow) await page.locator('.chat-window').scrollIntoViewIfNeeded();
         if (colorScheme === 'light') await page.screenshot({ path: `${screenshots}${phase}-${scope}-light${narrow ? '-narrow' : ''}.png`, fullPage: phase === 'before' });
       }
     }
   }
   if (phase === 'after') {
-    await page.setViewportSize({ width: 1600, height: 1100 });
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('http://127.0.0.1:5177/creative/?project=film&run=7&stage=4&item=5');
     await page.getByRole('article', { name: 'Message 105', exact: true }).waitFor();
     const history = page.getByRole('region', { name: 'Chat history' });
-    await page.getByRole('textbox', { name: 'Message', exact: true }).fill('A draft that survives polling');
+    const input = page.getByRole('textbox', { name: 'Message', exact: true });
+    await page.waitForTimeout(500);
+    await history.evaluate(el => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')); });
+    const singleLineHeight = (await input.boundingBox()).height;
+    await input.fill('First line\nSecond line\nThird line\nFourth line\nFifth line');
+    const grownHeight = (await input.boundingBox()).height;
+    if (grownHeight <= singleLineHeight || grownHeight > 104) throw new Error('Composer must grow to a bounded few lines');
+    await page.waitForTimeout(150);
+    const growthGap = await history.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight);
+    if (growthGap > 2) throw new Error(`Growing composer hid latest message by ${growthGap}px`);
+    await input.fill('A draft that survives polling');
+    await page.getByRole('button', { name: 'Old questions', exact: true }).click();
+    await page.getByRole('region', { name: 'Old questions archive' }).waitFor();
+    await page.getByRole('button', { name: 'Back to chat', exact: true }).click();
+    if (await input.inputValue() !== 'A draft that survives polling') throw new Error('Archive navigation lost chat draft');
     const anchor = page.getByRole('article', { name: 'Message 104', exact: true });
     await history.evaluate(el => {
       const anchor = el.querySelector('#feed-entry-104');
@@ -136,6 +181,11 @@ export async function captureChatWindow(page, phase = 'before') {
       el.dispatchEvent(new Event('scroll'));
     });
     const anchorTop = (await anchor.boundingBox()).y;
+    await input.fill('First line\nSecond line\nThird line\nFourth line\nFifth line');
+    await page.waitForTimeout(150);
+    if (Math.abs((await anchor.boundingBox()).y - anchorTop) > 2) throw new Error('Growing composer shifted older visible message');
+    await input.fill('A draft that survives polling');
+    await page.waitForTimeout(150);
     await page.locator('#feed-entry-101').evaluate(el => { el.style.paddingBottom = '160px'; });
     await page.waitForTimeout(150);
     if (Math.abs((await anchor.boundingBox()).y - anchorTop) > 2) throw new Error('Late attachment layout shifted visible message');
@@ -159,9 +209,9 @@ export async function captureChatWindow(page, phase = 'before') {
     await page.getByRole('textbox', { name: 'Message', exact: true }).press('Control+Enter');
     await page.waitForFunction(() => document.querySelector('textarea')?.value === '');
     const sent = writes.find(w => w.path === '/v1/creative/runs/7/feed');
-    if (sent?.body.artifact_version_ids.length !== 12 || sent.body.item_id !== 5) throw new Error('Keyboard send lost target versions');
+    if (!sent || 'artifact_version_ids' in sent.body || sent.body.item_id !== 5 || sent.body.stage_id !== 4) throw new Error('Keyboard send must keep item target without automatic versions');
     const composer = await page.locator('.composer').boundingBox();
-    if (composer.y + composer.height > 1100) throw new Error('Composer below viewport');
+    if (composer.y + composer.height > 900) throw new Error('Composer below viewport');
   }
   if (failures.length || consoleErrors.length) throw new Error(JSON.stringify({ failures, consoleErrors }));
   return { screenshots, errors: consoleErrors };

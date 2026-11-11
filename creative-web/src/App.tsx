@@ -385,10 +385,7 @@ function Workspace({
                 </details>
               </>
             )}
-            {work && (
-              <ReviewActions scope={scope} work={work} canProgress={!!canProgress}
-                itemContexts={stage && !item ? stage.items : []} />
-            )}
+            {stage && <ItemEditor key={stage.id} scope={scope} stage={stage} />}
             <div className="view-tabs">
               <Tabs
                 label="Workspace"
@@ -402,7 +399,7 @@ function Workspace({
                 }
               />
             </div>
-            <div hidden={tab !== "discussion"}>
+            <div className="conversation-panel" hidden={tab !== "discussion"}>
               <Discussion
                 stageName={stage?.name}
                 context={{
@@ -423,7 +420,7 @@ function Workspace({
                 active={tab === "discussion"}
               />
             </div>
-            <div hidden={tab !== "results"}>
+            <div className="artifacts-panel" hidden={tab !== "results"}>
               <Artifacts
                 key={scopeKey}
                 scope={scope}
@@ -437,11 +434,14 @@ function Workspace({
                 onShown={onShown}
               />
             </div>
-            {stage && <ItemEditor key={stage.id} scope={scope} stage={stage} />}
           </>
         )}
       </main>
-      <CreativeSessionRail key={run.id} runID={run.id} orchestrator={run.orchestrator_session_id} allowedProfiles={run.allowed_profiles} />
+      <aside className="workspace-sidebar" aria-label="Review and sessions">
+        {!invalid && work && <ReviewActions scope={scope} work={work} canProgress={!!canProgress}
+          itemContexts={stage && !item ? stage.items : []} />}
+        <CreativeSessionRail key={run.id} runID={run.id} orchestrator={run.orchestrator_session_id} allowedProfiles={run.allowed_profiles} />
+      </aside>
     </div>
   );
 }
