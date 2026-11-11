@@ -50,4 +50,4 @@ Interfaces: Run.closure_state?: open|closing|accepted; accepted_at?: number; clo
 
 - [x] Run go test ./..., Development and Creative npm test/build; investigate any failures before claiming completion.
 - [x] Exercise an isolated end-to-end scenario with test runtime/browser fixtures; record scenario evidence and limitations.
-- [ ] Review diff for acceptance gaps, run git diff --check, commit evidence, push feature branch and open one PR referencing ui-improve-3 and task 6073.
+- [x] Review diff for acceptance gaps, run git diff --check, commit evidence, push feature branch and open one PR referencing ui-improve-3 and task 6073.
