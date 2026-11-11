@@ -772,15 +772,16 @@ details p {
   .composer-context { flex-basis: 100%; }
   .feed-entry { max-width: 96%; }
   .creative-app .topbar { flex-wrap: wrap; height: auto; }
+  .top-actions { flex-wrap: wrap; margin-left: 0; max-width: 100%; }
   .chat-pending span { display: none; }
 }
 
 .final-acceptance {
-  border: 1px solid var(--color-accent, #7465e8);
-  border-radius: 12px;
+  border: 1px solid var(--accent-selected-border);
+  border-radius: var(--radius-card);
   padding: 18px;
   margin-bottom: 20px;
 }
 .final-acceptance h2 { margin-top: 0; }
 .final-acceptance p { line-height: 1.5; }
-.final-acceptance.accepted { border-color: #398365; }
+.final-acceptance.accepted { border-color: var(--ok, #398365); }

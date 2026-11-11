@@ -47,6 +47,7 @@ export async function runFinalAcceptanceCheck(page) {
   await page.getByRole('button', { name: /After the rain/ }).click();
   await page.getByText('Work accepted · Permanent archive', { exact: true }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
+  if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error('Archive navigation overflows mobile viewport');
   await page.screenshot({ path: 'docs/screenshots/creative-final-acceptance-mobile.png', fullPage: true });
   if (errors.length) throw new Error(errors.join('\n'));
   return { attempts, state: work.closure_state, retainedSelection: page.url(), errors };
