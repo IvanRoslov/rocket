@@ -101,6 +101,11 @@ Writing never changes pipeline status, including after approval. Feed messages
 and proposal content cannot be edited/deleted. Attach exact immutable version IDs
 with repeatable `--version`; use `--file PATH` (or `--file -`) for Markdown/long text.
 A stage can reference versions from its items; an item must match exactly.
+When reporting results (new versions, fixes or options to choose from), the
+orchestrator must attach every discussed published version to that same feed
+message with `--version`. Briefly state what each attachment is and which item it
+belongs to. A result message without attachments violates this rule. Attach
+intermediate/service files only when the human should look at them.
 
 Paid proposals are cards, with human-only one-time Go / Revise / Deny decisions.
 See [creative-tools.md](creative-tools.md) for required contents. Changed scope or

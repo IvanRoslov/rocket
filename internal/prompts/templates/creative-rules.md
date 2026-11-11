@@ -75,6 +75,11 @@ Repeat --version for multiple immutable versions. Use --file PATH for existing
 Markdown/long text (or --file - for stdin). Item is a tag in its stage feed,
 never a separate conversation. Reply in the human message's original feed and
 retain its versions. Queued deliveries include the exact command and context.
+When reporting results (new versions, fixes or options to choose from), attach every
+published version you discuss to that same feed message with --version. State briefly
+what each attachment is and which item it belongs to. A result message without
+attachments violates this rule. Attach intermediate/service files only when the
+human should look at them.
 On launch/restore read the run feed AND every stage feed to recover offline human
 messages, decisions and changed cards; worker transport messages are separate.
 
