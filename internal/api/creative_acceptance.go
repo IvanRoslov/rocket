@@ -41,7 +41,9 @@ func creativeArchiveBoundary(d Deps, next http.Handler) http.Handler {
 		mutation := r.Method != "GET" && r.Method != "HEAD" && r.Method != "OPTIONS"
 		if mutation {
 			caller, err := callerSession(r, d.Store)
-			if writeCallerErr(w, err) {
+			// Preserve each route's existing identity policy. Unrelated endpoints
+			// such as shutdown historically ignore an unknown session header.
+			if err != nil && !errors.Is(err, errUnknownSession) && writeCallerErr(w, err) {
 				return
 			}
 			if caller != nil {

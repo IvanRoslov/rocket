@@ -778,7 +778,7 @@ details p {
 
 .final-acceptance {
   border: 1px solid var(--accent-selected-border);
-  border-radius: var(--radius-card);
+  border-radius: var(--radius-panel);
   padding: 18px;
   margin-bottom: 20px;
 }

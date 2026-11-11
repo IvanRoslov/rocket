@@ -23,10 +23,11 @@ type acceptanceRuntime struct {
 	sessFakeRuntime
 	live               map[string]bool
 	failStop, failList bool
+	failName           string
 }
 
 func (r *acceptanceRuntime) Destroy(_ context.Context, h runtime.Handle) error {
-	if r.failStop {
+	if r.failStop || h.Name == r.failName {
 		return errors.New("injected stop error")
 	}
 	delete(r.live, h.Name)
@@ -243,5 +244,84 @@ func TestCreativeAcceptanceRetainsDownloadsAndRejectsArtifactChanges(t *testing.
 	rec := artifactRequest(h, "POST", fmt.Sprintf("/v1/creative/artifacts/%d/versions?filename=late.mp4", p.Artifact.ID), "video/mp4", "", strings.NewReader("late"))
 	if rec.Code != 409 {
 		t.Fatalf("late artifact: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreativeAcceptanceBoundaryPreservesUnrelatedEndpoints(t *testing.T) {
+	d, _, _, _ := acceptanceFixture(t)
+	d.Shutdown = func() {}
+	rec := creativeCall(NewHandler(d), "POST", "/v1/shutdown", "session-from-another-daemon", "")
+	if rec.Code != 200 {
+		t.Fatalf("archive guard changed unrelated endpoint identity: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreativeAcceptanceConcurrentRequestsShareDecision(t *testing.T) {
+	d, r, _, _ := acceptanceFixture(t)
+	finishStages(t, d, r)
+	h := NewHandler(d)
+	replies := make(chan int, 4)
+	for i := 0; i < 4; i++ {
+		go func() {
+			replies <- creativeCall(h, "POST", fmt.Sprintf("/v1/creative/runs/%d/accept", r.ID), "", "{}").Code
+		}()
+	}
+	for i := 0; i < 4; i++ {
+		if code := <-replies; code != 200 {
+			t.Fatalf("concurrent acceptance: %d", code)
+		}
+	}
+	got, err := d.Store.GetCreativeRun(r.ID)
+	if err != nil || got.ClosureState != "accepted" || got.AcceptanceRequestedAt == 0 || got.AcceptedAt == 0 {
+		t.Fatalf("decision: %+v %v", got, err)
+	}
+}
+
+func TestCreativeAcceptancePartialStopAndSessionSaveRetry(t *testing.T) {
+	for _, mode := range []string{"partial stop", "session save"} {
+		t.Run(mode, func(t *testing.T) {
+			d, r, rt, _ := acceptanceFixture(t)
+			finishStages(t, d, r)
+			db, err := sql.Open("sqlite", filepath.Join(d.Cfg.Home, "rocket.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			if mode == "partial stop" {
+				rt.failName = "worker"
+			} else {
+				if _, err = db.Exec(`CREATE TRIGGER fail_session_save BEFORE UPDATE OF state ON sessions WHEN NEW.id='worker' AND NEW.state='killed' BEGIN SELECT RAISE(ABORT,'injected session save error'); END`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			path := fmt.Sprintf("/v1/creative/runs/%d/accept", r.ID)
+			h := NewHandler(d)
+			rec := creativeCall(h, "POST", path, "", "{}")
+			if rec.Code < 400 {
+				t.Fatal("partial closure reported success")
+			}
+			got, _ := d.Store.GetCreativeRun(r.ID)
+			if got.ClosureState != "closing" || got.ClosureError == "" {
+				t.Fatalf("lost recovery: %+v", got)
+			}
+			// At least one runtime stopped before failure; the remaining session may
+			// be alive or may have a stale active row after a persistence failure.
+			if rt.live["orch"] || rt.live["sibling"] {
+				t.Fatal("fixture did not exercise partial stop")
+			}
+			if err = d.Manager.Restore(context.Background(), "orch", session.RestoreOpts{Force: true}); err == nil {
+				t.Fatal("partly stopped run resumed")
+			}
+			rt.failName = ""
+			if mode == "session save" {
+				if _, err = db.Exec(`DROP TRIGGER fail_session_save`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rec = creativeCall(h, "POST", path, "", "{}")
+			if rec.Code != 200 {
+				t.Fatalf("retry: %d %s", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }
